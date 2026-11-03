@@ -11,6 +11,7 @@ import type {
   ExperimentalComposerRegistration,
   PluginEnvironmentProviderInputsRegistration,
   PluginMachineProviderInputsRegistration,
+  ExperimentalThreadDisplayPolicyResolver,
   PluginPendingInteractionRegistration,
   PluginFileOpenerRegistration,
   PluginHomepageSectionRegistration,
@@ -85,6 +86,7 @@ export interface PluginRegistrationSet {
   timelineRenderers?: readonly PluginTimelineRendererRegistration[];
   environmentProviderInputs?: readonly PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs?: readonly PluginMachineProviderInputsRegistration[];
+  threadDisplayPolicies?: readonly ExperimentalThreadDisplayPolicyResolver[];
 }
 
 interface PluginSlotBase {
@@ -92,6 +94,9 @@ interface PluginSlotBase {
   generation: number;
 }
 
+export interface PluginThreadDisplayPolicySlot extends PluginSlotBase {
+  resolve: ExperimentalThreadDisplayPolicyResolver;
+}
 export interface PluginHomepageSectionSlot
   extends PluginHomepageSectionRegistration, PluginSlotBase {}
 export interface PluginSettingsSectionSlot
@@ -140,8 +145,7 @@ export interface PluginThreadContextSegmentSlot
 export interface PluginThreadInfoRowSlot
   extends ExperimentalThreadInfoRowRegistration, PluginSlotBase {}
 export interface PluginThreadRowMetadataSlot
-  extends ExperimentalThreadRowMetadataRegistration<unknown>,
-    PluginSlotBase {}
+  extends ExperimentalThreadRowMetadataRegistration<unknown>, PluginSlotBase {}
 export interface PluginThreadInfoSectionSlot
   extends ExperimentalThreadInfoSectionRegistration, PluginSlotBase {}
 export interface PluginThreadContextCardRowSlot
@@ -216,6 +220,7 @@ export interface PluginSlotSnapshot {
   timelineRenderers: readonly PluginTimelineRendererSlot[];
   environmentProviderInputs: readonly PluginEnvironmentProviderInputsSlot[];
   machineProviderInputs: readonly PluginMachineProviderInputsSlot[];
+  threadDisplayPolicies: readonly PluginThreadDisplayPolicySlot[];
 }
 
 export const EMPTY_PLUGIN_SLOT_SNAPSHOT: PluginSlotSnapshot = {
@@ -254,6 +259,7 @@ export const EMPTY_PLUGIN_SLOT_SNAPSHOT: PluginSlotSnapshot = {
   timelineRenderers: [],
   environmentProviderInputs: [],
   machineProviderInputs: [],
+  threadDisplayPolicies: [],
 };
 
 const registrationsByPluginId = new Map<string, PluginRegistrationSet>();
@@ -299,6 +305,7 @@ const SLOT_KINDS: readonly SlotKind[] = [
   "timelineRenderers",
   "environmentProviderInputs",
   "machineProviderInputs",
+  "threadDisplayPolicies",
 ];
 
 type FlattenedPluginSlots = {
@@ -392,6 +399,9 @@ function flattenRegistrations(
     timelineRenderers: stamp(set.timelineRenderers),
     environmentProviderInputs: stamp(set.environmentProviderInputs),
     machineProviderInputs: stamp(set.machineProviderInputs),
+    threadDisplayPolicies: stamp(
+      (set.threadDisplayPolicies ?? []).map((resolve) => ({ resolve })),
+    ),
   };
 }
 

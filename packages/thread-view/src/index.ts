@@ -85,3 +85,8 @@ export {
   type ExternalUserBoundaryMessage,
   type ExternalUserBoundaryTurnSpan,
 } from "./external-user-boundaries.js";
+export { collapseBackgroundTurns } from "./background-turns.js";
+export type {
+  CollapseBackgroundTurnsOptions,
+  TimelineBackgroundTurnsRow,
+} from "./background-turns.js";

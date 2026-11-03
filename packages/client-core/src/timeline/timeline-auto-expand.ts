@@ -84,6 +84,8 @@ export function isRowExpandable(row: ThreadTimelineViewRow): boolean {
       return row.children.length > 0;
     case "turn":
       return true;
+    case "background-turns":
+      return row.children.length > 0;
     case "work":
       return isWorkRowExpandable(row);
     default:
@@ -117,6 +119,7 @@ function shouldAutoExpandLiveFrontierRow(row: ThreadTimelineViewRow): boolean {
     case "conversation":
     case "step-summary":
     case "turn":
+    case "background-turns":
       return false;
     default:
       return assertNever(row);

@@ -438,6 +438,8 @@ function formatRow(
         ),
       ].join("\n");
     }
+    case "background-turns":
+      return formatRows(row.children, context);
     default:
       return assertNever(row);
   }

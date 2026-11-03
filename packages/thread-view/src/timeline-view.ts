@@ -18,6 +18,7 @@ import {
   type FileChangeAction,
 } from "./file-change-summary.js";
 import { plural } from "./format-helpers.js";
+import type { TimelineBackgroundTurnsRow } from "./background-turns.js";
 import {
   getTimelineActivityIntentDetailDedupeKey,
   hasTimelineExplorationIntent,
@@ -93,7 +94,8 @@ export interface TimelineViewTurnRow extends Omit<TimelineTurnRow, "children"> {
 export type ThreadTimelineViewRow =
   | TimelineViewSourceRow
   | TimelineWorkSummaryRow
-  | TimelineViewTurnRow;
+  | TimelineViewTurnRow
+  | TimelineBackgroundTurnsRow;
 
 type TimelineExplorationKind = "files" | "searches" | "lists";
 

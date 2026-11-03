@@ -1,5 +1,7 @@
 import type {
   ComposerCustomization,
+  ExperimentalThreadDisplayPolicy,
+  ExperimentalThreadDisplayPolicyThread,
   ComposerPlusMenuItem,
   PluginComposerScope,
 } from "@get-bb/plugin-sdk";
@@ -9,6 +11,7 @@ import type {
   PluginFileOpenerSlot,
   PluginMessageDirectiveSlot,
   PluginPendingInteractionSlot,
+  PluginThreadDisplayPolicySlot,
   PluginTimelineRendererSlot,
 } from "./plugin-slots";
 
@@ -401,3 +404,22 @@ export function resolveComposerPopups(
 export type ResolvedComposerPopup = ReturnType<
   typeof resolveComposerPopups
 >[number];
+
+/**
+ * First non-null answer wins, in slot (plugin id) order. A resolver that
+ * throws is skipped, so a broken plugin leaves the timeline as stock bb draws it.
+ */
+export function resolveThreadDisplayPolicy(
+  slots: readonly PluginThreadDisplayPolicySlot[],
+  thread: ExperimentalThreadDisplayPolicyThread,
+): ExperimentalThreadDisplayPolicy | null {
+  for (const slot of slots) {
+    try {
+      const policy = slot.resolve(thread);
+      if (policy !== null && policy !== undefined) return policy;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}

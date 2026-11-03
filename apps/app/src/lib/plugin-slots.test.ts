@@ -12,6 +12,7 @@ import {
   setPluginSlotRegistrations,
   subscribePluginSlots,
 } from "./plugin-slots";
+import { resolveThreadDisplayPolicy } from "./plugin-slot-resolvers";
 import { makePluginRegistrationSet as registrationSet } from "@/test/fixtures/plugins";
 
 function SectionComponent(_props: Partial<PluginHomepageSectionProps>) {
@@ -300,5 +301,55 @@ describe("plugin slot batches", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("thread display policy slots", () => {
+  it("resolves the first non-null policy in plugin id order and skips a throwing resolver", () => {
+    setPluginSlotRegistrations(
+      "zeta",
+      registrationSet({
+        threadDisplayPolicies: [() => ({ backgroundTurns: "collapsed" })],
+      }),
+    );
+    setPluginSlotRegistrations(
+      "alpha",
+      registrationSet({
+        threadDisplayPolicies: [
+          () => {
+            throw new Error("broken");
+          },
+          (thread) => (thread.threadId === "thr_a" ? null : null),
+        ],
+      }),
+    );
+    const slots = getPluginSlotSnapshot().threadDisplayPolicies;
+    expect(slots.map((slot) => slot.pluginId)).toEqual([
+      "alpha",
+      "alpha",
+      "zeta",
+    ]);
+    expect(
+      resolveThreadDisplayPolicy(slots, { threadId: "thr_a", projectId: null }),
+    ).toEqual({ backgroundTurns: "collapsed" });
+  });
+
+  it("returns null when no plugin answers", () => {
+    setPluginSlotRegistrations(
+      "alpha",
+      registrationSet({ threadDisplayPolicies: [() => null] }),
+    );
+    expect(
+      resolveThreadDisplayPolicy(
+        getPluginSlotSnapshot().threadDisplayPolicies,
+        {
+          threadId: "thr_a",
+          projectId: "proj_a",
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveThreadDisplayPolicy([], { threadId: "thr_a", projectId: null }),
+    ).toBeNull();
   });
 });

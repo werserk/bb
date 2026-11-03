@@ -51,6 +51,7 @@ export function makePluginRegistrationSet(
     commandPaletteActions: [],
     providerIcons: [],
     timelineRenderers: [],
+    threadDisplayPolicies: [],
     ...overrides,
   };
 }

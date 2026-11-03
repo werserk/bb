@@ -14,6 +14,29 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## Background turns (`experimental_threadDisplayPolicy`, `experimental_threads.setAttentionPolicy`)
+
+Fork capability (`core-background-turns`); stock bb has neither method, so
+plugins feature-detect them. `PluginAppBuilder.experimental_threadDisplayPolicy(resolve)`
+registers a render-time resolver `({ threadId, projectId }) => { backgroundTurns?: "collapsed" } | null`;
+the first non-null answer wins in plugin id order and a throwing resolver is
+skipped. With `"collapsed"` the thread timeline folds each run of
+agent-/system-initiated turns into one expandable "Background" row; a run the
+owner steered, or one with a failed turn, is shown as before.
+`BbPluginApi.experimental_threads.setAttentionPolicy(threadId, { backgroundTurns: "silent" } | null)`
+tells the server not to bump `latestAttentionAt` when a turn whose request was
+not initiated by the user ends cleanly (`run.succeeded`); the policy is in
+memory, owned by the calling plugin, and dropped when it is disabled or
+reloaded, so any gap raises attention as on stock bb. A `thread.idle` event for
+such a turn carries `experimental_attention: "skipped"` so notification
+plugins can stay quiet.
+
+Docs: none yet; the contract lives on the SDK types. Before stabilization,
+decide whether a durable per-thread policy is needed (today it must be
+re-asserted after a server restart), whether failed background turns should
+also be quiet, and whether the collapse belongs in thread-view for all
+timeline consumers.
+
 ## Application link approvals (`@get-bb/plugin-sdk/app`)
 
 `experimental_getApplicationLinkApprovals()` lists approved URL schemes on the

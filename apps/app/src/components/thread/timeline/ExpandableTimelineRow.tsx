@@ -38,6 +38,8 @@ interface ExpandableTimelineRowProps {
   forceExpanded?: boolean;
   terminalAutoExpanded?: boolean;
   renderBody: () => ReactNode;
+  /** When set, the expanded body ends with a control of this label that collapses the row. */
+  collapseLabel?: string;
   title: TimelineTitle;
   titleContent?: ReactNode;
   collapsedPreview?: ReactNode;
@@ -124,6 +126,7 @@ function useRowIntentHandlers(
 
 function ExpandableTimelineRowComponent({
   autoExpanded = false,
+  collapseLabel,
   collapsedPreview,
   expandable = true,
   forceExpanded = false,
@@ -168,6 +171,23 @@ function ExpandableTimelineRowComponent({
   const handleToggle = useCallback((): void => {
     setManualExpansionOverride(!isExpanded);
   }, [isExpanded, setManualExpansionOverride]);
+  const renderBodyWithCollapse = useCallback(
+    () => (
+      <>
+        {renderBody()}
+        {collapseLabel !== undefined ? (
+          <button
+            type="button"
+            className="mt-1 text-xs text-subtle-foreground transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-none"
+            onClick={() => setManualExpansionOverride(false)}
+          >
+            {collapseLabel}
+          </button>
+        ) : null}
+      </>
+    ),
+    [collapseLabel, renderBody, setManualExpansionOverride],
+  );
   const handleCollapsedPreviewClick = useCallback(
     (event: CollapsedPreviewClickEvent): void => {
       if (
@@ -275,7 +295,9 @@ function ExpandableTimelineRowComponent({
         headerClassName,
       )}
       contentClassName={cn(horizontalPaddingClass, "pb-1 pt-0.5")}
-      renderBody={renderBody}
+      renderBody={
+        collapseLabel !== undefined ? renderBodyWithCollapse : renderBody
+      }
     />
   );
 }

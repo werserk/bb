@@ -396,6 +396,13 @@ function computeTimelineRowRenderSignature(row: ThreadTimelineViewRow): string {
         row.completedAt,
         row.children ? timelineRowsSignature(row.children) : null,
       ]);
+    case "background-turns":
+      return joinSignatureParts([
+        baseSignature,
+        row.status,
+        row.turnCount,
+        timelineRowsSignature(row.children),
+      ]);
     case "work":
       return timelineWorkRowRenderSignature(row);
     default:

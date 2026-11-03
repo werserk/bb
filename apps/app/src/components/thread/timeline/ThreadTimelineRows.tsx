@@ -26,6 +26,7 @@ import {
   buildTimelineActivityIntentTitles,
   buildTimelineRowTitle,
   buildTimelineViewRows,
+  collapseBackgroundTurns,
   createTimelineViewRowsCache,
   findActiveLatestBundleId,
   parseSentThreadMessage,
@@ -142,6 +143,7 @@ import {
   type PluginMessageActionSlot,
   type PluginMessageMetadataSlot,
 } from "@/lib/plugin-slots.js";
+import { useThreadDisplayPolicy } from "@/lib/thread-display-policy.js";
 import {
   MessageMetadata,
   type MessageMetadataProps,
@@ -1204,6 +1206,19 @@ function TimelineExpandableBodyContent({
           }
         />
       );
+    case "background-turns":
+      return (
+        <TimelineRowsList
+          rows={row.children}
+          scopeActive={false}
+          showAssistantMessageActions={false}
+          compactActivityIntents={compactActivityIntents}
+          spacing="nested"
+          className={NESTED_TIMELINE_GROUP_LINE_CLASS_NAME}
+          unreadDividerAutoScroll={false}
+          unreadDividerPlacement={null}
+        />
+      );
     case "work":
       if (row.workKind === "delegation") {
         return <DelegationRowBody row={row} />;
@@ -1585,6 +1600,7 @@ export function pastRowDimClassName({
         ? PAST_ROW_DIM_CLASS_NAME
         : undefined;
     case "turn":
+    case "background-turns":
     case "bundle-summary":
     case "step-summary":
       return row.status === "completed" ? PAST_ROW_DIM_CLASS_NAME : undefined;
@@ -1877,6 +1893,7 @@ function TimelineExpandableRowView({
           : undefined
       }
       title={title}
+      collapseLabel={row.kind === "background-turns" ? "Hide" : undefined}
       summaryClassName={pastRowDimClassName({
         activeLatestBundleId,
         row,
@@ -2313,10 +2330,17 @@ function ThreadTimelineRowsComponent(props: ThreadTimelineRowsProps) {
 function ThreadTimelineRowsForTimelineView(props: ThreadTimelineRowsProps) {
   const getViewRows = useTimelineViewRowsCache();
   const [windowingMeasurements] = useState(() => new Map<string, number>());
-  const rows = useMemo(
-    () => getViewRows(props.timelineRows),
-    [getViewRows, props.timelineRows],
+  const displayPolicy = useThreadDisplayPolicy(props.threadId, props.projectId);
+  const collapseBackground = displayPolicy?.backgroundTurns === "collapsed";
+  const threadRunning = isRunningThreadRuntimeDisplayStatus(
+    props.threadRuntimeDisplayStatus,
   );
+  const rows = useMemo(() => {
+    const viewRows = getViewRows(props.timelineRows);
+    return collapseBackground
+      ? collapseBackgroundTurns(viewRows, { threadRunning })
+      : viewRows;
+  }, [collapseBackground, getViewRows, props.timelineRows, threadRunning]);
   const latestActionableAssistantMessageId = useMemo(
     () => findLastActionableAssistantMessageId(rows),
     [rows],

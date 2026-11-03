@@ -88,6 +88,7 @@ import {
   type PluginPendingInteractionRegistration,
   type ExperimentalIconRegistration,
   type PluginTimelineRendererRegistration,
+  type ExperimentalThreadDisplayPolicyResolver,
   type PluginRealtimeConnectionState,
   type PluginRpcClient,
   type PluginSdkApp,
@@ -2098,6 +2099,7 @@ export interface CapturedPluginApp {
   environmentProviderInputs: PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs: PluginMachineProviderInputsRegistration[];
   contentScripts: PluginContentScriptRegistration[];
+  threadDisplayPolicies: ExperimentalThreadDisplayPolicyResolver[];
 }
 
 type PluginAppModule = { default: unknown };

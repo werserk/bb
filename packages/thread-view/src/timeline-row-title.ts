@@ -24,6 +24,7 @@ import type {
   TimelineWebSearchWorkRow,
 } from "@bb/server-contract";
 import { assertNever } from "./assert-never.js";
+import type { TimelineBackgroundTurnsRow } from "./background-turns.js";
 import { OWNERSHIP_CHANGE_VERBS } from "./family-a-verbs.js";
 import {
   formatFileChangePath,
@@ -1526,6 +1527,25 @@ function mapTurnTitle(row: TimelineViewTurnRow): TimelineTitle {
   });
 }
 
+function mapBackgroundTurnsTitle(
+  row: TimelineBackgroundTurnsRow,
+): TimelineTitle {
+  const isPending = row.status === "pending";
+  const time = new Date(row.startedAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return makeTitle({
+    segments: [
+      segment(
+        `Background · ${row.turnCount} ${row.turnCount === 1 ? "turn" : "turns"} · ${time}`,
+        { shimmer: isPending, accent: isPending ? undefined : "subtle" },
+      ),
+    ],
+  });
+}
+
 function parentChangeThreadSegment(
   row: TimelineParentChangeSystemRow,
   name: string,
@@ -1773,6 +1793,8 @@ export function buildTimelineRowTitle(
       return mapWorkSummaryTitle(row, options);
     case "turn":
       return mapTurnTitle(row);
+    case "background-turns":
+      return mapBackgroundTurnsTitle(row);
     default:
       return assertNever(row);
   }

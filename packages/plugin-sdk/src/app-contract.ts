@@ -3969,7 +3969,43 @@ export interface ExperimentalAppIcons {
   register(registration: ExperimentalIconRegistration): void;
 }
 
+/** The thread a {@link ExperimentalThreadDisplayPolicyResolver} is asked about. */
+export interface ExperimentalThreadDisplayPolicyThread {
+  threadId: string;
+  /** Null while the thread's project is not known to the caller. */
+  projectId: string | null;
+}
+
+/**
+ * How bb renders one thread's timeline. `backgroundTurns: "collapsed"`:
+ * consecutive turns that were not started by the user (another thread, a
+ * plugin or the system) render as one expandable "Background" row. A turn the
+ * user steered, or one that ended in error, is shown in full.
+ */
+export interface ExperimentalThreadDisplayPolicy {
+  backgroundTurns?: "collapsed";
+}
+
+/**
+ * Called at render time with a thread. Return a policy, or `null` for
+ * "nothing to say" so the next plugin (or today's rendering) applies. Keep it
+ * synchronous and cheap: it runs for every timeline render.
+ */
+export type ExperimentalThreadDisplayPolicyResolver = (
+  thread: ExperimentalThreadDisplayPolicyThread,
+) => ExperimentalThreadDisplayPolicy | null;
+
 export interface PluginAppBuilder {
+  /**
+   * Experimental. Declare how bb renders threads' timelines (see
+   * {@link ExperimentalThreadDisplayPolicy}). Several plugins may register:
+   * the first non-null answer wins, in plugin id order. Without any answer the
+   * timeline renders as it does today. A fork capability: a stock bb has no
+   * such method, so plugins should check `typeof app.experimental_threadDisplayPolicy`.
+   */
+  experimental_threadDisplayPolicy(
+    resolve: ExperimentalThreadDisplayPolicyResolver,
+  ): void;
   experimental_icons: ExperimentalAppIcons;
   commands: PluginAppCommands;
   slots: PluginAppSlots;

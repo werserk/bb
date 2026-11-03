@@ -6,6 +6,7 @@ import type {
   ExperimentalAppOverlayRegistration,
   ExperimentalCodeFenceRendererRegistration,
   ExperimentalSidebarFooter,
+  ExperimentalThreadDisplayPolicyResolver,
   ExperimentalSidebarFooterActionRegistration,
   ExperimentalSidebarFooterDisclosureController,
   ExperimentalSidebarFooterDisclosureRegistration,
@@ -341,6 +342,7 @@ export interface CollectedPluginAppRegistrations {
   environmentProviderInputs: PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs: PluginMachineProviderInputsRegistration[];
   contentScripts: PluginContentScriptRegistration[];
+  threadDisplayPolicies: ExperimentalThreadDisplayPolicyResolver[];
 }
 
 export interface CollectedSidebarNavigationRegistration extends ExperimentalSidebarNavigationRegistration {
@@ -484,6 +486,7 @@ export function collectPluginAppRegistrations(
     environmentProviderInputs: [],
     machineProviderInputs: [],
     contentScripts: [],
+    threadDisplayPolicies: [],
   };
   sidebarFooterItemsByRegistrationSet.set(collected, sidebarFooterItems);
   const seenIds = {
@@ -1296,6 +1299,14 @@ export function collectPluginAppRegistrations(
         }
       },
       experimental_registerCommand: registerComposerCommand,
+    },
+    experimental_threadDisplayPolicy(resolve) {
+      if (typeof resolve !== "function") {
+        throw new Error(
+          "experimental_threadDisplayPolicy: resolver must be a function",
+        );
+      }
+      collected.threadDisplayPolicies.push(resolve);
     },
     experimental_icons: {
       register(registration) {
