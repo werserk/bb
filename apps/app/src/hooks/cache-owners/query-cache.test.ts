@@ -7,9 +7,16 @@ import {
   archivedThreadsListQueryKey,
   threadListQueryKey,
 } from "../queries/query-keys";
+import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@bb/domain";
+import {
+  makeProjectWithThreadsResponse,
+  makeSidebarBootstrapResponse,
+} from "@/test/fixtures/projects";
+import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
 import {
   getCachedGlobalThreadListInvalidationQueryKeys,
   getCachedProjectThreadListInvalidationQueryKeys,
+  listSidebarNavigationThreads,
 } from "./query-cache";
 
 describe("query cache thread list invalidation keys", () => {
@@ -94,5 +101,50 @@ describe("query cache thread list invalidation keys", () => {
     expect(queryKeys).toContainEqual(projectArchivedKey);
     expect(queryKeys).toContainEqual(projectThreadListKey);
     expect(queryKeys).not.toContainEqual(otherProjectArchivedKey);
+  });
+});
+
+describe("listSidebarNavigationThreads", () => {
+  function navigation(
+    threads: ThreadListEntry[],
+    personal: ThreadListEntry[] = [],
+  ) {
+    return makeSidebarBootstrapResponse({
+      projects: [makeProjectWithThreadsResponse({ id: "proj_app", threads })],
+      personalProject: makeProjectWithThreadsResponse({
+        id: PERSONAL_PROJECT_ID,
+        kind: "personal",
+        threads: personal,
+      }),
+    });
+  }
+
+  it("returns the same array for the same navigation object", () => {
+    const nav = navigation([makeThreadListEntry({ id: "thr_a" })]);
+    expect(listSidebarNavigationThreads(nav)).toBe(
+      listSidebarNavigationThreads(nav),
+    );
+  });
+
+  it("returns the previous array when a new navigation lists the same entries", () => {
+    const a = makeThreadListEntry({ id: "thr_a" });
+    const b = makeThreadListEntry({ id: "thr_b" });
+    const before = listSidebarNavigationThreads(navigation([a], [b]));
+    const after = listSidebarNavigationThreads(navigation([a], [b]));
+    expect(after).toBe(before);
+    expect(after).toEqual([a, b]);
+  });
+
+  it("returns a new array when an entry changes or the order differs", () => {
+    const a = makeThreadListEntry({ id: "thr_a", title: "One" });
+    const b = makeThreadListEntry({ id: "thr_b" });
+    const before = listSidebarNavigationThreads(navigation([a, b]));
+    const changed = listSidebarNavigationThreads(
+      navigation([makeThreadListEntry({ id: "thr_a", title: "Two" }), b]),
+    );
+    expect(changed).not.toBe(before);
+    expect(changed[1]).toBe(b);
+    const reordered = listSidebarNavigationThreads(navigation([b, a]));
+    expect(reordered).not.toBe(changed);
   });
 });

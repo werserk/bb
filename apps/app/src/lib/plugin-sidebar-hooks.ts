@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useStore } from "jotai";
 import {
   PERSONAL_PROJECT_ID,
@@ -57,6 +57,7 @@ export { lookupCachedThread, resolveThread } from "./cached-thread.js";
 const EMPTY_THREADS: readonly PluginSidebarThread[] = [];
 const EMPTY_PROJECTS: readonly PluginSidebarProject[] = [];
 const EMPTY_SECTIONS: readonly PluginSidebarSection[] = [];
+const EMPTY_HOSTS: readonly Host[] = [];
 const EMPTY_HOST_NAMES: ReadonlyMap<string, string> = new Map();
 
 const hostNamesByHosts = new WeakMap<
@@ -106,6 +107,59 @@ function toPluginSidebarThreadCached(
   return thread;
 }
 
+function sameElements<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+function sameProject(
+  a: PluginSidebarProject,
+  b: PluginSidebarProject,
+): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.isPersonal === b.isPersonal &&
+    a.href === b.href &&
+    a.settingsHref === b.settingsHref
+  );
+}
+
+export function stabilizePluginSidebarThreadsState(
+  previous: PluginSidebarThreadsState | null,
+  next: PluginSidebarThreadsState,
+): PluginSidebarThreadsState {
+  if (previous === null) return next;
+  const previousProjects = new Map(
+    previous.projects.map((project) => [project.id, project] as const),
+  );
+  const projects = next.projects.map((project) => {
+    const reused = previousProjects.get(project.id);
+    return reused !== undefined && sameProject(reused, project)
+      ? reused
+      : project;
+  });
+  const stable: PluginSidebarThreadsState = {
+    experimental_archived: next.experimental_archived,
+    status: next.status,
+    threads: sameElements(previous.threads, next.threads)
+      ? previous.threads
+      : next.threads,
+    experimental_hosts: next.experimental_hosts,
+    projects: sameElements(previous.projects, projects)
+      ? previous.projects
+      : projects,
+    sections: next.sections,
+  };
+  const unchanged =
+    stable.experimental_archived === previous.experimental_archived &&
+    stable.status === previous.status &&
+    stable.threads === previous.threads &&
+    stable.experimental_hosts === previous.experimental_hosts &&
+    stable.projects === previous.projects &&
+    stable.sections === previous.sections;
+  return unchanged ? previous : stable;
+}
+
 export function useSidebarThreads(
   options?: Parameters<PluginSdkApp["experimental_useSidebarThreads"]>[0],
 ): PluginSidebarThreadsState {
@@ -151,13 +205,13 @@ export function useSidebarThreads(
   const hostNamesById = hostNamesFor(hosts);
   const titleResources = useThreadTitleMentionResources();
 
-  return useMemo<PluginSidebarThreadsState>(() => {
+  const next = useMemo<PluginSidebarThreadsState>(() => {
     if (data === undefined) {
       return {
         experimental_archived: archiveState,
         status: query.isError ? "error" : "loading",
         threads: EMPTY_THREADS,
-        experimental_hosts: hosts ?? [],
+        experimental_hosts: hosts ?? EMPTY_HOSTS,
         projects: EMPTY_PROJECTS,
         sections: EMPTY_SECTIONS,
       };
@@ -182,7 +236,7 @@ export function useSidebarThreads(
       threads: [...selected.values()].map((thread) =>
         toPluginSidebarThreadCached(thread, hostNamesById, titleResources),
       ),
-      experimental_hosts: hosts ?? [],
+      experimental_hosts: hosts ?? EMPTY_HOSTS,
       projects: allProjects.map((project) => ({
         id: project.id,
         name: project.name,
@@ -203,6 +257,15 @@ export function useSidebarThreads(
     archived.data,
     archiveState,
   ]);
+  const previousRef = useRef<PluginSidebarThreadsState | null>(null);
+  return useMemo(() => {
+    const stable = stabilizePluginSidebarThreadsState(
+      previousRef.current,
+      next,
+    );
+    previousRef.current = stable;
+    return stable;
+  }, [next]);
 }
 
 export function useSidebarThreadEntry(
