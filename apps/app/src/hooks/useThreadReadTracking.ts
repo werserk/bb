@@ -46,6 +46,7 @@ export function useThreadReadTracking({
   useEffect(() => {
     const controllers = pendingReadControllersRef.current;
     return () => {
+      previousSnapshotRef.current = null;
       for (const controller of controllers.values()) controller.abort();
     };
   }, []);
