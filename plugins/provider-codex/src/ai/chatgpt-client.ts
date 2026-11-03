@@ -1,6 +1,11 @@
 import type { JsonValue } from "@get-bb/plugin-sdk";
 import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
-import { fetchChatGpt, isCloudflareChallenge } from "./chatgpt-fetch.js";
+import { selectChatGptTranscriptionFetch } from "./chatgpt-curl-fetch.js";
+import {
+  CHATGPT_TRANSCRIBE_URL,
+  fetchChatGpt,
+  isCloudflareChallenge,
+} from "./chatgpt-fetch.js";
 import type {
   CodexAiCompleteInput,
   CodexAiFailureCode,
@@ -20,7 +25,6 @@ type InferenceCompleteCommand = CodexAiCompleteInput;
 type VoiceTranscribeCommand = CodexAiTranscribeInput;
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
-const CHATGPT_TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
 const CODEX_ERROR_TEXT_MAX_BYTES = 4 * 1024;
@@ -833,11 +837,13 @@ function parseTranscriptionResponse(rawText: string): JsonValue {
 async function fetchChatGptTranscription(
   args: ChatGptTranscriptionFetchArgs,
 ): Promise<Response> {
+  const transcriptionFetch = selectChatGptTranscriptionFetch();
   return runWithTimeout({
     deadline: args.deadline,
     work: (signal) =>
       fetchChatGpt({
         url: CHATGPT_TRANSCRIBE_URL,
+        fetchImpl: (url, init) => transcriptionFetch(url, { ...init, signal }),
         init: (headers) => ({
           method: "POST",
           headers: createChatGptTranscriptionHeaders(args.auth, headers),

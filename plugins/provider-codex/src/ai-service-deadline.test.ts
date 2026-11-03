@@ -4,6 +4,11 @@ import { registerCodexAiService } from "./ai-service.js";
 import { transcribeCodexVoice } from "./ai/chatgpt-client.js";
 import { codexAiTranscribeInputSchema } from "./ai/host-contract.js";
 
+vi.mock("./ai/chatgpt-curl-fetch.js", () => ({
+  selectChatGptTranscriptionFetch: () => (url: string, init: RequestInit) =>
+    fetch(url, init),
+}));
+
 vi.mock("./ai/codex-auth.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./ai/codex-auth.js")>()),
   readCodexAuthCredentials: async () => ({

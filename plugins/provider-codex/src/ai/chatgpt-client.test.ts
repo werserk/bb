@@ -3,16 +3,36 @@ import os from "node:os";
 import path from "node:path";
 import type { JsonValue } from "@get-bb/plugin-sdk";
 import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   completeCodexInference,
   transcribeCodexVoice,
 } from "./chatgpt-client.js";
 import { resetChatGptCloudflareCookiesForTests } from "./chatgpt-fetch.js";
 
+const transcriptionTransport = vi.hoisted(() => ({
+  selected: vi.fn<() => void>(),
+  requested: vi.fn<(url: string) => void>(),
+}));
+
+vi.mock("./chatgpt-curl-fetch.js", () => ({
+  selectChatGptTranscriptionFetch: () => {
+    transcriptionTransport.selected();
+    return (url: string, init: RequestInit) => {
+      transcriptionTransport.requested(url);
+      return fetch(url, init);
+    };
+  },
+}));
+
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 
 const tempDirs: string[] = [];
+
+beforeEach(() => {
+  transcriptionTransport.selected.mockClear();
+  transcriptionTransport.requested.mockClear();
+});
 
 interface WriteCodexAuthArgs {
   homeDir: string;
@@ -226,6 +246,88 @@ describe("Codex ChatGPT client", () => {
         .splice(0)
         .map((tempDir) => fs.rm(tempDir, { force: true, recursive: true })),
     );
+  });
+
+  it("never gives inference the transcription transport", async () => {
+    const homeDir = await makeTempHome();
+    await writeCodexAuth({
+      homeDir,
+      accessToken: createAccessToken({
+        accountId: "account-123",
+        expSeconds: Math.floor(Date.now() / 1000) + 3600,
+      }),
+      refreshToken: "refresh-token",
+    });
+    const fetchMock = setupFetchMock();
+    fetchMock.mockImplementation(async () =>
+      sseResponse([{ type: "response.output_text.delta", delta: "Title" }]),
+    );
+    const inference = {
+      model: "gpt-5.6-luna",
+      prompt: "Return a title",
+      timeoutMs: 10000,
+    };
+
+    await completeCodexInference(inference, new AbortController().signal);
+    await writeCodexApiKeyAuth({ homeDir, apiKey: "sk-codex-api-key" });
+    await completeCodexInference(inference, new AbortController().signal);
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json({ text: "hello openai" }),
+    );
+    await transcribeCodexVoice(
+      {
+        model: "gpt-4o-mini-transcribe",
+        audioBase64: Buffer.from("audio").toString("base64"),
+        mimeType: "audio/webm",
+        filename: "prompt.webm",
+        hint: null,
+        timeoutMs: 30000,
+      },
+      new AbortController().signal,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(transcriptionTransport.selected).not.toHaveBeenCalled();
+    expect(transcriptionTransport.requested).not.toHaveBeenCalled();
+  });
+
+  it("sends every ChatGPT transcription attempt through the transcription transport", async () => {
+    const homeDir = await makeTempHome();
+    await writeCodexAuth({
+      homeDir,
+      accessToken: createAccessToken({
+        accountId: "account-123",
+        expSeconds: Math.floor(Date.now() / 1000) + 3600,
+      }),
+      refreshToken: "refresh-token",
+    });
+    const fetchMock = setupFetchMock();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response("challenge", {
+          status: 403,
+          headers: { "cf-mitigated": "challenge" },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ text: "hello world" }));
+
+    await transcribeCodexVoice(
+      {
+        model: "gpt-4o-mini-transcribe",
+        audioBase64: Buffer.from("audio").toString("base64"),
+        mimeType: "audio/webm",
+        filename: "prompt.webm",
+        hint: null,
+        timeoutMs: 30000,
+      },
+      new AbortController().signal,
+    );
+
+    expect(transcriptionTransport.selected).toHaveBeenCalledTimes(1);
+    expect(transcriptionTransport.requested.mock.calls).toEqual([
+      ["https://chatgpt.com/backend-api/transcribe"],
+      ["https://chatgpt.com/backend-api/transcribe"],
+    ]);
   });
 
   it("runs plain-text inference with Codex auth from ~/.codex/auth.json", async () => {
