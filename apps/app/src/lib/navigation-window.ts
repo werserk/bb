@@ -43,13 +43,11 @@ function hasFirstContent(queryClient: QueryClient, threadId: string): boolean {
 }
 
 function hasFailed(queryClient: QueryClient, threadId: string): boolean {
-  const queryCache = queryClient.getQueryCache();
   return [
     threadDetailBootstrapQueryKey(threadId),
     threadTimelineQueryKey(threadId),
   ].some(
-    (queryKey) =>
-      queryCache.find({ queryKey, exact: true })?.state.status === "error",
+    (queryKey) => queryClient.getQueryState(queryKey)?.status === "error",
   );
 }
 
