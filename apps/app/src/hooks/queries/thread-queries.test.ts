@@ -16,6 +16,7 @@ import type {
 import { COMPACT_VIEWPORT_QUERY } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
 import * as api from "@/lib/api";
+import { requestPriority } from "@/lib/app-surface";
 import { sdk } from "@/lib/sdk";
 import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -275,6 +276,41 @@ beforeEach(() => {
     url: "/api/v1/threads/thread-1/host-files/tmp/log.txt",
     mimeType: "text/plain",
     content: "preview",
+  });
+});
+
+describe("navigation-first fetch priority", () => {
+  it("tags the bootstrap request and both timeline requests as high", async () => {
+    const { queryClient } = createQueryClientTestHarness();
+    const bootstrap = observe(
+      queryClient,
+      threadDetailBootstrapQueryOptions(queryClient, "thread-1", {
+        timelinePrefetch: false,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(bootstrap.getCurrentResult().isSuccess).toBe(true);
+    });
+    const getSignal = vi.mocked(sdk.threads.get).mock.calls[0]?.[0].signal;
+    expect(requestPriority({ signal: getSignal })).toBe("high");
+
+    observeThreadTimeline(queryClient, "thread-1");
+    await vi.waitFor(() => {
+      expect(sdk.threads.timeline).toHaveBeenCalled();
+    });
+    const timelineCalls = vi.mocked(sdk.threads.timeline).mock.calls;
+    expect(timelineCalls.length).toBeGreaterThan(0);
+    for (const [args] of timelineCalls) {
+      expect(requestPriority({ signal: args.signal })).toBe("high");
+    }
+  });
+
+  it("leaves other thread reads untagged", async () => {
+    const { queryClient } = createQueryClientTestHarness();
+    await queryClient.fetchQuery(threadQueuedMessagesQueryOptions("thread-1"));
+    const signal = vi.mocked(sdk.threads.queuedMessages.list).mock.calls[0]?.[0]
+      .signal;
+    expect(requestPriority({ signal })).toBeUndefined();
   });
 });
 

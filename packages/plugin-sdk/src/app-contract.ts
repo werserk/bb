@@ -5868,6 +5868,13 @@ export interface PluginSdkApp {
    */
   experimental_prefetchThread(threadId: string): void;
   /**
+   * `false` while the host is switching threads and has not yet painted the
+   * target's transcript (at most about one second), `true` otherwise and
+   * outside the host. Use it to defer polls and other background reads until
+   * the switch settles. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_useNavigationSettled(): boolean;
+  /**
    * The host-owned chat component (see {@link ThreadChatProps}). Together
    * with `Markdown`, the only components the SDK ships — everything else
    * stays vendored per §5.5.

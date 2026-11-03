@@ -6,7 +6,9 @@ import {
   type SidebarBootstrapResponse,
 } from "@bb/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requestPriority } from "@/lib/app-surface";
 import { request } from "@/lib/api";
+import { apiClient } from "@/lib/api-server";
 import {
   MAX_CACHED_SIDEBAR_THREADS_PER_PROJECT,
   SIDEBAR_BOOTSTRAP_CACHE_KEY,
@@ -68,6 +70,16 @@ afterEach(() => {
 });
 
 describe("useSidebarNavigation", () => {
+  it("tags the bootstrap request as low so it yields to the target thread", async () => {
+    vi.mocked(request).mockResolvedValue(BOOTSTRAP);
+    const harness = createQueryClientTestHarness();
+    renderHook(() => useSidebarNavigation(), { wrapper: harness.wrapper });
+    const get = vi.mocked(apiClient["sidebar-bootstrap"].$get);
+    await waitFor(() => expect(get).toHaveBeenCalled());
+    const init = get.mock.calls[0]?.[1]?.init;
+    expect(requestPriority(init)).toBe("low");
+  });
+
   it("replays the last bootstrap while the live one loads", async () => {
     sidebarBootstrapResponseSchema.parse(BOOTSTRAP);
 

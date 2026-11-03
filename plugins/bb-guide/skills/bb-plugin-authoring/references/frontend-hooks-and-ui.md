@@ -186,6 +186,10 @@ reasoningLevel?, serviceTier?, permissionMode? })` sets the pickers as if
   nothing read and does not navigate. The host drops calls over its budget
   (cached and fresh, already loading, one in flight, 4 threads per 10 s, hidden
   document, data saver).
+- `experimental_useNavigationSettled()` → `boolean` — `false` while the host
+  switches threads and has not painted the target's transcript yet (at most
+  about one second), `true` otherwise and outside the host. Defer polls and
+  background reads while it is `false`.
 
 ```tsx
 const composer = useComposer();

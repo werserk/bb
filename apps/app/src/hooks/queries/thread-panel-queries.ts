@@ -27,6 +27,7 @@ import type { FilePreview } from "@bb/client-core";
 import type { PathListOptions } from "@/lib/path-list-options";
 import type { ThreadStorageFileListOptions } from "@/lib/thread-storage-files";
 import * as api from "@/lib/api";
+import { withFetchPriority } from "@/lib/app-surface";
 import { sdk } from "@/lib/sdk";
 import {
   useThreadDetailRealtimeSubscription,
@@ -347,7 +348,11 @@ export function useThreadConversationOutline(
     queryKey: threadConversationOutlineQueryKey(id, role),
     queryFn: async ({ signal }) => {
       const threadId = requireThreadId(id, "useThreadConversationOutline");
-      return sdk.threads.conversationOutline({ threadId, role, signal });
+      return sdk.threads.conversationOutline({
+        threadId,
+        role,
+        signal: withFetchPriority(signal, "low"),
+      });
     },
     enabled,
     refetchOnMount: options?.refetchOnMount ?? true,

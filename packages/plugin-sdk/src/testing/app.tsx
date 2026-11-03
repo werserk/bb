@@ -1868,6 +1868,9 @@ const testPluginSdkApp = {
     return Promise.resolve("started");
   },
   experimental_prefetchThread(): void {},
+  experimental_useNavigationSettled(): boolean {
+    return true;
+  },
   experimental_useSidebarThreadActions(): PluginSidebarThreadActions {
     return useSlotEnv("experimental_useSidebarThreadActions").sidebarActions;
   },

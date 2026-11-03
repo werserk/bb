@@ -9,6 +9,11 @@ import {
   showMutationErrorToast,
 } from "./mutation-errors";
 import { createBrowserLifecycleFetchController } from "@/hooks/cache-owners/browser-lifecycle-cache-owner";
+import {
+  bindNavigationWindowQueryClient,
+  isNavigationWindowOpen,
+  waitForNavigationSettled,
+} from "./navigation-window";
 import { registerThreadEntityViews } from "@/hooks/cache-owners/thread-entity-store";
 import {
   shouldRetryTransientReadQuery,
@@ -38,7 +43,13 @@ function installAppFocusEvents(): void {
       return;
     }
 
-    const listener = () => handleFocus();
+    const listener = () => {
+      if (!isNavigationWindowOpen()) {
+        handleFocus();
+        return;
+      }
+      void waitForNavigationSettled().then(() => handleFocus());
+    };
     window.addEventListener("visibilitychange", listener, false);
     window.addEventListener("pageshow", listener, false);
 
@@ -58,6 +69,7 @@ export function installAppQueryClientBrowserEvents(
     return { cleanup: () => {} };
   }
 
+  const unbindNavigationWindow = bindNavigationWindowQueryClient(queryClient);
   const fetchController = createBrowserLifecycleFetchController(queryClient);
   const handlePageHide = () => {
     fetchController.suspend();
@@ -85,6 +97,7 @@ export function installAppQueryClientBrowserEvents(
 
   return {
     cleanup: () => {
+      unbindNavigationWindow();
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("pageshow", handlePageShow);
       window.removeEventListener("focus", handleWindowFocus);

@@ -14,6 +14,10 @@ import {
 import { useNavigate, type NavigateOptions } from "react-router-dom";
 import { useStore } from "jotai";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import {
+  closeNavigationWindow,
+  openNavigationWindow,
+} from "@/lib/navigation-window";
 import { isRoutePath, resolveRouteHref } from "@/lib/route-paths";
 import { getDesktopBrowserApi } from "@/lib/bb-desktop";
 import { openPaneContentInSplit } from "@/lib/split-layout/openPaneContentInSplit";
@@ -124,6 +128,12 @@ export function RouteNavigationProvider({
   }, []);
   const navigateRoute = useCallback<RouteNavigate>(
     (path, options) => {
+      const target = paneContentForPathname(path.split(/[?#]/)[0] ?? path);
+      if (target?.kind === "thread") {
+        openNavigationWindow(target.threadId);
+      } else {
+        closeNavigationWindow();
+      }
       startNavigationTransition(() => {
         navigateImmediately(path, options);
       });
