@@ -294,6 +294,7 @@
     "title": "optional",
     "detail": "optional",
     "suppress": "optional",
+    "ownerPost": "optional",
     "tint": "optional",
     "badge": "optional"
   },

@@ -7,6 +7,7 @@ import type {
   EventProjectionCommandMessage,
   EventProjectionMessage,
   EventProjectionOperationMessage,
+  EventProjectionToolCallMessage,
   EventProjectionTurnRequest,
   EventProjectionTurn,
   EventProjectionUserMessage,
@@ -91,6 +92,28 @@ function legacyUserMessage(
   };
 }
 
+function ownerPostMessage(
+  args: MessageBaseArgs,
+  status: EventProjectionToolCallMessage["status"] = "completed",
+): EventProjectionToolCallMessage {
+  return {
+    ...messageBase(args),
+    kind: "tool-call",
+    callId: args.id,
+    toolName: "post_to_owner",
+    toolArgs: { text: "Morning report" },
+    output: "",
+    completedAt: args.seq,
+    approvalStatus: null,
+    presentation: {
+      label: { pending: "Posting", completed: "Posted" },
+      icon: { glyph: "Zap" },
+      ownerPost: true,
+    },
+    status,
+  };
+}
+
 function compactionMessage(
   args: MessageBaseArgs,
 ): EventProjectionOperationMessage {
@@ -154,6 +177,34 @@ describe("groupCompletedTurnMessages", () => {
       kind: "ungrouped-message",
       message: sent,
     });
+  });
+
+  it("keeps an owner post out of the summary and between its neighbours", () => {
+    const before = commandMessage({ id: "command-1", seq: 1 });
+    const post = ownerPostMessage({ id: "post", seq: 2 });
+    const after = commandMessage({ id: "command-2", seq: 3 });
+    const groups = groupCompletedTurnMessages(
+      completedTurn([before, post, after], undefined),
+    );
+
+    expect(summarySourceMessageIds(groups)).toEqual([
+      ["command-1"],
+      ["command-2"],
+    ]);
+    expect(groups.summaryItems).toContainEqual({
+      kind: "ungrouped-message",
+      message: post,
+    });
+  });
+
+  it("leaves a failed post call in the summary", () => {
+    const before = commandMessage({ id: "command-1", seq: 1 });
+    const failed = ownerPostMessage({ id: "post", seq: 2 }, "error");
+    const groups = groupCompletedTurnMessages(
+      completedTurn([before, failed], undefined),
+    );
+
+    expect(summarySourceMessageIds(groups)).toEqual([["command-1", "post"]]);
   });
 
   it("unwraps a singleton compaction group after a user message", () => {

@@ -2127,6 +2127,14 @@ export function parsePluginRowPresentation(
     }
     presentation.suppress = declared.suppress;
   }
+  if (declared.experimental_ownerPost !== undefined) {
+    if (typeof declared.experimental_ownerPost !== "boolean") {
+      throw new Error(
+        `${subject} presentation.experimental_ownerPost must be a boolean`,
+      );
+    }
+    presentation.experimental_ownerPost = declared.experimental_ownerPost;
+  }
   if (declared.tint !== undefined) {
     const tint = declared.tint;
     if (

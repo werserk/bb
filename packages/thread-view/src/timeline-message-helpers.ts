@@ -1,4 +1,5 @@
 import type { EventProjectionMessage } from "./event-projection-types.js";
+import { ownerPostText } from "./owner-post.js";
 import { parseSentThreadMessage } from "./tool-call-parsing.js";
 
 export function isTimelineTerminalMessage(
@@ -28,6 +29,9 @@ export function isTimelineUngroupableMessage(
   }
   if (message.kind === "command") {
     return parseSentThreadMessage(message) !== null;
+  }
+  if (message.kind === "tool-call") {
+    return ownerPostText(message) !== null;
   }
   return false;
 }

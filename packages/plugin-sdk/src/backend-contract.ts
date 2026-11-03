@@ -309,6 +309,14 @@ export interface PluginThreadEventPayloads {
     lastAssistantText: string | null;
     experimental_attention?: "skipped";
   };
+  /**
+   * Fired after a tool call whose row presentation sets
+   * `experimental_ownerPost` completed successfully and core raised the
+   * thread's attention marker for it. `text` is the post's Markdown body.
+   * A consumer that notifies the user should notify for it, once per post.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  "experimental_thread.ownerPost": { thread: ThreadResponse; text: string };
   /** Fired when a thread transitions into `error`. `error` is the latest
    * system/error event message, when one exists. */
   "thread.failed": { thread: ThreadResponse; error: string | null };
@@ -1153,6 +1161,16 @@ export interface PluginRowPresentation {
   /** Low-value rows clients collapse by default (a question a dedicated
    * interaction row already shows, a bookkeeping call). */
   suppress?: boolean;
+  /**
+   * Marks the tool as an explicit message to the owner. A successful call
+   * renders outside any collapsed or background group as an assistant-style
+   * message whose body is the call's `text` argument (Markdown), raises the
+   * thread's attention marker and sends one notification with the post's first
+   * line. A failed call renders as an ordinary tool error. Needs a string
+   * `text` argument; without one the call is an ordinary tool row, as on stock
+   * bb. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_ownerPost?: boolean;
   /** Accent colour per theme; omitted rows use the neutral row tint. */
   tint?: { light: string; dark: string };
 }

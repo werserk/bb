@@ -29,6 +29,7 @@ import {
   collapseBackgroundTurns,
   createTimelineViewRowsCache,
   findActiveLatestBundleId,
+  isOwnerPostRow,
   parseSentThreadMessage,
   workRowGlyph,
   workRowPluginGlyph,
@@ -69,6 +70,7 @@ import type {
   UserAttachmentImageSrcResolver,
 } from "./types.js";
 import { ConversationMessageContent } from "./ConversationMessageContent.js";
+import { OwnerPostRow } from "./OwnerPostRow.js";
 import {
   MessageColumnWidthContext,
   useMeasuredWidth,
@@ -1737,7 +1739,8 @@ function TimelineRowView({
   spacing,
 }: TimelineRowViewProps) {
   const horizontalPadding = timelineRowHorizontalPadding(spacing);
-  const { onTitleAction } = useTimelineRendererStaticContext();
+  const staticContext = useTimelineRendererStaticContext();
+  const { onTitleAction } = staticContext;
   const titleState = useTimelineRowTitleRenderState({
     activeLatestBundleId,
     compactActivityIntents,
@@ -1754,6 +1757,18 @@ function TimelineRowView({
       <ConversationRow
         row={row}
         showAssistantMessageActions={showAssistantMessageActions}
+      />
+    );
+  }
+
+  if (isOwnerPostRow(row)) {
+    return (
+      <OwnerPostRow
+        onOpenLink={staticContext.onOpenLink}
+        onOpenLocalFileLink={staticContext.onOpenLocalFileLink}
+        projectId={staticContext.projectId}
+        row={row}
+        workspaceRootPath={staticContext.workspaceRootPath}
       />
     );
   }

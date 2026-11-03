@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   TimelineConversationRow,
   TimelineRowStatus,
+  TimelineToolWorkRow,
   TimelineTurnRow,
 } from "@bb/server-contract";
 import { collapseBackgroundTurns } from "../src/background-turns.js";
@@ -67,6 +68,27 @@ function reply(id: string): TimelineConversationRow {
     attachments: null,
     turnRequest: null,
   };
+}
+
+function ownerPost(id: string, status: TimelineRowStatus = "completed") {
+  const row: TimelineToolWorkRow = {
+    ...base(id),
+    kind: "work",
+    workKind: "tool",
+    status,
+    callId: id,
+    toolName: "post_to_owner",
+    toolArgs: { text: "Morning report" },
+    output: "",
+    completedAt: status === "pending" ? null : 1,
+    approvalStatus: null,
+    presentation: {
+      label: { pending: "Posting", completed: "Posted" },
+      icon: { glyph: "Zap" },
+      ownerPost: true,
+    },
+  };
+  return row;
 }
 
 function kinds(rows: readonly ThreadTimelineViewRow[]): string[] {
@@ -216,6 +238,73 @@ describe("collapseBackgroundTurns", () => {
     expect(collapseBackgroundTurns(rows, { threadRunning: false })).toEqual(
       rows,
     );
+  });
+
+  it("keeps an owner post visible between collapsed background turns", () => {
+    const rows = [
+      request("g1", "agent"),
+      turn("t1"),
+      request("g2", "agent"),
+      turn("t2"),
+      ownerPost("p1"),
+      request("g3", "agent"),
+      turn("t3"),
+    ];
+    const out = collapseBackgroundTurns(rows, { threadRunning: false });
+    expect(kinds(out)).toEqual([
+      "background-turns:background-turns:g1",
+      "work:p1",
+      "background-turns:background-turns:g3",
+    ]);
+    const counts = out.flatMap((row) =>
+      row.kind === "background-turns" ? [row.turnCount] : [],
+    );
+    expect(counts).toEqual([2, 1]);
+  });
+
+  it("keeps a post alone visible when the whole run is a post", () => {
+    const rows = [request("g1", "agent"), turn("t1"), ownerPost("p1")];
+    const out = collapseBackgroundTurns(rows, { threadRunning: false });
+    expect(kinds(out)).toEqual([
+      "background-turns:background-turns:g1",
+      "work:p1",
+    ]);
+  });
+
+  it("marks only the chunk after the last post as running", () => {
+    const rows = [
+      request("g1", "agent"),
+      turn("t1"),
+      ownerPost("p1"),
+      request("g2", "agent"),
+      turn("t2", "pending"),
+    ];
+    const out = collapseBackgroundTurns(rows, { threadRunning: true });
+    const statuses = out.flatMap((row) =>
+      row.kind === "background-turns" ? [row.status] : [],
+    );
+    expect(statuses).toEqual(["completed", "pending"]);
+  });
+
+  it("keeps posts visible when the owner steers a run", () => {
+    const rows = [
+      request("g1", "agent"),
+      turn("t1"),
+      ownerPost("p1"),
+      request("g2", "agent"),
+      turn("t2", "pending"),
+      request("u1", "user", "steer"),
+      turn("t3"),
+    ];
+    const out = collapseBackgroundTurns(rows, { threadRunning: false });
+    expect(kinds(out)).toEqual([
+      "background-turns:background-turns:g1",
+      "work:p1",
+      "conversation:g2",
+      "turn:t2",
+      "conversation:u1",
+      "turn:t3",
+    ]);
   });
 
   it("collapses 60 background turns into a single row", () => {

@@ -2878,6 +2878,7 @@ describe("a provider-produced environment over its life", () => {
         emitMessageDispatched: () => {},
         emitMessageCancelled: () => {},
         emitInteractionPending: () => {},
+        emitThreadOwnerPost: () => 0,
         emitTurnFailed: () => 0,
       });
       try {

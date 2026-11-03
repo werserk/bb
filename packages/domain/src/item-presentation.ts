@@ -56,6 +56,7 @@ export const threadEventItemPresentationSchema = z.object({
     .max(THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH)
     .optional(),
   suppress: z.boolean().optional(),
+  ownerPost: z.boolean().optional(),
   tint: threadEventItemPresentationTintSchema.optional(),
   badge: threadEventItemPresentationBadgeSchema.optional(),
 });

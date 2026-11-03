@@ -8,6 +8,7 @@ bb.events.on("experimental_thread.parentChanged", ({ thread, previousParentThrea
 bb.events.on("experimental_terminal.input", ({ terminal }) => { ... });
 bb.events.on("experimental_environment.removed", ({ removal }) => { ... });
 bb.events.on("experimental_host.deleted", ({ host }) => { ... });
+bb.events.on("experimental_thread.ownerPost", ({ thread, text }) => { ... }); // fork: a successful tool call declared experimental_ownerPost
 bb.events.on("thread.created", ({ thread }) => { ... });
 bb.events.on("thread.active", ({ thread }) => { ... });
 bb.events.on("thread.idle", ({ thread, lastAssistantText, experimental_attention }) => { ... });   // experimental_attention: "skipped" (fork) when core silenced the turn
@@ -29,7 +30,7 @@ caught, logged, and counted in the plugin's handler stats (`bb plugin list`;
 stats survive reloads and reset on remove). The surface that asks is
 `bb.experimental_hooks`, below, where core acts on your answer.
 
-Seventeen events. The seven `thread.*` ones are thread lifecycle. `interaction.pending`
+Eighteen events. The seven `thread.*` ones are thread lifecycle. `interaction.pending`
 fires after core commits a pending interaction row. The three `message.*`
 ones fire when a dispatch is queued behind a wait (again when a row's wait is
 rewritten), when a queued row's waits all clear and it dispatches, or when the
@@ -38,8 +39,7 @@ queued row, so a plugin that only wants its own filters on
 `entry.waitingOn?.kind === "plugin" && entry.waitingOn.pluginId === bb.pluginId`.
 `message.cancelled` is the only signal for that removal: release external
 resources held for a waiting message (a sandbox mid-provision, a reserved
-slot) there. Archiving or deleting the whole thread fires the thread event
-instead.
+slot) there. Archiving or deleting the whole thread fires the thread event instead.
 
 `turn.failed` fires after a turn failed and the thread has already landed in
 `error`. Its payload (`PluginTurnFailedEvent`) is ids and failure facts only —

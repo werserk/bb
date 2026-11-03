@@ -43,6 +43,10 @@ export function emitPluginThreadParentChanged(
   emitter?.emitThreadParentChanged(thread, previousParentThreadId);
 }
 
+export function emitPluginThreadOwnerPost(thread: Thread, text: string): void {
+  emitter?.emitThreadOwnerPost(thread, text);
+}
+
 export function emitPluginThreadDeleted(thread: Thread): void {
   emitter?.emitThreadDeleted(thread);
 }

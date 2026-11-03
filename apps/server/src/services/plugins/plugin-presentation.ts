@@ -29,6 +29,7 @@ export function fillPluginPresentation(args: {
     ...(declared?.suppress === undefined
       ? {}
       : { suppress: declared.suppress }),
+    ...(declared?.experimental_ownerPost === true ? { ownerPost: true } : {}),
     ...(declared?.tint === undefined ? {} : { tint: declared.tint }),
   };
 }

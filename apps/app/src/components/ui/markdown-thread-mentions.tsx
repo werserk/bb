@@ -22,6 +22,10 @@ import {
   useSidebarThreadMentionResource,
   useThreadMentionResource,
 } from "@/components/thread/ThreadTitleMentions.js";
+import {
+  ThreadMentionCard,
+  useThreadMentionCards,
+} from "@/components/thread/ThreadMentionCard.js";
 import { replaceTextMatches } from "./markdown-text-matches.js";
 
 const THREAD_MENTION_PATTERN = new RegExp(
@@ -492,8 +496,25 @@ export function ThreadMentionElement(props: ThreadMentionElementProps) {
   const rawMessageSeq = props["data-message-seq"];
   const messageSeq = rawMessageSeq === undefined ? null : Number(rawMessageSeq);
   const sidebarResource = useSidebarThreadMentionResource(threadId);
+  const cardsEnabled = useThreadMentionCards();
   if (threadId.length === 0) {
     return null;
+  }
+  if (cardsEnabled && rawThreadId === undefined && messageSeq === null) {
+    return (
+      <ThreadMentionCard
+        fallbackLabel={
+          (sidebarResource ?? resolveThreadMentionResource(mentions, threadId))
+            .label
+        }
+        fallbackProjectId={
+          sidebarResource?.kind === "thread"
+            ? sidebarResource.projectId
+            : undefined
+        }
+        threadId={threadId}
+      />
+    );
   }
   if (rawThreadId !== undefined) {
     return (

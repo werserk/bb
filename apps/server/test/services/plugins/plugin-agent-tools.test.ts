@@ -378,6 +378,7 @@ describe("bb.agents.registerTool", () => {
         label: { pending: "Looking things up", completed: "Looked things up" },
         icon: { glyph: "Search" },
         suppress: true,
+        experimental_ownerPost: true,
         tint: { light: "#123456", dark: "#654321" },
       },
       parameters: { type: "object" },
@@ -397,6 +398,7 @@ describe("bb.agents.registerTool", () => {
       label: { pending: "Looking things up", completed: "Looked things up" },
       icon: { glyph: "Search" },
       suppress: true,
+      ownerPost: true,
       tint: { light: "#123456", dark: "#654321" },
     });
     expect(byName.get("plain_tool")?.presentation).toEqual({

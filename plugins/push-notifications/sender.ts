@@ -34,12 +34,14 @@ const NETWORK_WARNING_INTERVAL_MS = 60 * 60 * 1_000;
 const LAST_OUTCOME_KEY = "last-send-outcome";
 const FALLBACK_BODIES: Record<PushNotificationKind, string> = {
   "pending-interaction": "Waiting for your input",
+  "owner-post": "Posted a message for you",
   "thread-error": "The thread hit an error",
   "turn-finished": "Finished and waiting for you",
 };
 const PUSH_KIND_PRIORITY: readonly PushNotificationKind[] = [
   "pending-interaction",
   "thread-error",
+  "owner-post",
   "turn-finished",
 ];
 
@@ -152,7 +154,11 @@ export interface PushSender {
   onInteractionPending(
     payload: PluginThreadEventPayloads["interaction.pending"],
   ): void;
+  onOwnerPost(
+    payload: PluginThreadEventPayloads["experimental_thread.ownerPost"],
+  ): void;
   onThreadFailed(payload: PluginThreadEventPayloads["thread.failed"]): void;
+  onThreadActive(payload: PluginThreadEventPayloads["thread.active"]): void;
   onThreadIdle(payload: PluginThreadEventPayloads["thread.idle"]): void;
   send(
     input: SendNotificationInput,
@@ -250,6 +256,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
   } = args;
   const fetchImpl = args.fetch ?? undiciFetch;
   const pending = new Map<string, PendingThreadPush>();
+  const turnsWithPost = new Set<string>();
   const inFlight = new Set<Promise<void>>();
   let dispatcher: EnvHttpProxyAgent | null = null;
   let lastNetworkWarningAt = Number.NEGATIVE_INFINITY;
@@ -589,12 +596,22 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
         describePendingInteraction(payload.interaction),
       );
     },
+    onOwnerPost({ thread, text }) {
+      if (thread.visibility !== "visible") return;
+      turnsWithPost.add(thread.id);
+      schedule(thread.id, "owner-post", firstLine(text));
+    },
+    onThreadActive({ thread }) {
+      turnsWithPost.delete(thread.id);
+    },
     onThreadFailed({ thread, error }) {
+      turnsWithPost.delete(thread.id);
       schedule(thread.id, "thread-error", firstLine(error ?? ""));
     },
     onThreadIdle({ thread, lastAssistantText, experimental_attention }) {
       if (thread.visibility !== "visible") return;
       if (experimental_attention === "skipped") return;
+      if (turnsWithPost.delete(thread.id)) return;
       schedule(thread.id, "turn-finished", lastAssistantText ?? "");
     },
     send,
