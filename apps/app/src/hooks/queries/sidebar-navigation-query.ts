@@ -5,6 +5,7 @@ import type { SidebarBootstrapResponse } from "@bb/server-contract";
 import { listSidebarNavigationThreads } from "@/hooks/cache-owners/query-cache";
 import { apiClient } from "@/lib/api-server";
 import { request, requestOptions } from "@/lib/api";
+import { withFetchPriority } from "@/lib/app-surface";
 import {
   useEnvironmentListRealtimeSubscription,
   useHostListRealtimeSubscription,
@@ -23,7 +24,12 @@ function fetchSidebarNavigation(
   signal?: AbortSignal,
 ): Promise<SidebarBootstrapResponse> {
   return request<SidebarBootstrapResponse>(
-    apiClient["sidebar-bootstrap"].$get(undefined, requestOptions(signal)),
+    apiClient["sidebar-bootstrap"].$get(
+      undefined,
+      requestOptions(
+        signal === undefined ? signal : withFetchPriority(signal, "low"),
+      ),
+    ),
   );
 }
 

@@ -25,6 +25,7 @@ import {
   isThreadTimelineDelta,
 } from "@bb/server-contract";
 import type { ThreadListFilters } from "@bb/client-core";
+import { withFetchPriority } from "@/lib/app-surface";
 import { sdk } from "@/lib/sdk";
 import {
   useThreadDetailRealtimeSubscription,
@@ -741,7 +742,7 @@ export function threadDetailBootstrapQueryOptions(
       const thread = await sdk.threads.get({
         include: "environment,host",
         threadId,
-        signal,
+        signal: withFetchPriority(signal, "high"),
       });
       ingestThreadDetailBootstrap({
         queryClient,
@@ -835,14 +836,15 @@ export async function fetchThreadTimeline({
       ? {}
       : { segmentLimit: String(segmentLimit) }),
   };
+  const highSignal = withFetchPriority(signal, "high");
   const response = await sdk.threads.timeline({
     threadId,
-    signal,
+    signal: highSignal,
     ...pageArgs,
     ...(previous === undefined ? {} : { afterTag: previous.tag }),
   });
   const merged = await mergeThreadTimelineDelta(previous, response, () =>
-    sdk.threads.timeline({ threadId, signal, ...pageArgs }),
+    sdk.threads.timeline({ threadId, signal: highSignal, ...pageArgs }),
   );
   const pushed = isCachedThreadTimelinePushEnabled(queryClient)
     ? queryClient.getQueryData<ThreadTimelineResponse>(queryKey)

@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import {
+  bindNavigationWindowQueryClient,
+  closeNavigationWindow,
+  isNavigationWindowOpen,
+} from "@/lib/navigation-window";
 import {
   PluginDetailRouteNavigationProvider,
   RouteAnchor,
@@ -208,6 +214,29 @@ describe("RouteAnchor transition navigation", () => {
     expect(screen.getByTestId("current-path").textContent).toBe(
       "/threads/thr-current",
     );
+  });
+});
+
+describe("RouteAnchor navigation window", () => {
+  it("opens the window for a thread route only", () => {
+    const unbind = bindNavigationWindowQueryClient(new QueryClient());
+    try {
+      render(
+        <MemoryRouter initialEntries={["/threads/thr-old"]}>
+          <RouteNavigationProvider>
+            <RouteAnchor href="/plugins/secrets">Plugin</RouteAnchor>
+            <RouteAnchor href="/threads/thr-new">Thread</RouteAnchor>
+          </RouteNavigationProvider>
+        </MemoryRouter>,
+      );
+      fireEvent.click(screen.getByRole("link", { name: "Plugin" }));
+      expect(isNavigationWindowOpen()).toBe(false);
+      fireEvent.click(screen.getByRole("link", { name: "Thread" }));
+      expect(isNavigationWindowOpen()).toBe(true);
+    } finally {
+      closeNavigationWindow();
+      unbind();
+    }
   });
 });
 

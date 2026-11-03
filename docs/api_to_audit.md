@@ -2166,6 +2166,33 @@ Docs: `frontend-hooks-and-ui.md`.
 3. **Remote latency.** The gain is measured on loopback only. Re-measure over a
    remote link before relying on it there.
 
+## `app.experimental_useNavigationSettled` (`@get-bb/plugin-sdk/app`)
+
+`experimental_useNavigationSettled()` is a hook that returns a `boolean`. It is
+`false` from the start of a thread navigation until the target's transcript has
+its first rows, the target's load fails, or one second has passed, and `true`
+at all other times. Plugins use it to hold polls and other background reads so
+they do not compete with the switch. Outside the host (the test harness) it
+returns `true`.
+
+**Core callers.** The state lives in `apps/app/src/lib/navigation-window.ts`.
+The window opens in `RouteNavigationProvider.navigate` for thread routes whose
+timeline is not yet cached. Inside the app, the same window holds low-priority
+reads (the sidebar bootstrap, the conversation outline) and window-focus
+refetches for at most one second; the target's bootstrap and timeline reads
+carry a high fetch priority.
+
+Docs: `frontend-hooks-and-ui.md`.
+
+**Audit before stabilizing.**
+
+1. **Shape.** A boolean cannot tell a plugin which thread is loading. Decide
+   whether a target id or a promise is needed.
+2. **Cap.** The one-second cap is chosen, not tuned. Decide whether plugins
+   should see or set it.
+3. **Split panes.** The window follows the last thread navigation made through
+   the route navigator, not per pane.
+
 ## `app.experimental_usePluginId` (`@get-bb/plugin-sdk/app`)
 
 Returns the id of the plugin that owns the calling component, the same value

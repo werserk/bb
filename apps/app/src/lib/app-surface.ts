@@ -5,6 +5,26 @@ import {
   type RequestAppSurface,
 } from "@bb/config/app-surface";
 import { isInsideNativeShell } from "@/lib/native-shell";
+import { waitForNavigationSettled } from "@/lib/navigation-window";
+
+export type AppFetchPriority = "high" | "low";
+
+const priorityBySignal = new WeakMap<AbortSignal, AppFetchPriority>();
+
+export function withFetchPriority(
+  signal: AbortSignal,
+  priority: AppFetchPriority,
+): AbortSignal {
+  priorityBySignal.set(signal, priority);
+  return signal;
+}
+
+function requestPriority(init?: RequestInit): AppFetchPriority | undefined {
+  if (init?.priority === "high" || init?.priority === "low") {
+    return init.priority;
+  }
+  return init?.signal ? priorityBySignal.get(init.signal) : undefined;
+}
 
 const APP_SURFACE_MOBILE: RequestAppSurface = "mobile";
 
@@ -28,9 +48,18 @@ export function appSurfaceRequestInit(init?: RequestInit): RequestInit {
   };
 }
 
-export function fetchWithAppSurface(
+export async function fetchWithAppSurface(
   input: Parameters<typeof fetch>[0],
   init?: RequestInit,
 ): ReturnType<typeof fetch> {
-  return fetch(input, appSurfaceRequestInit(init));
+  const priority = requestPriority(init);
+  if (priority === "low") {
+    await waitForNavigationSettled();
+  }
+  return fetch(
+    input,
+    appSurfaceRequestInit(
+      priority === undefined ? init : { ...init, priority },
+    ),
+  );
 }

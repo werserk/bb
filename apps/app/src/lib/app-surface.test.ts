@@ -1,86 +1,87 @@
-import { APP_SURFACE_HEADER_NAME } from "@bb/config/app-surface";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { fetchWithAppSurface, withFetchPriority } from "./app-surface";
 import {
-  buildBridgeInjectionScript,
-  type NativeShellHandshake,
-} from "@bb/mobile-bridge";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
-import { resetNativeShellForTests } from "@/lib/native-shell";
-import { appSurfaceRequestInit, getAppSurface } from "./app-surface";
+  bindNavigationWindowQueryClient,
+  closeNavigationWindow,
+  openNavigationWindow,
+} from "./navigation-window";
 
-const mobileHandshake: NativeShellHandshake = {
-  bridgeVersion: 1,
-  appVersion: "0.39.0",
-  platform: "ios",
-  profileMode: "connect",
-  secureContext: true,
-  safeArea: { top: 59, right: 0, bottom: 34, left: 0 },
-  capabilities: ["haptic", "badge", "share", "open-external", "safe-area"],
-};
+describe("fetchWithAppSurface priority", () => {
+  const fetchMock = vi.fn();
+  let unbind: () => void;
 
-const desktopInfo = {
-  lastCheckedAt: null,
-  latestVersion: null,
-  pendingVersion: null,
-  platform: "macos",
-  updateAvailable: false,
-  updateDownloaded: false,
-  version: "0.0.0-test",
-} as const;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    unbind = bindNavigationWindowQueryClient(new QueryClient());
+  });
 
-describe("app surface request metadata", () => {
   afterEach(() => {
+    closeNavigationWindow();
+    unbind();
     vi.unstubAllGlobals();
-    resetNativeShellForTests();
+    vi.useRealTimers();
   });
 
-  it("defaults browser requests to the web app surface", () => {
-    const init = appSurfaceRequestInit({
-      headers: { "x-existing": "kept" },
-    });
+  const sent = () => fetchMock.mock.calls.map(([url]) => String(url));
 
-    const headers = new Headers(init.headers);
-    expect(getAppSurface()).toBe("web");
-    expect(headers.get(APP_SURFACE_HEADER_NAME)).toBe("web");
-    expect(headers.get("x-existing")).toBe("kept");
+  it("sends a high-priority tagged request at once and with the hint", async () => {
+    openNavigationWindow("t1");
+    const signal = withFetchPriority(new AbortController().signal, "high");
+    await fetchWithAppSurface("/high", { signal });
+    expect(sent()).toEqual(["/high"]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ priority: "high" });
   });
 
-  it("keeps API requests out of the browser HTTP cache unless the caller chooses a mode", () => {
-    expect(appSurfaceRequestInit().cache).toBe("no-store");
-    expect(appSurfaceRequestInit({ cache: "force-cache" }).cache).toBe(
-      "force-cache",
-    );
+  it("holds a low-priority tagged request until the window closes", async () => {
+    openNavigationWindow("t1");
+    const signal = withFetchPriority(new AbortController().signal, "low");
+    const pending = fetchWithAppSurface("/low", { signal });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sent()).toEqual([]);
+    closeNavigationWindow();
+    await pending;
+    expect(sent()).toEqual(["/low"]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ priority: "low" });
   });
 
-  it("marks Electron preload requests as desktop", () => {
-    vi.stubGlobal("window", {
-      bbDesktop: createBbDesktopApi(desktopInfo),
-    });
-
-    const init = appSurfaceRequestInit();
-
-    expect(getAppSurface()).toBe("desktop");
-    expect(new Headers(init.headers).get(APP_SURFACE_HEADER_NAME)).toBe(
-      "desktop",
-    );
+  it("releases a held low-priority request after the cap", async () => {
+    openNavigationWindow("t1");
+    const pending = fetchWithAppSurface("/low", { priority: "low" });
+    await vi.advanceTimersByTimeAsync(1000);
+    await pending;
+    expect(sent()).toEqual(["/low"]);
   });
 
-  it("marks requests from the bb mobile shell as mobile", () => {
-    const fakeWindow: Record<string, unknown> = {
-      ReactNativeWebView: { postMessage: () => {} },
-    };
-    // eslint-disable-next-line no-new-func
-    new Function("window", buildBridgeInjectionScript(mobileHandshake))(
-      fakeWindow,
-    );
-    vi.stubGlobal("window", fakeWindow);
-    resetNativeShellForTests();
+  it("does not hold low priority requests while no window is open", async () => {
+    await fetchWithAppSurface("/low", { priority: "low" });
+    expect(sent()).toEqual(["/low"]);
+  });
 
-    const init = appSurfaceRequestInit();
+  it("does not hold or tag untagged requests", async () => {
+    openNavigationWindow("t1");
+    await fetchWithAppSurface("/plain");
+    expect(sent()).toEqual(["/plain"]);
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("priority");
+  });
+});
 
-    expect(getAppSurface()).toBe("mobile");
-    expect(new Headers(init.headers).get(APP_SURFACE_HEADER_NAME)).toBe(
-      "mobile",
-    );
+describe("priority through the SDK client", () => {
+  afterEach(() => {
+    closeNavigationWindow();
+    vi.unstubAllGlobals();
+  });
+
+  it("carries the signal tag from sdk.threads.get to the fetch hint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { sdk } = await import("./sdk");
+    const signal = withFetchPriority(new AbortController().signal, "high");
+    await sdk.threads.get({ threadId: "t1", signal }).catch(() => undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ priority: "high" });
   });
 });

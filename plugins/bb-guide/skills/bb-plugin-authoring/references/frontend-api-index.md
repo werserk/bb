@@ -106,6 +106,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `experimental_copyToClipboard`
 - `experimental_saveFile`
 - `experimental_prefetchThread`
+- `experimental_useNavigationSettled`
 
 ## Type exports
 

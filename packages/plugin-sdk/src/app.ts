@@ -358,6 +358,9 @@ export const experimental_copyToClipboard = runtimeFunction(
 export const experimental_prefetchThread = runtimeFunction(
   "experimental_prefetchThread",
 );
+export const experimental_useNavigationSettled = runtimeFunction(
+  "experimental_useNavigationSettled",
+);
 export const experimental_saveFile = runtimeFunction("experimental_saveFile");
 
 export const experimental_getApplicationLinkApprovals = runtimeFunction(
