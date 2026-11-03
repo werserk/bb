@@ -20,11 +20,7 @@ describe("reconcilePaneRetention", () => {
   });
 
   it("keeps the thread it left next to the new one", () => {
-    const state = reconcilePaneRetention(
-      initialPaneRetention(A),
-      B,
-      retainAll,
-    );
+    const state = reconcilePaneRetention(initialPaneRetention(A), B, retainAll);
     expect(ids(state)).toEqual(["a", "b"]);
     expect(state.activeThreadId).toBe("b");
   });

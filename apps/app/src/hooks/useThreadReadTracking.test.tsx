@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { Activity } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { USER_ACTIVITY_WINDOW_MS } from "@/lib/user-activity";
 import { useThreadReadTracking } from "./useThreadReadTracking";
@@ -228,6 +229,37 @@ describe("useThreadReadTracking", () => {
     await act(async () => {});
     rerender({ lastReadAt: null, visible: true });
 
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a retained thread read when its hidden view is shown again after manual unread", async () => {
+    const markThreadRead = makeMarkThreadRead();
+    markThreadRead.mutateAsync.mockResolvedValue({
+      lastReadAt: 20,
+      latestAttentionAt: 20,
+    });
+    function RetainedThread({ lastReadAt }: { lastReadAt: number | null }) {
+      useThreadReadTracking({
+        markThreadRead,
+        thread: { id: "thr_retained", lastReadAt, latestAttentionAt: 20 },
+      });
+      return null;
+    }
+    const view = (lastReadAt: number | null, mode: "visible" | "hidden") => (
+      <Activity mode={mode}>
+        <RetainedThread lastReadAt={lastReadAt} />
+      </Activity>
+    );
+    const { rerender } = render(view(10, "visible"));
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    rerender(view(20, "visible"));
+    rerender(view(20, "hidden"));
+    await act(async () => {});
+    rerender(view(null, "hidden"));
+    expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(1);
+
+    rerender(view(null, "visible"));
     expect(markThreadRead.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
