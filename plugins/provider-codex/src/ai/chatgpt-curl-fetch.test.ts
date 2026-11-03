@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildCurlEnv,
   createCurlChatGptFetch,
   selectChatGptTranscriptionFetch,
 } from "./chatgpt-curl-fetch.js";
@@ -12,6 +13,7 @@ const URL = "https://chatgpt.com/backend-api/transcribe";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     tempDirs
       .splice(0)
@@ -274,6 +276,72 @@ describe.skipIf(process.platform === "win32")("curl ChatGPT transport", () => {
 
     expect(error).toMatchObject({
       detailCode: "codex_transcription_transport_invalid_request",
+    });
+  });
+
+  it("starts curl with only the CA variables and no secrets or proxy", async () => {
+    vi.stubEnv("SSL_CERT_FILE", "/etc/ssl/test-ca.pem");
+    vi.stubEnv("SSLKEYLOGFILE", "/tmp/keys.log");
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:3128");
+    vi.stubEnv("NODE_USE_ENV_PROXY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "secret-key");
+    const fake = await makeFakeCurl(
+      'env > "$(dirname "$0")/env"\nprintf \'HTTP/1.1 200 OK\\r\\n\\r\\n{}\'',
+    );
+
+    await createCurlChatGptFetch({ curlPath: fake.curlPath })(
+      URL,
+      transcriptionInit(new AbortController().signal),
+    );
+
+    const names = (
+      await fs.readFile(path.join(path.dirname(fake.curlPath), "env"), "utf8")
+    )
+      .split("\n")
+      .map((line) => line.split("=")[0])
+      .filter(
+        (name) => name && !["PWD", "SHLVL", "_", "OLDPWD"].includes(name),
+      );
+    expect(names).toEqual(["SSL_CERT_FILE"]);
+  });
+
+  it("passes proxy variables only when Node itself uses them", () => {
+    const source = {
+      SSL_CERT_FILE: "/ca.pem",
+      SSLKEYLOGFILE: "/keys.log",
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+      no_proxy: "localhost",
+      ANTHROPIC_API_KEY: "secret-key",
+    };
+
+    expect(buildCurlEnv(source)).toEqual({ SSL_CERT_FILE: "/ca.pem" });
+    expect(buildCurlEnv({ ...source, NODE_USE_ENV_PROXY: "1" })).toEqual({
+      SSL_CERT_FILE: "/ca.pem",
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+      no_proxy: "localhost",
+    });
+  });
+
+  it("refuses any URL other than the ChatGPT transcription endpoint", async () => {
+    const fake = await makeFakeCurl("exit 0");
+
+    for (const url of [
+      "https://chatgpt.com/backend-api/other",
+      "https://example.com/backend-api/transcribe",
+      "http://chatgpt.com/backend-api/transcribe",
+    ]) {
+      const error = await failureOf(
+        createCurlChatGptFetch({ curlPath: fake.curlPath })(
+          url,
+          transcriptionInit(new AbortController().signal),
+        ),
+      );
+      expect(error).toMatchObject({
+        detailCode: "codex_transcription_transport_unsupported_url",
+      });
+    }
+    await expect(fs.stat(fake.argsPath)).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 

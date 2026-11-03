@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { CHATGPT_TRANSCRIBE_URL } from "./chatgpt-fetch.js";
 import { AiServiceFailure } from "./failure.js";
 
 export type ChatGptFetch = (
@@ -16,6 +17,15 @@ export interface CurlChatGptFetchOptions {
 const DEFAULT_CURL_PATH = "/usr/bin/curl";
 const CURL_HEADER_MAX_BYTES = 32 * 1024;
 const CURL_OUTPUT_MAX_BYTES = 2 * 1024 * 1024;
+const CURL_CA_ENV_KEYS = ["SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"];
+const CURL_PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+];
 
 export function selectChatGptTranscriptionFetch(): ChatGptFetch {
   return process.platform === "linux" ? createCurlChatGptFetch() : fetch;
@@ -32,6 +42,21 @@ interface CurlFetchArgs {
   curlPath: string;
   url: string;
   init: RequestInit & { signal: AbortSignal };
+}
+
+export function buildCurlEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const keys =
+    source.NODE_USE_ENV_PROXY === "1"
+      ? [...CURL_CA_ENV_KEYS, ...CURL_PROXY_ENV_KEYS]
+      : CURL_CA_ENV_KEYS;
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return env;
 }
 
 function curlFailure(detailCode: string, message: string): AiServiceFailure {
@@ -116,6 +141,7 @@ function runCurl(args: {
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(args.curlPath, ["-q", "--config", "-"], {
       stdio: ["pipe", "pipe", "pipe"],
+      env: buildCurlEnv(process.env),
     });
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -212,6 +238,12 @@ function runCurl(args: {
 
 async function curlChatGptFetch(args: CurlFetchArgs): Promise<Response> {
   const { signal } = args.init;
+  if (args.url !== CHATGPT_TRANSCRIBE_URL) {
+    throw curlFailure(
+      "codex_transcription_transport_unsupported_url",
+      "Codex transcription transport only supports the ChatGPT transcription endpoint.",
+    );
+  }
   signal.throwIfAborted();
   let request: Request;
   try {

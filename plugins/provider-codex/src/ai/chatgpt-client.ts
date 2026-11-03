@@ -1,7 +1,11 @@
 import type { JsonValue } from "@get-bb/plugin-sdk";
 import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
 import { selectChatGptTranscriptionFetch } from "./chatgpt-curl-fetch.js";
-import { fetchChatGpt, isCloudflareChallenge } from "./chatgpt-fetch.js";
+import {
+  CHATGPT_TRANSCRIBE_URL,
+  fetchChatGpt,
+  isCloudflareChallenge,
+} from "./chatgpt-fetch.js";
 import type {
   CodexAiCompleteInput,
   CodexAiFailureCode,
@@ -21,7 +25,6 @@ type InferenceCompleteCommand = CodexAiCompleteInput;
 type VoiceTranscribeCommand = CodexAiTranscribeInput;
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
-const CHATGPT_TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
 const CODEX_ERROR_TEXT_MAX_BYTES = 4 * 1024;

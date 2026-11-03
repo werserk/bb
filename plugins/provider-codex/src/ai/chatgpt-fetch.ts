@@ -10,6 +10,9 @@ const ALLOWED_CLOUDFLARE_COOKIE_NAMES = new Set([
   "cf_use_ob",
 ]);
 
+export const CHATGPT_TRANSCRIBE_URL =
+  "https://chatgpt.com/backend-api/transcribe";
+
 const cloudflareCookiesByName = new Map<string, string>();
 
 export interface ChatGptFetchArgs {
