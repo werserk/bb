@@ -11,6 +11,10 @@ import {
 import { createMachineBootstrapApi } from "../machines/bootstrap.js";
 import type { MachineEnrollments } from "../machines/enrollments.js";
 import { listServerAccessProviders } from "./plugin-server-access-registry.js";
+import {
+  clearThreadAttentionPoliciesOfPlugin,
+  setThreadAttentionPolicy,
+} from "../threads/thread-attention-policy.js";
 import { detachActivePluginToolCallForUserInput } from "./plugin-tool-calls.js";
 import { fillPluginPresentation } from "./plugin-presentation.js";
 import { mkdirSync } from "node:fs";
@@ -57,6 +61,7 @@ import type {
   PluginMentionTrigger,
   PluginMachines,
   PluginAiServices,
+  PluginExperimentalThreads,
   PluginProviderDeclaration,
   ExperimentalPluginProviderEnvContext,
   ExperimentalPluginProviderEnvEntry,
@@ -1417,6 +1422,22 @@ export function createPluginApi(options: {
     register: aiServiceRegistrations.register,
   };
 
+  const experimental_threads: PluginExperimentalThreads = {
+    setAttentionPolicy(threadId, policy) {
+      assertLive();
+      if (typeof threadId !== "string" || threadId.length === 0) {
+        throw new Error("setAttentionPolicy: threadId must be a non-empty string");
+      }
+      if (policy !== null && policy?.backgroundTurns !== "silent") {
+        throw new Error(
+          'setAttentionPolicy: policy must be null or { backgroundTurns: "silent" }',
+        );
+      }
+      setThreadAttentionPolicy({ pluginId, policy, threadId });
+    },
+  };
+  disposeHooks.push(() => clearThreadAttentionPoliciesOfPlugin(pluginId));
+
   const api: BbPluginApi = {
     pluginId,
     log,
@@ -1439,6 +1460,7 @@ export function createPluginApi(options: {
     server,
     hosts,
     experimental_aiServices,
+    experimental_threads,
     get sdk(): PluginBbSdk {
       assertLive();
       const sdk = getSdk();

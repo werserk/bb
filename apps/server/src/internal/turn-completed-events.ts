@@ -11,6 +11,7 @@ import {
   resetActiveThreadEventPruningState,
 } from "../services/system/event-pruning.js";
 import { applyLoggedThreadLifecycleEvent } from "../services/threads/lifecycle-outcome.js";
+import { shouldSilenceBackgroundTurnAttention } from "../services/threads/thread-attention-policy.js";
 
 interface ApplyTurnCompletedEventResult {
   isRootTurnCompletion: boolean;
@@ -51,8 +52,17 @@ export function applyTurnCompletedEvent(
     return { isRootTurnCompletion, nextStatus: null, thread };
   }
 
+  const event = lifecycleEventForTurnCompletion(payload.status);
+  // Only a clean finish can be quiet: errors and interrupts keep their attention.
+  const suppressIdleAttention =
+    event.type === "run.succeeded" &&
+    shouldSilenceBackgroundTurnAttention(deps.db, {
+      threadId: payload.threadId,
+      turnId,
+    });
   const outcome = applyLoggedThreadLifecycleEvent(deps, {
-    event: lifecycleEventForTurnCompletion(payload.status),
+    event,
+    suppressIdleAttention,
     threadId: payload.threadId,
   });
   const nextStatus = outcome.applied ? outcome.thread.status : null;

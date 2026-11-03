@@ -24,6 +24,7 @@ type ExpectedBbPluginApiKey =
   | "experimental_environments"
   | "experimental_hooks"
   | "experimental_machines"
+  | "experimental_threads"
   | "onInstall"
   | "experimental_serverAccess"
   | "hosts"
@@ -74,6 +75,7 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "PluginEnvironmentProviderDeclaration",
   "PluginEnvironmentProviderRequirements",
   "PluginEnvironments",
+  "PluginExperimentalThreads",
   "PluginDispatchEnvironmentIntent",
   "PluginDispatchExecution",
   "PluginDispatchExecutionSources",
@@ -140,6 +142,7 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "InternalDoNotUsePluginHostNextTunnelStatus",
   "PluginStatusApi",
   "PluginStorage",
+  "PluginThreadAttentionPolicy",
   "PluginThreadEventHandler",
   "PluginThreadEventName",
   "PluginThreadEventPayloads",

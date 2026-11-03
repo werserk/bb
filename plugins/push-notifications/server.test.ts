@@ -495,6 +495,29 @@ describe("push sender", () => {
     }
   });
 
+  it("sends nothing for an idle event whose attention core skipped", async () => {
+    const host = await setup();
+    try {
+      await host.addSubscription();
+      const thread = host.setThread();
+
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Background turn finished.",
+        experimental_attention: "skipped",
+      });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Owner turn finished.",
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.body).toBe("Owner turn finished.");
+    } finally {
+      await host.cleanup();
+    }
+  });
+
   it("sends the first paragraph as plain text with thread references named", async () => {
     const host = await setup();
     try {

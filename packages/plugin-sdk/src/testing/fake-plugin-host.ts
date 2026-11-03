@@ -95,6 +95,8 @@ import type {
   PluginMentionTrigger,
   PluginAiServiceDeclaration,
   PluginAiServices,
+  PluginExperimentalThreads,
+  PluginThreadAttentionPolicy,
   PluginProviderDeclaration,
   ExperimentalPluginProviderEnvContext,
   ExperimentalPluginProviderEnvEntry,
@@ -328,6 +330,8 @@ export interface FakePluginRegistrations {
   /** Live AI-service registrations from `experimental_aiServices.register`
    * (normalized declarations, registration order; dispose removes). */
   aiServiceRegistrations: PluginAiServiceDeclaration[];
+  /** Policies set through `experimental_threads.setAttentionPolicy`, by thread id. */
+  attentionPolicies: Map<string, PluginThreadAttentionPolicy>;
 }
 
 /** One handle opened through `bb.server.internal_DO_NOT_USE_openTunnelIngress`. */
@@ -1055,6 +1059,14 @@ function createFakePluginHostInternal(
   }
 
   const aiServiceRegistrations: PluginAiServiceDeclaration[] = [];
+  const attentionPolicies = new Map<string, PluginThreadAttentionPolicy>();
+  const experimental_threads: PluginExperimentalThreads = {
+    setAttentionPolicy(threadId, policy) {
+      assertLive();
+      if (policy === null) attentionPolicies.delete(threadId);
+      else attentionPolicies.set(threadId, { ...policy });
+    },
+  };
   const experimental_aiServices: PluginAiServices = {
     register(declaration) {
       assertLive();
@@ -1658,6 +1670,7 @@ function createFakePluginHostInternal(
     server,
     hosts,
     experimental_aiServices,
+    experimental_threads,
     get sdk() {
       assertLive();
       return sdk;
@@ -1822,6 +1835,7 @@ function createFakePluginHostInternal(
       providerEnvResolvers,
       providerEnvHealthResolvers,
       aiServiceRegistrations,
+      attentionPolicies,
     },
     get pendingInteractions() {
       return [...pendingInteractions].map(([id, pending]) => ({

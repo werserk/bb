@@ -1409,10 +1409,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           thread: buildThreadDto(thread),
         }));
       },
-      emitThreadIdle(thread) {
+      emitThreadIdle(thread, options) {
         emitThreadEvent("thread.idle", () => ({
           thread: buildThreadDto(thread),
           lastAssistantText: getLastThreadOutput(deps.db, thread.id),
+          ...(options?.attentionSkipped === true
+            ? { experimental_attention: "skipped" as const }
+            : {}),
         }));
       },
       emitThreadFailed(thread) {

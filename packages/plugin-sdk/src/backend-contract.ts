@@ -299,8 +299,16 @@ export interface PluginThreadEventPayloads {
   /** Fired when a thread transitions into `active`. */
   "thread.active": { thread: ThreadResponse };
   /** Fired when a thread transitions into `idle`. `lastAssistantText` is
-   * assembled the same way GET /threads/:id/output is. */
-  "thread.idle": { thread: ThreadResponse; lastAssistantText: string | null };
+   * assembled the same way GET /threads/:id/output is.
+   * `experimental_attention: "skipped"` means core did not raise the thread's
+   * attention marker for this turn, because a plugin set a silent
+   * `experimental_threads.setAttentionPolicy` and the turn was not started by
+   * the user. A consumer that notifies the user should not notify for it. */
+  "thread.idle": {
+    thread: ThreadResponse;
+    lastAssistantText: string | null;
+    experimental_attention?: "skipped";
+  };
   /** Fired when a thread transitions into `error`. `error` is the latest
    * system/error event message, when one exists. */
   "thread.failed": { thread: ThreadResponse; error: string | null };
@@ -2055,6 +2063,29 @@ export interface PluginAiServices {
   register(declaration: PluginAiServiceDeclaration): { dispose(): void };
 }
 
+/**
+ * How a thread's attention marker (unread dot, push notification) treats turns
+ * the user did not start. `silent`: a root turn started by another thread or a
+ * plugin leaves the marker alone when it finishes cleanly.
+ */
+export interface PluginThreadAttentionPolicy {
+  backgroundTurns: "silent";
+}
+
+export interface PluginExperimentalThreads {
+  /**
+   * Set (or with `null` clear) the attention policy of one thread. Held in
+   * server memory only: nothing is stored, so a restart forgets it and the
+   * plugin must call this again when it starts (until then attention is raised
+   * as usual). The plugin's policies are cleared when it reloads or is
+   * disabled. A turn that ends in error still raises attention.
+   */
+  setAttentionPolicy(
+    threadId: string,
+    policy: PluginThreadAttentionPolicy | null,
+  ): void;
+}
+
 // ---------------------------------------------------------------------------
 // Host control plane.
 // ---------------------------------------------------------------------------
@@ -2281,6 +2312,8 @@ export interface BbPluginApi {
    * commit messages, and voice input.
    */
   readonly experimental_aiServices: PluginAiServices;
+  /** Per-thread attention policy. Experimental: see docs/api_to_audit.md. */
+  readonly experimental_threads: PluginExperimentalThreads;
   /**
    * The full BB SDK, bound to this server over loopback (design §4.1).
    * Bind-gated: reading this before the host binds the SDK throws. The real

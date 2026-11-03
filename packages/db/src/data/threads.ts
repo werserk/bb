@@ -2301,6 +2301,12 @@ export type ApplyThreadLifecycleEventOutcome =
 export interface ApplyThreadLifecycleEventArgs {
   event: ThreadLifecycleEvent;
   threadId: string;
+  /**
+   * The active → idle transition does not raise `latestAttentionAt`. The
+   * caller decides (a plugin's silent background-turn policy); an error
+   * transition still raises it.
+   */
+  suppressIdleAttention?: boolean;
 }
 
 interface ThreadLifecycleEventNotAppliedErrorArgs {
@@ -2373,7 +2379,8 @@ export function applyThreadLifecycleEventInTransaction(
       currentStatus: thread.status,
       newStatus: evaluation.to,
       parentThreadId: thread.parentThreadId,
-    })
+    }) &&
+    !(args.suppressIdleAttention === true && evaluation.to === "idle")
   ) {
     set.latestAttentionAt = now;
   }
