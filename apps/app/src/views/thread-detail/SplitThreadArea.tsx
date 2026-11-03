@@ -79,6 +79,7 @@ import {
   type PaneSecondaryPanelRegistry,
 } from "./PaneContext";
 import { LazyThreadDetailView as ThreadDetailView } from "./LazyThreadDetailView";
+import { PaneThreadKeepAlive } from "./PaneThreadKeepAlive";
 import { LazyRootComposeView as RootComposeView } from "@/views/LazyRootComposeView";
 import { PluginPanelView } from "@/views/PluginPanelView";
 import {
@@ -1136,8 +1137,7 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
 
   return (
     <PaneContext.Provider value={value}>
-      <ThreadDetailView
-        surface="pane"
+      <PaneThreadKeepAlive
         projectId={content.projectId}
         threadId={content.threadId}
         timelineEnabled={timelineEnabled}
