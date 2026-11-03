@@ -95,6 +95,7 @@ export {
   listThreadsWithPendingInteractionStateForProjects,
   pinThread,
   reorderPinnedThread,
+  raiseThreadAttention,
   updateThread,
   deleteThread,
   archiveThread,

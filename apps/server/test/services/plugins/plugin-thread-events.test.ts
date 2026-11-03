@@ -1,4 +1,9 @@
-import { getLatestThreadSequence } from "@bb/db";
+import {
+  archiveThread,
+  getLatestThreadSequence,
+  getThread,
+  updateThread,
+} from "@bb/db";
 import { emitPluginThreadEvents } from "../../../src/services/plugins/plugin-thread-events.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +13,7 @@ import { threadScope, turnScope } from "@bb/domain";
 import { applyLoggedThreadLifecycleEvent } from "../../../src/services/threads/lifecycle-outcome.js";
 import { beginProjectDeletion } from "../../../src/services/projects/project-deletion.js";
 import { createThreadRecord } from "../../../src/services/threads/thread-create-helpers.js";
+import { raiseOwnerPostAttention } from "../../../src/services/threads/owner-post.js";
 import { archiveThreadAndReleaseChildren } from "../../../src/services/threads/thread-ownership.js";
 import type { ThreadCreateServiceRequest } from "../../../src/services/threads/thread-create-request.js";
 import {
@@ -586,6 +592,77 @@ describe("plugin thread lifecycle events", () => {
       );
     } finally {
       delete globals.__parentChangedEvents;
+      await cleanup();
+    }
+  });
+
+  it("raises attention and delivers experimental_thread.ownerPost for a successful post", async () => {
+    const recorded: Array<{
+      text: string;
+      thread: RecordedThreadPayload["thread"];
+    }> = [];
+    globals.__ownerPostEvents = recorded;
+    const { harness, cleanup } = await setUpPluginHarness(`
+      export default function plugin(bb: any) {
+        bb.events.on("experimental_thread.ownerPost", (payload: any) => {
+          (globalThis as any).__ownerPostEvents.push(payload);
+        });
+      }
+    `);
+    try {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "active" },
+      });
+      updateThread(harness.db, harness.hub, thread.id, {
+        lastReadAt: thread.latestAttentionAt,
+      });
+      const presentation = {
+        label: { pending: "Posting", completed: "Posted" },
+        experimental_ownerPost: true,
+      };
+      const ok = { contentItems: [], success: true };
+      const post = (args: {
+        input?: unknown;
+        presentation?: typeof presentation | null;
+        response?: typeof ok;
+      }) =>
+        raiseOwnerPostAttention(harness.deps, {
+          input: args.input ?? { text: "Morning report" },
+          presentation:
+            args.presentation === undefined ? presentation : args.presentation,
+          response: args.response ?? ok,
+          threadId: thread.id,
+        });
+
+      post({ response: { contentItems: [], success: false } });
+      post({ presentation: null });
+      post({
+        presentation: { ...presentation, experimental_ownerPost: false },
+      });
+      post({ input: { text: "  " } });
+      post({ input: { other: 1 } });
+      const untouched = getThread(harness.db, thread.id)!;
+      expect(untouched.latestAttentionAt).toBe(thread.latestAttentionAt);
+      expect(recorded).toEqual([]);
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      post({});
+      const raised = getThread(harness.db, thread.id)!;
+      expect(raised.latestAttentionAt).toBeGreaterThan(
+        thread.latestAttentionAt,
+      );
+      expect(raised.lastReadAt).toBe(thread.latestAttentionAt);
+      expect(raised.lastReadAt! < raised.latestAttentionAt).toBe(true);
+      await vi.waitFor(() => expect(recorded).toHaveLength(1));
+      expect(recorded[0]?.text).toBe("Morning report");
+      expect(recorded[0]?.thread.id).toBe(thread.id);
+
+      archiveThread(harness.db, harness.hub, thread.id);
+      post({});
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(recorded).toHaveLength(1);
+    } finally {
+      delete globals.__ownerPostEvents;
       await cleanup();
     }
   });

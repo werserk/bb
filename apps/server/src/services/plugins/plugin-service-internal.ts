@@ -248,6 +248,7 @@ export interface PluginThreadEventEmitter {
     thread: Thread,
     previousParentThreadId: string | null,
   ): void;
+  emitThreadOwnerPost(thread: Thread, text: string): void;
   emitThreadDeleted(thread: Thread): void;
   emitInteractionPending(thread: Thread, interaction: PendingInteraction): void;
   /**

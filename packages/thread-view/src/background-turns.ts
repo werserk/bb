@@ -1,4 +1,5 @@
 import type { TimelineRowBase, TimelineRowStatus } from "@bb/server-contract";
+import { isOwnerPostRow } from "./owner-post.js";
 import type { ThreadTimelineViewRow } from "./timeline-view.js";
 
 export interface TimelineBackgroundTurnsRow extends TimelineRowBase {
@@ -46,11 +47,11 @@ function hasFailure(rows: readonly ThreadTimelineViewRow[]): boolean {
 
 function buildRow(
   segment: ThreadTimelineViewRow[],
-  turnCount: number,
   running: boolean,
 ): TimelineBackgroundTurnsRow {
   const first = segment[0]!;
   const last = segment[segment.length - 1]!;
+  const requestCount = segment.filter(isAgentInitiatedRequest).length;
   return {
     id: `background-turns:${first.id}`,
     threadId: first.threadId,
@@ -61,9 +62,32 @@ function buildRow(
     createdAt: first.createdAt,
     kind: "background-turns",
     status: running ? "pending" : "completed",
-    turnCount,
+    turnCount: Math.max(1, requestCount),
     children: segment,
   };
+}
+
+function collapseAroundOwnerPosts(
+  segment: ThreadTimelineViewRow[],
+  running: boolean,
+): ThreadTimelineViewRow[] {
+  const out: ThreadTimelineViewRow[] = [];
+  let chunk: ThreadTimelineViewRow[] = [];
+  const flushChunk = (last: boolean): void => {
+    if (chunk.length === 0) return;
+    out.push(buildRow(chunk, last && running));
+    chunk = [];
+  };
+  for (const row of segment) {
+    if (isOwnerPostRow(row)) {
+      flushChunk(false);
+      out.push(row);
+      continue;
+    }
+    chunk.push(row);
+  }
+  flushChunk(true);
+  return out;
 }
 
 /**
@@ -79,7 +103,6 @@ export function collapseBackgroundTurns(
 ): ThreadTimelineViewRow[] {
   const out: ThreadTimelineViewRow[] = [];
   let segment: ThreadTimelineViewRow[] = [];
-  let turnCount = 0;
 
   const flush = (endedBy: ThreadTimelineViewRow | null): void => {
     if (segment.length === 0) return;
@@ -94,17 +117,17 @@ export function collapseBackgroundTurns(
         steeredFrom -= 1;
       }
       const earlier = segment.slice(0, steeredFrom);
-      if (earlier.length > 0) {
-        out.push(buildRow(earlier, turnCount - 1, false));
-      }
+      out.push(...collapseAroundOwnerPosts(earlier, false));
       out.push(...segment.slice(steeredFrom));
     } else {
       out.push(
-        buildRow(segment, turnCount, endedBy === null && options.threadRunning),
+        ...collapseAroundOwnerPosts(
+          segment,
+          endedBy === null && options.threadRunning,
+        ),
       );
     }
     segment = [];
-    turnCount = 0;
   };
 
   for (const row of rows) {
@@ -114,13 +137,11 @@ export function collapseBackgroundTurns(
         out.push(row);
         continue;
       }
-      if (isAgentInitiatedRequest(row)) turnCount += 1;
       segment.push(row);
       continue;
     }
     if (isAgentInitiatedRequest(row)) {
       segment.push(row);
-      turnCount = 1;
       continue;
     }
     out.push(row);

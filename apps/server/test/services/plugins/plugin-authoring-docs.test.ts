@@ -239,6 +239,7 @@ const THREAD_EVENT_PAYLOAD_FIELDS = {
   "experimental_terminal.input": ["terminal"],
   "experimental_host.deleted": ["host"],
   "experimental_environment.removed": ["removal"],
+  "experimental_thread.ownerPost": ["thread", "text"],
   "thread.created": ["thread"],
   "thread.active": ["thread"],
   "thread.idle": ["thread", "lastAssistantText", "experimental_attention"],

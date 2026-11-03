@@ -60,6 +60,7 @@ function captureEnvironmentRemovals(): string[] {
     emitMessageDispatched: ignore,
     emitMessageCancelled: ignore,
     emitInteractionPending: ignore,
+    emitThreadOwnerPost: ignore,
     emitTurnFailed: ignore,
   });
   return removed;

@@ -565,6 +565,9 @@ export function createPushNotificationsPlugin(
     bb.events.on("interaction.pending", (payload) => {
       sender.onInteractionPending(payload);
     });
+    bb.events.on("experimental_thread.ownerPost", (payload) => {
+      sender.onOwnerPost(payload);
+    });
     bb.events.on("thread.idle", (payload) => {
       sender.onThreadIdle(payload);
     });

@@ -14,6 +14,7 @@ import {
 } from "../services/plugins/plugin-agent-contributions.js";
 import { deliverDetachedToolResult } from "../services/plugins/detached-tool-result-delivery.js";
 import { requirePluginToolCallRegistry } from "../services/plugins/plugin-tool-calls.js";
+import { raiseOwnerPostAttention } from "../services/threads/owner-post.js";
 import {
   handleUpdateEnvironmentDirectoryToolCall,
   UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
@@ -98,15 +99,30 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             context.req.raw.signal,
             roundTrip.signal,
           ]),
-          invoke: (signal) =>
-            invokePluginAgentTool(pluginTool, {
+          invoke: async (signal) => {
+            const result = await invokePluginAgentTool(pluginTool, {
               input: payload.arguments,
               ctx: {
                 threadId: thread.id,
                 projectId: thread.projectId,
                 signal,
               },
-            }),
+            });
+            try {
+              raiseOwnerPostAttention(deps, {
+                input: payload.arguments,
+                presentation: pluginTool.record.presentation,
+                response: result,
+                threadId: thread.id,
+              });
+            } catch (error) {
+              deps.logger.warn(
+                { err: error, threadId: thread.id, tool: payload.tool },
+                "Failed to raise attention for an owner post",
+              );
+            }
+            return result;
+          },
           onDetachedResult: (result) =>
             deliverDetachedToolResult(deps, {
               threadId: thread.id,

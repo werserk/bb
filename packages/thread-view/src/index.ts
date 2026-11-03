@@ -86,6 +86,11 @@ export {
   type ExternalUserBoundaryTurnSpan,
 } from "./external-user-boundaries.js";
 export { collapseBackgroundTurns } from "./background-turns.js";
+export {
+  isOwnerPostRow,
+  ownerPostText,
+  type TimelineOwnerPostRow,
+} from "./owner-post.js";
 export type {
   CollapseBackgroundTurnsOptions,
   TimelineBackgroundTurnsRow,

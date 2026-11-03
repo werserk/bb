@@ -623,6 +623,7 @@ export function createPluginApi(options: {
   const threadEventHandlers: PluginThreadEventHandlers = {
     "experimental_thread.events": [],
     "experimental_thread.parentChanged": [],
+    "experimental_thread.ownerPost": [],
     "experimental_terminal.input": [],
     "experimental_host.deleted": [],
     "experimental_environment.removed": [],
@@ -1426,7 +1427,9 @@ export function createPluginApi(options: {
     setAttentionPolicy(threadId, policy) {
       assertLive();
       if (typeof threadId !== "string" || threadId.length === 0) {
-        throw new Error("setAttentionPolicy: threadId must be a non-empty string");
+        throw new Error(
+          "setAttentionPolicy: threadId must be a non-empty string",
+        );
       }
       if (policy !== null && policy?.backgroundTurns !== "silent") {
         throw new Error(

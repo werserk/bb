@@ -21,12 +21,14 @@ describe("parsePluginRowPresentation", () => {
         label: { pending: "Running", completed: "Ran" },
         icon: { glyph: "Workflow" },
         suppress: true,
+        experimental_ownerPost: true,
         tint: { light: "#111111", dark: "#eeeeee" },
       },
       expected: {
         label: { pending: "Running", completed: "Ran" },
         icon: { glyph: "Workflow" },
         suppress: true,
+        experimental_ownerPost: true,
         tint: { light: "#111111", dark: "#eeeeee" },
       },
     },
@@ -109,6 +111,12 @@ describe("parsePluginRowPresentation", () => {
       name: "a non-boolean suppress",
       value: { suppress: "yes" },
       message: 'tool "tool_x" presentation.suppress must be a boolean',
+    },
+    {
+      name: "a non-boolean experimental_ownerPost",
+      value: { experimental_ownerPost: "yes" },
+      message:
+        'tool "tool_x" presentation.experimental_ownerPost must be a boolean',
     },
     {
       name: "a tint missing dark",

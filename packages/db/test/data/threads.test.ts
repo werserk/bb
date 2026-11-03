@@ -28,6 +28,7 @@ import {
   unpinThread,
   unarchiveThread,
   applyThreadLifecycleEvent,
+  raiseThreadAttention,
   requireThreadLifecycleEventApplied,
 } from "../../src/data/threads.js";
 import { createPendingInteraction } from "../../src/data/pending-interactions.js";
@@ -1445,6 +1446,40 @@ describe("thread lifecycle transitions and read state", () => {
       expect(activeAgainThread.updatedAt).toBe(3_000);
       expect(activeAgainThread.latestAttentionAt).toBe(2_000);
       expect(activeAgainThread.lastReadAt).toBe(2_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("raises attention on a read thread and notifies the read-state change", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const { db, project } = setup();
+      const thread = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        status: "active",
+      });
+      updateThread(db, noopNotifier, thread.id, {
+        lastReadAt: thread.latestAttentionAt,
+      });
+      const notifyThread = vi.fn();
+      const notifier: DbNotifier = { ...noopNotifier, notifyThread };
+
+      vi.setSystemTime(2_000);
+      const raised = raiseThreadAttention(db, notifier, thread.id);
+
+      expect(raised?.status).toBe("active");
+      expect(raised?.latestAttentionAt).toBe(2_000);
+      expect(raised?.updatedAt).toBe(2_000);
+      expect(raised?.lastReadAt).toBe(1_000);
+      expect(notifyThread).toHaveBeenCalledWith(
+        thread.id,
+        ["read-state-changed"],
+        { projectId: project.id },
+      );
+      expect(raiseThreadAttention(db, notifier, "missing-thread")).toBeNull();
     } finally {
       vi.useRealTimers();
     }

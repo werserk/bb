@@ -1,7 +1,7 @@
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
 import type { PluginAgentToolRecord } from "../../src/services/plugins/plugin-api.js";
 import { eq } from "drizzle-orm";
-import { events } from "@bb/db";
+import { events, getThread, updateThread } from "@bb/db";
 import { describe, expect, it, vi } from "vitest";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
@@ -221,6 +221,72 @@ describe("plugin tool calls that outlive their round trip", () => {
         );
       } finally {
         finish();
+        setPluginAgentContributions(undefined);
+      }
+    });
+  });
+
+  it.each([
+    { name: "a successful owner post", success: true, raised: true },
+    { name: "a failed owner post", success: false, raised: false },
+  ])("raises attention for $name only when it succeeds", async (scenario) => {
+    await withTestHarness(async (harness) => {
+      const { session, thread } = seedIdleProviderThread(
+        harness,
+        scenario.success ? 11 : 12,
+      );
+      updateThread(harness.db, harness.hub, thread.id, {
+        lastReadAt: thread.latestAttentionAt,
+      });
+      const record: PluginAgentToolRecord = {
+        name: "post_to_owner",
+        description: "Post to the owner",
+        presentation: {
+          label: { pending: "Posting", completed: "Posted" },
+          experimental_ownerPost: true,
+        },
+        instructions: null,
+        inputSchema: {},
+        parse: (input) => ({ ok: true, value: input }),
+        execute: () => "unused",
+      };
+      setPluginAgentContributions({
+        listSkillRootContributions: () => [],
+        listAgentTools: () => [],
+        listInstructionContributions: () => [],
+        findAgentTool: (name) =>
+          name === record.name ? { pluginId: "fixture", record } : undefined,
+        resolveMention: async () => ({ ok: false, error: "unused" }),
+        invokeAgentTool: async () => ({
+          success: scenario.success,
+          contentItems: [{ type: "inputText", text: "ok" }],
+        }),
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const response = await harness.app.request(
+          "/internal/session/tool-call",
+          {
+            method: "POST",
+            headers: internalAuthHeaders(harness),
+            body: JSON.stringify({
+              sessionId: session.id,
+              threadId: thread.id,
+              providerThreadId: "provider-thread",
+              turnId: "turn",
+              callId: "post-call",
+              tool: record.name,
+              arguments: { text: "Morning report" },
+            }),
+          },
+        );
+        await response.text();
+        const after = getThread(harness.db, thread.id)!;
+        expect(after.latestAttentionAt > thread.latestAttentionAt).toBe(
+          scenario.raised,
+        );
+        expect(after.lastReadAt).toBe(thread.latestAttentionAt);
+      } finally {
         setPluginAgentContributions(undefined);
       }
     });

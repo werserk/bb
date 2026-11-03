@@ -39,9 +39,7 @@ import {
   updateEnvironmentRequestSchema,
   unmanagedBranchSpecSchema,
 } from "../src/index.js";
-import type {
-  WorkspaceResolutionFailure,
-} from "@bb/host-daemon-contract/workspace";
+import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract/workspace";
 
 interface OptionalServerFieldGroup {
   fields: readonly string[];
@@ -136,21 +134,25 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
     fields: [
       "threadPendingInteractionsResponseSchema.payload.presentation.badge",
       "threadPendingInteractionsResponseSchema.payload.presentation.detail",
+      "threadPendingInteractionsResponseSchema.payload.presentation.ownerPost",
       "threadPendingInteractionsResponseSchema.payload.presentation.suppress",
       "threadPendingInteractionsResponseSchema.payload.presentation.tint",
       "threadPendingInteractionsResponseSchema.payload.presentation.title",
       "threadPendingInteractionsResponseSchema.payload.subject.presentation.badge",
       "threadPendingInteractionsResponseSchema.payload.subject.presentation.detail",
+      "threadPendingInteractionsResponseSchema.payload.subject.presentation.ownerPost",
       "threadPendingInteractionsResponseSchema.payload.subject.presentation.suppress",
       "threadPendingInteractionsResponseSchema.payload.subject.presentation.tint",
       "threadPendingInteractionsResponseSchema.payload.subject.presentation.title",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation.badge",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation.detail",
+      "threadTimelineResponseSchema.activeBackgroundCommands.presentation.ownerPost",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation.suppress",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation.tint",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation.title",
       "threadTimelineResponseSchema.activeWorkflows.presentation.badge",
       "threadTimelineResponseSchema.activeWorkflows.presentation.detail",
+      "threadTimelineResponseSchema.activeWorkflows.presentation.ownerPost",
       "threadTimelineResponseSchema.activeWorkflows.presentation.suppress",
       "threadTimelineResponseSchema.activeWorkflows.presentation.tint",
       "threadTimelineResponseSchema.activeWorkflows.presentation.title",
@@ -158,7 +160,9 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.presentation.badge",
       "threadTimelineResponseSchema.rows.presentation.detail",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.presentation.detail",
+      "threadTimelineResponseSchema.rows.presentation.ownerPost",
       "threadTimelineResponseSchema.rows.presentation.suppress",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.presentation.ownerPost",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.presentation.suppress",
       "threadTimelineResponseSchema.rows.presentation.tint",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.presentation.tint",

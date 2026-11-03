@@ -212,11 +212,19 @@ rejects the registration), `icon` a host glyph name or one of this plugin's
 declared icons as `{ glyph: "<pluginId>/<name>" }` (see
 `bb.branding.experimental_icons` in quickstart.md; another plugin's id or an
 undeclared name rejects the registration), `suppress` collapses low-value rows
-by default, and `tint` accents the row per theme. BB stamps it on every call's
+by default, `experimental_ownerPost` (fork) makes a successful call a message to the
+owner (see below), and `tint` accents the row per theme. BB stamps it on every call's
 timeline row, whichever provider runs the thread; it needs no frontend bundle.
 Without it, and in any state with no label — error, interrupted, or awaiting
 approval — rows use BB's standard `Running tool …` / `Ran tool …` wording and
 the plugin's branding glyph.
+
+`experimental_ownerPost: true` marks a tool whose string `text` argument is a post to the
+owner. The call renders as its own Markdown message outside collapsed turns and
+step summaries, `@thread:` mentions in it render as live thread cards, and a
+successful call raises the thread's attention (unread) and emits
+`experimental_thread.ownerPost`. A failed, interrupted or text-less call stays an
+ordinary tool row.
 
 `configure` and `contributeInstructions` are synchronous, may each be
 registered once per factory execution, and run whenever BB resolves a

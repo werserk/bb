@@ -1921,6 +1921,26 @@ export function updateThread(
   return updated ?? null;
 }
 
+export function raiseThreadAttention(
+  db: ThreadWriteConnection,
+  notifier: DbNotifier,
+  id: string,
+) {
+  const now = Date.now();
+  const updated = db
+    .update(threads)
+    .set({ latestAttentionAt: now, updatedAt: now })
+    .where(eq(threads.id, id))
+    .returning()
+    .get();
+  if (updated) {
+    notifier.notifyThread(id, ["read-state-changed"], {
+      projectId: updated.projectId,
+    });
+  }
+  return updated ?? null;
+}
+
 export interface ThreadExecutionOverride {
   modelOverride: string | null;
   reasoningLevelOverride: ReasoningLevel | null;

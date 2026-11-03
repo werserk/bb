@@ -733,6 +733,77 @@ describe("push sender", () => {
     }
   });
 
+  it("sends the first line of an owner post and prefers it to the idle summary", async () => {
+    const host = await setup();
+    try {
+      await host.addSubscription();
+      const thread = host.setThread({ status: "active", title: "Coordinator" });
+      const post = "Morning report\n\nAll 4 builders are done.";
+
+      await host.harness.behavior.emitThreadEvent(
+        "experimental_thread.ownerPost",
+        { thread, text: post },
+      );
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: { ...thread, status: "idle" },
+        lastAssistantText: "Done",
+      });
+
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]).toEqual([
+        expect.objectContaining({
+          title: "Coordinator",
+          body: "Morning report",
+          data: expect.objectContaining({ kind: "owner-post" }),
+        }),
+      ]);
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
+  it("notifies an owner post at needs-input level, but not for a muted, hidden or read thread", async () => {
+    let now = 1_000;
+    const host = await setup({ now: () => now });
+    try {
+      await host.addSubscription();
+      const quiet = host.setThread({ id: "thread-quiet" });
+      await host.setLevel(quiet.id, "input-only");
+      await host.harness.behavior.emitThreadEvent(
+        "experimental_thread.ownerPost",
+        { thread: quiet, text: "Needs a look" },
+      );
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.body).toBe("Needs a look");
+
+      const muted = host.setThread({ id: "thread-muted" });
+      await host.setLevel(muted.id, "muted");
+      const hidden = host.setThread({
+        id: "thread-hidden",
+        visibility: "hidden",
+      });
+      const read = host.setThread({ id: "thread-read" });
+      for (const thread of [muted, hidden, read]) {
+        await host.harness.behavior.emitThreadEvent(
+          "experimental_thread.ownerPost",
+          { thread, text: "Ignored" },
+        );
+      }
+      host.threads.set(read.id, {
+        ...read,
+        latestAttentionAt: now + 1,
+        lastReadAt: now + 1,
+      });
+      now += 2;
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+    } finally {
+      await host.cleanup();
+    }
+  });
+
   it("batches devices and removes rows that Expo rejects as unregistered", async () => {
     const host = await setup();
     try {

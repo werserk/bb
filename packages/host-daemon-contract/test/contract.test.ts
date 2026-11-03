@@ -616,6 +616,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
   "hostDaemonCommandSchema.dynamicTools.presentation.detail":
     "a dynamic tool's presentation has a detail only when the plugin summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
+  "hostDaemonCommandSchema.dynamicTools.presentation.ownerPost":
+    "a dynamic tool's presentation marks ownerPost only when the plugin declared the call a post to the owner; absence means an ordinary tool row.",
   "hostDaemonCommandSchema.dynamicTools.presentation.suppress":
     "a dynamic tool's presentation marks suppress only for low-value rows the plugin wants collapsed; absence means render normally.",
   "hostDaemonCommandSchema.dynamicTools.presentation.tint":
@@ -652,6 +654,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.detail":
     "a dynamic tool's presentation has a detail only when the plugin summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
+  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.ownerPost":
+    "a resumed dynamic tool's presentation marks ownerPost only when the plugin declared the call a post to the owner; absence means an ordinary tool row.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.suppress":
     "a dynamic tool's presentation marks suppress only for low-value rows the plugin wants collapsed; absence means render normally.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.tint":
@@ -696,6 +700,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a tool_use approval's presentation carries a badge only when the bridge has something to flag about how the call will run, such as a command opting out of the session sandbox; absence means the ordinary case, not a blank badge.",
   "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.detail":
     "a tool_use approval's presentation has a detail only when the bridge summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
+  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.ownerPost":
+    "an interaction subject's presentation marks ownerPost only when the plugin declared the call a post to the owner; absence means an ordinary tool row.",
   "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.suppress":
     "a tool_use approval's presentation marks suppress only for low-value rows the bridge wants collapsed; absence means render normally.",
   "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.tint":

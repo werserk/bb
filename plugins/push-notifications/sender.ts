@@ -34,12 +34,14 @@ const NETWORK_WARNING_INTERVAL_MS = 60 * 60 * 1_000;
 const LAST_OUTCOME_KEY = "last-send-outcome";
 const FALLBACK_BODIES: Record<PushNotificationKind, string> = {
   "pending-interaction": "Waiting for your input",
+  "owner-post": "Posted a message for you",
   "thread-error": "The thread hit an error",
   "turn-finished": "Finished and waiting for you",
 };
 const PUSH_KIND_PRIORITY: readonly PushNotificationKind[] = [
   "pending-interaction",
   "thread-error",
+  "owner-post",
   "turn-finished",
 ];
 
@@ -151,6 +153,9 @@ export interface PushSender {
   getLastOutcome(): LastSendOutcome;
   onInteractionPending(
     payload: PluginThreadEventPayloads["interaction.pending"],
+  ): void;
+  onOwnerPost(
+    payload: PluginThreadEventPayloads["experimental_thread.ownerPost"],
   ): void;
   onThreadFailed(payload: PluginThreadEventPayloads["thread.failed"]): void;
   onThreadIdle(payload: PluginThreadEventPayloads["thread.idle"]): void;
@@ -588,6 +593,10 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
         "pending-interaction",
         describePendingInteraction(payload.interaction),
       );
+    },
+    onOwnerPost({ thread, text }) {
+      if (thread.visibility !== "visible") return;
+      schedule(thread.id, "owner-post", firstLine(text));
     },
     onThreadFailed({ thread, error }) {
       schedule(thread.id, "thread-error", firstLine(error ?? ""));

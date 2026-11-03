@@ -93,6 +93,7 @@ function presentationSignature(
     presentation.title ?? null,
     presentation.detail ?? null,
     presentation.suppress ?? null,
+    presentation.ownerPost ?? null,
     presentation.tint?.light ?? null,
     presentation.tint?.dark ?? null,
   ]);

@@ -313,6 +313,32 @@ describe("buildTimelineViewRows", () => {
     }
   });
 
+  it("keeps an owner post out of the surrounding bundle and step summary", () => {
+    const post = {
+      ...toolRow({ id: "post", toolName: "post_to_owner" }),
+      toolArgs: { text: "Morning report" },
+      presentation: {
+        label: { pending: "Posting", completed: "Posted" },
+        icon: { glyph: "Zap" },
+        ownerPost: true,
+      },
+    } satisfies TimelineToolWorkRow;
+    const rows = buildTimelineViewRows([
+      commandRow({ id: "c1", sourceSeqStart: 1, sourceSeqEnd: 1 }),
+      commandRow({ id: "c2", sourceSeqStart: 2, sourceSeqEnd: 2 }),
+      post,
+      commandRow({ id: "c3", sourceSeqStart: 4, sourceSeqEnd: 4 }),
+      commandRow({ id: "c4", sourceSeqStart: 5, sourceSeqEnd: 5 }),
+    ]);
+
+    expect(rows.map((row) => row.id)).toEqual([
+      expect.stringContaining("c1"),
+      "post",
+      expect.stringContaining("c3"),
+    ]);
+    expect(rows[1]).toEqual(post);
+  });
+
   it("keeps activity summary identity stable as a run grows", () => {
     const firstRows = buildTimelineViewRows([
       commandRow({

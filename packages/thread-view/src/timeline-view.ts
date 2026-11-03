@@ -18,6 +18,7 @@ import {
   type FileChangeAction,
 } from "./file-change-summary.js";
 import { plural } from "./format-helpers.js";
+import { isOwnerPostRow } from "./owner-post.js";
 import type { TimelineBackgroundTurnsRow } from "./background-turns.js";
 import {
   getTimelineActivityIntentDetailDedupeKey,
@@ -745,6 +746,7 @@ function isSummarizableActivityRow(
   }
   return (
     row.kind === "work" &&
+    !isOwnerPostRow(row) &&
     row.workKind !== "approval" &&
     row.workKind !== "question" &&
     row.workKind !== "workflow" &&
