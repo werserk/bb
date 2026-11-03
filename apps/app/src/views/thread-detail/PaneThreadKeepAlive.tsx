@@ -1,4 +1,10 @@
-import { Activity, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Activity,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { THREAD_QUERY_KEY } from "@/hooks/queries/query-keys";
 import {
@@ -40,6 +46,34 @@ function useHiddenThreadCacheRevision(
   );
 }
 
+function RetainedThreadView({
+  projectId,
+  threadId,
+  timelineEnabled,
+}: PaneThreadKeepAliveProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    return () => {
+      for (const media of root?.querySelectorAll<HTMLMediaElement>(
+        "audio, video",
+      ) ?? []) {
+        media.pause();
+      }
+    };
+  }, []);
+  return (
+    <div ref={rootRef} className="contents">
+      <ThreadDetailView
+        surface="pane"
+        projectId={projectId}
+        threadId={threadId}
+        timelineEnabled={timelineEnabled}
+      />
+    </div>
+  );
+}
+
 export function PaneThreadKeepAlive({
   projectId,
   threadId,
@@ -70,8 +104,7 @@ export function PaneThreadKeepAlive({
         const visible = slot.threadId === threadId;
         return (
           <Activity key={slot.threadId} mode={visible ? "visible" : "hidden"}>
-            <ThreadDetailView
-              surface="pane"
+            <RetainedThreadView
               projectId={slot.projectId}
               threadId={slot.threadId}
               timelineEnabled={timelineEnabled && visible}
