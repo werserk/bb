@@ -180,6 +180,12 @@ reasoningLevel?, serviceTier?, permissionMode? })` sets the pickers as if
   never rejects; bb shows the error toast on `failed`. `started` means the
   browser or shell took over; completion and share cancellation are not
   reported to the page.
+- `experimental_prefetchThread(threadId)` → `void` — warms a thread's detail
+  and first timeline page so a click renders from cache. Call it on a hover
+  dwell (about 120 ms) or keyboard focus, never on every pointer move. It marks
+  nothing read and does not navigate. The host drops calls over its budget
+  (cached and fresh, already loading, one in flight, 4 threads per 10 s, hidden
+  document, data saver).
 
 ```tsx
 const composer = useComposer();

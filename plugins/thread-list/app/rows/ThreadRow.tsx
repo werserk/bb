@@ -114,6 +114,7 @@ import {
 } from "../selection/threadSelection.js";
 import { useThreadSelectionMenu } from "../selection/useThreadSelectionMenu.js";
 import { useOpenThreadInSplit } from "./threadRowNavigation.js";
+import { useThreadPrefetchIntent } from "./useThreadPrefetchIntent.js";
 import { Button } from "@/components/ui/button";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import {
@@ -189,6 +190,8 @@ interface ThreadRowContainerArgs {
   selected: boolean;
   onClick?: MouseEventHandler<HTMLDivElement>;
   onClickCapture?: ThreadRowClickCaptureHandler;
+  onPointerEnter?: PointerEventHandler<HTMLElement>;
+  onPointerLeave?: PointerEventHandler<HTMLElement>;
   onSplitDragPointerDown?: PointerEventHandler<HTMLElement>;
   stickyLevel?: number;
   style: CSSProperties;
@@ -229,6 +232,8 @@ function renderThreadRowContainer({
   nestTargetState,
   onClick,
   onClickCapture,
+  onPointerEnter,
+  onPointerLeave,
   onSplitDragPointerDown,
   reorderPlacement,
   selected,
@@ -247,6 +252,8 @@ function renderThreadRowContainer({
     onClick,
     onClickCapture,
     onPointerDown: onSplitDragPointerDown,
+    onPointerEnter,
+    onPointerLeave,
   };
   if (stickyLevel !== undefined) {
     return (
@@ -447,6 +454,7 @@ function ThreadRowComponent({
     },
     [startEditingFromDoubleClick],
   );
+  const prefetchIntent = useThreadPrefetchIntent(thread.id);
   const miniMap = useThreadSplitMiniMap(thread.id);
   const isOpenInSplit = miniMap !== null;
   const split = experimental_useSidebarThreadSplit(
@@ -664,6 +672,7 @@ function ThreadRowComponent({
           data-sidebar-thread-shortcut-target=""
           data-sidebar-thread-id={thread.id}
           data-sidebar-rename-anchor=""
+          onFocus={prefetchIntent.onFocus}
           onClick={(event) => {
             if (isEditing) {
               event.preventDefault();
@@ -952,6 +961,8 @@ function ThreadRowComponent({
       !isEditing && options.consumeClickSuppression
         ? handleRowClickCapture
         : undefined,
+    onPointerEnter: isEditing ? undefined : prefetchIntent.onPointerEnter,
+    onPointerLeave: isEditing ? undefined : prefetchIntent.onPointerLeave,
     onSplitDragPointerDown: isEditing ? undefined : onSplitDragPointerDown,
     stickyLevel: parentOptions?.stickyLevel,
     style: rowStyle,

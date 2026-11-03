@@ -5819,6 +5819,18 @@ export interface PluginSdkApp {
     request: ExperimentalSaveFileRequest,
   ): Promise<ExperimentalSaveFileOutcome>;
   /**
+   * Warms a thread's detail bootstrap and first timeline page so a click on
+   * it renders from cache. Call it on a hover dwell or keyboard focus, not on
+   * every pointer move. Side-effect free: it does not mark the thread read,
+   * subscribe, or navigate. Budgeted by the host: calls are dropped (never
+   * queued) when the thread is cached and fresh or already loading, another
+   * prefetch is in flight, more than 4 distinct threads were prefetched in
+   * the last 10 seconds, the document is hidden, or the user asked for
+   * reduced data. A plain function that returns immediately. Experimental:
+   * see docs/api_to_audit.md.
+   */
+  experimental_prefetchThread(threadId: string): void;
+  /**
    * The host-owned chat component (see {@link ThreadChatProps}). Together
    * with `Markdown`, the only components the SDK ships — everything else
    * stays vendored per §5.5.
