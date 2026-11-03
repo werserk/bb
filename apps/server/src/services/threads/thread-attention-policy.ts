@@ -1,4 +1,7 @@
-import { getStoredTurnRequestEventForTurn, type DbQueryConnection } from "@bb/db";
+import {
+  listStoredTurnRequestEventsForTurn,
+  type DbQueryConnection,
+} from "@bb/db";
 import { parseStoredTurnRequestEvent } from "./thread-events.js";
 
 /**
@@ -54,9 +57,11 @@ export function resetThreadAttentionPolicies(): void {
 
 /**
  * True when the finishing root turn must not raise the thread's attention
- * marker: the thread has a silent background policy and the turn was not
- * started by the user. Anything unreadable answers false, so attention is
- * raised (fail visible).
+ * marker: the thread has a silent background policy and no input the turn
+ * accepted came from the user. A later system or agent steer never makes an
+ * owner turn background, and an owner steer into a background turn keeps its
+ * attention. Anything unreadable answers false, so attention is raised (fail
+ * visible).
  */
 export function shouldSilenceBackgroundTurnAttention(
   db: DbQueryConnection,
@@ -68,9 +73,11 @@ export function shouldSilenceBackgroundTurnAttention(
     return false;
   }
   try {
-    const row = getStoredTurnRequestEventForTurn(db, args);
-    if (row === null) return false;
-    return parseStoredTurnRequestEvent(row).initiator !== "user";
+    const rows = listStoredTurnRequestEventsForTurn(db, args);
+    if (rows.length === 0) return false;
+    return rows.every(
+      (row) => parseStoredTurnRequestEvent(row).initiator !== "user",
+    );
   } catch {
     return false;
   }

@@ -151,6 +151,61 @@ describe("collapseBackgroundTurns", () => {
     ]);
   });
 
+  it.each(["agent", "system"] as const)(
+    "keeps an owner turn visible when a %s steer joins it",
+    (initiator) => {
+      const rows = [
+        request("u1", "user"),
+        turn("t1", "pending"),
+        request("s1", initiator, "steer"),
+        reply("a1"),
+      ];
+      expect(collapseBackgroundTurns(rows, { threadRunning: true })).toEqual(
+        rows,
+      );
+    },
+  );
+
+  it("does not count a background steer as another turn", () => {
+    const rows = [
+      request("g1", "agent"),
+      turn("t1", "pending"),
+      request("s1", "system", "steer"),
+      reply("a1"),
+    ];
+    const out = collapseBackgroundTurns(rows, { threadRunning: false });
+    expect(kinds(out)).toEqual(["background-turns:background-turns:g1"]);
+    const group = out[0]!;
+    if (group.kind !== "background-turns") throw new Error("expected group");
+    expect(group.turnCount).toBe(1);
+    expect(group.children).toHaveLength(4);
+  });
+
+  it("shows only the steered turn of a run in full when the owner steers", () => {
+    const rows = [
+      request("g1", "agent"),
+      turn("t1"),
+      request("g2", "agent"),
+      turn("t2"),
+      request("g3", "agent"),
+      turn("t3", "pending"),
+      request("u1", "user", "steer"),
+      turn("t4"),
+    ];
+    const out = collapseBackgroundTurns(rows, { threadRunning: false });
+    expect(kinds(out)).toEqual([
+      "background-turns:background-turns:g1",
+      "conversation:g3",
+      "turn:t3",
+      "conversation:u1",
+      "turn:t4",
+    ]);
+    const group = out[0]!;
+    if (group.kind !== "background-turns") throw new Error("expected group");
+    expect(group.turnCount).toBe(2);
+    expect(group.status).toBe("completed");
+  });
+
   it("keeps a run visible when one of its turns failed", () => {
     const rows = [
       request("g1", "agent"),

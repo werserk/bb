@@ -357,5 +357,7 @@ in the plugin log.
 `app.experimental_threadDisplayPolicy(({ threadId, projectId }) => ({ backgroundTurns: "collapsed" }) | null)`
 folds each run of turns not started by the user into one expandable
 "Background" timeline row. The first non-null answer wins in plugin id order; a
-run the owner steered or that contains a failed turn stays visible. Stock bb
+run that contains a failed turn stays visible, and when the owner steers a run
+only the steered turn does. A system or agent steer into an owner turn never
+folds it. Stock bb
 has no such method: call `app.experimental_threadDisplayPolicy?.(...)`.

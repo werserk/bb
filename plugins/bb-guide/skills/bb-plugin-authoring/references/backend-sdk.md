@@ -387,8 +387,9 @@ the refusal codes, optional validation issues and mutation rollback behavior.
 ## Background-turn attention (fork)
 
 `bb.experimental_threads.setAttentionPolicy(threadId, { backgroundTurns: "silent" } | null)`
-asks the server not to raise unread attention when a turn that was not started
-by the user (another thread, a plugin, the system) ends cleanly. The policy is
+asks the server not to raise unread attention when a turn none of whose inputs
+came from the user (another thread, a plugin, the system) ends cleanly; a
+system or agent steer into a user turn never silences it. The policy is
 held in memory for the calling plugin and dropped when the plugin is disabled
 or reloaded; failed turns and user turns always raise attention. A
 `thread.idle` event for a silenced turn carries `experimental_attention:

@@ -302,8 +302,8 @@ export interface PluginThreadEventPayloads {
    * assembled the same way GET /threads/:id/output is.
    * `experimental_attention: "skipped"` means core did not raise the thread's
    * attention marker for this turn, because a plugin set a silent
-   * `experimental_threads.setAttentionPolicy` and the turn was not started by
-   * the user. A consumer that notifies the user should not notify for it. */
+   * `experimental_threads.setAttentionPolicy` and none of the turn's inputs
+   * came from the user. A consumer that notifies the user should not notify for it. */
   "thread.idle": {
     thread: ThreadResponse;
     lastAssistantText: string | null;

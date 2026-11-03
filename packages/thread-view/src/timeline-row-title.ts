@@ -1531,10 +1531,9 @@ function mapBackgroundTurnsTitle(
   row: TimelineBackgroundTurnsRow,
 ): TimelineTitle {
   const isPending = row.status === "pending";
-  const time = new Date(row.startedAt).toLocaleTimeString([], {
-    hour: "2-digit",
+  const time = new Date(row.startedAt).toLocaleTimeString(undefined, {
+    hour: "numeric",
     minute: "2-digit",
-    hour12: false,
   });
   return makeTitle({
     segments: [

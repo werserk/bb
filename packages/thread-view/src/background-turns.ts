@@ -18,6 +18,7 @@ function isAgentInitiatedRequest(row: ThreadTimelineViewRow): boolean {
     row.kind === "conversation" &&
     row.role === "user" &&
     row.initiator !== "user" &&
+    row.turnRequest.kind !== "steer" &&
     row.turnRequest.status !== "rejected"
   );
 }
@@ -68,8 +69,9 @@ function buildRow(
 /**
  * Folds runs of agent- or system-initiated turns into one `background-turns`
  * row. A run starts at a non-owner turn request and ends at the next owner
- * message. Runs that contain a failed turn, or that the owner steered, stay
- * visible as they are.
+ * message. Runs that contain a failed turn stay visible as they are. When the
+ * owner steers a run, only the turn being steered stays visible. A system or
+ * agent steer never starts a run, so it cannot pull an owner turn into one.
  */
 export function collapseBackgroundTurns(
   rows: readonly ThreadTimelineViewRow[],
@@ -81,10 +83,21 @@ export function collapseBackgroundTurns(
 
   const flush = (endedBy: ThreadTimelineViewRow | null): void => {
     if (segment.length === 0) return;
-    const keepVisible =
-      hasFailure(segment) || (endedBy !== null && isOwnerSteer(endedBy));
-    if (keepVisible) {
+    if (hasFailure(segment)) {
       out.push(...segment);
+    } else if (endedBy !== null && isOwnerSteer(endedBy)) {
+      let steeredFrom = segment.length - 1;
+      while (
+        steeredFrom > 0 &&
+        !isAgentInitiatedRequest(segment[steeredFrom]!)
+      ) {
+        steeredFrom -= 1;
+      }
+      const earlier = segment.slice(0, steeredFrom);
+      if (earlier.length > 0) {
+        out.push(buildRow(earlier, turnCount - 1, false));
+      }
+      out.push(...segment.slice(steeredFrom));
     } else {
       out.push(
         buildRow(segment, turnCount, endedBy === null && options.threadRunning),

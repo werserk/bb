@@ -2050,6 +2050,57 @@ export function getStoredTurnRequestEventForTurn(
   );
 }
 
+export function listStoredTurnRequestEventsForTurn(
+  db: DbQueryConnection,
+  args: GetStoredTurnRequestEventForTurnArgs,
+): StoredTurnRequestEventRow[] {
+  const acceptedInputs = db
+    .select({
+      clientRequestId: sql<
+        string | null
+      >`json_extract(${events.data}, '$.clientRequestId')`,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        eq(events.turnId, args.turnId),
+        eq(events.type, "turn/input/accepted"),
+      ),
+    )
+    .all();
+  const requestIds = new Set<string>();
+  for (const row of acceptedInputs) {
+    const result = clientTurnRequestIdSchema.safeParse(row.clientRequestId);
+    if (!result.success) {
+      return [];
+    }
+    requestIds.add(result.data);
+  }
+  if (requestIds.size === 0) {
+    return [];
+  }
+  const requests = db
+    .select({
+      data: events.data,
+      sequence: events.sequence,
+      threadId: events.threadId,
+      type: events.type,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        eq(events.type, "client/turn/requested"),
+        inArray(sql`json_extract(${events.data}, '$.requestId')`, [
+          ...requestIds,
+        ]),
+      ),
+    )
+    .all();
+  return requests.length < requestIds.size ? [] : requests;
+}
+
 export interface StoredThreadEventDataRow {
   data: string;
   sequence: number;

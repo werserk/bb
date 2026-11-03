@@ -21,11 +21,14 @@ plugins feature-detect them. `PluginAppBuilder.experimental_threadDisplayPolicy(
 registers a render-time resolver `({ threadId, projectId }) => { backgroundTurns?: "collapsed" } | null`;
 the first non-null answer wins in plugin id order and a throwing resolver is
 skipped. With `"collapsed"` the thread timeline folds each run of
-agent-/system-initiated turns into one expandable "Background" row; a run the
-owner steered, or one with a failed turn, is shown as before.
+agent-/system-initiated turns into one expandable "Background" row; a run with
+a failed turn is shown as before, and when the owner steers a run only the
+steered turn is. A turn's initiator is that of the input that started it: a
+system/agent steer into an owner turn never folds it.
 `BbPluginApi.experimental_threads.setAttentionPolicy(threadId, { backgroundTurns: "silent" } | null)`
-tells the server not to bump `latestAttentionAt` when a turn whose request was
-not initiated by the user ends cleanly (`run.succeeded`); the policy is in
+tells the server not to bump `latestAttentionAt` when a turn ends cleanly
+(`run.succeeded`) and none of its accepted inputs was initiated by the user
+(an owner steer into a background turn keeps its attention); the policy is in
 memory, owned by the calling plugin, and dropped when it is disabled or
 reloaded, so any gap raises attention as on stock bb. A `thread.idle` event for
 such a turn carries `experimental_attention: "skipped"` so notification

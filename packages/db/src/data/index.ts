@@ -314,6 +314,7 @@ export {
   listStoredTaskTurnRequestEvents,
   listLatestTurnFinalAgentMessageEventRows,
   getStoredTurnRequestEventForTurn,
+  listStoredTurnRequestEventsForTurn,
   getLatestThreadOutputEventRow,
   getLatestStoredConversationOutlineSequence,
   getLatestCompletedThreadContextClearSequence,

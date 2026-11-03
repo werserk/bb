@@ -3980,7 +3980,8 @@ export interface ExperimentalThreadDisplayPolicyThread {
  * How bb renders one thread's timeline. `backgroundTurns: "collapsed"`:
  * consecutive turns that were not started by the user (another thread, a
  * plugin or the system) render as one expandable "Background" row. A turn the
- * user steered, or one that ended in error, is shown in full.
+ * user steered, or one that ended in error, is shown in full. A system or
+ * agent message steered into a turn does not change who started it.
  */
 export interface ExperimentalThreadDisplayPolicy {
   backgroundTurns?: "collapsed";

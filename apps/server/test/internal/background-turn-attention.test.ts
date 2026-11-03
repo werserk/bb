@@ -59,21 +59,25 @@ function setup(): Setup {
   });
   return {
     db,
-    deps: { db, hub: new NotificationHub(), logger: testLogger, providerRegistry },
+    deps: {
+      db,
+      hub: new NotificationHub(),
+      logger: testLogger,
+      providerRegistry,
+    },
     threadId: thread.id,
   };
 }
 
-/** A root turn that a request with the given initiator started. */
-function seedRootTurn(
+function requestEvent(
   db: DbConnection,
   args: {
     initiator: ThreadTurnInitiator;
     suffix: string;
+    target: { kind: "new-turn" } | { kind: "steer"; expectedTurnId: string };
     threadId: string;
-    turnId: string;
   },
-): void {
+): string {
   const requestId = formatClientTurnRequestIdSuffix({ suffix: args.suffix });
   appendStoredThreadEvent(db, noopNotifier, {
     threadId: args.threadId,
@@ -86,7 +90,7 @@ function seedRootTurn(
       senderThreadId: args.initiator === "agent" ? "thr_child" : null,
       requestId,
       input: [{ type: "text", text: "go", mentions: [] }],
-      target: { kind: "new-turn" },
+      target: args.target,
       request: { method: "turn/start", params: {} },
       execution: {
         model: "gpt-5",
@@ -97,6 +101,36 @@ function seedRootTurn(
       },
     },
   });
+  return requestId;
+}
+
+function acceptInput(
+  db: DbConnection,
+  args: { requestId: string; threadId: string; turnId: string },
+): void {
+  appendStoredThreadEvent(db, noopNotifier, {
+    threadId: args.threadId,
+    scope: turnScope(args.turnId),
+    providerThreadId: "provider-bg",
+    type: "turn/input/accepted",
+    data: { providerThreadId: "provider-bg", clientRequestId: args.requestId },
+  });
+}
+
+/** A root turn that a request with the given initiator started. */
+function seedRootTurn(
+  db: DbConnection,
+  args: {
+    initiator: ThreadTurnInitiator;
+    suffix: string;
+    threadId: string;
+    turnId: string;
+  },
+): void {
+  const requestId = requestEvent(db, {
+    ...args,
+    target: { kind: "new-turn" },
+  });
   appendStoredThreadEvent(db, noopNotifier, {
     threadId: args.threadId,
     scope: turnScope(args.turnId),
@@ -104,19 +138,33 @@ function seedRootTurn(
     type: "turn/started",
     data: { providerThreadId: "provider-bg" },
   });
-  appendStoredThreadEvent(db, noopNotifier, {
-    threadId: args.threadId,
-    scope: turnScope(args.turnId),
-    providerThreadId: "provider-bg",
-    type: "turn/input/accepted",
-    data: { providerThreadId: "provider-bg", clientRequestId: requestId },
+  acceptInput(db, { requestId, threadId: args.threadId, turnId: args.turnId });
+}
+
+/** A steer of the given initiator that the running turn accepted. */
+function seedSteer(
+  db: DbConnection,
+  args: {
+    initiator: ThreadTurnInitiator;
+    suffix: string;
+    threadId: string;
+    turnId: string;
+  },
+): void {
+  const requestId = requestEvent(db, {
+    ...args,
+    target: { kind: "steer", expectedTurnId: args.turnId },
   });
+  acceptInput(db, { requestId, threadId: args.threadId, turnId: args.turnId });
 }
 
 function completeTurn(
   s: Setup,
   turnId: string,
-  status: Extract<ThreadEvent, { type: "turn/completed" }>["status"] = "completed",
+  status: Extract<
+    ThreadEvent,
+    { type: "turn/completed" }
+  >["status"] = "completed",
 ): void {
   applyTurnCompletedEvent(s.deps, {
     type: "turn/completed",
@@ -149,7 +197,12 @@ describe("silent background-turn attention", () => {
     const s = setup();
     silence(s);
     const before = attentionAt(s);
-    seedRootTurn(s.db, { initiator: "user", suffix: "aaaaaaaaaa", threadId: s.threadId, turnId: "t1" });
+    seedRootTurn(s.db, {
+      initiator: "user",
+      suffix: "aaaaaaaaaa",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
     completeTurn(s, "t1");
     expect(getThread(s.db, s.threadId)?.status).toBe("idle");
     expect(attentionAt(s)).toBeGreaterThan(before);
@@ -161,7 +214,12 @@ describe("silent background-turn attention", () => {
       const s = setup();
       silence(s);
       const before = attentionAt(s);
-      seedRootTurn(s.db, { initiator, suffix: "bbbbbbbbbb", threadId: s.threadId, turnId: "t1" });
+      seedRootTurn(s.db, {
+        initiator,
+        suffix: "bbbbbbbbbb",
+        threadId: s.threadId,
+        turnId: "t1",
+      });
       completeTurn(s, "t1");
       expect(getThread(s.db, s.threadId)?.status).toBe("idle");
       expect(attentionAt(s)).toBe(before);
@@ -172,7 +230,12 @@ describe("silent background-turn attention", () => {
     const s = setup();
     silence(s);
     const before = attentionAt(s);
-    seedRootTurn(s.db, { initiator: "agent", suffix: "cccccccccc", threadId: s.threadId, turnId: "t1" });
+    seedRootTurn(s.db, {
+      initiator: "agent",
+      suffix: "cccccccccc",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
     completeTurn(s, "t1", "failed");
     expect(getThread(s.db, s.threadId)?.status).toBe("error");
     expect(attentionAt(s)).toBeGreaterThan(before);
@@ -181,7 +244,12 @@ describe("silent background-turn attention", () => {
   it("raises attention when no policy is set (stock behaviour)", () => {
     const s = setup();
     const before = attentionAt(s);
-    seedRootTurn(s.db, { initiator: "agent", suffix: "dddddddddd", threadId: s.threadId, turnId: "t1" });
+    seedRootTurn(s.db, {
+      initiator: "agent",
+      suffix: "dddddddddd",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
     completeTurn(s, "t1");
     expect(attentionAt(s)).toBeGreaterThan(before);
   });
@@ -189,9 +257,18 @@ describe("silent background-turn attention", () => {
   it("raises attention after the policy is cleared or the plugin unloads", () => {
     const s = setup();
     silence(s);
-    setThreadAttentionPolicy({ pluginId: PLUGIN_ID, policy: null, threadId: s.threadId });
+    setThreadAttentionPolicy({
+      pluginId: PLUGIN_ID,
+      policy: null,
+      threadId: s.threadId,
+    });
     const before = attentionAt(s);
-    seedRootTurn(s.db, { initiator: "agent", suffix: "eeeeeeeeee", threadId: s.threadId, turnId: "t1" });
+    seedRootTurn(s.db, {
+      initiator: "agent",
+      suffix: "eeeeeeeeee",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
     completeTurn(s, "t1");
     expect(attentionAt(s)).toBeGreaterThan(before);
   });
@@ -224,6 +301,91 @@ describe("silent background-turn attention", () => {
     expect(attentionAt(t)).toBeGreaterThan(beforeT);
   });
 
+  it.each(["agent", "system"] as const)(
+    "keeps attention for an owner turn that a %s steer joined",
+    (initiator) => {
+      const s = setup();
+      silence(s);
+      const before = attentionAt(s);
+      seedRootTurn(s.db, {
+        initiator: "user",
+        suffix: "hhhhhhhhhh",
+        threadId: s.threadId,
+        turnId: "t1",
+      });
+      seedSteer(s.db, {
+        initiator,
+        suffix: "iiiiiiiiii",
+        threadId: s.threadId,
+        turnId: "t1",
+      });
+      completeTurn(s, "t1");
+      expect(attentionAt(s)).toBeGreaterThan(before);
+    },
+  );
+
+  it.each(["agent", "system"] as const)(
+    "keeps attention for a %s turn that the owner steered",
+    (initiator) => {
+      const s = setup();
+      silence(s);
+      const before = attentionAt(s);
+      seedRootTurn(s.db, {
+        initiator,
+        suffix: "jjjjjjjjjj",
+        threadId: s.threadId,
+        turnId: "t1",
+      });
+      seedSteer(s.db, {
+        initiator: "user",
+        suffix: "kkkkkkkkkk",
+        threadId: s.threadId,
+        turnId: "t1",
+      });
+      completeTurn(s, "t1");
+      expect(attentionAt(s)).toBeGreaterThan(before);
+    },
+  );
+
+  it("stays silent for a background turn that only background steers joined", () => {
+    const s = setup();
+    silence(s);
+    const before = attentionAt(s);
+    seedRootTurn(s.db, {
+      initiator: "system",
+      suffix: "pppppppppp",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
+    seedSteer(s.db, {
+      initiator: "agent",
+      suffix: "mmmmmmmmmm",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
+    completeTurn(s, "t1");
+    expect(attentionAt(s)).toBe(before);
+  });
+
+  it("raises attention when an accepted steer's request cannot be found", () => {
+    const s = setup();
+    silence(s);
+    const before = attentionAt(s);
+    seedRootTurn(s.db, {
+      initiator: "system",
+      suffix: "nnnnnnnnnn",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
+    acceptInput(s.db, {
+      requestId: formatClientTurnRequestIdSuffix({ suffix: "qqqqqqqqqq" }),
+      threadId: s.threadId,
+      turnId: "t1",
+    });
+    completeTurn(s, "t1");
+    expect(attentionAt(s)).toBeGreaterThan(before);
+  });
+
   it("tells plugins the idle event skipped attention", () => {
     const idleCalls: Array<{ attentionSkipped?: boolean } | undefined> = [];
     const emitter = new Proxy({} as PluginThreadEventEmitter, {
@@ -237,12 +399,22 @@ describe("silent background-turn attention", () => {
     setPluginThreadEventEmitter(emitter);
     const s = setup();
     silence(s);
-    seedRootTurn(s.db, { initiator: "agent", suffix: "ffffffffff", threadId: s.threadId, turnId: "t1" });
+    seedRootTurn(s.db, {
+      initiator: "agent",
+      suffix: "ffffffffff",
+      threadId: s.threadId,
+      turnId: "t1",
+    });
     completeTurn(s, "t1");
     expect(idleCalls).toEqual([{ attentionSkipped: true }]);
 
     const u = setup();
-    seedRootTurn(u.db, { initiator: "user", suffix: "gggggggggg", threadId: u.threadId, turnId: "t1" });
+    seedRootTurn(u.db, {
+      initiator: "user",
+      suffix: "gggggggggg",
+      threadId: u.threadId,
+      turnId: "t1",
+    });
     completeTurn(u, "t1");
     expect(idleCalls.at(-1)).toEqual({ attentionSkipped: false });
   });
