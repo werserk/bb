@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render } from "@testing-library/react";
+import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
   threadTimelineQueryKey,
 } from "@/hooks/queries/query-keys";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
+import { retainLoadedTimeline } from "@/components/thread/timeline/retained-loaded-timelines";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { PaneThreadKeepAlive } from "./PaneThreadKeepAlive";
 
@@ -189,5 +191,38 @@ describe("PaneThreadKeepAlive", () => {
     const pause = vi.spyOn(audio, "pause");
     show("b");
     expect(pause).toHaveBeenCalled();
+  });
+
+  it("does not retain a thread whose loaded pages are over the row cap", () => {
+    const { queryClient, show, view } = setup();
+    queryClient.setQueryData(threadTimelineQueryKey("a"), { rows: [] });
+    retainLoadedTimeline(queryClient, {
+      historySnapshot: null,
+      latestWindowEndSequence: null,
+      olderCursor: null,
+      rows: Array.from({ length: 2001 }, (_, index) => ({ id: index })),
+      surfaceKey: "a",
+    } as never);
+    show("b");
+    expect(view.queryByTestId("view-a")).toBeNull();
+  });
+
+  it("retains nothing on a compact viewport", () => {
+    const { queryClient, wrapper: Providers } = createQueryClientTestHarness();
+    seedThread(queryClient, "a");
+    seedThread(queryClient, "b");
+    const tree = (threadId: string) => (
+      <CompactViewportOverrideProvider isCompactViewport>
+        <PaneThreadKeepAlive
+          projectId={PROJECT}
+          threadId={threadId}
+          timelineEnabled
+        />
+      </CompactViewportOverrideProvider>
+    );
+    const view = render(tree("a"), { wrapper: Providers });
+    view.rerender(tree("b"));
+    expect(view.queryByTestId("view-a")).toBeNull();
+    expect(view.getByTestId("view-b")).toBeTruthy();
   });
 });

@@ -24,6 +24,7 @@ import {
 import { usePluginCommandBindings } from "@/hooks/usePluginCommandBindings";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { hasVisibleMatch } from "@/lib/visible-dom";
 import {
   browserPlatform,
   isEditableKeyboardTarget,
@@ -98,7 +99,7 @@ const OPEN_MODAL_SELECTOR = [
 ].join(", ");
 
 function hasOpenModal(): boolean {
-  return document.querySelector(OPEN_MODAL_SELECTOR) !== null;
+  return hasVisibleMatch(OPEN_MODAL_SELECTOR);
 }
 
 export function AppCommandProvider({ children }: { children: ReactNode }) {

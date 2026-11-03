@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   useQueryClient,
-  type QueryClient,
   type QueryObserverResult,
 } from "@tanstack/react-query";
 import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
@@ -20,6 +19,10 @@ import { threadTimelineQueryKey } from "@/hooks/queries/query-keys";
 import { isTransientReadError } from "@/hooks/queries/query-helpers";
 import { useThreadTimeline } from "@/hooks/queries/thread-panel-queries";
 import { BbHttpError, sdk } from "@/lib/sdk";
+import {
+  retainLoadedTimeline,
+  retainedLoadedTimeline,
+} from "./retained-loaded-timelines";
 
 type TimelineQueryResultProp =
   keyof QueryObserverResult<ThreadTimelineResponse>;
@@ -70,37 +73,6 @@ interface ReconcileLoadedTimelineArgs {
   current: LoadedTimelineState;
   latestTimeline: ThreadTimelineResponse | undefined;
   surfaceKey: string;
-}
-
-const MAX_RETAINED_LOADED_TIMELINES = 8;
-const retainedLoadedTimelines = new WeakMap<
-  QueryClient,
-  Map<string, LoadedTimelineState>
->();
-
-function retainedLoadedTimeline(
-  queryClient: QueryClient,
-  surfaceKey: string,
-): LoadedTimelineState | undefined {
-  return retainedLoadedTimelines.get(queryClient)?.get(surfaceKey);
-}
-
-function retainLoadedTimeline(
-  queryClient: QueryClient,
-  loaded: LoadedTimelineState,
-): void {
-  let retained = retainedLoadedTimelines.get(queryClient);
-  if (retained === undefined) {
-    retained = new Map();
-    retainedLoadedTimelines.set(queryClient, retained);
-  }
-  retained.delete(loaded.surfaceKey);
-  retained.set(loaded.surfaceKey, loaded);
-  while (retained.size > MAX_RETAINED_LOADED_TIMELINES) {
-    const oldest = retained.keys().next().value;
-    if (oldest === undefined) break;
-    retained.delete(oldest);
-  }
 }
 
 function isStaleTimelinePaginationCursorError(error: Error): boolean {

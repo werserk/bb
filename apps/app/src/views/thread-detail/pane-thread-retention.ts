@@ -7,6 +7,7 @@ import {
   threadQueryKey,
   threadTimelineQueryKey,
 } from "@/hooks/queries/query-keys";
+import { retainedLoadedRowCount } from "@/components/thread/timeline/retained-loaded-timelines";
 import type { ThreadRoutePathArgs } from "@/lib/route-paths";
 
 export const PANE_RETAINED_VIEW_LIMIT = 2;
@@ -41,7 +42,11 @@ export function reconcilePaneRetention(
         checkRows: switched && slot.threadId === state.activeThreadId,
       }),
   );
-  let slots = kept;
+  let slots = kept.map((slot) =>
+    slot.threadId === active.threadId && slot.projectId !== active.projectId
+      ? active
+      : slot,
+  );
   if (!kept.some((slot) => slot.threadId === active.threadId)) {
     if (kept.length >= PANE_RETAINED_VIEW_LIMIT) {
       const victim = kept.find(
@@ -79,5 +84,10 @@ export function canRetainCachedThread(
   const timeline = queryClient.getQueryData<ThreadTimelineResponse>(
     threadTimelineQueryKey(threadId),
   );
-  return (timeline?.rows.length ?? 0) <= PANE_RETAINED_ROW_LIMIT;
+  return (
+    Math.max(
+      timeline?.rows.length ?? 0,
+      retainedLoadedRowCount(queryClient, threadId),
+    ) <= PANE_RETAINED_ROW_LIMIT
+  );
 }
