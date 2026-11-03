@@ -1,6 +1,14 @@
-import { Activity, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Activity,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { THREAD_QUERY_KEY } from "@/hooks/queries/query-keys";
+import { useSplitWorkspaceActive } from "@/hooks/useSplitWorkspaceActive";
 import {
   canRetainCachedThread,
   initialPaneRetention,
@@ -38,7 +46,7 @@ function useHiddenThreadCacheRevision(
   }, [queryClient, hiddenKey]);
 }
 
-function RetainedThreadView({
+const RetainedThreadView = memo(function RetainedThreadView({
   projectId,
   threadId,
   timelineEnabled,
@@ -64,9 +72,9 @@ function RetainedThreadView({
       />
     </div>
   );
-}
+});
 
-export function PaneThreadKeepAlive({
+function RetainingPane({
   projectId,
   threadId,
   timelineEnabled,
@@ -106,4 +114,12 @@ export function PaneThreadKeepAlive({
       })}
     </>
   );
+}
+
+export function PaneThreadKeepAlive(props: PaneThreadKeepAliveProps) {
+  const splitWorkspaceActive = useSplitWorkspaceActive();
+  if (!splitWorkspaceActive) {
+    return <ThreadDetailView surface="pane" {...props} />;
+  }
+  return <RetainingPane {...props} />;
 }

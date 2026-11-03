@@ -83,4 +83,14 @@ describe("reconcilePaneRetention", () => {
     );
     expect(ids(state).sort()).toEqual(["a", "c"]);
   });
+
+  it("replaces the active slot when its project changed", () => {
+    const moved = { projectId: "q", threadId: "a" };
+    const state = reconcilePaneRetention(
+      initialPaneRetention(A),
+      moved,
+      retainAll,
+    );
+    expect(state.slots).toEqual([moved]);
+  });
 });
