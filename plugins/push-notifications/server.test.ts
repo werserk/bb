@@ -764,6 +764,44 @@ describe("push sender", () => {
     }
   });
 
+  it("sends one notification for an owner turn with a post, however late the turn ends", async () => {
+    const host = await setup();
+    try {
+      await host.addSubscription();
+      const thread = host.setThread({ status: "active", title: "Coordinator" });
+
+      await host.harness.behavior.emitThreadEvent(
+        "experimental_thread.ownerPost",
+        { thread, text: "Morning report" },
+      );
+      await waitForCoalesce();
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+
+      host.setThread({ id: thread.id, status: "idle", title: "Coordinator" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: { ...thread, status: "idle" },
+        lastAssistantText: "Done",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(1);
+
+      await host.harness.behavior.emitThreadEvent("thread.active", {
+        thread: { ...thread, status: "active" },
+      });
+      host.setThread({ id: thread.id, status: "idle", title: "Coordinator" });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread: { ...thread, status: "idle" },
+        lastAssistantText: "Next turn",
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(2));
+      expect(host.expo.requests[1]?.[0]?.data).toEqual(
+        expect.objectContaining({ kind: "turn-finished" }),
+      );
+    } finally {
+      await host.cleanup();
+    }
+  });
+
   it("notifies an owner post at needs-input level, but not for a muted, hidden or read thread", async () => {
     let now = 1_000;
     const host = await setup({ now: () => now });

@@ -108,18 +108,20 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
                 signal,
               },
             });
-            try {
-              raiseOwnerPostAttention(deps, {
-                input: payload.arguments,
-                presentation: pluginTool.record.presentation,
-                response: result,
-                threadId: thread.id,
-              });
-            } catch (error) {
-              deps.logger.warn(
-                { err: error, threadId: thread.id, tool: payload.tool },
-                "Failed to raise attention for an owner post",
-              );
+            if (!signal.aborted) {
+              try {
+                raiseOwnerPostAttention(deps, {
+                  input: payload.arguments,
+                  presentation: pluginTool.record.presentation,
+                  response: result,
+                  threadId: thread.id,
+                });
+              } catch (error) {
+                deps.logger.warn(
+                  { err: error, threadId: thread.id, tool: payload.tool },
+                  "Failed to raise attention for an owner post",
+                );
+              }
             }
             return result;
           },

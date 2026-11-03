@@ -3588,7 +3588,9 @@ message (outside completed-turn summaries, step bundles and the background-turn
 collapse), renders `@thread:` mentions in it as live thread cards, and after a
 successful call raises the thread's attention and emits
 `experimental_thread.ownerPost` with `{ thread, text }`. Push-notifications
-maps it to an `owner-post` kind (both `all` and `input-only` levels).
+maps it to an `owner-post` kind (both `all` and `input-only` levels) and
+sends no `turn-finished` notification for a turn that already posted, however
+late it ends. A call whose signal is already aborted raises nothing.
 
 Docs: `backend-cli-agents.md`, `backend-events.md`.
 

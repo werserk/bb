@@ -75,9 +75,9 @@ function postRow(
   };
 }
 
-function renderPost(row: TimelineOwnerPostRow) {
+function renderPostTree(row: TimelineOwnerPostRow) {
   const { wrapper: QueryWrapper } = createQueryClientTestHarness();
-  return render(
+  return (
     <QueryWrapper>
       <MemoryRouter>
         <RouteNavigationProvider>
@@ -96,8 +96,12 @@ function renderPost(row: TimelineOwnerPostRow) {
           </ThreadTitleMentionResourcesProvider>
         </RouteNavigationProvider>
       </MemoryRouter>
-    </QueryWrapper>,
+    </QueryWrapper>
   );
+}
+
+function renderPost(row: TimelineOwnerPostRow) {
+  return render(renderPostTree(row));
 }
 
 describe("threadCardStatus", () => {
@@ -217,5 +221,53 @@ describe("OwnerPostRow", () => {
     expect(cards[0]?.getAttribute("href")).toBe(
       "/projects/proj_1/threads/thr_running",
     );
+  });
+
+  it("updates a card when the thread status changes", () => {
+    sidebarThreads.entries.set(
+      "thr_live",
+      thread({
+        id: "thr_live",
+        title: "Live thread",
+        runtime: { displayStatus: "active" },
+      }),
+    );
+    const row = postRow("Watching @thread:thr_live");
+    const view = renderPost(row);
+    const status = () =>
+      view.container
+        .querySelector("[data-thread-card-status]")
+        ?.getAttribute("data-thread-card-status");
+    expect(status()).toBe("running");
+
+    sidebarThreads.entries.set(
+      "thr_live",
+      thread({
+        id: "thr_live",
+        title: "Live thread",
+        hasPendingInteraction: true,
+        runtime: { displayStatus: "active" },
+      }),
+    );
+    view.rerender(renderPostTree(row));
+    expect(status()).toBe("waiting");
+    expect(screen.getByText(THREAD_CARD_STATUS_LABELS.waiting)).toBeTruthy();
+  });
+
+  it("does not render raw HTML or script from the post text", () => {
+    const { container } = renderPost(
+      postRow(
+        'Hello <script>window.__pwned = 1</script><img src="x" onerror="window.__pwned = 2"> [link](javascript:alert(1))',
+      ),
+    );
+
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("[onerror]")).toBeNull();
+    expect(
+      Array.from(container.querySelectorAll("a")).some((anchor) =>
+        (anchor.getAttribute("href") ?? "").startsWith("javascript:"),
+      ),
+    ).toBe(false);
+    expect((window as { __pwned?: number }).__pwned).toBeUndefined();
   });
 });
