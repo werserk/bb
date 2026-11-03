@@ -218,7 +218,7 @@ describe("RouteAnchor transition navigation", () => {
 });
 
 describe("RouteAnchor navigation window", () => {
-  it("opens the window for a thread route only", () => {
+  it("opens the window for a thread route and closes it on any other route", () => {
     const unbind = bindNavigationWindowQueryClient(new QueryClient());
     try {
       render(
@@ -233,6 +233,8 @@ describe("RouteAnchor navigation window", () => {
       expect(isNavigationWindowOpen()).toBe(false);
       fireEvent.click(screen.getByRole("link", { name: "Thread" }));
       expect(isNavigationWindowOpen()).toBe(true);
+      fireEvent.click(screen.getByRole("link", { name: "Plugin" }));
+      expect(isNavigationWindowOpen()).toBe(false);
     } finally {
       closeNavigationWindow();
       unbind();

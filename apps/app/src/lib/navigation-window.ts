@@ -1,5 +1,4 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ThreadTimelineResponse } from "@bb/server-contract";
 import {
   threadDetailBootstrapQueryKey,
   threadTimelineQueryKey,
@@ -35,11 +34,11 @@ function notify(): void {
   }
 }
 
-function hasFirstContent(queryClient: QueryClient, threadId: string): boolean {
-  const timeline = queryClient.getQueryData<ThreadTimelineResponse>(
-    threadTimelineQueryKey(threadId),
+function hasTimeline(queryClient: QueryClient, threadId: string): boolean {
+  return (
+    queryClient.getQueryState(threadTimelineQueryKey(threadId))?.status ===
+    "success"
   );
-  return timeline !== undefined && timeline.rows.length > 0;
 }
 
 function hasFailed(queryClient: QueryClient, threadId: string): boolean {
@@ -69,7 +68,7 @@ export function openNavigationWindow(threadId: string): void {
   if (queryClient === null) {
     return;
   }
-  if (hasFirstContent(queryClient, threadId)) {
+  if (hasTimeline(queryClient, threadId)) {
     closeNavigationWindow();
     return;
   }
@@ -80,7 +79,7 @@ export function openNavigationWindow(threadId: string): void {
   }
   const settle = () => {
     if (
-      hasFirstContent(queryClient, threadId) ||
+      hasTimeline(queryClient, threadId) ||
       hasFailed(queryClient, threadId)
     ) {
       closeNavigationWindow();

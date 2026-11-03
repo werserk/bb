@@ -43,15 +43,19 @@ describe("navigation window", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(isNavigationWindowOpen()).toBe(true);
 
-    queryClient.setQueryData(threadTimelineQueryKey("t1"), timeline(0));
-    expect(isNavigationWindowOpen()).toBe(true);
-
     queryClient.setQueryData(threadTimelineQueryKey("t1"), timeline(2));
     await vi.advanceTimersByTimeAsync(0);
     expect(isNavigationWindowOpen()).toBe(false);
     expect(released).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  it("closes on an empty timeline too, so an empty thread does not hold background reads", async () => {
+    openNavigationWindow("t1");
+    queryClient.setQueryData(threadTimelineQueryKey("t1"), timeline(0));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(isNavigationWindowOpen()).toBe(false);
   });
 
   it("closes after the cap when the target never paints", async () => {
@@ -78,7 +82,7 @@ describe("navigation window", () => {
     expect(isNavigationWindowOpen()).toBe(false);
   });
 
-  it("does not open for a target whose timeline is already cached", () => {
+  it("does not open for a target whose timeline is already loaded", () => {
     queryClient.setQueryData(threadTimelineQueryKey("t1"), timeline(4));
     openNavigationWindow("t1");
     expect(isNavigationWindowOpen()).toBe(false);

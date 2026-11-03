@@ -19,7 +19,7 @@ export function withFetchPriority(
   return signal;
 }
 
-function requestPriority(init?: RequestInit): AppFetchPriority | undefined {
+export function requestPriority(init?: RequestInit): AppFetchPriority | undefined {
   if (init?.priority === "high" || init?.priority === "low") {
     return init.priority;
   }
