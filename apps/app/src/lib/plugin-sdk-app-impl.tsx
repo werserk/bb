@@ -111,6 +111,7 @@ import {
 import { useCodeTheme } from "./plugin-code-theme";
 import { copyToClipboard } from "./clipboard";
 import { saveFile } from "./save-file";
+import { prefetchThread } from "./thread-prefetch";
 import {
   useSidebarNavigation,
   useSidebarNavigationSplit,
@@ -249,6 +250,7 @@ export const pluginSdkAppImplementation = {
   experimental_useCodeTheme: useCodeTheme,
   experimental_copyToClipboard: copyToClipboard,
   experimental_saveFile: saveFile,
+  experimental_prefetchThread: prefetchThread,
 } satisfies PluginSdkApp;
 
 export const retiredPluginSdkAppMembers = {

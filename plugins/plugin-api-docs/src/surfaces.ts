@@ -1688,6 +1688,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "experimental_saveFile",
           "ExperimentalSaveFileRequest",
           "ExperimentalSaveFileOutcome",
+          "experimental_prefetchThread",
           "UrlLink",
           "UrlLinkProps",
           "experimental_FileLink",

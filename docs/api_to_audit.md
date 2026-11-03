@@ -2111,6 +2111,35 @@ Docs: `frontend-hooks-and-ui.md`.
 4. **Link helper.** Decide whether the repeated click handler belongs in a
    shared link component.
 
+## `app.experimental_prefetchThread` (`@get-bb/plugin-sdk/app`)
+
+`experimental_prefetchThread(threadId)` is a plain function that returns
+`void`. It warms the thread detail bootstrap and the first timeline page, the
+same query the thread route runs, so a click that follows renders from cache
+with no new bootstrap request. It issues two reads and nothing else: it marks
+nothing read, opens no realtime subscription and does not navigate. The host
+drops (never queues) a call when the bootstrap is cached and younger than 5 s
+or already loading, when another prefetch is in flight, when 4 distinct threads
+were prefetched in the last 10 s, when the document is hidden, or when
+`navigator.connection.saveData` is on. The test harness makes it a no-op.
+
+**Core callers.** The export is `prefetchThread` from
+`apps/app/src/lib/thread-prefetch.ts`. The bundled thread-list plugin's rows
+call the SDK export after a 120 ms mouse dwell or on keyboard focus
+(`plugins/thread-list/app/rows/useThreadPrefetchIntent.ts`).
+
+Docs: `frontend-hooks-and-ui.md`.
+
+**Audit before stabilizing.**
+
+1. **Budget constants.** The 120 ms dwell, the 4-per-10 s cap and the 5 s
+   freshness are chosen from the `switch-bench` hover case, not tuned. Decide
+   whether plugins should see or set them.
+2. **Result.** The call returns nothing. Decide whether a plugin needs to know
+   whether a prefetch ran, for example to show a loading hint.
+3. **Remote latency.** The gain is measured on loopback only. Re-measure over a
+   remote link before relying on it there.
+
 ## `app.experimental_usePluginId` (`@get-bb/plugin-sdk/app`)
 
 Returns the id of the plugin that owns the calling component, the same value

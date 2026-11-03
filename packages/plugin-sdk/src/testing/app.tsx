@@ -1866,6 +1866,7 @@ const testPluginSdkApp = {
   experimental_saveFile(): Promise<ExperimentalSaveFileOutcome> {
     return Promise.resolve("started");
   },
+  experimental_prefetchThread(): void {},
   experimental_useSidebarThreadActions(): PluginSidebarThreadActions {
     return useSlotEnv("experimental_useSidebarThreadActions").sidebarActions;
   },

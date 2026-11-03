@@ -52,6 +52,12 @@ import {
   ThreadRowActionsCustomizingContext,
 } from "../list/customizeRowActionsContext.js";
 
+const prefetchThread = vi.hoisted(() => vi.fn());
+vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@get-bb/plugin-sdk/app")>()),
+  experimental_prefetchThread: prefetchThread,
+}));
+
 installTestPluginRuntime();
 const { SidebarDraftPresenceSync } =
   await import("../list/sidebarDraftPresence.js");
@@ -1827,5 +1833,82 @@ describe("ThreadRow", () => {
     expect(
       await screen.findByRole("textbox", { name: "Thread name" }),
     ).toHaveProperty("value", "Thread");
+  });
+});
+
+describe("ThreadRow prefetch intent", () => {
+  function mouseEvent(type: "pointerEnter" | "pointerLeave", extra = {}) {
+    return { pointerType: "mouse", buttons: 0, ...extra, type };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    prefetchThread.mockReset();
+  });
+
+  it("prefetches after a 120 ms mouse dwell and only once", () => {
+    vi.useFakeTimers();
+    renderThreadRow();
+    const row = screen
+      .getByRole("link", { name: "Open Thread" })
+      .closest<HTMLElement>("[data-sidebar-rename-row]")!;
+    fireEvent.pointerEnter(row, mouseEvent("pointerEnter"));
+    vi.advanceTimersByTime(119);
+    expect(prefetchThread).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(prefetchThread).toHaveBeenCalledExactlyOnceWith("thr_test");
+    vi.advanceTimersByTime(1_000);
+    expect(prefetchThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not prefetch when the pointer leaves before the dwell ends", () => {
+    vi.useFakeTimers();
+    renderThreadRow();
+    const row = screen
+      .getByRole("link", { name: "Open Thread" })
+      .closest<HTMLElement>("[data-sidebar-rename-row]")!;
+    fireEvent.pointerEnter(row, mouseEvent("pointerEnter"));
+    vi.advanceTimersByTime(100);
+    fireEvent.pointerLeave(row, mouseEvent("pointerLeave"));
+    vi.advanceTimersByTime(1_000);
+    expect(prefetchThread).not.toHaveBeenCalled();
+  });
+
+  it("ignores touch and pen pointers and a pointer with a button held", () => {
+    vi.useFakeTimers();
+    renderThreadRow();
+    const row = screen
+      .getByRole("link", { name: "Open Thread" })
+      .closest<HTMLElement>("[data-sidebar-rename-row]")!;
+    fireEvent.pointerEnter(row, { pointerType: "touch", buttons: 0 });
+    fireEvent.pointerEnter(row, { pointerType: "pen", buttons: 0 });
+    fireEvent.pointerEnter(row, { pointerType: "mouse", buttons: 1 });
+    vi.advanceTimersByTime(1_000);
+    expect(prefetchThread).not.toHaveBeenCalled();
+  });
+
+  it("drops the pending dwell when the row unmounts", () => {
+    vi.useFakeTimers();
+    renderThreadRow();
+    const row = screen
+      .getByRole("link", { name: "Open Thread" })
+      .closest<HTMLElement>("[data-sidebar-rename-row]")!;
+    fireEvent.pointerEnter(row, mouseEvent("pointerEnter"));
+    cleanup();
+    vi.advanceTimersByTime(1_000);
+    expect(prefetchThread).not.toHaveBeenCalled();
+  });
+
+  it("prefetches on keyboard focus but not on a pointer-driven focus", () => {
+    renderThreadRow();
+    const link = screen.getByRole("link", { name: "Open Thread" });
+    const matches = vi.spyOn(link, "matches");
+    matches.mockReturnValue(false);
+    fireEvent.focus(link);
+    expect(prefetchThread).not.toHaveBeenCalled();
+    matches.mockReturnValue(true);
+    fireEvent.focus(link);
+    expect(matches).toHaveBeenLastCalledWith(":focus-visible");
+    expect(prefetchThread).toHaveBeenCalledExactlyOnceWith("thr_test");
   });
 });
