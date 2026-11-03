@@ -39,8 +39,7 @@ queued row, so a plugin that only wants its own filters on
 `entry.waitingOn?.kind === "plugin" && entry.waitingOn.pluginId === bb.pluginId`.
 `message.cancelled` is the only signal for that removal: release external
 resources held for a waiting message (a sandbox mid-provision, a reserved
-slot) there. Archiving or deleting the whole thread fires the thread event
-instead.
+slot) there. Archiving or deleting the whole thread fires the thread event instead.
 
 `turn.failed` fires after a turn failed and the thread has already landed in
 `error`. Its payload (`PluginTurnFailedEvent`) is ids and failure facts only —
