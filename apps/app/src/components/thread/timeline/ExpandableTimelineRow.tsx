@@ -38,7 +38,6 @@ interface ExpandableTimelineRowProps {
   forceExpanded?: boolean;
   terminalAutoExpanded?: boolean;
   renderBody: () => ReactNode;
-  /** When set, the expanded body ends with a control of this label that collapses the row. */
   collapseLabel?: string;
   title: TimelineTitle;
   titleContent?: ReactNode;

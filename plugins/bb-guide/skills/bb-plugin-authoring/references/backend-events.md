@@ -10,7 +10,7 @@ bb.events.on("experimental_environment.removed", ({ removal }) => { ... });
 bb.events.on("experimental_host.deleted", ({ host }) => { ... });
 bb.events.on("thread.created", ({ thread }) => { ... });
 bb.events.on("thread.active", ({ thread }) => { ... });
-bb.events.on("thread.idle", ({ thread, lastAssistantText, experimental_attention }) => { ... });   // lastAssistantText: string | null; experimental_attention: "skipped" | undefined (fork)
+bb.events.on("thread.idle", ({ thread, lastAssistantText, experimental_attention }) => { ... });   // experimental_attention: "skipped" (fork) when core silenced the turn
 bb.events.on("thread.failed", ({ thread, error }) => { ... });             // error: string | null
 bb.events.on("thread.archived", ({ thread }) => { ... });
 bb.events.on("thread.unarchived", ({ thread }) => { ... });
@@ -498,14 +498,3 @@ if (!initial.apiKey)
     "Set apiKey with `bb plugin config <id> set apiKey <value>`.",
   );
 ```
-
-## Background-turn attention (fork)
-
-`bb.experimental_threads.setAttentionPolicy(threadId, { backgroundTurns: "silent" } | null)`
-asks the server not to raise unread attention when a turn that was not started
-by the user (another thread, a plugin, the system) ends cleanly. The policy is
-held in memory for the calling plugin and dropped when the plugin is disabled
-or reloaded; failed turns and user turns always raise attention. A
-`thread.idle` event for a silenced turn carries `experimental_attention:
-"skipped"`; notification plugins should send nothing for it. Stock bb has no
-such method: check `typeof bb.experimental_threads?.setAttentionPolicy`.

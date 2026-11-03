@@ -351,3 +351,11 @@ The old registration names are absent from SDK typings. Previously published
 bundles and Git-source installs remain supported by runtime adapters. Builds
 emit migration warnings rather than blocking install/update; bb records them
 in the plugin log.
+
+## Thread display policy (fork)
+
+`app.experimental_threadDisplayPolicy(({ threadId, projectId }) => ({ backgroundTurns: "collapsed" }) | null)`
+folds each run of turns not started by the user into one expandable
+"Background" timeline row. The first non-null answer wins in plugin id order; a
+run the owner steered or that contains a failed turn stays visible. Stock bb
+has no such method: call `app.experimental_threadDisplayPolicy?.(...)`.

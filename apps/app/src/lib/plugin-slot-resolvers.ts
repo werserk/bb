@@ -405,10 +405,6 @@ export type ResolvedComposerPopup = ReturnType<
   typeof resolveComposerPopups
 >[number];
 
-/**
- * First non-null answer wins, in slot (plugin id) order. A resolver that
- * throws is skipped, so a broken plugin leaves the timeline as stock bb draws it.
- */
 export function resolveThreadDisplayPolicy(
   slots: readonly PluginThreadDisplayPolicySlot[],
   thread: ExperimentalThreadDisplayPolicyThread,

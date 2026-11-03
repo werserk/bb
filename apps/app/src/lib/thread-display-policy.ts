@@ -16,7 +16,6 @@ function useThreadDisplayPolicySlots(): readonly PluginThreadDisplayPolicySlot[]
   );
 }
 
-/** The display policy plugins declare for a thread; null renders as stock bb. */
 export function useThreadDisplayPolicy(
   threadId: string | undefined,
   projectId: string | undefined,

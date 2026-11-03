@@ -383,3 +383,14 @@ code: "forbidden", message: "Only the connect plugin can call this method" })`
 from `@get-bb/plugin-sdk`. `bb.sdk.plugins.callRpc` rejects with a `BbHttpError`
 whose `code` is `forbidden` and `status` is 403. See `backend-events.md` for
 the refusal codes, optional validation issues and mutation rollback behavior.
+
+## Background-turn attention (fork)
+
+`bb.experimental_threads.setAttentionPolicy(threadId, { backgroundTurns: "silent" } | null)`
+asks the server not to raise unread attention when a turn that was not started
+by the user (another thread, a plugin, the system) ends cleanly. The policy is
+held in memory for the calling plugin and dropped when the plugin is disabled
+or reloaded; failed turns and user turns always raise attention. A
+`thread.idle` event for a silenced turn carries `experimental_attention:
+"skipped"`; notification plugins should send nothing for it. Stock bb has no
+such method: check `typeof bb.experimental_threads?.setAttentionPolicy`.
