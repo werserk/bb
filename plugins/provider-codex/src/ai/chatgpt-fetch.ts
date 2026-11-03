@@ -15,6 +15,7 @@ const cloudflareCookiesByName = new Map<string, string>();
 export interface ChatGptFetchArgs {
   url: string;
   init: (headers: Headers) => RequestInit;
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
 function isAllowedChatGptHost(host: string): boolean {
@@ -106,7 +107,7 @@ export async function fetchChatGpt(args: ChatGptFetchArgs): Promise<Response> {
       headers.set("Cookie", cookie);
     }
     const init = args.init(headers);
-    const response = await fetch(args.url, init);
+    const response = await (args.fetchImpl ?? fetch)(args.url, init);
     storeChatGptCloudflareCookies(args.url, response.headers);
     return response;
   };

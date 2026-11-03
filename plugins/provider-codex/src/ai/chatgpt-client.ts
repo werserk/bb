@@ -1,5 +1,6 @@
 import type { JsonValue } from "@get-bb/plugin-sdk";
 import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
+import { selectChatGptTranscriptionFetch } from "./chatgpt-curl-fetch.js";
 import { fetchChatGpt, isCloudflareChallenge } from "./chatgpt-fetch.js";
 import type {
   CodexAiCompleteInput,
@@ -833,11 +834,13 @@ function parseTranscriptionResponse(rawText: string): JsonValue {
 async function fetchChatGptTranscription(
   args: ChatGptTranscriptionFetchArgs,
 ): Promise<Response> {
+  const transcriptionFetch = selectChatGptTranscriptionFetch();
   return runWithTimeout({
     deadline: args.deadline,
     work: (signal) =>
       fetchChatGpt({
         url: CHATGPT_TRANSCRIBE_URL,
+        fetchImpl: (url, init) => transcriptionFetch(url, { ...init, signal }),
         init: (headers) => ({
           method: "POST",
           headers: createChatGptTranscriptionHeaders(args.auth, headers),

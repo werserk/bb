@@ -10,6 +10,11 @@ import {
 } from "./chatgpt-client.js";
 import { resetChatGptCloudflareCookiesForTests } from "./chatgpt-fetch.js";
 
+vi.mock("./chatgpt-curl-fetch.js", () => ({
+  selectChatGptTranscriptionFetch: () => (url: string, init: RequestInit) =>
+    fetch(url, init),
+}));
+
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 
 const tempDirs: string[] = [];
