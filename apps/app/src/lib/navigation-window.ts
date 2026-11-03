@@ -46,9 +46,7 @@ function hasFailed(queryClient: QueryClient, threadId: string): boolean {
   return [
     threadDetailBootstrapQueryKey(threadId),
     threadTimelineQueryKey(threadId),
-  ].some(
-    (queryKey) => queryClient.getQueryState(queryKey)?.status === "error",
-  );
+  ].some((queryKey) => queryClient.getQueryState(queryKey)?.status === "error");
 }
 
 export function closeNavigationWindow(): void {
