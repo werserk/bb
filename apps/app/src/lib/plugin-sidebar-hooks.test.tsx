@@ -86,10 +86,13 @@ vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
   useSidebarNavigation: () => ({ data: state.data, isError: false }),
 }));
 
-vi.mock("@/hooks/queries/host-queries", () => {
-  const hosts: never[] = [];
-  return { useHosts: () => ({ data: hosts }) };
-});
+const hostsState = vi.hoisted(() => ({
+  data: [] as { id: string; name: string }[] | undefined,
+}));
+
+vi.mock("@/hooks/queries/host-queries", () => ({
+  useHosts: () => ({ data: hostsState.data }),
+}));
 
 vi.mock("@/components/thread/ThreadActionsProvider", () => ({
   useThreadActions: () => ({
@@ -178,6 +181,7 @@ afterEach(() => {
   drafts.threadIds.clear();
   clearPluginThreadRowStatuses("plugin-a");
   environmentProviders.providers = undefined;
+  hostsState.data = [];
 });
 
 describe("useSidebarThreads", () => {
@@ -202,6 +206,101 @@ describe("useSidebarThreads", () => {
     expect(after[0]).toBe(before[0]);
     expect(after[1]).not.toBe(before[1]);
     expect(after[1]?.title).toBe("Two");
+  });
+
+  it("returns the same result object when a refetch carries identical data", () => {
+    const first = makeThreadListEntry({ id: "thr_first", title: "First" });
+    const sections = [{ id: "sec_a", name: "A", createdAt: 1, updatedAt: 1 }];
+    state.data = payload([first], sections);
+    const { result, rerender } = renderHook(() => useSidebarThreads());
+    const before = result.current;
+
+    state.data = payload([first], sections);
+    rerender();
+    expect(result.current).toBe(before);
+    expect(result.current.threads).toBe(before.threads);
+    expect(result.current.projects).toBe(before.projects);
+    expect(result.current.experimental_hosts).toBe(before.experimental_hosts);
+  });
+
+  it("changes only the changed thread and its array when one thread changes", () => {
+    const stable = makeThreadListEntry({ id: "thr_stable", title: "Stable" });
+    const changing = makeThreadListEntry({
+      id: "thr_changing",
+      status: "idle",
+    });
+    state.data = payload([stable, changing]);
+    const { result, rerender } = renderHook(() => useSidebarThreads());
+    const before = result.current;
+
+    state.data = payload([
+      stable,
+      makeThreadListEntry({ id: "thr_changing", status: "active" }),
+    ]);
+    rerender();
+    const after = result.current;
+    expect(after).not.toBe(before);
+    expect(after.threads).not.toBe(before.threads);
+    expect(after.threads[0]).toBe(before.threads[0]);
+    expect(after.threads[1]).not.toBe(before.threads[1]);
+    expect(after.projects).toBe(before.projects);
+    expect(after.projects[0]).toBe(before.projects[0]);
+    expect(after.experimental_hosts).toBe(before.experimental_hosts);
+  });
+
+  it("keeps project objects when only the personal project changes", () => {
+    const first = makeThreadListEntry({ id: "thr_first" });
+    state.data = payload([first]);
+    const { result, rerender } = renderHook(() => useSidebarThreads());
+    const before = result.current;
+
+    state.data = {
+      ...payload([first]),
+      personalProject: {
+        id: PERSONAL_PROJECT_ID,
+        name: "Mine",
+        threads: [],
+      },
+    };
+    rerender();
+    const after = result.current;
+    expect(after.projects).not.toBe(before.projects);
+    expect(after.projects[0]).toBe(before.projects[0]);
+    expect(after.projects[1]).not.toBe(before.projects[1]);
+    expect(after.projects[1]?.name).toBe("Mine");
+    expect(after.threads).toBe(before.threads);
+  });
+
+  it("renews hosts, and the thread rows that show host names, when a host changes", () => {
+    const first = makeThreadListEntry({ id: "thr_first" });
+    state.data = payload([first]);
+    const { result, rerender } = renderHook(() => useSidebarThreads());
+    const before = result.current;
+
+    hostsState.data = [{ id: "host_a", name: "A" }];
+    rerender();
+    const after = result.current;
+    expect(after).not.toBe(before);
+    expect(after.experimental_hosts).toBe(hostsState.data);
+    expect(after.projects).toBe(before.projects);
+  });
+
+  it("uses one shared empty hosts array while hosts are unknown", () => {
+    hostsState.data = undefined;
+    state.data = undefined;
+    const first = renderHook(() => useSidebarThreads());
+    const second = renderHook(() => useSidebarThreads());
+    expect(first.result.current.status).toBe("loading");
+    expect(first.result.current.experimental_hosts).toEqual([]);
+    expect(second.result.current.experimental_hosts).toBe(
+      first.result.current.experimental_hosts,
+    );
+
+    state.data = payload([makeThreadListEntry({ id: "thr_first" })]);
+    first.rerender();
+    expect(first.result.current.experimental_hosts).toBe(
+      second.result.current.experimental_hosts,
+    );
   });
 
   it("shares DTO identity between two consumers of the same payload", () => {
