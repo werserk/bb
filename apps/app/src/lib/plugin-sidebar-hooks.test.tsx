@@ -5,6 +5,7 @@ import {
   cleanup,
   renderHook as renderHookBase,
 } from "@testing-library/react";
+import { useMemo } from "react";
 import { getDefaultStore } from "jotai";
 import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@bb/domain";
 import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
@@ -221,6 +222,33 @@ describe("useSidebarThreads", () => {
     expect(result.current.threads).toBe(before.threads);
     expect(result.current.projects).toBe(before.projects);
     expect(result.current.experimental_hosts).toBe(before.experimental_hosts);
+  });
+
+  it("re-runs a memoised consumer zero times on identical refetches of 480 threads", () => {
+    const entries = Array.from({ length: 480 }, (_, index) =>
+      makeThreadListEntry({ id: `thr_${index}`, title: `Thread ${index}` }),
+    );
+    const sections: SidebarSection[] = [];
+    state.data = payload(entries, sections);
+    let recomputed = 0;
+    const { rerender } = renderHook(() => {
+      const sidebar = useSidebarThreads();
+      useMemo(() => {
+        recomputed += 1;
+        return sidebar.threads.length;
+      }, [sidebar.threads]);
+      useMemo(() => {
+        recomputed += 1;
+        return sidebar.projects.length;
+      }, [sidebar.projects]);
+      return sidebar;
+    });
+    expect(recomputed).toBe(2);
+    for (let refetch = 0; refetch < 10; refetch += 1) {
+      state.data = payload([...entries], sections);
+      rerender();
+    }
+    expect(recomputed).toBe(2);
   });
 
   it("changes only the changed thread and its array when one thread changes", () => {
