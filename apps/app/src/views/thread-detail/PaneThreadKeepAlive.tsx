@@ -1,10 +1,4 @@
-import {
-  Activity,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { Activity, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { THREAD_QUERY_KEY } from "@/hooks/queries/query-keys";
 import {
@@ -22,28 +16,26 @@ interface PaneThreadKeepAliveProps {
 
 function useHiddenThreadCacheRevision(
   queryClient: QueryClient,
-  hiddenThreadIds: ReadonlySet<string>,
-): number {
-  const hiddenRef = useRef(hiddenThreadIds);
-  hiddenRef.current = hiddenThreadIds;
-  const revisionRef = useRef(0);
-  const subscribe = (notify: () => void) =>
-    queryClient.getQueryCache().subscribe((event) => {
+  hiddenThreadIds: readonly string[],
+): void {
+  const [, setRevision] = useState(0);
+  const hiddenKey = hiddenThreadIds.join("\n");
+  useEffect(() => {
+    if (hiddenKey === "") {
+      return;
+    }
+    const hidden = new Set(hiddenKey.split("\n"));
+    return queryClient.getQueryCache().subscribe((event) => {
       const queryKey = event.query.queryKey;
       if (
         queryKey[0] === THREAD_QUERY_KEY &&
         typeof queryKey[1] === "string" &&
-        hiddenRef.current.has(queryKey[1])
+        hidden.has(queryKey[1])
       ) {
-        revisionRef.current += 1;
-        notify();
+        setRevision((revision) => revision + 1);
       }
     });
-  return useSyncExternalStore(
-    subscribe,
-    () => revisionRef.current,
-    () => 0,
-  );
+  }, [queryClient, hiddenKey]);
 }
 
 function RetainedThreadView({
@@ -92,12 +84,12 @@ export function PaneThreadKeepAlive({
   if (next !== state) {
     setState(next);
   }
-  const hiddenThreadIds = new Set(
+  useHiddenThreadCacheRevision(
+    queryClient,
     next.slots
       .filter((slot) => slot.threadId !== threadId)
       .map((slot) => slot.threadId),
   );
-  useHiddenThreadCacheRevision(queryClient, hiddenThreadIds);
   return (
     <>
       {next.slots.map((slot) => {
