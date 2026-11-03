@@ -308,20 +308,6 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         apiSymbols: [
           "PluginTimelineRendererRegistration",
           "PluginTimelineRendererProps",
-        ],
-        experimental: true,
-      },
-      {
-        id: "background-turns",
-        title: "Background turns",
-        summary:
-          "Fold turns nobody asked for into one quiet row. With this, a plugin can:",
-        bullets: [
-          "Collapse runs of agent- and system-started turns into one expandable row",
-          "Leave the owner's own turns, steered turns, and failed turns in full view",
-          "Fall back to bb's stock timeline when no plugin answers or a resolver throws",
-        ],
-        apiSymbols: [
           "PluginAppBuilder.experimental_threadDisplayPolicy",
           "ExperimentalThreadDisplayPolicyResolver",
           "ExperimentalThreadDisplayPolicy",

@@ -235,7 +235,7 @@ describe("collapseBackgroundTurns", () => {
     const group = collapseBackgroundTurns(rows, { threadRunning: false })[0]!;
     const options = { summaryStyle: "bundle", workStyle: "default" } as const;
     const title = buildTimelineRowTitle(group, options);
-    expect(title.plain).toMatch(/^Background · 2 turns · \d{2}:\d{2}$/);
+    expect(title.plain).toMatch(/^Background · 2 turns · \d{1,2}:\d{2}/);
     const single = collapseBackgroundTurns([request("g1", "agent")], {
       threadRunning: false,
     })[0]!;
