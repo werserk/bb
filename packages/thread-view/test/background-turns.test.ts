@@ -37,11 +37,11 @@ function request(
     attachments: null,
     initiator,
     senderThreadId: null,
-    systemMessageKind: null,
+    systemMessageKind: "unlabeled",
     systemMessageSubject: null,
     turnRequest: { isGrouped: false, kind, status: "accepted" },
     mentions: [],
-  } as TimelineConversationRow;
+  };
 }
 
 function turn(id: string, status: TimelineRowStatus = "completed") {

@@ -188,6 +188,7 @@ const BB_PLUGIN_API_KEYS = [
   "experimental_environments",
   "experimental_machines",
   "experimental_serverAccess",
+  "experimental_threads",
   "sdk",
   "onDispose",
   "onInstall",
@@ -240,7 +241,7 @@ const THREAD_EVENT_PAYLOAD_FIELDS = {
   "experimental_environment.removed": ["removal"],
   "thread.created": ["thread"],
   "thread.active": ["thread"],
-  "thread.idle": ["thread", "lastAssistantText"],
+  "thread.idle": ["thread", "lastAssistantText", "experimental_attention"],
   "thread.failed": ["thread", "error"],
   "thread.archived": ["thread"],
   "thread.unarchived": ["thread"],
@@ -322,6 +323,7 @@ const APP_BUILDER_FIELDS = [
   "composer",
   "contentScripts",
   "experimental_sidebarFooter",
+  "experimental_threadDisplayPolicy",
 ] as const satisfies readonly (keyof PluginAppBuilder)[];
 
 type MissingAppBuilderField = Exclude<

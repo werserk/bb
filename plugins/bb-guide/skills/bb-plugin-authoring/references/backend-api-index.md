@@ -337,6 +337,7 @@ Read the installed declarations for exact current signatures.
 - `PluginSourceCodeRendererRegistration`
 - `PluginStatusApi`
 - `PluginStorage`
+- `PluginExperimentalThreads`, `PluginThreadAttentionPolicy`
 - `PluginThreadEventHandler`
 - `PluginThreadEventName`
 - `PluginThreadEventPayloads`

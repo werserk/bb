@@ -118,6 +118,10 @@ export default definePluginApp((app) => {
     id: "credentials",
     component: CredentialForm,
   });
+  // Fork only: fold agent-/system-started turns into one "Background" row.
+  app.experimental_threadDisplayPolicy?.(({ threadId }) => ({
+    backgroundTurns: "collapsed",
+  }));
   app.experimental_sidebarFooter.register({
     kind: "action",
     id: "remote",

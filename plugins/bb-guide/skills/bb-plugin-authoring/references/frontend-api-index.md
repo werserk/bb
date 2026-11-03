@@ -116,6 +116,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `ExperimentalRpcMutationState`
 
 - `ExperimentalAppIcons`
+- `ExperimentalThreadDisplayPolicy`, `ExperimentalThreadDisplayPolicyThread`, `ExperimentalThreadDisplayPolicyResolver`
 - `ExperimentalIconRegistration`
 - `ExperimentalIconProps`
 - `ExperimentalProviderIconProps`
