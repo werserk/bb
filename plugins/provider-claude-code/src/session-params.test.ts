@@ -107,6 +107,38 @@ describe("buildClaudeSessionParams", () => {
     expect(params.baseInstructions).toContain("Session instructions");
   });
 
+  it("keeps a dynamic tool's row presentation for the bridge", () => {
+    const presentation = {
+      label: { pending: "Posting", completed: "Posted" },
+      icon: { glyph: "message" },
+      ownerPost: true,
+    };
+    const params = buildClaudeSessionParams({
+      threadId: "thread-1",
+      cwd: "/tmp/worktree",
+      instructionMode: "append",
+      dynamicTools: [
+        {
+          name: "plain",
+          description: "desc",
+          inputSchema: { type: "object" },
+        },
+        {
+          name: "post",
+          description: "desc",
+          inputSchema: { type: "object" },
+          presentation,
+        },
+      ],
+      options: toCanonicalWireOptions(EXECUTION_CONTEXT),
+    });
+
+    const tools = (params as { dynamicTools: Record<string, unknown>[] })
+      .dynamicTools;
+    expect(tools[0]).not.toHaveProperty("presentation");
+    expect(tools[1]?.presentation).toEqual(presentation);
+  });
+
   it("falls back to provider defaults when the providerOptions bag is absent", () => {
     const params = buildClaudeSessionParams({
       threadId: "thread-1",
