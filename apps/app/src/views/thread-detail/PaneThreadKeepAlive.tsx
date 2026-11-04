@@ -74,12 +74,13 @@ const RetainedThreadView = memo(function RetainedThreadView({
   );
 });
 
-function RetainingPane({
+export function PaneThreadKeepAlive({
   projectId,
   threadId,
   timelineEnabled,
 }: PaneThreadKeepAliveProps) {
   const queryClient = useQueryClient();
+  const retains = useSplitWorkspaceActive();
   const [state, setState] = useState(() =>
     initialPaneRetention({ projectId, threadId }),
   );
@@ -87,7 +88,7 @@ function RetainingPane({
     state,
     { projectId, threadId },
     (candidateId, options) =>
-      canRetainCachedThread(queryClient, candidateId, options),
+      retains && canRetainCachedThread(queryClient, candidateId, options),
   );
   if (next !== state) {
     setState(next);
@@ -114,12 +115,4 @@ function RetainingPane({
       })}
     </>
   );
-}
-
-export function PaneThreadKeepAlive(props: PaneThreadKeepAliveProps) {
-  const splitWorkspaceActive = useSplitWorkspaceActive();
-  if (!splitWorkspaceActive) {
-    return <ThreadDetailView surface="pane" {...props} />;
-  }
-  return <RetainingPane {...props} />;
 }
