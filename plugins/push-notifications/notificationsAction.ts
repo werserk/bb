@@ -115,6 +115,7 @@ function useThreadNotificationsData({
 const LEVEL_ICONS: Record<NotificationLevel, string> = {
   all: "push-notifications/ringing",
   "input-only": "BellDot",
+  "questions-only": "FileQuestion",
   muted: "push-notifications/off",
 };
 

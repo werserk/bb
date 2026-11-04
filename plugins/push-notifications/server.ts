@@ -152,11 +152,12 @@ export function createPushNotificationsPlugin(
         type: "select",
         label: "Default notifications",
         description:
-          "For threads you haven't set. Needs input only skips finished turns.",
+          "For threads you haven't set. Needs input only skips finished turns; Questions only also skips errors.",
         options: [...notificationLevelSchema.options],
         experimental_optionLabels: {
           all: NOTIFICATION_LEVEL_LABELS.all,
           "input-only": NOTIFICATION_LEVEL_LABELS["input-only"],
+          "questions-only": NOTIFICATION_LEVEL_LABELS["questions-only"],
           muted: NOTIFICATION_LEVEL_LABELS.muted,
         },
         default: "all",
@@ -172,6 +173,7 @@ export function createPushNotificationsPlugin(
           inherit: NOTIFICATION_LEVEL_LABELS.inherit,
           all: NOTIFICATION_LEVEL_LABELS.all,
           "input-only": NOTIFICATION_LEVEL_LABELS["input-only"],
+          "questions-only": NOTIFICATION_LEVEL_LABELS["questions-only"],
           muted: NOTIFICATION_LEVEL_LABELS.muted,
         },
         default: "input-only",

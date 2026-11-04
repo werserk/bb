@@ -842,6 +842,44 @@ describe("push sender", () => {
     }
   });
 
+  it("at Questions only notifies a question and an owner post, but not an error or a finished turn", async () => {
+    const host = await setup();
+    try {
+      await host.addSubscription();
+      const thread = host.setThread({ id: "thread-questions", status: "active" });
+      await host.setLevel(thread.id, "questions-only");
+
+      await host.harness.behavior.emitThreadEvent("thread.failed", {
+        thread: { ...thread, status: "error" },
+        error: "Provider crashed",
+      });
+      await host.harness.behavior.emitThreadEvent("thread.idle", {
+        thread,
+        lastAssistantText: "Finished quietly",
+      });
+      await waitForCoalesce();
+      expect(host.expo.requests).toHaveLength(0);
+
+      await host.harness.behavior.emitThreadEvent(
+        "experimental_thread.ownerPost",
+        { thread, text: "Needs a look" },
+      );
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(1));
+      expect(host.expo.requests[0]?.[0]?.body).toBe("Needs a look");
+
+      const question = pendingQuestion(thread.id, "Deploy now?");
+      host.interactions.set(thread.id, [question]);
+      await host.harness.behavior.emitThreadEvent("interaction.pending", {
+        thread,
+        interaction: question,
+      });
+      await vi.waitFor(() => expect(host.expo.requests).toHaveLength(2));
+      expect(host.expo.requests[1]?.[0]?.body).toBe("Deploy now?");
+    } finally {
+      await host.cleanup();
+    }
+  });
+
   it("batches devices and removes rows that Expo rejects as unregistered", async () => {
     const host = await setup();
     try {

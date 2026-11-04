@@ -1,7 +1,12 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 
-export const notificationLevelSchema = z.enum(["all", "input-only", "muted"]);
+export const notificationLevelSchema = z.enum([
+  "all",
+  "input-only",
+  "questions-only",
+  "muted",
+]);
 export const ownNotificationLevelSchema = z.enum([
   "inherit",
   ...notificationLevelSchema.options,
@@ -54,6 +59,7 @@ export const NOTIFICATION_LEVEL_LABELS: Record<OwnNotificationLevel, string> = {
   inherit: "Same as default",
   all: "All activity",
   "input-only": "Needs input only",
+  "questions-only": "Questions only",
   muted: "Muted",
 };
 
@@ -74,13 +80,15 @@ export const NOTIFICATION_KINDS_BY_LEVEL: Record<
     "turn-finished",
   ]),
   "input-only": new Set(["pending-interaction", "thread-error", "owner-post"]),
+  "questions-only": new Set(["pending-interaction", "owner-post"]),
   muted: new Set(),
 };
 
 const LEVEL_RANK: Record<NotificationLevel, number> = {
   muted: 0,
-  "input-only": 1,
-  all: 2,
+  "questions-only": 1,
+  "input-only": 2,
+  all: 3,
 };
 
 function isQuieter(
