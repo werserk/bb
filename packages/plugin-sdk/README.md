@@ -90,6 +90,14 @@ The plugin owns the overlay's chrome, positioning, visibility, focus, and
 responsive behavior; a crashing overlay is hidden without affecting siblings.
 Use a content script for app-wide DOM behavior that does not need React context.
 
+Use `app.slots.experimental_modal({ id, component })` for one large modal that
+BB draws and that owns its own history entry. It returns this plugin's handle
+`{ open(modalId, { title, context?, params? }), close(), useOpenId() }`; `open`
+pushes one entry on the current URL (a second `open` replaces the showing
+modal), so back, forward and Esc close and reopen it. `params` must be JSON and
+is capped in size. The component receives `{ params, compact, close }` and draws
+its body and footer; BB draws the scrim, panel and header.
+
 See the
 [`composer-customization` reference plugin](../../examples/plugins/composer-customization/README.md)
 for every region in one small app. The deprecated pre-1.0

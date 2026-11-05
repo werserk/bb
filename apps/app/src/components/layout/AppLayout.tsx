@@ -68,6 +68,7 @@ import {
   PluginPanelHeaderCenter,
 } from "@/components/plugin/PluginPanelHeader";
 import { PluginAppOverlays } from "@/components/plugin/PluginAppOverlays";
+import { ModalHost } from "@/components/modal/ModalHost";
 import { ThreadRowMetadataCollectors } from "@/components/plugin/ThreadRowMetadataCollectors";
 import { ThreadActionsProvider } from "@/components/thread/ThreadActionsProvider";
 import {
@@ -878,6 +879,7 @@ function AppLayoutContent({ children }: AppLayoutProps) {
                 />
               </SidebarStateBridge>
               <PluginAppOverlays />
+              <ModalHost />
               <ThreadRowMetadataCollectors />
               <IframeDragGuardOverlay
                 active={isSidebarResizing}

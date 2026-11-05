@@ -38,6 +38,8 @@ import {
   type ComposerView,
   type ExperimentalTabRegistration,
   type ExperimentalAppOverlayRegistration,
+  type ExperimentalModalOpenOptions,
+  type ExperimentalModalRegistration,
   type ExperimentalSidebarNavigationActions,
   type ExperimentalSidebarNavigationTarget,
   type ExperimentalSidebarNavigationIconProps,
@@ -175,6 +177,7 @@ import {
 } from "../thread-info-groups.js";
 import {
   collectPluginAppRegistrations,
+  installModalDriver,
   type CollectedPluginProviderIconRegistration,
   type CollectedExperimentalSidebarFooterItem,
 } from "../internal/plugin-app-collector.js";
@@ -2069,6 +2072,7 @@ export interface CapturedPluginApp {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
+  modals: ExperimentalModalRegistration[];
   navPanels: import("../internal/plugin-app-registration-collector.js").LegacyNavPanelRegistration[];
   tabs: ExperimentalTabRegistration[];
   threadPanelActions: import("../internal/plugin-app-registration-collector.js").LegacyThreadPanelActionRegistration[];
@@ -2112,6 +2116,22 @@ export type PluginAppSource =
   | PluginAppModule
   | (() => Promise<PluginAppDefinition | PluginAppModule>);
 
+export type RecordedModalCall =
+  | {
+      kind: "open";
+      pluginId: string | null;
+      modalId: string;
+      options: ExperimentalModalOpenOptions;
+    }
+  | { kind: "close" };
+
+export interface LoadPluginAppOptions {
+  /** Plugin id the modal handle is bound to. Defaults to `"test-plugin"`. */
+  pluginId?: string;
+  /** Receives every `open()` and `close()` the plugin makes on its modal handle. */
+  modalCalls?: RecordedModalCall[];
+}
+
 /**
  * Install the test runtime, resolve the plugin app definition, and capture
  * its slot registrations. Pass the imported module, its default export, or a
@@ -2119,8 +2139,25 @@ export type PluginAppSource =
  */
 export async function loadPluginApp(
   source: PluginAppSource,
+  options: LoadPluginAppOptions = {},
 ): Promise<CapturedPluginApp> {
   installTestPluginRuntime();
+  const modalCalls = options.modalCalls ?? [];
+  installModalDriver({
+    open: (pluginId, modalId, openOptions) => {
+      modalCalls.push({
+        kind: "open",
+        pluginId,
+        modalId,
+        options: openOptions,
+      });
+    },
+    close: () => {
+      modalCalls.push({ kind: "close" });
+    },
+    subscribe: () => () => {},
+    getOpenId: () => null,
+  });
   const resolved = typeof source === "function" ? await source() : source;
   const definition = isPluginAppDefinition(resolved)
     ? resolved
@@ -2130,7 +2167,11 @@ export async function loadPluginApp(
       "the bundle's default export is not definePluginApp(...) from @get-bb/plugin-sdk/app",
     );
   }
-  return collectPluginAppRegistrations(definition);
+  return collectPluginAppRegistrations(
+    definition,
+    undefined,
+    options.pluginId ?? "test-plugin",
+  );
 }
 
 export interface ContentScriptTestMountOptions {

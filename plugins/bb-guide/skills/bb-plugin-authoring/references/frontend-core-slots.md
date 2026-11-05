@@ -84,6 +84,20 @@ Slot props contracts (versioned, additive-only):
   directly or use the vendored responsive overlay primitives. A crash hides
   only that overlay. Use a content script instead for DOM enhancement that does
   not need React context. Experimental: see `docs/api_to_audit.md`.
+- `experimental_modal` → `{ params, compact, close }`. One large modal drawn by
+  BB (a centred 1040×740 panel, a full-height sheet below 768 px) that owns its
+  visibility through a browser history entry. Registration: `{ id, component }`,
+  which returns this plugin's handle
+  `{ open(modalId, { title, context?, params? }), close(), useOpenId() }`.
+  `open` pushes one entry on the current URL (a second `open` replaces the
+  showing modal), so back, forward, mouse 4/5 and Esc close and reopen it.
+  `params` must be JSON and stays in the entry (at most 16 KiB with the title
+  and context; `open` throws otherwise). A reload does not restore a modal.
+  BB draws the scrim, panel, header (breadcrumb title and Close) and focus
+  handling; the component draws its body and footer and switches layout on
+  `compact`. A crash shows a BB error block with "Try again", and the header
+  Close still works. A plugin can open only ids it registered. Experimental:
+  see `docs/api_to_audit.md`.
 - `navPanel` → `{ subPath: string }` — owns the whole route at
   `/plugins/<pluginId>/<path>/*` and gets its own navigation rail destination. `subPath`
   is the route remainder after the panel root (`""` at the root) as it appears

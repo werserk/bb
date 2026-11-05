@@ -876,9 +876,13 @@ async function reconcileCandidate(
         "the bundle's default export is not definePluginApp(...) from @get-bb/plugin-sdk/app",
       );
     }
-    collected = collectPluginAppRegistrations(definition, (message) => {
-      deps.warn(`[plugin:${pluginId}] ${message}`);
-    });
+    collected = collectPluginAppRegistrations(
+      definition,
+      (message) => {
+        deps.warn(`[plugin:${pluginId}] ${message}`);
+      },
+      pluginId,
+    );
   } catch (error) {
     const message = errorMessage(error);
     deps.warn(`[plugin:${pluginId}] frontend registration failed: ${message}`);

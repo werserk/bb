@@ -7,6 +7,7 @@ import * as pluginSdkApp from "@get-bb/plugin-sdk/app";
 import {
   type BbPluginApi,
   type ExperimentalAppOverlayProps,
+  type ExperimentalModalProps,
   type ExperimentalMessageMetadataProps,
   type PluginAppBuilder,
   type PluginAppSlots,
@@ -281,6 +282,7 @@ type SlotPropsByName = {
   homepageSection: PluginHomepageSectionProps;
   settingsSection: PluginSettingsSectionProps;
   experimental_appOverlay: ExperimentalAppOverlayProps;
+  experimental_modal: ExperimentalModalProps;
   navPanel: PluginNavPanelProps;
   experimental_tab: ExperimentalThreadActionTabProps | PluginNavPanelProps;
   experimental_newThreadPanelAction: PluginNewThreadPanelProps;
@@ -370,6 +372,7 @@ const FRONTEND_SLOT_PROP_FIELDS = {
   homepageSection: ["projectId"],
   settingsSection: [],
   experimental_appOverlay: [],
+  experimental_modal: ["params", "compact", "close"],
   navPanel: ["subPath"],
   experimental_tab: ["threadId", "environment", "subPath", "params"],
   experimental_newThreadPanelAction: ["projectId", "params"],

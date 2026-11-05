@@ -1,9 +1,12 @@
 import type { ComponentType } from "react";
 import { z } from "zod";
+import { createModalHandle } from "./modal-handle.js";
 import type {
   ExperimentalTabRegistration,
   ComposerCustomization,
   ExperimentalAppOverlayRegistration,
+  ExperimentalModalHandle,
+  ExperimentalModalRegistration,
   ExperimentalCodeFenceRendererRegistration,
   ExperimentalSidebarFooter,
   ExperimentalThreadDisplayPolicyResolver,
@@ -308,6 +311,7 @@ export interface CollectedPluginAppRegistrations {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
+  modals: ExperimentalModalRegistration[];
   navPanels: LegacyNavPanelRegistration[];
   tabs: ExperimentalTabRegistration[];
   threadPanelActions: LegacyThreadPanelActionRegistration[];
@@ -436,6 +440,7 @@ function collectPanelAction<C, Run>(
 export function collectPluginAppRegistrations(
   definition: PluginAppDefinition,
   onWarning: (message: string) => void = (message) => console.warn(message),
+  pluginId?: string,
 ): CollectedPluginAppRegistrations {
   const commandShortcutSchema = createCommandShortcutSchema();
   const sidebarFooterItems: CollectedSidebarFooterItem[] = [];
@@ -443,6 +448,7 @@ export function collectPluginAppRegistrations(
     homepageSections: [],
     settingsSections: [],
     appOverlays: [],
+    modals: [],
     navPanels: [],
     tabs: [],
     get threadPanelActions() {
@@ -489,10 +495,12 @@ export function collectPluginAppRegistrations(
     threadDisplayPolicies: [],
   };
   sidebarFooterItemsByRegistrationSet.set(collected, sidebarFooterItems);
+  let modalHandle: ExperimentalModalHandle | null = null;
   const seenIds = {
     homepageSection: new Set<string>(),
     settingsSection: new Set<string>(),
     appOverlay: new Set<string>(),
+    modal: new Set<string>(),
     navPanel: new Set<string>(),
     tab: new Set<string>(),
     newThreadPanelAction: new Set<string>(),
@@ -740,6 +748,17 @@ export function collectPluginAppRegistrations(
           id,
           component: requireComponent(kind, registration.component),
         });
+      },
+      experimental_modal(registration) {
+        const kind = "slots.experimental_modal";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.modal, id);
+        collected.modals.push({
+          id,
+          component: requireComponent(kind, registration.component),
+        });
+        modalHandle ??= createModalHandle(pluginId ?? null, seenIds.modal);
+        return modalHandle;
       },
       navPanel(registration) {
         const kind = "slots.navPanel";

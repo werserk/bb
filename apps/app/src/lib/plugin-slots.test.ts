@@ -179,6 +179,47 @@ describe("plugin slot store", () => {
   });
 });
 
+describe("modal slots", () => {
+  function Body() {
+    return null;
+  }
+
+  it("stamps modal registrations with the plugin id and generation, and drops them on removal", () => {
+    setPluginSlotRegistrations(
+      "alpha",
+      registrationSet({ modals: [{ id: "settings", component: Body }] }),
+    );
+    setPluginSlotRegistrations(
+      "beta",
+      registrationSet({ modals: [{ id: "settings", component: Body }] }),
+    );
+
+    const [first, second] = getPluginSlotSnapshot().modals;
+    expect([first?.pluginId, first?.id]).toEqual(["alpha", "settings"]);
+    expect([second?.pluginId, second?.id]).toEqual(["beta", "settings"]);
+
+    removePluginSlotRegistrations("alpha");
+    expect(getPluginSlotSnapshot().modals.map((slot) => slot.pluginId)).toEqual(
+      ["beta"],
+    );
+  });
+
+  it("bumps the generation when a plugin re-registers its modals", () => {
+    setPluginSlotRegistrations(
+      "alpha",
+      registrationSet({ modals: [{ id: "settings", component: Body }] }),
+    );
+    const before = getPluginSlotSnapshot().modals[0]?.generation;
+    setPluginSlotRegistrations(
+      "alpha",
+      registrationSet({ modals: [{ id: "settings", component: Body }] }),
+    );
+    expect(getPluginSlotSnapshot().modals[0]?.generation).toBeGreaterThan(
+      before ?? 0,
+    );
+  });
+});
+
 describe("plugin slot store structural sharing", () => {
   it("keeps the messageActions array identity when a navPanels-only plugin registers", () => {
     setPluginSlotRegistrations(

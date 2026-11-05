@@ -125,6 +125,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginHomepageSectionProps`
 - `PluginSettingsSectionProps`
 - `ExperimentalAppOverlayProps`
+- `ExperimentalModalProps`
 - `PluginNavPanelProps`
 - `PluginNewThreadPanelProps`
 - `PluginPendingInteractionView`
@@ -179,6 +180,10 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginHomepageSectionRegistration`
 - `PluginSettingsSectionRegistration`
 - `ExperimentalAppOverlayRegistration`
+- `ExperimentalModalRegistration`
+- `ExperimentalModalOpenOptions`
+- `ExperimentalModalHandle`
+- `ExperimentalModalParams`
 - `ExperimentalFixedTabTargetContract`
 - `ExperimentalPluginFixedTabReference`
 - `PluginNavPanelRegistration`

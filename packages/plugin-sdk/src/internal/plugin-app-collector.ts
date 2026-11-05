@@ -19,3 +19,7 @@ export {
   type CollectedSidebarNavigationRegistration,
   collectPluginAppRegistrations,
 } from "./plugin-app-registration-collector.js";
+export {
+  type ModalDriver,
+  installModalDriver,
+} from "./modal-handle.js";

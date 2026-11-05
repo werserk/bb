@@ -18,6 +18,8 @@ Read `testing.md` for examples and fidelity limits.
 - `installTestPluginRuntime`
 - `CapturedPluginApp`
 - `PluginAppSource`
+- `LoadPluginAppOptions`
+- `RecordedModalCall`
 - `loadPluginApp`
 - `ContentScriptTestMountOptions`
 - `ContentScriptThreadRowStatusCall`

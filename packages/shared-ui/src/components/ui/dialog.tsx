@@ -229,6 +229,7 @@ type DialogContentProps = React.ComponentPropsWithoutRef<
   onAfterCloseAutoFocus?: () => void;
   hideCloseButton?: boolean;
   compactContentClassName?: string;
+  overlayClassName?: string;
 };
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
@@ -238,6 +239,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
       children,
       hideCloseButton = false,
       compactContentClassName,
+      overlayClassName,
       onAfterCloseAutoFocus,
       onCloseAutoFocus,
       ...props
@@ -259,6 +261,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
         <ResponsiveDrawerShell
           open={open}
           contentClassName={compactContentClassName}
+          backdropClassName={overlayClassName}
           onOpenChange={onOpenChange}
           onAfterCloseAutoFocus={onAfterCloseAutoFocus}
           onContentAnimationEnd={(settledOpen) => {
@@ -287,7 +290,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
     return (
       <DialogPrimitive.Portal>
-        <DialogOverlay />
+        <DialogOverlay className={overlayClassName} />
         <DialogPrimitive.Content
           ref={ref}
           {...scopeProps}
