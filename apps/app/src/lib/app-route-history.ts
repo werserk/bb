@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import type { Location } from "react-router-dom";
+import { readModalFromLocationState } from "./modal-host";
 
 export interface AppRouteHistoryEntry {
   key: string;
   url: string;
+  modal?: string | null;
 }
 
 export interface AppRouteHistoryState {
@@ -25,15 +27,22 @@ function getNormalizedUrl(location: Location): string {
   return `${location.pathname}${location.search}${location.hash}`;
 }
 
+function isSamePage(
+  a: AppRouteHistoryEntry,
+  b: AppRouteHistoryEntry,
+): boolean {
+  return a.url === b.url && (a.modal ?? null) === (b.modal ?? null);
+}
+
 export function findBackTargetIndex(
   state: AppRouteHistoryState,
 ): number | null {
-  const currentUrl = state.entries[state.index]?.url;
-  if (currentUrl === undefined) {
+  const current = state.entries[state.index];
+  if (current === undefined) {
     return null;
   }
   for (let candidate = state.index - 1; candidate >= 0; candidate -= 1) {
-    if (state.entries[candidate].url !== currentUrl) {
+    if (!isSamePage(state.entries[candidate], current)) {
       return candidate;
     }
   }
@@ -43,8 +52,8 @@ export function findBackTargetIndex(
 export function findForwardTargetIndex(
   state: AppRouteHistoryState,
 ): number | null {
-  const currentUrl = state.entries[state.index]?.url;
-  if (currentUrl === undefined) {
+  const current = state.entries[state.index];
+  if (current === undefined) {
     return null;
   }
   for (
@@ -52,7 +61,7 @@ export function findForwardTargetIndex(
     candidate < state.entries.length;
     candidate += 1
   ) {
-    if (state.entries[candidate].url !== currentUrl) {
+    if (!isSamePage(state.entries[candidate], current)) {
       return candidate;
     }
   }
@@ -101,7 +110,11 @@ function recordLocation(
     return;
   }
   lastRecordedLocation = location;
-  const entry = { key: location.key, url: getNormalizedUrl(location) };
+  const entry = {
+    key: location.key,
+    url: getNormalizedUrl(location),
+    modal: readModalFromLocationState(location.state)?.token ?? null,
+  };
   historyState =
     historyState.entries.length === 0
       ? { entries: [entry], index: 0 }

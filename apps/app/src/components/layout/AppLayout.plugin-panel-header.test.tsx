@@ -123,6 +123,10 @@ vi.mock("@/components/plugin/PluginAppOverlays", () => ({
   PluginAppOverlays: () => <div data-testid="plugin-app-overlays" />,
 }));
 
+vi.mock("@/components/modal/ModalHost", () => ({
+  ModalHost: () => <div data-testid="modal-host" />,
+}));
+
 vi.mock("@/components/plugin/ThreadRowMetadataCollectors", () => ({
   ThreadRowMetadataCollectors: () => null,
 }));
@@ -268,6 +272,16 @@ describe("AppLayout plugin panel header", () => {
       screen
         .getByTestId("thread-actions-provider")
         .contains(screen.getByTestId("plugin-app-overlays")),
+    ).toBe(true);
+  });
+
+  it("mounts the modal host inside the app-level thread actions provider", () => {
+    renderPluginPanelRoute();
+
+    expect(
+      screen
+        .getByTestId("thread-actions-provider")
+        .contains(screen.getByTestId("modal-host")),
     ).toBe(true);
   });
 
