@@ -78,11 +78,7 @@ function resolveSiblingThreadStorageTarget({
     return null;
   }
   const [threadId, ...fileSegments] = relativeToParent.split("/");
-  if (
-    !threadId ||
-    !isRawThreadId(threadId) ||
-    fileSegments.length === 0
-  ) {
+  if (!threadId || !isRawThreadId(threadId) || fileSegments.length === 0) {
     return null;
   }
   return {

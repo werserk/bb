@@ -15,6 +15,7 @@ import {
   buildEnvironmentFileContentUrl,
   buildThreadStorageRawContentUrl,
 } from "@/lib/file-content-urls";
+import { isPdfPath, PdfViewerFrame } from "./PdfViewerFrame";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import type { EmbeddedLocalFileTarget } from "@/lib/embedded-local-file-target";
 
@@ -46,6 +47,14 @@ function getDownloadUrl(target: LocalFileViewerTarget): string {
 }
 
 function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
+  if (isPdfPath(target.relativePath)) {
+    return (
+      <PdfViewerFrame
+        title={getFileName(target.relativePath)}
+        url={getDownloadUrl(target)}
+      />
+    );
+  }
   if (target.kind === "thread-storage") {
     return (
       <ThreadStorageFilePreviewTabContent

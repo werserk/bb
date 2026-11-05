@@ -115,9 +115,11 @@ describe("resolveEmbeddedLocalFileTarget", () => {
     expect(resolve("/home/me/.bb/thread-storage")).toMatchObject({
       kind: "unavailable",
     });
-    expect(resolve("/home/me/.bb/thread-storage/thr_abcd234567")).toMatchObject({
-      kind: "unavailable",
-    });
+    expect(resolve("/home/me/.bb/thread-storage/thr_abcd234567")).toMatchObject(
+      {
+        kind: "unavailable",
+      },
+    );
   });
 
   it("rejects paths outside every served root", () => {
