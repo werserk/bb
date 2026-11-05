@@ -35,11 +35,11 @@ describe("resolveEmbeddedLocalFileTarget", () => {
 
   it("opens a file in another thread's storage next to it", () => {
     expect(
-      resolve("/home/me/.bb/thread-storage/thr_other/report.html"),
+      resolve("/home/me/.bb/thread-storage/thr_abcd234567/report.html"),
     ).toMatchObject({
       kind: "thread-storage",
       relativePath: "report.html",
-      threadId: "thr_other",
+      threadId: "thr_abcd234567",
     });
   });
 
@@ -76,7 +76,7 @@ describe("resolveEmbeddedLocalFileTarget", () => {
 
   it("rejects traversal out of the sibling storage parent", () => {
     expect(
-      resolve("/home/me/.bb/thread-storage/thr_other/../../config.json"),
+      resolve("/home/me/.bb/thread-storage/thr_abcd234567/../../config.json"),
     ).toMatchObject({ kind: "unavailable" });
   });
 
@@ -115,7 +115,7 @@ describe("resolveEmbeddedLocalFileTarget", () => {
     expect(resolve("/home/me/.bb/thread-storage")).toMatchObject({
       kind: "unavailable",
     });
-    expect(resolve("/home/me/.bb/thread-storage/thr_other")).toMatchObject({
+    expect(resolve("/home/me/.bb/thread-storage/thr_abcd234567")).toMatchObject({
       kind: "unavailable",
     });
   });
@@ -153,6 +153,18 @@ describe("resolveEmbeddedLocalFileTarget", () => {
         storage: "C:\\Users\\me\\.bb\\thread-storage\\thr_own",
       }),
     ).toMatchObject({ kind: "unavailable" });
+  });
+
+  it("resolves a Windows-style sibling thread storage link", () => {
+    expect(
+      resolve("C:\\Users\\me\\.bb\\thread-storage\\thr_abcd234567\\a.png", {
+        storage: "C:\\Users\\me\\.bb\\thread-storage\\thr_own",
+      }),
+    ).toMatchObject({
+      kind: "thread-storage",
+      relativePath: "a.png",
+      threadId: "thr_abcd234567",
+    });
   });
 
   it("leaves app routes to normal navigation", () => {

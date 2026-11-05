@@ -1,10 +1,13 @@
 import type { FilePreviewLineRange } from "@bb/client-core";
-import { getHostPathDirname, getRelativeHostPath } from "@bb/domain";
+import {
+  getHostPathDirname,
+  getRelativeHostPath,
+  isRawThreadId,
+} from "@bb/domain";
 import { normalizeAbsoluteFilePath } from "@bb/shared-ui/lib/absolute-file-path";
 import type { ThreadTimelineLocalFileLink } from "@/components/thread/timeline";
 import { resolveThreadLocalFileLink } from "./thread-local-file-links";
 
-const SIBLING_THREAD_ID_PATTERN = /^thr_[A-Za-z0-9]+$/;
 const THREAD_STORAGE_PARENT_PATTERN = /(?:^|[\\/])thread-storage$/;
 
 interface ResolveEmbeddedLocalFileTargetArgs {
@@ -77,7 +80,7 @@ function resolveSiblingThreadStorageTarget({
   const [threadId, ...fileSegments] = relativeToParent.split("/");
   if (
     !threadId ||
-    !SIBLING_THREAD_ID_PATTERN.test(threadId) ||
+    !isRawThreadId(threadId) ||
     fileSegments.length === 0
   ) {
     return null;
