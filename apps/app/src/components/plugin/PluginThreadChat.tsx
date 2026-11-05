@@ -18,6 +18,7 @@ import {
   type ThreadTimelineForkMessageHandler,
 } from "@/components/thread/timeline";
 import { useThreadTimelineNavigation } from "@/components/thread/timeline/ThreadTimelineNavigationContext";
+import { useEmbeddedLocalFileLinkHandler } from "@/components/plugin/local-file-viewer/useEmbeddedLocalFileLinkHandler";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { PluginComposerHostScopeProvider } from "@/components/plugin/plugin-composer-host";
 import { ThreadProviderContext } from "@/components/thread/thread-provider-context";
@@ -175,7 +176,7 @@ function PluginThreadChatBody({
     thread !== undefined &&
     thread.environmentId === timelineNavigation?.environmentId;
   const onOpenLink = timelineNavigation?.onOpenLink;
-  const onOpenLocalFileLink = canUseHostFileNavigation
+  const hostOnOpenLocalFileLink = canUseHostFileNavigation
     ? timelineNavigation.onOpenLocalFileLink
     : undefined;
   const resolveHostMentionLink = canUseHostFileNavigation
@@ -186,6 +187,14 @@ function PluginThreadChatBody({
     (canUseHostFileNavigation
       ? timelineNavigation.workspaceRootPath
       : undefined);
+  const embeddedLocalFileLinks = useEmbeddedLocalFileLinkHandler({
+    enabled: hostOnOpenLocalFileLink === undefined && thread !== undefined,
+    environmentId: thread?.environmentId ?? null,
+    threadId: thread?.id ?? null,
+    workspaceRootPath: workspaceRootPath ?? null,
+  });
+  const onOpenLocalFileLink =
+    hostOnOpenLocalFileLink ?? embeddedLocalFileLinks.onOpenLocalFileLink;
   const pluginId = useContext(PluginContext);
   const consumerMessageActions = useMemo<
     readonly ThreadTimelineConsumerMessageAction[] | undefined
@@ -341,6 +350,7 @@ function PluginThreadChatBody({
           }}
           workspaceRootPath={workspaceRootPath}
         />
+        {embeddedLocalFileLinks.viewer}
       </PluginComposerHostScopeProvider>
     </ThreadProviderContext.Provider>
   );

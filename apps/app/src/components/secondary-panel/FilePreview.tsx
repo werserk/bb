@@ -129,6 +129,7 @@ interface FilePreviewProps {
 }
 
 interface FilePreviewBodyProps {
+  centerMedia: boolean;
   iframePreview: ReactNode;
   state: FilePreviewState;
   path: string;
@@ -185,6 +186,7 @@ interface CsvFilePreviewProps {
 interface FilePreviewImageProps {
   url: string;
   alt: string;
+  centered: boolean;
 }
 
 interface FilePreviewVideoProps {
@@ -580,6 +582,7 @@ export function FilePreview({
         />
       ) : null}
       <FilePreviewBody
+        centerMedia={headerMode === "none"}
         iframePreview={iframePreview}
         state={state}
         path={path}
@@ -593,6 +596,7 @@ export function FilePreview({
 }
 
 function FilePreviewBody({
+  centerMedia,
   iframePreview,
   state,
   path,
@@ -622,7 +626,9 @@ function FilePreviewBody({
     return <UnsupportedFilePreview file={state.file} />;
   }
   if (state.kind === "image") {
-    return <FilePreviewImage url={state.url} alt={path} />;
+    return (
+      <FilePreviewImage url={state.url} alt={path} centered={centerMedia} />
+    );
   }
   if (state.kind === "video") {
     return <FilePreviewVideo url={state.url} title={path} />;
@@ -1193,7 +1199,7 @@ function CsvFilePreview({ file, onSelectionAddToChat }: CsvFilePreviewProps) {
   );
 }
 
-function FilePreviewImage({ url, alt }: FilePreviewImageProps) {
+function FilePreviewImage({ url, alt, centered }: FilePreviewImageProps) {
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const imageTabLightbox = useImageTabLightbox();
 
@@ -1204,10 +1210,16 @@ function FilePreviewImage({ url, alt }: FilePreviewImageProps) {
   }, [alt, imageTabLightbox, url]);
 
   return (
-    <div className="pt-4">
+    <div
+      className={
+        centered ? "flex min-h-full items-center justify-center p-4" : "pt-4"
+      }
+    >
       <button
         type="button"
-        className="block w-full cursor-zoom-in"
+        className={
+          centered ? "block cursor-zoom-in" : "block w-full cursor-zoom-in"
+        }
         aria-label={`Open ${alt} in full screen preview`}
         onClick={() => {
           if (imageTabLightbox) {
