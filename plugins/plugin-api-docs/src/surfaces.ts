@@ -570,6 +570,26 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         experimental: true,
       },
       {
+        id: "modal",
+        title: "Large modal",
+        summary:
+          "Open one large modal drawn by bb, with its own history entry. With this, a plugin can:",
+        bullets: [
+          "Show a settings or creation flow in a centred window, or a sheet on a phone",
+          "Let back, forward and Esc close and reopen it without leaving the page",
+          "Keep its own body and footer while bb draws the frame",
+        ],
+        apiSymbols: [
+          "ExperimentalModalRegistration",
+          "ExperimentalModalProps",
+          "ExperimentalModalHandle",
+          "ExperimentalModalOpenOptions",
+          "ExperimentalModalParams",
+        ],
+        firstParty: [],
+        experimental: true,
+      },
+      {
         id: "content-scripts",
         title: "App-wide scripts",
         summary:

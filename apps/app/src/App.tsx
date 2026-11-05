@@ -5,7 +5,7 @@ import { PluginUpdateJobsHost } from "./components/plugin/PluginUpdateJobsHost";
 import { LazyThreadDetailView } from "./views/thread-detail/LazyThreadDetailView";
 import { LazyRootComposeView } from "./views/LazyRootComposeView";
 import { useRouteState } from "./hooks/useRouteState";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { parseMessageLink } from "@bb/client-core";
 import {
   matchPath,
@@ -22,6 +22,7 @@ import { RouteNavigationProvider } from "./components/ui/app-route-anchor";
 import { RouteNavigationIndicator } from "./components/ui/route-navigation-indicator";
 import { AppNavigationUrlHost } from "./lib/url-open-routing";
 import { NativeShellReporter } from "./lib/native-shell";
+import { isModalOnlyTransition } from "./lib/modal-host";
 import { UiPreferencesSync } from "@/lib/ui-preferences/UiPreferencesSync";
 import { AppFileExternalNavigationHost } from "./components/plugin/AppFileExternalNavigationHost";
 import { pluginDetailKeyFromRoute } from "./components/plugin/plugin-detail-key";
@@ -246,8 +247,12 @@ const HASH_NAVIGATION_WAIT_MS = 2_000;
 
 export function HashNavigationScroll() {
   const location = useLocation();
+  const previousLocation = useRef(location);
 
   useEffect(() => {
+    const previous = previousLocation.current;
+    previousLocation.current = location;
+    if (isModalOnlyTransition(previous, location)) return;
     if (parseMessageLink(`${location.pathname}${location.hash}`) !== null) {
       return;
     }
@@ -283,7 +288,7 @@ export function HashNavigationScroll() {
     observer.observe(document.body, { childList: true, subtree: true });
     timeoutId = window.setTimeout(stopWaiting, HASH_NAVIGATION_WAIT_MS);
     return stopWaiting;
-  }, [location.hash, location.key, location.pathname]);
+  }, [location]);
 
   return null;
 }

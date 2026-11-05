@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  ExperimentalModalHandle,
   ExperimentalSidebarFooterDisclosureController,
   PluginAppSlots,
   PluginSidebarFooterActionContext,
 } from "@get-bb/plugin-sdk";
 import {
   getCollectedSidebarFooterItems,
+  installModalDriver,
   type LegacyThreadHeaderActionRegistration,
 } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
 import { loadPluginApp } from "@get-bb/plugin-sdk/testing/app";
@@ -65,6 +67,122 @@ describe("collectPluginAppRegistrations — experimental_appOverlay", () => {
     expect(() => collectPluginAppRegistrations(malformed)).toThrow(
       '"component" must be a React component function',
     );
+  });
+});
+
+describe("collectPluginAppRegistrations — experimental_modal", () => {
+  const calls: Array<[string | null, string]> = [];
+
+  beforeEach(() => {
+    installModalDriver({
+      open: (pluginId, modalId) => {
+        calls.push([pluginId, modalId]);
+      },
+      close: () => {},
+      subscribe: () => () => {},
+      getOpenId: () => null,
+    });
+  });
+
+  afterEach(() => {
+    calls.length = 0;
+  });
+
+  function collectModals(pluginId?: string) {
+    let handle: ExperimentalModalHandle | undefined;
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_modal({ id: "settings", component: Component });
+      handle = app.slots.experimental_modal({
+        id: "create",
+        component: Component,
+      });
+    });
+    const collected = collectPluginAppRegistrations(
+      definition,
+      undefined,
+      pluginId,
+    );
+    return { collected, handle: handle as ExperimentalModalHandle };
+  }
+
+  it("rejects duplicate ids, malformed components and ids with a slash", () => {
+    const duplicate = definePluginApp((app) => {
+      app.slots.experimental_modal({ id: "a", component: Component });
+      app.slots.experimental_modal({ id: "a", component: Component });
+    });
+    const malformed = definePluginApp((app) => {
+      app.slots.experimental_modal({ id: "a", component: null as never });
+    });
+    const coreLike = definePluginApp((app) => {
+      app.slots.experimental_modal({
+        id: "core/local-file-viewer",
+        component: Component,
+      });
+    });
+
+    expect(() => collectPluginAppRegistrations(duplicate)).toThrow(
+      'slots.experimental_modal: duplicate id "a"',
+    );
+    expect(() => collectPluginAppRegistrations(malformed)).toThrow(
+      '"component" must be a React component function',
+    );
+    expect(() => collectPluginAppRegistrations(coreLike)).toThrow(
+      /experimental_modal/,
+    );
+  });
+
+  it("collects the registrations and returns the same handle for every registration of one plugin", () => {
+    const first = collectModals("alpha");
+    expect(first.collected.modals.map((modal) => modal.id)).toEqual([
+      "settings",
+      "create",
+    ]);
+
+    let secondHandle: unknown;
+    let thirdHandle: unknown;
+    collectPluginAppRegistrations(
+      definePluginApp((app) => {
+        secondHandle = app.slots.experimental_modal({
+          id: "a",
+          component: Component,
+        });
+        thirdHandle = app.slots.experimental_modal({
+          id: "b",
+          component: Component,
+        });
+      }),
+      undefined,
+      "alpha",
+    );
+    expect(secondHandle).toBe(thirdHandle);
+  });
+
+  it("opens only ids its own plugin registered, bound to that plugin's id", () => {
+    const alpha = collectModals("alpha");
+    const beta = collectPluginAppRegistrations(
+      definePluginApp((app) => {
+        app.slots.experimental_modal({ id: "other", component: Component });
+      }),
+      undefined,
+      "beta",
+    );
+    expect(beta.modals).toHaveLength(1);
+
+    alpha.handle.open("settings", { title: "Settings" });
+    expect(calls).toEqual([["alpha", "settings"]]);
+    expect(() => alpha.handle.open("other", { title: "Other" })).toThrow(
+      /not a modal this plugin registered/,
+    );
+    expect(() =>
+      alpha.handle.open("core/local-file-viewer", { title: "Viewer" }),
+    ).toThrow(/not a modal this plugin registered/);
+    expect(calls).toEqual([["alpha", "settings"]]);
+  });
+
+  it("gives an unbound collector's handle no plugin id", () => {
+    const unbound = collectModals();
+    unbound.handle.open("settings", { title: "Settings" });
+    expect(calls).toEqual([[null, "settings"]]);
   });
 });
 

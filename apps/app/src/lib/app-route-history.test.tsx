@@ -21,7 +21,11 @@ import {
   getAutomationsRoutePath,
   getSkillDetailRoutePath,
 } from "./route-paths";
-import { resetAppRouteHistoryForTest } from "./app-route-history";
+import {
+  findBackTargetIndex,
+  findForwardTargetIndex,
+  resetAppRouteHistoryForTest,
+} from "./app-route-history";
 
 const TOOL_SKILL_DETAIL_ROUTE = getSkillDetailRoutePath({
   skillId: "skill_review_loop",
@@ -220,5 +224,42 @@ describe("useRouteStateHistoryNavigation", () => {
     await clickAndExpectPath("Remount plugin", editPath);
     await clickAndExpectPath("Redirect edit to compose", "/");
     await clickAndExpectPath("Native back", getAutomationsRoutePath());
+  });
+});
+
+describe("modal entries in the in-app history", () => {
+  const page = { key: "a", url: "/chat" };
+  const modal = { key: "b", url: "/chat", modal: "t1" };
+  const next = { key: "c", url: "/other" };
+
+  it("steps back from a modal entry onto the page under it", () => {
+    expect(
+      findBackTargetIndex({ entries: [page, modal], index: 1 }),
+    ).toBe(0);
+  });
+
+  it("steps forward from the page onto a modal entry", () => {
+    expect(
+      findForwardTargetIndex({ entries: [page, modal, next], index: 0 }),
+    ).toBe(1);
+  });
+
+  it("steps from a modal entry to the next page, not over it", () => {
+    expect(
+      findForwardTargetIndex({ entries: [page, modal, next], index: 1 }),
+    ).toBe(2);
+    expect(
+      findBackTargetIndex({ entries: [page, modal, next], index: 2 }),
+    ).toBe(1);
+  });
+
+  it("still skips same-URL entries when no modal is involved", () => {
+    const again = { key: "d", url: "/chat" };
+    expect(
+      findBackTargetIndex({ entries: [next, page, again], index: 2 }),
+    ).toBe(0);
+    expect(
+      findForwardTargetIndex({ entries: [again, page, next], index: 0 }),
+    ).toBe(2);
   });
 });
