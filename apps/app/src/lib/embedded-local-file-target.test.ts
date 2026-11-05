@@ -89,6 +89,28 @@ describe("resolveEmbeddedLocalFileTarget", () => {
     });
   });
 
+  it.each([
+    "/home/me/.bb/thread-storage/%2e%2e/f.png",
+    "/home/me/.bb/thread-storage/x#y/f.png",
+    "/home/me/.bb/thread-storage/x?y/f.png",
+    "/home/me/.bb/thread-storage/x\\y/f.png",
+    "/home/me/.bb/thread-storage/thr_a b/f.png",
+    "/home/me/.bb/thread-storage/notathread/f.png",
+  ])("rejects a sibling segment that is not a thread id: %s", (path) => {
+    expect(resolve(path)).toMatchObject({ kind: "unavailable" });
+  });
+
+  it("makes no sibling target when the storage parent is not thread-storage", () => {
+    expect(resolve("/etc/passwd", { storage: "/thr_own" })).toMatchObject({
+      kind: "unavailable",
+    });
+    expect(
+      resolve("/home/me/other/thr_x/a.png", {
+        storage: "/home/me/other/thr_own",
+      }),
+    ).toMatchObject({ kind: "unavailable" });
+  });
+
   it("rejects the storage parent itself and a bare thread directory", () => {
     expect(resolve("/home/me/.bb/thread-storage")).toMatchObject({
       kind: "unavailable",

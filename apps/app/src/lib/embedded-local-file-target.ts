@@ -4,6 +4,9 @@ import { normalizeAbsoluteFilePath } from "@bb/shared-ui/lib/absolute-file-path"
 import type { ThreadTimelineLocalFileLink } from "@/components/thread/timeline";
 import { resolveThreadLocalFileLink } from "./thread-local-file-links";
 
+const SIBLING_THREAD_ID_PATTERN = /^thr_[A-Za-z0-9]+$/;
+const THREAD_STORAGE_PARENT_PATTERN = /(?:^|[\\/])thread-storage$/;
+
 interface ResolveEmbeddedLocalFileTargetArgs {
   environmentId: string | null;
   link: ThreadTimelineLocalFileLink;
@@ -58,7 +61,10 @@ function resolveSiblingThreadStorageTarget({
     return null;
   }
   const storageParentPath = getHostPathDirname(threadStorageRootPath);
-  if (storageParentPath === null) {
+  if (
+    storageParentPath === null ||
+    !THREAD_STORAGE_PARENT_PATTERN.test(storageParentPath)
+  ) {
     return null;
   }
   const relativeToParent = getRelativeHostPath({
@@ -69,7 +75,11 @@ function resolveSiblingThreadStorageTarget({
     return null;
   }
   const [threadId, ...fileSegments] = relativeToParent.split("/");
-  if (!threadId || fileSegments.length === 0) {
+  if (
+    !threadId ||
+    !SIBLING_THREAD_ID_PATTERN.test(threadId) ||
+    fileSegments.length === 0
+  ) {
     return null;
   }
   return {
