@@ -43,6 +43,18 @@ describe("PdfViewerFrame", () => {
     );
   });
 
+  it("pins the blob type to application/pdf and revokes the url on unmount", async () => {
+    fetchMock.mockResolvedValue(pdfResponse("application/pdf; charset=binary"));
+    const { unmount } = render(
+      <PdfViewerFrame title="doc.pdf" url="/api/v1/x/doc.pdf" />,
+    );
+    await screen.findByTitle("doc.pdf");
+    const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob;
+    expect(blob.type).toBe("application/pdf");
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:pdf-1");
+  });
+
   it("refuses a response that is not application/pdf", async () => {
     fetchMock.mockResolvedValue(pdfResponse("text/html"));
     render(<PdfViewerFrame title="doc.pdf" url="/api/v1/x/doc.pdf" />);

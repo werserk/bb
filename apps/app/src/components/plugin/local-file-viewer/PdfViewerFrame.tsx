@@ -27,7 +27,9 @@ async function loadPdfBlob(url: string, signal: AbortSignal): Promise<Blob> {
   ) {
     throw new Error("The file is not a PDF document.");
   }
-  return response.blob();
+  return new Blob([await response.arrayBuffer()], {
+    type: "application/pdf",
+  });
 }
 
 export function PdfViewerFrame({ title, url }: PdfViewerFrameProps) {
