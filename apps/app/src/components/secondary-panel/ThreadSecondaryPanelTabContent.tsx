@@ -39,6 +39,7 @@ interface WorkspaceFilePreviewTabContentProps {
   isPanelOpen: boolean;
   copyPath?: string | null;
   environmentId?: string | null;
+  headerMode?: "file" | "none";
   lineRange: FilePreviewLineRange | null;
   markdownLinkRouting?: MarkdownLinkRouting;
   onSelectionAddToChat?: (text: string) => void;
@@ -94,6 +95,7 @@ interface ThreadStorageFilePreviewTabContentProps {
   activePath: string;
   isPanelOpen: boolean;
   copyPath?: string | null;
+  headerMode?: "file" | "none";
   lineRange: FilePreviewLineRange | null;
   markdownLinkRouting?: MarkdownLinkRouting;
   onSelectionAddToChat?: (text: string) => void;
@@ -115,6 +117,7 @@ export function WorkspaceFilePreviewTabContent({
   activePath,
   copyPath = null,
   environmentId,
+  headerMode,
   isPanelOpen,
   lineRange,
   markdownLinkRouting,
@@ -163,6 +166,7 @@ export function WorkspaceFilePreviewTabContent({
       {...filePreviewQueryProps(workspaceFilePreviewQuery)}
       activePath={activePath}
       copyPath={copyPath}
+      headerMode={headerMode}
       htmlPreviewUrl={
         environmentId && source?.kind === "working-tree"
           ? buildEnvironmentFileContentUrl(environmentId, source, activePath)
@@ -315,6 +319,7 @@ export function HostScopedFilePreviewTabContent({
 export function ThreadStorageFilePreviewTabContent({
   activePath,
   copyPath = null,
+  headerMode,
   isPanelOpen,
   lineRange,
   markdownLinkRouting,
@@ -343,6 +348,7 @@ export function ThreadStorageFilePreviewTabContent({
       {...filePreviewQueryProps(threadStorageFilePreviewQuery)}
       activePath={activePath}
       copyPath={copyPath}
+      headerMode={headerMode}
       htmlPreviewUrl={buildThreadStorageRawContentUrl(threadId, activePath)}
       lineRange={lineRange}
       markdownLinkRouting={resolvedMarkdownLinkRouting}

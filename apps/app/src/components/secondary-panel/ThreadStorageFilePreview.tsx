@@ -30,6 +30,7 @@ interface SecondaryPanelFilePreviewProps {
   copyPath?: string | null;
   error?: Error | null;
   filePreview: FilePreview | undefined;
+  headerMode?: "file" | "none";
   htmlPreviewUrl?: string | null;
   isLoading: boolean;
   isRefreshing?: boolean;
@@ -176,6 +177,7 @@ export function SecondaryPanelFilePreview({
   copyPath = null,
   error,
   filePreview,
+  headerMode = "file",
   htmlPreviewUrl = null,
   isLoading,
   isRefreshing = false,
@@ -216,6 +218,7 @@ export function SecondaryPanelFilePreview({
           : null
       }
       copyPath={copyPath}
+      headerMode={headerMode}
       onSelectionAddToChat={onSelectionAddToChat}
       onOpenInEditor={onOpenInEditor}
       onRefresh={onRefresh}
