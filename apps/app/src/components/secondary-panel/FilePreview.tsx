@@ -537,6 +537,8 @@ export function FilePreview({
     usesCodeLayout ||
     usesMarkdownPreviewLayout;
 
+  const centersImage = headerMode === "none" && state.kind === "image";
+
   return (
     <div
       className={
@@ -545,7 +547,10 @@ export function FilePreview({
               "@container/page flex h-full min-h-0 flex-col",
               usesMarkdownPreviewLayout && "overflow-y-auto",
             )
-          : "@container/page min-h-full"
+          : cn(
+              "@container/page min-h-full",
+              centersImage && "flex flex-col",
+            )
       }
       data-file-preview-scroll-container={
         usesMarkdownPreviewLayout ? "" : undefined
@@ -1212,7 +1217,7 @@ function FilePreviewImage({ url, alt, centered }: FilePreviewImageProps) {
   return (
     <div
       className={
-        centered ? "flex min-h-full items-center justify-center p-4" : "pt-4"
+        centered ? "flex flex-1 items-center justify-center p-4" : "pt-4"
       }
     >
       <button
