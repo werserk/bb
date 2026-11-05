@@ -443,6 +443,16 @@ describe("crash isolation", () => {
     act(() => openCoreModal("core/crashy", { title: "C" }));
     await settle();
     expect(screen.getByText("This view could not load.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Try again. If it keeps happening, close this and reload the plugin.",
+      ),
+    ).toBeTruthy();
+    expect(
+      document.querySelector(
+        '[data-bb-modal-error] [data-icon="AlertTriangle"]',
+      ),
+    ).not.toBeNull();
     expect(screen.getByLabelText("Close")).toBeTruthy();
 
     crash = false;

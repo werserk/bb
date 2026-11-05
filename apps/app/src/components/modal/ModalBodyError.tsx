@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@bb/shared-ui/button";
+import { Icon } from "@bb/shared-ui/icon";
 
 export function ModalBodyError({
   onRetry,
@@ -12,16 +13,29 @@ export function ModalBodyError({
     <div
       role="alert"
       data-bb-modal-error=""
-      className="flex flex-col items-start gap-3 p-6"
+      className="flex items-start gap-3 p-6"
     >
-      <p className="text-sm text-foreground">This view could not load.</p>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={onRetry}>
-          Try again
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Close
-        </Button>
+      <Icon
+        name="AlertTriangle"
+        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+      />
+      <div className="flex flex-col items-start gap-3">
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium text-foreground">
+            This view could not load.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Try again. If it keeps happening, close this and reload the plugin.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       </div>
     </div>
   );
