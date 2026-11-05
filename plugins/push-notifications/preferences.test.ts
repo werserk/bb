@@ -12,9 +12,9 @@ const levels = notificationLevelSchema.options;
 const defaults = { defaultLevel: "all", childLevel: "inherit" } as const;
 
 describe("notification levels", () => {
-  it("lists levels from loud to quiet and labels Questions only", () => {
+  it("lists levels from loud to quiet and labels Needs you only", () => {
     expect(levels).toEqual(["all", "input-only", "questions-only", "muted"]);
-    expect(NOTIFICATION_LEVEL_LABELS["questions-only"]).toBe("Questions only");
+    expect(NOTIFICATION_LEVEL_LABELS["questions-only"]).toBe("Needs you only");
   });
 
   it("pushes only questions and owner posts at Questions only", () => {

@@ -50,8 +50,8 @@ describe("generatedConversationTitle — system source", () => {
     },
     {
       kind: "child-needs-attention",
-      plain: "Fix auth bug needs attention",
-      verb: "needs attention",
+      plain: "Fix auth bug needs you",
+      verb: "needs you",
     },
     {
       kind: "child-completed",

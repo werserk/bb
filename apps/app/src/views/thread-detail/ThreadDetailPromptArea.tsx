@@ -59,6 +59,7 @@ import {
 } from "@/components/plugin/plugin-composer-host";
 import {
   ThreadChildThreadsBanner,
+  ThreadChildQuestionCards,
   ThreadPromptContextBanner,
   type ThreadPromptParentThreadSection,
   type ThreadPromptChildThreadsSection,
@@ -2082,6 +2083,13 @@ export function ThreadDetailPromptArea({
         environmentGoneStatus === null ? (
           <ThreadMachineStatus hostId={environmentHostId} />
         ) : null}
+        {shouldHideComposer ? null : (
+          <ThreadChildQuestionCards
+            key={`child-questions:${thread.id}`}
+            questions={childThreadsSection?.pendingInteractions ?? []}
+            ownInteractions={orderedPendingInteractions}
+          />
+        )}
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
           childThreads={
@@ -2203,6 +2211,7 @@ export function ThreadDetailPromptArea({
       modelFallback,
       parentThreadSection,
       childThreadsSection,
+      orderedPendingInteractions,
       pendingTodos,
       displayedProcessingQueuedMessage,
       queuedMessageCount,
@@ -2237,6 +2246,13 @@ export function ThreadDetailPromptArea({
   const pendingInteractionStack = useMemo(
     () => (
       <>
+        {shouldHideComposer ? null : (
+          <ThreadChildQuestionCards
+            key={`child-questions:${thread.id}`}
+            questions={childThreadsSection?.pendingInteractions ?? []}
+            ownInteractions={orderedPendingInteractions}
+          />
+        )}
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
           childThreads={childThreadsSection}
@@ -2253,8 +2269,11 @@ export function ThreadDetailPromptArea({
       activePromptModeCard,
       childThreadsBannerKey,
       childThreadsSection,
+      orderedPendingInteractions,
       isChildThreadsExpanded,
       goal,
+      shouldHideComposer,
+      thread.id,
     ],
   );
 

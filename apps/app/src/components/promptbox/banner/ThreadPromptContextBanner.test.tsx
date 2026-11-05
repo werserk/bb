@@ -388,7 +388,7 @@ describe("ThreadPromptContextBanner", () => {
 
     expect(markup).toContain(">2<");
     expect(markup).not.toContain(">+");
-    expect(markup).toContain('aria-label="Needs input"');
+    expect(markup).toContain("1 needs you · 1 working");
     expect(markup).toContain('aria-label="Working"');
     expect(markup).toContain('data-icon="Loading"');
   });
@@ -427,16 +427,12 @@ describe("ThreadPromptContextBanner", () => {
       </MemoryRouter>
     );
 
-    const collapsed = renderToMarkup(renderBanner(null));
-    expect(collapsed).toContain(">Which color should the badge use?<");
-    expect(collapsed).toContain(
-      'aria-label="2 active child threads, needs input: Install workspace tools: Which color should the badge use?"',
-    );
-    expect(collapsed).not.toContain("Active child threads");
-
-    const expanded = renderToMarkup(renderBanner(CHILD_THREADS));
-    expect(expanded).toContain("Active child threads");
-    expect(expanded).toContain('aria-label="2 active child threads"');
+    for (const state of [null, CHILD_THREADS]) {
+      const markup = renderToMarkup(renderBanner(state));
+      expect(markup).not.toContain("Which color should the badge use?");
+      expect(markup).not.toContain("Install workspace tools");
+      expect(markup).toContain("1 needs you · 1 working");
+    }
   });
 
   it("expands once when a child thread newly needs input, even across remounts", () => {
@@ -480,7 +476,7 @@ describe("ThreadPromptContextBanner", () => {
 
     rerender(renderBanner([blocked, working]));
     expect(onToggleSection).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Active child threads")).toBeTruthy();
+    expect(screen.getByText("1 needs you · 1 working")).toBeTruthy();
 
     rerender(
       renderBanner([blocked, working], {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from "react";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { PendingInteraction } from "@bb/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,9 @@ import {
   useChildThreadPendingAttention,
   type ChildThreadPendingAttentionSource,
 } from "./child-thread-pending-interactions";
+
+import { useThreadPendingInteractions } from "./thread-queries";
+import { applyResolvedThreadPendingInteraction } from "../cache-owners/mutation-cache-effects";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -159,5 +162,44 @@ describe("useChildThreadPendingAttention", () => {
       "thr_blocked",
       "thr_stale",
     ]);
+  });
+});
+
+it("clears the child's own card and every parent observer from the same answer", async () => {
+  const interaction = makeApproval("pi_shared", 10);
+  mocks.list.mockResolvedValue([interaction]);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const children = [
+    {
+      id: "thr_child",
+      title: "Child",
+      href: "/threads/thr_child",
+      hasPendingInteraction: true,
+    },
+  ];
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  const { result } = renderHook(
+    () => ({
+      own: useThreadPendingInteractions("thr_child").data,
+      parent: useChildThreadPendingAttention(children),
+      secondParent: useChildThreadPendingAttention(children),
+    }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.parent).toHaveLength(1));
+  await act(async () => {
+    applyResolvedThreadPendingInteraction({
+      queryClient,
+      interaction: { ...interaction, status: "resolved" },
+    });
+  });
+  await waitFor(() => {
+    expect(result.current.own).toEqual([]);
+    expect(result.current.parent).toEqual([]);
+    expect(result.current.secondParent).toEqual([]);
   });
 });

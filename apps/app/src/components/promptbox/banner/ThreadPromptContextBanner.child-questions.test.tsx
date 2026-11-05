@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
+import { Provider, createStore } from "jotai";
+import { splitLayoutAtom, maximizedPaneIdAtom } from "@/lib/split-layout/atoms";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -15,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PendingInteraction } from "@bb/domain";
 import {
   ThreadChildThreadsBanner,
+  ThreadChildQuestionCards,
   type ChildThreadQuestion,
   type ThreadPromptChildThreadsSection,
 } from "./ThreadPromptContextBanner";
@@ -84,7 +87,6 @@ function childQuestion(
 
 const newest = childQuestion("thr_b", "Which size?", 3);
 const middle = childQuestion("thr_c", "Which shape?", 2);
-const oldest = childQuestion("thr_a", "Which color?", 1);
 
 function section(
   pendingInteractions: readonly ChildThreadQuestion[],
@@ -142,256 +144,103 @@ function bannerElement(
   );
 }
 
-function openForm() {
-  return screen.queryByTestId("user-question-banner");
-}
-
-function shownSource(): string | null {
-  return screen.getByRole("link", { name: /^Child thr_/ }).textContent;
-}
-
-function press(name: "Previous question" | "Next question") {
-  const button = screen.getByRole("button", { name });
-  button.focus();
-  fireEvent.click(button);
-}
-
 afterEach(() => {
   cleanup();
   mocks.resolveHook.mockClear();
   mocks.resolve.mockClear();
 });
 
-describe("ThreadPromptContextBanner child questions", () => {
-  it("auto-expands to the row list without opening a question", () => {
-    const { rerender } = render(bannerElement(section([]), false));
-
-    rerender(bannerElement(section([newest, middle, oldest]), false));
-
-    expect(screen.getByText("Active child threads")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Child thr_b/ }).textContent,
-    ).toBe("Child thr_b: Which size?");
-    expect(screen.getByText("Investigate failing checks")).toBeTruthy();
-    expect(openForm()).toBe(null);
-  });
-
-  it("opens the clicked child's question compactly inside the banner", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_c/ }));
-
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Back to active child threads" }),
-    );
-    const form = openForm();
-    expect(form?.getAttribute("data-presentation")).toBe("inline");
-    expect(shownSource()).toBe("Child thr_c");
-    expect(screen.getByText("2 of 3")).toBeTruthy();
-    expect(screen.getAllByText("Which shape?").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Submit answer" })).toBe(null);
-    expect(screen.queryByText("Investigate failing checks")).toBe(null);
-  });
-
-  it("expands to the row list from the collapsed header without opening a question", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(
-      screen.getByRole("button", { name: "4 active child threads" }),
-    );
-    expect(openForm()).toBe(null);
-
-    const header = screen.getByRole("button", {
-      name: "4 active child threads, needs input: Child thr_b: Which size?",
-    });
-    fireEvent.click(header);
-
-    expect(openForm()).toBe(null);
+describe("child question announcements", () => {
+  it("shows counts without question text or an answer path in the child strip", () => {
+    render(bannerElement(section([newest, middle])));
+    expect(screen.getByText("2 needs you · 1 working")).toBeTruthy();
+    expect(screen.queryByText(/Which size/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Child thr_b/ })).toBeNull();
+    expect(screen.queryByTestId("user-question-banner")).toBeNull();
     expect(screen.getByText("Investigate failing checks")).toBeTruthy();
   });
+});
 
-  it("steps both ways, wraps, and keeps focus on the pressed caret", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
+function cards(
+  questions: readonly ChildThreadQuestion[],
+  ownInteractions: readonly PendingInteraction[] = [],
+) {
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <ThreadChildQuestionCards
+          questions={questions}
+          ownInteractions={ownInteractions}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
 
-    press("Next question");
-    expect(shownSource()).toBe("Child thr_c");
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Next question" }),
-    );
-    press("Next question");
-    press("Next question");
-    expect(shownSource()).toBe("Child thr_b");
-    press("Previous question");
-    expect(shownSource()).toBe("Child thr_a");
-    expect(screen.getByText("3 of 3")).toBeTruthy();
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Previous question" }),
-    );
+it("relays one answer card per interaction and submits to the original child", async () => {
+  render(cards([newest, newest]));
+  expect(screen.getAllByTestId("user-question-banner")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: /^Alpha/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+  await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1));
+  expect(mocks.resolve).toHaveBeenCalledWith({
+    threadId: "thr_b",
+    interactionId: "pint_thr_b",
+    resolution: {
+      kind: "user_answer",
+      answers: { choice: { selected: ["a"] } },
+    },
   });
+});
 
-  it("drops the back control when the parent has a single child thread", () => {
-    const only = section([newest]);
-    render(
-      bannerElement({
-        ...only,
-        items: only.items.filter((item) => item.hasPendingInteraction),
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
+it("omits the relay when the question already has an own card", () => {
+  render(cards([newest], [newest.interaction]));
+  expect(screen.queryByTestId("user-question-banner")).toBeNull();
+});
 
-    expect(shownSource()).toBe("Child thr_b");
-    expect(
-      screen.queryByRole("button", { name: "Back to active child threads" }),
-    ).toBe(null);
-  });
+it("clears the relay after an answer arrives from another view", () => {
+  const { rerender } = render(cards([newest]));
+  expect(screen.getByTestId("user-question-banner")).toBeTruthy();
+  rerender(
+    cards([
+      { ...newest, interaction: { ...newest.interaction, status: "resolved" } },
+    ]),
+  );
+  expect(screen.queryByTestId("user-question-banner")).toBeNull();
+});
 
-  it("drops the stepper and the collapse row for a single open question", () => {
-    render(bannerElement(section([newest])));
-    expect(
-      screen.getByRole("button", { name: /^Collapse \d+ child threads?$/ }),
-    ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-
-    expect(shownSource()).toBe("Child thr_b");
-    expect(screen.queryByRole("button", { name: "Next question" })).toBe(null);
-    expect(screen.queryByText(/^\d+ of \d+$/)).toBe(null);
-    expect(
-      screen.queryByRole("button", { name: /^Collapse \d+ child threads?$/ }),
-    ).toBe(null);
-  });
-
-  it("returns focus to the row in its own banner when another banner lists the same child", () => {
-    render(
-      <>
-        {bannerElement(section([newest, middle, oldest]))}
-        {bannerElement(section([newest, middle, oldest]))}
-      </>,
-    );
-    const [, second] = screen.getAllByRole("region", { name: "Child threads" });
-    if (!second) throw new Error("expected two banners");
-    fireEvent.click(
-      within(second).getByRole("button", { name: /Child thr_c/ }),
-    );
-    fireEvent.click(
-      within(second).getByRole("button", {
-        name: "Back to active child threads",
-      }),
-    );
-
-    expect(document.activeElement).toBe(
-      within(second).getByRole("button", { name: /Child thr_c/ }),
-    );
-  });
-
-  it("returns to the row list on Escape", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Submit" }), {
-      key: "Escape",
-    });
-
-    expect(openForm()).toBe(null);
-    expect(screen.getByText("Investigate failing checks")).toBeTruthy();
-  });
-
-  it("leaves focus outside the banner alone when the open question is answered elsewhere", () => {
-    const withOutside = (
-      childThreads: ThreadPromptChildThreadsSection,
-      showOutside: boolean,
-    ) => (
-      <>
-        {bannerElement(childThreads)}
-        {showOutside ? <button type="button">Elsewhere</button> : null}
-      </>
-    );
-    const { rerender } = render(withOutside(section([newest, middle]), true));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-    screen.getByRole("button", { name: "Elsewhere" }).focus();
-
-    rerender(withOutside(section([middle]), false));
-    expect(shownSource()).toBe("Child thr_c");
-    expect(document.activeElement).toBe(document.body);
-  });
-
-  it("returns to the row list on Cancel and leaves the question waiting", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_c/ }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(openForm()).toBe(null);
-    expect(
-      screen.getByRole("button", { name: /Child thr_c/ }).textContent,
-    ).toBe("Child thr_c: Which shape?");
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: /Child thr_c/ }),
-    );
-  });
-
-  it("keeps the question open for an Escape that ends text composition", () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Submit" }), {
-      key: "Escape",
-      isComposing: true,
-    });
-
-    expect(openForm()).not.toBe(null);
-  });
-
-  it("submits the answer to the open child's interaction", async () => {
-    render(bannerElement(section([newest, middle, oldest])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_c/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^Alpha/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
-
-    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1));
-    expect(mocks.resolveHook).toHaveBeenLastCalledWith("thr_c");
-    expect(mocks.resolve).toHaveBeenCalledWith({
-      threadId: "thr_c",
-      interactionId: "pint_thr_c",
-      resolution: {
-        kind: "user_answer",
-        answers: { choice: { selected: ["a"] } },
+it("shows the question only in the child's pane when parent and child are visible together", () => {
+  const store = createStore();
+  const view = () => <Provider store={store}>{cards([newest])}</Provider>;
+  render(view());
+  act(() =>
+    store.set(splitLayoutAtom, {
+      focusedPaneId: "parent",
+      root: {
+        type: "split",
+        dir: "row",
+        sizes: [50, 50],
+        children: [
+          {
+            type: "pane",
+            paneId: "parent",
+            content: {
+              kind: "thread",
+              projectId: "proj_1",
+              threadId: "thr_parent",
+            },
+          },
+          {
+            type: "pane",
+            paneId: "child",
+            content: { kind: "thread", projectId: "proj_1", threadId: "thr_b" },
+          },
+        ],
       },
-    });
-  });
-
-  it("does not re-render the open form when the banner updates around it", () => {
-    const queryClient = new QueryClient();
-    const { rerender } = render(
-      bannerElement(section([newest, middle]), true, queryClient),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-    const formRenders = mocks.resolveHook.mock.calls.length;
-
-    rerender(bannerElement(section([newest, middle]), true, queryClient));
-
-    expect(shownSource()).toBe("Child thr_b");
-    expect(mocks.resolveHook.mock.calls.length).toBe(formRenders);
-  });
-
-  it("moves to the next question after an answer, keeping focus in the banner, then closes when none remain", () => {
-    const { rerender } = render(bannerElement(section([newest, middle])));
-    fireEvent.click(screen.getByRole("button", { name: /Child thr_b/ }));
-    screen.getByRole("button", { name: /^Alpha/ }).focus();
-
-    rerender(bannerElement(section([middle])));
-    expect(shownSource()).toBe("Child thr_c");
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Back to active child threads" }),
-    );
-
-    screen.getByRole("button", { name: /^Alpha/ }).focus();
-    rerender(bannerElement(section([])));
-    expect(openForm()).toBe(null);
-    expect(screen.getByText("Investigate failing checks")).toBeTruthy();
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "1 active child thread" }),
-    );
-  });
+    }),
+  );
+  expect(screen.queryByTestId("user-question-banner")).toBeNull();
+  // A hidden child pane cannot own the answer path.
+  act(() => store.set(maximizedPaneIdAtom, "parent"));
+  expect(screen.getByTestId("user-question-banner")).toBeTruthy();
 });

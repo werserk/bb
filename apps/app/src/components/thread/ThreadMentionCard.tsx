@@ -16,10 +16,10 @@ export type ThreadCardStatus =
   | "archived";
 
 export const THREAD_CARD_STATUS_LABELS: Record<ThreadCardStatus, string> = {
-  running: "Running",
+  running: "Working",
   idle: "Idle",
-  waiting: "Waiting on you",
-  error: "Error",
+  waiting: "Needs you",
+  error: "Failed",
   archived: "Archived",
 };
 

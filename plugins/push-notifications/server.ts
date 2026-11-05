@@ -152,7 +152,7 @@ export function createPushNotificationsPlugin(
         type: "select",
         label: "Default notifications",
         description:
-          "For threads you haven't set. Needs input only skips finished turns; Questions only also skips errors.",
+          "For threads you haven't set. Everything sends questions, approvals, owner posts, failures and finished work. Needs you and failures skips finished work. Needs you only sends questions, approvals and owner posts; it does not send failures or finished work.",
         options: [...notificationLevelSchema.options],
         experimental_optionLabels: {
           all: NOTIFICATION_LEVEL_LABELS.all,

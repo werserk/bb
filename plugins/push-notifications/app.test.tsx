@@ -321,19 +321,19 @@ describe("thread notifications action", () => {
       selected: "inherit",
     });
     expect(summary({ id: "thr_other", parentThreadId: "thr_top" })).toEqual({
-      detail: "Needs input only",
+      detail: "Needs you and failures",
       icon: "BellDot",
       hint: null,
       selected: "inherit",
     });
     expect(summary({ id: "thr_new" })).toEqual({
-      detail: "All activity",
+      detail: "Everything",
       icon: "push-notifications/ringing",
       hint: null,
       selected: "inherit",
     });
     expect(summary({ id: "thr_unshown" })).toEqual({
-      detail: "All activity",
+      detail: "Everything",
       icon: "push-notifications/ringing",
       hint: null,
       selected: "inherit",
@@ -369,7 +369,7 @@ describe("thread notifications action", () => {
     ]);
     await waitFor(() => expect(summary()?.selected).toBe("inherit"));
     const child = { id: "thr_child", parentThreadId: "thr_top" };
-    expect(summary(child)?.detail).toBe("Needs input only");
+    expect(summary(child)?.detail).toBe("Needs you and failures");
 
     restore({
       thr_top: { own: "muted", ancestorCap: null },

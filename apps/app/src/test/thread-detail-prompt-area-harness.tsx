@@ -494,6 +494,7 @@ vi.mock("@/components/promptbox/banner/ThreadGoalCard", () => ({
 
 vi.mock("@/components/promptbox/banner/ThreadPromptContextBanner", () => ({
   ThreadPromptContextBanner: () => null,
+  ThreadChildQuestionCards: () => null,
   ThreadChildThreadsBanner: ({
     childThreads,
   }: {
