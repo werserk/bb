@@ -175,6 +175,67 @@ describe("application menu", () => {
     expect(zoomFocusedPage.mock.calls).toEqual([["reset"], ["in"], ["out"]]);
   });
 
+  it("zooms from the unshifted equals key and the numpad on non-mac without duplicate accelerators", () => {
+    const zoomFocusedPage = vi.fn();
+    const template = buildApplicationMenuTemplate(
+      menuArgs(vi.fn(), { isMac: false, zoomFocusedPage }),
+    );
+    const viewMenu = template.find((item) => item.label === "View");
+    const submenu = viewMenu?.submenu as MenuItemConstructorOptions[];
+
+    for (const [accelerator, command] of [
+      ["CommandOrControl+Plus", "in"],
+      ["CommandOrControl+=", "in"],
+      ["CommandOrControl+numadd", "in"],
+      ["CommandOrControl+-", "out"],
+      ["CommandOrControl+numsub", "out"],
+    ]) {
+      const matches = submenu.filter(
+        (entry) => entry.accelerator === accelerator,
+      );
+      expect(matches).toHaveLength(1);
+      zoomFocusedPage.mockClear();
+      matches[0]?.click?.({} as never, undefined, {} as never);
+      expect(zoomFocusedPage.mock.calls).toEqual([[command]]);
+    }
+
+    const aliases = submenu.filter((entry) =>
+      [
+        "CommandOrControl+=",
+        "CommandOrControl+numadd",
+        "CommandOrControl+numsub",
+      ].includes(entry.accelerator ?? ""),
+    );
+    expect(aliases.map((entry) => entry.visible)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    const accelerators = submenu.flatMap((entry) =>
+      entry.accelerator === undefined ? [] : [entry.accelerator],
+    );
+    expect(new Set(accelerators).size).toBe(accelerators.length);
+  });
+
+  it("keeps the mac zoom menu to the three native items", () => {
+    const template = buildApplicationMenuTemplate(menuArgs(vi.fn()));
+    const viewMenu = template.find((item) => item.label === "View");
+    const submenu = viewMenu?.submenu as MenuItemConstructorOptions[];
+    expect(
+      submenu
+        .filter(
+          (entry) =>
+            entry.accelerator?.startsWith("CommandOrControl+") &&
+            /\+(0|-|Plus|=|num\w+)$/u.test(entry.accelerator),
+        )
+        .map((entry) => entry.accelerator),
+    ).toEqual([
+      "CommandOrControl+0",
+      "CommandOrControl+Plus",
+      "CommandOrControl+-",
+    ]);
+  });
+
   it("shows reload shortcuts without globally stealing browser commands", () => {
     const reloadWindow = vi.fn();
     const template = buildApplicationMenuTemplate(menuArgs(reloadWindow));

@@ -47,6 +47,16 @@ interface ApplicationMenuServerItem {
   name: string;
 }
 
+const HIDDEN_ZOOM_ACCELERATORS: ReadonlyArray<{
+  accelerator: string;
+  command: BbDesktopZoomCommand;
+  label: string;
+}> = [
+  { accelerator: "CommandOrControl+=", command: "in", label: "Zoom In" },
+  { accelerator: "CommandOrControl+numadd", command: "in", label: "Zoom In" },
+  { accelerator: "CommandOrControl+numsub", command: "out", label: "Zoom Out" },
+];
+
 export interface InstallApplicationMenuArgs {
   accelerators: ApplicationMenuAccelerators;
   isMac: boolean;
@@ -315,6 +325,16 @@ export function buildApplicationMenuTemplate(
             args.zoomFocusedPage("out");
           },
         },
+        ...(args.isMac
+          ? []
+          : HIDDEN_ZOOM_ACCELERATORS.map(({ accelerator, command, label }) => ({
+              accelerator,
+              label,
+              visible: false,
+              click() {
+                args.zoomFocusedPage(command);
+              },
+            }))),
         { type: "separator" },
         { role: "togglefullscreen" },
         ...createLocalLogsMenuItems(args),
