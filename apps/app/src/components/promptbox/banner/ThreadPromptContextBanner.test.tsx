@@ -47,9 +47,7 @@ function Banner({
   const isReadOnly =
     archivedSection !== null || environmentGoneSection !== null;
   return (
-    <GitSegmentFixtureProvider
-      value={gitSectionPending ? null : gitSection}
-    >
+    <GitSegmentFixtureProvider value={gitSectionPending ? null : gitSection}>
       <ThreadChildThreadsBanner
         childThreads={isReadOnly ? null : childThreadsSection}
         isExpanded={expandedSection === CHILD_THREADS}
@@ -354,7 +352,9 @@ describe("ThreadPromptContextBanner", () => {
     );
 
     expect(markup).toContain('aria-label="Child threads"');
-    expect(markup).toContain('aria-label="1 active child thread"');
+    expect(markup).toContain(
+      'aria-label="1 active child thread · 0 needs you"',
+    );
     expect(markup).toContain("Active child threads");
     expect(markup).toContain(">1<");
     expect(markup).toContain('data-icon="ChildThread"');
@@ -435,7 +435,7 @@ describe("ThreadPromptContextBanner", () => {
     }
   });
 
-  it("expands once when a child thread newly needs input, even across remounts", () => {
+  it("does not expand the working-thread list when a child newly needs input", () => {
     const onToggleSection = vi.fn();
     const renderBanner = (
       items: ReturnType<typeof childThreadItem>[],
@@ -471,11 +471,10 @@ describe("ThreadPromptContextBanner", () => {
     expect(onToggleSection).not.toHaveBeenCalled();
 
     rerender(renderBanner([blocked, working]));
-    expect(onToggleSection).toHaveBeenCalledTimes(1);
-    expect(onToggleSection).toHaveBeenCalledWith(CHILD_THREADS);
+    expect(onToggleSection).not.toHaveBeenCalled();
 
     rerender(renderBanner([blocked, working]));
-    expect(onToggleSection).toHaveBeenCalledTimes(1);
+    expect(onToggleSection).not.toHaveBeenCalled();
     expect(screen.getByText("1 needs you · 1 working")).toBeTruthy();
 
     rerender(
@@ -485,10 +484,10 @@ describe("ThreadPromptContextBanner", () => {
     );
     rerender(renderBanner([blocked, working], { gitSectionPending: true }));
     rerender(renderBanner([blocked, working]));
-    expect(onToggleSection).toHaveBeenCalledTimes(1);
+    expect(onToggleSection).not.toHaveBeenCalled();
     expect(
       screen
-        .getByRole("button", { name: "2 active child threads" })
+        .getByRole("button", { name: "2 active child threads · 1 needs you" })
         .querySelector('[data-icon="CircleQuestion"]'),
     ).not.toBeNull();
   });
@@ -547,7 +546,7 @@ describe("ThreadPromptContextBanner", () => {
     expect(screen.getByText("Thread is archived")).toBeTruthy();
   });
 
-  it("opens the child card for a newly waiting child while changed files are open", () => {
+  it("keeps changed files open when a child newly needs input", () => {
     const onToggleSection = vi.fn();
     const renderBanner = (
       items: ReturnType<typeof childThreadItem>[],
@@ -581,8 +580,7 @@ describe("ThreadPromptContextBanner", () => {
     );
     expect(onToggleSection).not.toHaveBeenCalled();
     rerender(renderBanner([blocked, working], "bb--git/changed-files"));
-    expect(onToggleSection).toHaveBeenCalledTimes(1);
-    expect(onToggleSection).toHaveBeenCalledWith(CHILD_THREADS);
+    expect(onToggleSection).not.toHaveBeenCalled();
   });
 });
 

@@ -2083,13 +2083,11 @@ export function ThreadDetailPromptArea({
         environmentGoneStatus === null ? (
           <ThreadMachineStatus hostId={environmentHostId} />
         ) : null}
-        {shouldHideComposer ? null : (
-          <ThreadChildQuestionCards
-            key={`child-questions:${thread.id}`}
-            questions={childThreadsSection?.pendingInteractions ?? []}
-            ownInteractions={orderedPendingInteractions}
-          />
-        )}
+        <ThreadChildQuestionCards
+          key={`child-questions:${thread.id}`}
+          questions={childThreadsSection?.pendingInteractions ?? []}
+          ownInteractions={orderedPendingInteractions}
+        />
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
           childThreads={
@@ -2246,13 +2244,11 @@ export function ThreadDetailPromptArea({
   const pendingInteractionStack = useMemo(
     () => (
       <>
-        {shouldHideComposer ? null : (
-          <ThreadChildQuestionCards
-            key={`child-questions:${thread.id}`}
-            questions={childThreadsSection?.pendingInteractions ?? []}
-            ownInteractions={orderedPendingInteractions}
-          />
-        )}
+        <ThreadChildQuestionCards
+          key={`child-questions:${thread.id}`}
+          questions={childThreadsSection?.pendingInteractions ?? []}
+          ownInteractions={orderedPendingInteractions}
+        />
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
           childThreads={childThreadsSection}
@@ -2272,7 +2268,6 @@ export function ThreadDetailPromptArea({
       orderedPendingInteractions,
       isChildThreadsExpanded,
       goal,
-      shouldHideComposer,
       thread.id,
     ],
   );

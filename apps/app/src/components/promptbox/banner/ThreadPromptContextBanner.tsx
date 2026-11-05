@@ -32,8 +32,6 @@ import {
 import {
   createContext,
   useContext,
-  useEffect,
-  useRef,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -344,7 +342,7 @@ function ActiveChildThreadsCard({
         id={SECTION_IDS.childThreads.toggle}
         aria-expanded={isExpanded}
         aria-controls={SECTION_IDS.childThreads.body}
-        aria-label={`${items.length} active ${childThreadNoun(items.length)}`}
+        aria-label={`${items.length} active ${childThreadNoun(items.length)} · ${waiting} needs you`}
         onClick={focus.onTriggerClick}
         className={activityRowClass(
           "active",
@@ -422,8 +420,8 @@ export function ThreadChildQuestionCards({
     ),
   );
   const seen = new Set(ownInteractions.map((interaction) => interaction.id));
-  return questions
-    .filter(({ interaction, childThreadId }) => {
+  const relayedQuestions = questions.filter(
+    ({ interaction, childThreadId }) => {
       if (visibleChildThreads.has(childThreadId)) return false;
       if (
         seen.has(interaction.id) ||
@@ -432,21 +430,57 @@ export function ThreadChildQuestionCards({
         return false;
       seen.add(interaction.id);
       return true;
-    })
-    .map(({ interaction, childThreadId, childTitle, href }) => (
-      <div key={interaction.id} data-child-question-card={interaction.id}>
-        <NavLink
-          to={href}
-          className="px-3 text-xs text-muted-foreground underline underline-offset-2"
-        >
-          <ThreadTitle title={childTitle} inline />
-        </NavLink>
-        <ThreadPendingInteractionBanners
-          interactions={[interaction]}
-          threadId={childThreadId}
-        />
-      </div>
-    ));
+    },
+  );
+  const overflow = relayedQuestions.slice(3);
+  return (
+    <>
+      {relayedQuestions
+        .slice(0, 3)
+        .map(({ interaction, childThreadId, childTitle, href }) => (
+          <div key={interaction.id} data-child-question-card={interaction.id}>
+            <NavLink
+              to={href}
+              className="px-3 text-xs text-muted-foreground underline underline-offset-2"
+            >
+              <ThreadTitle title={childTitle} inline />
+            </NavLink>
+            <ThreadPendingInteractionBanners
+              interactions={[interaction]}
+              threadId={childThreadId}
+            />
+          </div>
+        ))}
+      {overflow.length > 0 ? (
+        <PromptStackCard ariaLabel="More child questions">
+          <details>
+            <summary
+              className={cn(
+                PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
+                "cursor-pointer text-xs",
+              )}
+            >
+              +{overflow.length} more need you
+            </summary>
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pb-2">
+              {overflow.map(({ interaction, childTitle, href }) => (
+                <li key={interaction.id} className="text-xs">
+                  <NavLink to={href} className={CHILD_THREAD_ROW_CLASS}>
+                    <Icon
+                      name="CircleQuestion"
+                      className="size-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <ThreadTitle title={childTitle} tooltip />
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </PromptStackCard>
+      ) : null}
+    </>
+  );
 }
 
 function PendingBannerActionButton({
@@ -468,28 +502,6 @@ function PendingBannerActionButton({
 }
 
 const NO_CHILD_THREAD_ITEMS: readonly ThreadPromptChildThreadItem[] = [];
-
-function useExpandForNewNeedsInput(
-  items: readonly ThreadPromptChildThreadItem[],
-  isExpanded: boolean,
-  onExpand: () => void,
-) {
-  const needsInputKey = items
-    .filter((item) => item.hasPendingInteraction)
-    .map((item) => item.id)
-    .join(" ");
-  const seenNeedsInputKey = useRef("");
-  useEffect(() => {
-    const seen = new Set(seenNeedsInputKey.current.split(" "));
-    seenNeedsInputKey.current = needsInputKey;
-    const hasNewNeedsInput =
-      needsInputKey !== "" &&
-      needsInputKey.split(" ").some((id) => !seen.has(id));
-    if (hasNewNeedsInput && !isExpanded) {
-      onExpand();
-    }
-  }, [needsInputKey, isExpanded, onExpand]);
-}
 
 type DisclosureFocusHandoff = ReturnType<typeof useDisclosureFocusHandoff>;
 
@@ -553,7 +565,6 @@ export function ThreadChildThreadsBanner({
   onExpandedChange: (isExpanded: boolean) => void;
 }) {
   const items = childThreads?.items ?? NO_CHILD_THREAD_ITEMS;
-  useExpandForNewNeedsInput(items, isExpanded, () => onExpandedChange(true));
   if (childThreads === null || items.length === 0) return null;
   return (
     <ActiveChildThreadsCard

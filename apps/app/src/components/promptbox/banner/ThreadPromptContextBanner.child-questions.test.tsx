@@ -154,6 +154,7 @@ describe("child question announcements", () => {
   it("shows counts without question text or an answer path in the child strip", () => {
     render(bannerElement(section([newest, middle])));
     expect(screen.getByText("2 needs you · 1 working")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 needs you/ })).toBeTruthy();
     expect(screen.queryByText(/Which size/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Child thr_b/ })).toBeNull();
     expect(screen.queryByTestId("user-question-banner")).toBeNull();
@@ -198,6 +199,41 @@ it("omits the relay when the question already has an own card", () => {
   expect(screen.queryByTestId("user-question-banner")).toBeNull();
 });
 
+it("limits answer cards to three and opens the remaining threads as a list", () => {
+  const questions = Array.from({ length: 5 }, (_, index) =>
+    childQuestion(`thr_${index}`, `Question ${index}?`, 5 - index),
+  );
+  const { rerender } = render(cards([...questions, questions[4]!]));
+  expect(screen.getAllByTestId("user-question-banner")).toHaveLength(3);
+  const more = screen.getByText("+2 more need you");
+  expect(more.closest("details")?.open).toBe(false);
+  fireEvent.click(more);
+  expect(more.closest("details")?.open).toBe(true);
+  expect(
+    screen.getByRole("link", { name: "Child thr_3" }).getAttribute("href"),
+  ).toBe("/threads/thr_3");
+  expect(
+    screen.getByRole("link", { name: "Child thr_4" }).getAttribute("href"),
+  ).toBe("/threads/thr_4");
+  expect(screen.getAllByTestId("user-question-banner")).toHaveLength(3);
+
+  rerender(
+    cards(
+      questions.map((question, index) =>
+        index < 2
+          ? {
+              ...question,
+              interaction: { ...question.interaction, status: "resolved" },
+            }
+          : question,
+      ),
+    ),
+  );
+  expect(screen.getAllByTestId("user-question-banner")).toHaveLength(3);
+  expect(screen.queryByText(/more need you/)).toBeNull();
+  expect(screen.getAllByText("Question 4?")).toHaveLength(2);
+});
+
 it("clears the relay after an answer arrives from another view", () => {
   const { rerender } = render(cards([newest]));
   expect(screen.getByTestId("user-question-banner")).toBeTruthy();
@@ -219,7 +255,7 @@ it("shows the question only in the child's pane when parent and child are visibl
       root: {
         type: "split",
         dir: "row",
-        sizes: [50, 50],
+        sizes: [0.5, 0.5],
         children: [
           {
             type: "pane",

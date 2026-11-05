@@ -273,6 +273,54 @@ it.each(["removed", "removing", "cleanup-failed"] as const)(
   },
 );
 
+it.each([
+  {
+    name: "archived",
+    thread: makeThread({ archivedAt: 1 }),
+    environmentGoneStatus: null,
+  },
+  {
+    name: "destroyed environment",
+    thread: makeThread(),
+    environmentGoneStatus: "destroyed" as const,
+  },
+  {
+    name: "removed machine",
+    thread: makeThread(),
+    environmentGoneStatus: "removed" as const,
+  },
+])(
+  "keeps child questions answerable with a hidden composer: $name",
+  ({ thread, environmentGoneStatus }) => {
+    renderPromptArea({
+      thread,
+      environmentGoneStatus,
+      childThreadsSection: {
+        items: [
+          {
+            id: "thr_child",
+            title: "Child",
+            href: "/threads/thr_child",
+            hasPendingInteraction: true,
+          },
+        ],
+        pendingInteractions: [
+          {
+            childThreadId: "thr_child",
+            childTitle: "Child",
+            href: "/threads/thr_child",
+            interaction: makePendingInteraction(),
+          },
+        ],
+      },
+    });
+    expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "Answer child question" }),
+    ).toBeTruthy();
+  },
+);
+
 describe("environment follow-up summary", () => {
   it("renders for a thread with an environment even when it has no environment label", () => {
     renderPromptArea({ thread: makeThread({ environmentId: "env_1" }) });
