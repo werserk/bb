@@ -146,7 +146,10 @@ export function ModalFrame({
   }, [open]);
 
   const restoreOpener = (event?: Event) => {
-    if (openRef.current) return;
+    if (openRef.current) {
+      event?.preventDefault();
+      return;
+    }
     const opener =
       lastToken.current === null ? null : getModalOpener(lastToken.current);
     if (opener === null || !opener.isConnected) return;
