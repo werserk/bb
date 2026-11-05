@@ -754,6 +754,61 @@ function isSummarizableActivityRow(
   );
 }
 
+export function isPendingQuestionRow(
+  row: ThreadTimelineViewRow,
+): row is TimelineQuestionViewWorkRow {
+  return (
+    row.kind === "work" &&
+    row.workKind === "question" &&
+    row.lifecycle === "pending"
+  );
+}
+
+/**
+ * A completed thought with text. Directly before a pending question it is
+ * shown as its own row instead of being folded into an activity group: it
+ * is often the only place the agent wrote what the owner needs to answer.
+ */
+export function isQuestionContextReasoningRow(
+  row: ThreadTimelineViewRow,
+): row is TimelineReasoningSummaryChild {
+  return (
+    row.kind === "system" &&
+    row.systemKind === "operation" &&
+    row.operationKind === "reasoning" &&
+    row.status === "completed" &&
+    row.detail !== null &&
+    row.detail.trim().length > 0
+  );
+}
+
+function isReasoningSummaryChild(
+  row: TimelineWorkSummaryChild,
+): row is TimelineReasoningSummaryChild {
+  return (
+    row.kind === "system" &&
+    row.systemKind === "operation" &&
+    row.operationKind === "reasoning"
+  );
+}
+
+function flushOpenStepBeforePendingQuestion(
+  work: TimelineWorkSummaryChild[],
+): ThreadTimelineViewRow[] {
+  let start = work.length;
+  while (start > 0 && isReasoningSummaryChild(work[start - 1]!)) start -= 1;
+  const trailing = work.slice(start);
+  const shown = new Set<TimelineWorkSummaryChild>(
+    trailing.filter(isQuestionContextReasoningRow),
+  );
+  if (shown.size === 0) return flushOpenStepAsBundles(work);
+  const kept = [
+    ...work.slice(0, start),
+    ...trailing.filter((row) => !shown.has(row)),
+  ];
+  return [...flushOpenStepAsBundles(kept), ...shown];
+}
+
 function isTimelineStepBoundary(row: ThreadTimelineViewRow): boolean {
   if (row.kind !== "conversation") return false;
   if (row.role === "user" && row.turnRequest.status === "pending") {
@@ -1009,7 +1064,11 @@ export function buildTimelineViewRows(
       result.push(row);
       continue;
     }
-    result.push(...flushOpenStepAsBundles(openStep));
+    result.push(
+      ...(isPendingQuestionRow(row)
+        ? flushOpenStepBeforePendingQuestion(openStep)
+        : flushOpenStepAsBundles(openStep)),
+    );
     openStep = [];
     result.push(row);
   }

@@ -6,6 +6,7 @@ import type {
   TimelineDelegationWorkRow,
   TimelineFileChangeWorkRow,
   TimelineRowBase,
+  TimelineQuestionWorkRow,
   TimelineRowStatus,
   TimelineToolWorkRow,
   TimelineSystemRow,
@@ -858,5 +859,130 @@ describe("reasoning within activity groups", () => {
       "work",
     ]);
     expect(rows[1]?.id).toBe("warning");
+  });
+});
+
+describe("reasoning before a pending question", () => {
+  type TimelineReasoningRow = Extract<
+    TimelineSystemRow,
+    { systemKind: "operation" }
+  > & { operationKind: "reasoning" };
+
+  function thought(
+    id: string,
+    seq: number,
+    detail: string | null = "Material for the owner.",
+  ): TimelineReasoningRow {
+    return {
+      ...baseRow(id, {
+        sourceSeqStart: seq,
+        sourceSeqEnd: seq,
+        startedAt: seq,
+        createdAt: seq + 1,
+      }),
+      kind: "system",
+      systemKind: "operation",
+      operationKind: "reasoning",
+      status: "completed",
+      title: "Thought",
+      detail,
+      completedAt: seq + 1,
+    };
+  }
+
+  function pendingQuestion(
+    lifecycle: "pending" | "answered" = "pending",
+  ): TimelineQuestionWorkRow {
+    return {
+      ...baseRow("question", { sourceSeqStart: 20, sourceSeqEnd: 20 }),
+      kind: "work",
+      workKind: "question",
+      status: lifecycle === "pending" ? "pending" : "completed",
+      interactionId: "interaction-1",
+      lifecycle,
+      questions: [],
+      answers: null,
+      statusReason: null,
+    };
+  }
+
+  it("shows the trailing thought as its own row after the activity group", () => {
+    const rows = buildTimelineViewRows([
+      thought("before", 1),
+      commandRowReadingPaths(["a.ts"], 2),
+      thought("between", 3),
+      commandRowReadingPaths(["b.ts"], 4),
+      thought("ask", 5),
+      pendingQuestion(),
+    ]);
+    expect(rows.map((row) => row.kind)).toEqual([
+      "bundle-summary",
+      "system",
+      "work",
+    ]);
+    expect(
+      expectBundleSummaryRow(rows[0]).children.map((child) => child.id),
+    ).toEqual(["before", "read-2", "between", "read-4"]);
+    expect(rows[1]?.id).toBe("ask");
+    expect(rows[2]?.id).toBe("question");
+  });
+
+  it("keeps earlier thoughts folded and shows every trailing thought with text", () => {
+    const rows = buildTimelineViewRows([
+      commandRowReadingPaths(["a.ts"], 1),
+      thought("first", 2),
+      thought("second", 3),
+      pendingQuestion(),
+    ]);
+    expect(rows.map((row) => row.id)).toEqual([
+      "read-1",
+      "first",
+      "second",
+      "question",
+    ]);
+  });
+
+  it("leaves a trailing thought without text inside the group", () => {
+    const empty = thought("empty", 3, null);
+    const rows = buildTimelineViewRows([
+      commandRowReadingPaths(["a.ts"], 1),
+      empty,
+      pendingQuestion(),
+    ]);
+    expect(rows.map((row) => row.kind)).toEqual(["bundle-summary", "work"]);
+    expect(
+      expectBundleSummaryRow(rows[0]).children.map((child) => child.id),
+    ).toContain("empty");
+  });
+
+  it("folds the thought back into the group once the question is answered", () => {
+    const rows = buildTimelineViewRows([
+      commandRowReadingPaths(["a.ts"], 1),
+      thought("ask", 2),
+      pendingQuestion("answered"),
+    ]);
+    expect(rows.map((row) => row.kind)).toEqual(["bundle-summary", "work"]);
+    expect(
+      expectBundleSummaryRow(rows[0]).children.map((child) => child.id),
+    ).toContain("ask");
+  });
+
+  it("does not move thoughts that follow assistant text or sit alone", () => {
+    const alone = thought("alone", 1);
+    expect(
+      buildTimelineViewRows([alone, pendingQuestion()]).map((row) => row.id),
+    ).toEqual(["alone", "question"]);
+    const message = assistantRow({
+      id: "text",
+      text: "Options",
+      sourceSeqStart: 2,
+    });
+    expect(
+      buildTimelineViewRows([
+        commandRowReadingPaths(["a.ts"], 1),
+        message,
+        pendingQuestion(),
+      ]).map((row) => row.kind),
+    ).toEqual(["work", "conversation", "work"]);
   });
 });

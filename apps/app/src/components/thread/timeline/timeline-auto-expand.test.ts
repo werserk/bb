@@ -7,6 +7,7 @@ import {
   delegationRow,
   extensionRow,
   imageViewRow,
+  questionRow,
   systemRow,
   workflowRow,
 } from "@/test/fixtures/thread-timeline-rows";
@@ -470,5 +471,68 @@ describe("collectTimelineAutoExpansionRowIds", () => {
 
     expect(ids.has("active-pending-delegation")).toBe(true);
     expect(ids.has("nested-pending-command")).toBe(false);
+  });
+});
+
+describe("reasoning before a pending question", () => {
+  function thought(id: string, detail: string | null) {
+    return systemRow({
+      id,
+      operationKind: "reasoning",
+      title: "Thought",
+      detail,
+      status: "completed",
+      sourceSeqStart: 2,
+      sourceSeqEnd: 2,
+    });
+  }
+  let readCount = 0;
+  const read = () =>
+    commandRow({
+      id: `read-${(readCount += 1)}`,
+      command: "pnpm test",
+      status: "completed",
+    });
+
+  it.each([true, false])(
+    "opens the trailing thought of a pending question (scope active: %s)",
+    (scopeActive) => {
+      const rows = buildTimelineViewRows([
+        read(),
+        thought("ask", "Options for the owner"),
+        questionRow({ lifecycle: "pending" }),
+      ]);
+      expect(collectAutoExpandedIds({ rows, scopeActive }).has("ask")).toBe(
+        true,
+      );
+    },
+  );
+
+  it.each(["answered", "resolving"] as const)(
+    "does not open it once the question is %s",
+    (lifecycle) => {
+      const rows = buildTimelineViewRows([
+        read(),
+        thought("ask", "Options for the owner"),
+        questionRow({ lifecycle }),
+      ]);
+      expect(
+        collectAutoExpandedIds({ rows, scopeActive: false }).has("ask"),
+      ).toBe(false);
+    },
+  );
+
+  it("does not open a thought without text or one folded in a group", () => {
+    const rows = buildTimelineViewRows([
+      read(),
+      thought("empty", null),
+      read(),
+      thought("ask", "Options for the owner"),
+      read(),
+      questionRow({ lifecycle: "pending" }),
+    ]);
+    const ids = collectAutoExpandedIds({ rows, scopeActive: false });
+    expect(ids.has("empty")).toBe(false);
+    expect(ids.has("ask")).toBe(false);
   });
 });

@@ -2,6 +2,8 @@ import {
   assertNever,
   findTimelineFrontierRow,
   hasTimelineExplorationIntent,
+  isPendingQuestionRow,
+  isQuestionContextReasoningRow,
   type ThreadTimelineViewRow,
   type TimelineViewWorkRow,
   type TimelineWorkSummaryChild,
@@ -199,6 +201,26 @@ function visitForLiveFrontierAutoExpand(
   }
 }
 
+// Pending question: the thoughts directly before it open, scope active or not
+// (a thread waiting for an answer need not count as running). They hold what
+// the agent wrote for the owner when it wrote no assistant text; see
+// `buildTimelineViewRows`, which keeps them out of the activity groups.
+function visitForPendingQuestionContext(
+  rows: readonly ThreadTimelineViewRow[],
+  ids: Set<string>,
+): void {
+  for (let i = 0; i < rows.length; i += 1) {
+    if (!isPendingQuestionRow(rows[i]!)) continue;
+    for (
+      let j = i - 1;
+      j >= 0 && isQuestionContextReasoningRow(rows[j]!);
+      j -= 1
+    ) {
+      ids.add(rows[j]!.id);
+    }
+  }
+}
+
 export function collectTimelineAutoExpansionRowIds({
   rows,
   scopeActive,
@@ -207,6 +229,7 @@ export function collectTimelineAutoExpansionRowIds({
   const liveExpandedRowIds = new Set<string>();
   visitForTerminalFrontierAutoExpand(rows, terminalFrontierRowIds);
   visitForLiveFrontierAutoExpand(rows, scopeActive, liveExpandedRowIds);
+  visitForPendingQuestionContext(rows, liveExpandedRowIds);
   return {
     liveExpandedRowIds,
     terminalFrontierRowIds,

@@ -25,6 +25,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   buildTimelineRowTitle,
+  buildTimelineViewRows,
   buildThreadTimelineFromEvents,
   extractThreadTimelineActivePlanTurn,
   type ThreadEventWithMeta,
@@ -3312,4 +3313,65 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
     operationKind: "reasoning",
   });
   expect(completed?.id).not.toBe(live.activeThinking?.id);
+});
+
+describe("owner-facing reasoning before a pending native question", () => {
+  it.each(["claude-code", "codex"])(
+    "shows the trailing thought of a %s question outside the activity group",
+    (providerId) => {
+      const event = createTimelineEventFactory({
+        threadId: "thread-1",
+        turnId: "turn-1",
+      });
+      const lifecycle = userQuestionLifecycleEvent({ seq: 100 });
+      if (lifecycle.event.type !== "system/interaction/lifecycle") {
+        throw new Error("Expected an interaction lifecycle event");
+      }
+      lifecycle.event.interaction.origin = {
+        kind: "provider",
+        providerId,
+        providerRequestId: "request-user-question",
+      };
+      const rows = buildTimelineRows(
+        [
+          ...fromRows([
+            event.turnStarted({ seq: 1 }),
+            event.commandStarted({ itemId: "ls", command: "ls" }),
+            event.commandCompleted({
+              itemId: "ls",
+              command: "ls",
+              exitCode: 0,
+            }),
+            event.commandStarted({ itemId: "pwd", command: "ls src" }),
+            event.commandCompleted({
+              itemId: "pwd",
+              command: "ls src",
+              exitCode: 0,
+            }),
+            event.reasoningStarted({ itemId: "thought" }),
+            event.reasoningCompleted({
+              itemId: "thought",
+              text: "Three options; I recommend A.",
+            }),
+          ]),
+          lifecycle,
+        ],
+        "active",
+      );
+      const view = buildTimelineViewRows(rows);
+      expect(view.map((row) => row.kind)).toEqual([
+        "bundle-summary",
+        "system",
+        "work",
+      ]);
+      expect(view[1]).toMatchObject({
+        operationKind: "reasoning",
+        detail: "Three options; I recommend A.",
+      });
+      expect(view[2]).toMatchObject({
+        workKind: "question",
+        lifecycle: "pending",
+      });
+    },
+  );
 });
