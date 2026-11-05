@@ -2457,8 +2457,11 @@ Docs: `frontend-core-slots.md`, `frontend-registration.md`,
 1. **Second plugin caller.** Confirm the registration-plus-handle shape against
    a plugin caller beyond the fork's first adopter, and decide whether the
    handle needs a plugin-scoped `isOpen` besides `useOpenId`.
-2. **Close veto.** Decide whether a body may block Esc, scrim, Close and
-   history traversal (unsaved changes), and how that fits history entries.
+2. **Close veto / ownership.** Decide whether a body may block Esc, scrim,
+   Close and history traversal (unsaved changes), and how that fits history
+   entries. There is one global modal: any plugin's `close()` or `open()` closes
+   or replaces a modal another plugin owns, with its unsaved form. Decide
+   whether `close()` and a replacing `open()` are limited to the owner.
 3. **`params` size cap.** The cap is provisional: measured in Chromium, not in
    Safari or iOS. Re-audit against more than one browser before stabilizing.
 4. **Stacking.** A second `open` replaces the showing modal. Decide whether a

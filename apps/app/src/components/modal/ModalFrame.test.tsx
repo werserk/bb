@@ -262,6 +262,7 @@ describe("ModalFrame as a phone sheet", () => {
 describe("viewport crossing 768", () => {
   it("remounts the body on the same entry with the same params", async () => {
     render(<Harness />);
+    screen.getByText("Opener").focus();
     act(() =>
       openCoreModal("core/form", { title: "Settings", params: { n: 4 } }),
     );
@@ -277,5 +278,9 @@ describe("viewport crossing 768", () => {
     expect(screen.getByTestId("params").textContent).toBe('{"n":4}');
     expect(window.history.length).toBe(length);
     expect(window.history.state.usr.bbModal.token).toBe(token);
+    expect(
+      document.activeElement?.closest("[data-bb-modal-panel]"),
+    ).not.toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByText("Opener"));
   });
 });

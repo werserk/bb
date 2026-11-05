@@ -200,6 +200,39 @@ describe("ModalHost history rules", () => {
     expect(screen.getByTestId("params").textContent).toBe('{"n":2}');
   });
 
+  it("gives the body null params when none are passed", async () => {
+    render(<Harness />);
+    act(() => openCoreModal("core/test", { title: "A" }));
+    await settle();
+
+    expect(screen.getByTestId("params").textContent).toBe("null");
+    expect(window.history.state.usr.bbModal.params).toBeNull();
+  });
+
+  it("keeps deferring an open while the modal is still in history after the fallback delay", async () => {
+    render(<Harness />);
+    act(() => openCoreModal("core/test", { title: "A", params: { n: 1 } }));
+    await settle();
+    const first = modalToken();
+    go.mockImplementation(() => {});
+
+    act(() => {
+      closeModal();
+      openCoreModal("core/test", { title: "B", params: { n: 2 } });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(modalToken()).toBe(first);
+
+    go.mockRestore();
+    go = navigateSpy();
+    act(() => window.history.back());
+    await settle();
+
+    expect(screen.getByTestId("params").textContent).toBe('{"n":2}');
+  });
+
   it("reopens on forward with the params of the entry", async () => {
     render(<Harness />);
     act(() => openCoreModal("core/test", { title: "A", params: { n: 7 } }));

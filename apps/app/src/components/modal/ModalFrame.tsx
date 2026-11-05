@@ -135,12 +135,18 @@ export function ModalFrame({
 }: ModalFrameProps) {
   const compact = useIsCompactViewport();
   const lastToken = useRef<string | null>(null);
+  const openRef = useRef(open);
 
   useEffect(() => {
     if (token !== null) lastToken.current = token;
   }, [token]);
 
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const restoreOpener = (event?: Event) => {
+    if (openRef.current) return;
     const opener =
       lastToken.current === null ? null : getModalOpener(lastToken.current);
     if (opener === null || !opener.isConnected) return;

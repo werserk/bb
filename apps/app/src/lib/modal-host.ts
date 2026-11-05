@@ -14,6 +14,7 @@ export const CORE_MODAL_PREFIX = "core/";
 export const MODAL_TEXT_LIMIT = 200;
 export const MODAL_STATE_LIMIT_BYTES = 16 * 1024;
 const DISMISS_FALLBACK_MS = 1000;
+const DISMISS_GIVE_UP_MS = 5000;
 
 export type BbModalTarget =
   | { kind: "plugin"; pluginId: string; modalId: string }
@@ -197,7 +198,7 @@ function buildState(
 ): BbModalState {
   assertText("title", options?.title);
   if (options.context !== undefined) assertText("context", options.context);
-  const params = options.params ?? {};
+  const params = options.params ?? null;
   assertJsonValue(params, "params", new Set());
   const state: BbModalState = {
     ...target,
@@ -283,9 +284,19 @@ export function closeModal(): void {
   }
   dismissing = showing.token;
   const token = showing.token;
-  dismissTimer = setTimeout(() => {
-    if (dismissing === token) finishDismiss();
-  }, DISMISS_FALLBACK_MS);
+  const startedAt = Date.now();
+  const arm = () => {
+    dismissTimer = setTimeout(() => {
+      if (dismissing !== token) return;
+      const stillShowing = readHistoryModal()?.token === token;
+      if (stillShowing && Date.now() - startedAt < DISMISS_GIVE_UP_MS) {
+        arm();
+        return;
+      }
+      finishDismiss();
+    }, DISMISS_FALLBACK_MS);
+  };
+  arm();
   notify();
   void navigate(-1);
 }
