@@ -205,6 +205,24 @@ describe("FilePreview", () => {
     vi.restoreAllMocks();
   });
 
+  it("centres an image only when the preview has no header of its own", () => {
+    const state = { kind: "image", url: "/files/a.png" } as const;
+    const { rerender } = render(
+      <FilePreview headerMode="none" path="a.png" state={state} />,
+    );
+    const image = screen.getByAltText("a.png");
+    expect(image.parentElement?.parentElement?.className).toContain("flex-1");
+
+    rerender(<FilePreview path="a.png" state={state} />);
+    const panelImage = screen.getByAltText("a.png");
+    expect(panelImage.parentElement?.parentElement?.className).toContain(
+      "pt-4",
+    );
+    expect(panelImage.parentElement?.parentElement?.className).not.toContain(
+      "flex-1",
+    );
+  });
+
   it("offers a manual file refresh action", () => {
     const onRefresh = vi.fn();
 
