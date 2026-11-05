@@ -41,6 +41,7 @@ function isRegistered(
 }
 
 export function ModalHost() {
+  "use no memo";
   const location = useLocation();
   const navigate = useNavigate();
   const { modals } = usePluginSlots();
