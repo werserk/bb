@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { ExperimentalModalHandle } from "../../app-contract.js";
 import type {
   PluginAppSlots,
   PluginComposerApi,
@@ -15,6 +16,7 @@ import type {
 import {
   installTestPluginRuntime,
   loadPluginApp,
+  type RecordedModalCall,
   mountPluginContentScripts,
   renderSlot,
 } from "../app.js";
@@ -569,6 +571,71 @@ describe("loadPluginApp", () => {
         }),
       ),
     ).rejects.toThrow('slots.experimental_appOverlay: duplicate id "office"');
+  });
+
+  it("captures modal registrations and records the handle's calls under the test plugin id", async () => {
+    function Body() {
+      return <div>body</div>;
+    }
+    const modalCalls: RecordedModalCall[] = [];
+    let opener: (() => void) | undefined;
+    const captured = await loadPluginApp(
+      definePluginApp((builder) => {
+        const handle = builder.slots.experimental_modal({
+          id: "settings",
+          component: Body,
+        });
+        opener = () => {
+          handle.open("settings", {
+            title: "Settings",
+            context: "E2E",
+            params: { tab: "memory" },
+          });
+          handle.close();
+        };
+      }),
+      { modalCalls },
+    );
+
+    expect(captured.modals).toEqual([{ id: "settings", component: Body }]);
+    opener?.();
+    expect(modalCalls).toEqual([
+      {
+        kind: "open",
+        pluginId: "test-plugin",
+        modalId: "settings",
+        options: {
+          title: "Settings",
+          context: "E2E",
+          params: { tab: "memory" },
+        },
+      },
+      { kind: "close" },
+    ]);
+  });
+
+  it("rejects a duplicate modal id and a handle open() for an id the plugin did not register", async () => {
+    function Body() {
+      return null;
+    }
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          builder.slots.experimental_modal({ id: "a", component: Body });
+          builder.slots.experimental_modal({ id: "a", component: Body });
+        }),
+      ),
+    ).rejects.toThrow('slots.experimental_modal: duplicate id "a"');
+
+    let handle: ExperimentalModalHandle | undefined;
+    await loadPluginApp(
+      definePluginApp((builder) => {
+        handle = builder.slots.experimental_modal({ id: "a", component: Body });
+      }),
+    );
+    expect(() => handle?.open("b", { title: "B" })).toThrow(
+      /not a modal this plugin registered/,
+    );
   });
 
   it("captures and validates New thread panel action registrations", async () => {

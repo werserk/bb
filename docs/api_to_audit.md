@@ -2430,6 +2430,41 @@ Docs: `frontend-components.md`.
    project switching is right for embedded plugin workflows, rather than
    adding an explicit project-locking policy.
 
+## `app.slots.experimental_modal` (`@get-bb/plugin-sdk/app`)
+
+Registers a body for the host-owned large modal and returns this plugin's
+handle `{ open(modalId, { title, context?, params? }), close(), useOpenId() }`.
+BB draws the frame (scrim, centred 1040×740 panel or a full-height sheet below
+768 px, header with breadcrumb title and Close) and owns visibility through one
+browser history entry: `open` pushes an entry on the current URL (a second
+`open` replaces the showing modal), the modal is a pure function of that
+entry's `location.state`, so back, forward, mouse 4/5 and in-app history
+controls close and reopen it, and Esc, the scrim and Close pop it. A reload does
+not restore a modal. `params` is JSON, validated before any history call and
+capped in size (a failed `pushState` reloads the page). The handle is created by
+the collector bound to the registering plugin's id and can open only ids that
+plugin registered; core ids carry a reserved `core/` prefix.
+
+Core callers: none yet. The first one is the local-file viewer
+(`LocalFileViewerDialog`), which is not in this tree; it will register
+`core/local-file-viewer` and open through the host when its branch lands.
+
+Docs: `frontend-core-slots.md`, `frontend-registration.md`,
+`frontend-hooks-and-ui.md`.
+
+**Audit before stabilizing.**
+
+1. **Second plugin caller.** Confirm the registration-plus-handle shape against
+   a plugin caller beyond the fork's first adopter, and decide whether the
+   handle needs a plugin-scoped `isOpen` besides `useOpenId`.
+2. **Close veto.** Decide whether a body may block Esc, scrim, Close and
+   history traversal (unsaved changes), and how that fits history entries.
+3. **`params` size cap.** The cap is provisional: measured in Chromium, not in
+   Safari or iOS. Re-audit against more than one browser before stabilizing.
+4. **Stacking.** A second `open` replaces the showing modal. Decide whether a
+   nested stack with "close means up one level" is wanted.
+5. **Rename.** Drop the prefix project-wide and remove this entry.
+
 ## `app.slots.experimental_appOverlay` (`@get-bb/plugin-sdk/app`)
 
 Mounts a no-props plugin component once per app window, outside route-owned

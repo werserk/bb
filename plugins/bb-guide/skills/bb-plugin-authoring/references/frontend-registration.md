@@ -49,6 +49,11 @@ export default definePluginApp((app) => {
     id: "floating-status",
     component: FloatingStatus,
   });
+  const modal = app.slots.experimental_modal({
+    id: "project-settings",
+    component: ProjectSettingsModal,
+  });
+  // later, from a click handler: modal.open("project-settings", { title: "Project settings" })
   app.slots.navPanel({
     id: "board",
     title: "Board",

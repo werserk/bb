@@ -2,6 +2,9 @@
 
 Hooks:
 
+- `modal.useOpenId()` (the handle returned by `app.slots.experimental_modal`) →
+  the id of this plugin's modal that is showing, else `null`. Only components
+  that call it re-render when the modal changes. Experimental.
 - `useSdk()` → bb's public API client bound to your plugin: the same areas
   the `bb` CLI and the backend `bb.sdk` expose (`threads`, `threadSections`,
   `projects`, `environments`, `hosts`, `files`, …), running with the

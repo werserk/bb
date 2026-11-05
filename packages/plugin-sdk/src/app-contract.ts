@@ -860,6 +860,67 @@ export interface ExperimentalAppOverlayRegistration {
 }
 
 /**
+ * JSON-only value passed to a host modal. It lives in the browser history
+ * entry, so it must survive structured cloning and stay small (the host
+ * rejects values over its size cap).
+ */
+export type ExperimentalModalParams =
+  | null
+  | boolean
+  | number
+  | string
+  | ExperimentalModalParams[]
+  | { [key: string]: ExperimentalModalParams };
+
+/** Props of a modal body mounted by the host modal frame. */
+export interface ExperimentalModalProps {
+  /** The `params` passed to `open()`; `null` when none. */
+  params: ExperimentalModalParams;
+  /** True below the host's phone breakpoint (768 px), when the frame is a sheet. */
+  compact: boolean;
+  /** Same as Esc, the scrim and the Close control: pops the history entry. */
+  close(): void;
+}
+
+/**
+ * One modal body. The host draws the frame (scrim, panel, header, Close) and
+ * owns visibility through a history entry; the component draws the body and
+ * its own footer.
+ */
+export interface ExperimentalModalRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  component: ComponentType<ExperimentalModalProps>;
+}
+
+export interface ExperimentalModalOpenOptions {
+  /** Header title, at most 200 characters. */
+  title: string;
+  /** Muted breadcrumb prefix, rendered "context / title"; at most 200 characters. */
+  context?: string;
+  /** JSON-only; throws when not JSON or over the size cap. */
+  params?: ExperimentalModalParams;
+}
+
+/**
+ * Returned by `app.slots.experimental_modal()`: one handle per plugin, bound
+ * to the registering plugin. It can open only modal ids that plugin
+ * registered.
+ */
+export interface ExperimentalModalHandle {
+  /**
+   * Opens one of this plugin's modals, or replaces the one showing, in a
+   * single history entry. Throws for an unregistered id, non-JSON params or
+   * params over the size cap.
+   */
+  open(modalId: string, options: ExperimentalModalOpenOptions): void;
+  /** Pops the modal's history entry; ignored when none is showing. */
+  close(): void;
+  /** Hook: the id of this plugin's modal that is showing, else `null`. */
+  useOpenId(): string | null;
+}
+
+/**
  * A name the host resolves to a glyph, in this order: a name any plugin
  * registered with `app.experimental_icons.register()`, then a built-in BB icon
  * name (`"Zap"`), then a namespaced `"<pluginId>/<name>"` glyph naming an
@@ -3684,6 +3745,14 @@ export interface PluginAppSlots {
   experimental_appOverlay(
     registration: ExperimentalAppOverlayRegistration,
   ): void;
+  /**
+   * Register a body for the host-owned large modal and get this plugin's
+   * handle (see {@link ExperimentalModalHandle}). Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_modal(
+    registration: ExperimentalModalRegistration,
+  ): ExperimentalModalHandle;
   navPanel(registration: PluginNavPanelRegistration): void;
   /** Register a context-scoped tab. Experimental: see docs/api_to_audit.md. */
   experimental_tab<
