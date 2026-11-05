@@ -765,7 +765,9 @@ export function isPendingQuestionRow(
 }
 
 /**
- * A completed thought with text. Directly before a pending question it is
+ * A completed thought with text, or one whose text the server deferred
+ * (long thoughts arrive with `detail: null, contentDeferred: true` and load
+ * when the row is expanded). Directly before a pending question it is
  * shown as its own row instead of being folded into an activity group: it
  * is often the only place the agent wrote what the owner needs to answer.
  */
@@ -777,8 +779,8 @@ export function isQuestionContextReasoningRow(
     row.systemKind === "operation" &&
     row.operationKind === "reasoning" &&
     row.status === "completed" &&
-    row.detail !== null &&
-    row.detail.trim().length > 0
+    (row.contentDeferred === true ||
+      (row.detail !== null && row.detail.trim().length > 0))
   );
 }
 

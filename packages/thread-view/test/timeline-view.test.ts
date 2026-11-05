@@ -942,6 +942,19 @@ describe("reasoning before a pending question", () => {
     ]);
   });
 
+  it("shows a long thought whose text the server deferred", () => {
+    const long: TimelineReasoningRow = {
+      ...thought("long", 3, null),
+      contentDeferred: true,
+    };
+    const rows = buildTimelineViewRows([
+      commandRowReadingPaths(["a.ts"], 1),
+      long,
+      pendingQuestion(),
+    ]);
+    expect(rows.map((row) => row.id)).toEqual(["read-1", "long", "question"]);
+  });
+
   it("leaves a trailing thought without text inside the group", () => {
     const empty = thought("empty", 3, null);
     const rows = buildTimelineViewRows([

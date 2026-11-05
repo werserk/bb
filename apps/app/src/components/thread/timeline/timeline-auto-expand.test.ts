@@ -522,6 +522,18 @@ describe("reasoning before a pending question", () => {
     },
   );
 
+  it("opens a long thought whose text the server deferred", () => {
+    const long = { ...thought("long", null), contentDeferred: true as const };
+    const rows = buildTimelineViewRows([
+      read(),
+      long,
+      questionRow({ lifecycle: "pending" }),
+    ]);
+    expect(
+      collectAutoExpandedIds({ rows, scopeActive: false }).has("long"),
+    ).toBe(true);
+  });
+
   it("does not open a thought without text or one folded in a group", () => {
     const rows = buildTimelineViewRows([
       read(),
