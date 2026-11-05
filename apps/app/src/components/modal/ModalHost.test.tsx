@@ -125,7 +125,9 @@ describe("ModalHost history rules", () => {
     render(<Harness />);
     const before = window.history.length;
 
-    act(() => openCoreModal("core/test", { title: "Settings", params: { a: 1 } }));
+    act(() =>
+      openCoreModal("core/test", { title: "Settings", params: { a: 1 } }),
+    );
     await settle();
 
     expect(window.history.length).toBe(before + 1);

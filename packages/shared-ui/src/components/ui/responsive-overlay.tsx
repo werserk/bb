@@ -280,6 +280,7 @@ interface ResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   labelledBy?: string;
   describedBy?: string;
   contentClassName?: string;
+  backdropClassName?: string;
   onContentAnimationEnd?: (open: boolean) => void;
   children: React.ReactNode;
 }
@@ -342,6 +343,7 @@ export function ResponsiveDrawerShell({
   labelledBy,
   describedBy,
   contentClassName,
+  backdropClassName,
   onContentAnimationEnd,
   onEscapeKeyDown,
   onPointerDownOutside,
@@ -364,6 +366,7 @@ export function ResponsiveDrawerShell({
       labelledBy={labelledBy}
       describedBy={describedBy}
       contentClassName={contentClassName}
+      backdropClassName={backdropClassName}
       onContentAnimationEnd={onContentAnimationEnd}
       onEscapeKeyDown={onEscapeKeyDown}
       onPointerDownOutside={onPointerDownOutside}
@@ -391,6 +394,7 @@ interface PersistentResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   labelledBy?: string;
   describedBy?: string;
   contentClassName?: string;
+  backdropClassName?: string;
   motionDurationMs?: number;
   onContentAnimationEnd?: (open: boolean) => void;
   children: React.ReactNode;
@@ -652,6 +656,7 @@ export function PersistentResponsiveDrawerShell({
   labelledBy,
   describedBy,
   contentClassName,
+  backdropClassName,
   motionDurationMs = 220,
   onContentAnimationEnd,
   onEscapeKeyDown,
@@ -827,7 +832,7 @@ export function PersistentResponsiveDrawerShell({
         aria-hidden="true"
         data-persistent-drawer-backdrop=""
         data-state={open ? "open" : "closed"}
-        className="fixed inset-0 z-50 bg-black/40"
+        className={cn("fixed inset-0 z-50 bg-black/40", backdropClassName)}
         style={{
           opacity: open ? 1 : 0,
           pointerEvents: open ? "auto" : "none",

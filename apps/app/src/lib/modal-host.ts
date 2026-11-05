@@ -151,7 +151,9 @@ function assertJsonValue(
     return;
   }
   if (typeof value !== "object") {
-    throw new Error(`experimental_modal: ${path} is not JSON (${typeof value})`);
+    throw new Error(
+      `experimental_modal: ${path} is not JSON (${typeof value})`,
+    );
   }
   if (ancestors.has(value)) {
     throw new Error(`experimental_modal: ${path} contains a cycle`);

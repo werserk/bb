@@ -64,10 +64,10 @@ export function ModalHost() {
 
   useEffect(() => {
     if (!stale) return;
-    void navigate(
-      `${location.pathname}${location.search}${location.hash}`,
-      { replace: true, state: stripModalFromLocationState(location.state) },
-    );
+    void navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: stripModalFromLocationState(location.state),
+    });
   }, [stale, navigate, location]);
 
   const attempt = retries.token === visible?.token ? retries.count : 0;
@@ -125,6 +125,7 @@ export function ModalHost() {
       open={visible !== null}
       title={visible?.title ?? null}
       context={visible?.context ?? null}
+      token={visible?.token ?? null}
       onClose={closeModal}
     >
       {body}
