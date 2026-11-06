@@ -11,6 +11,19 @@ import {
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThread: () => ({ data: { title: "Report agent", projectId: "proj_1" } }),
 }));
+const previewState = vi.hoisted(() => ({
+  value: { data: undefined, isError: false } as {
+    data: unknown;
+    isError: boolean;
+  },
+}));
+vi.mock("@/hooks/queries/thread-panel-queries", () => ({
+  useThreadStorageFilePreview: () => previewState.value,
+}));
+vi.mock("@/components/plugin/local-file-viewer/PdfViewerFrame", () => ({
+  isPdfPath: (path: string) => path.endsWith(".pdf"),
+  PdfViewerFrame: () => <div>pdf frame</div>,
+}));
 vi.mock("@/components/plugin/PluginThreadChat", () => ({
   PluginThreadChat: ({ threadId }: { threadId: string }) => (
     <div>live:{threadId}</div>
@@ -88,6 +101,16 @@ describe("LocalFileViewerModal", () => {
         .closest("[role=tabpanel]")
         ?.hasAttribute("hidden"),
     ).toBe(false);
+  });
+  it("reaches the PDF frame's own error state when the preview query fails", () => {
+    const pdf = { ...params, relativePath: "doc.pdf", path: "/storage/doc.pdf" };
+    previewState.value = { data: undefined, isError: false };
+    const view = show(pdf);
+    expect(screen.getByText("Loading PDF…")).toBeTruthy();
+    view.unmount();
+    previewState.value = { data: undefined, isError: true };
+    show(pdf);
+    expect(screen.getByText("pdf frame")).toBeTruthy();
   });
   it("fails through ModalBodyError for invalid history params", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});

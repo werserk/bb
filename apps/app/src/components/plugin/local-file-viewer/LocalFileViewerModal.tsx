@@ -75,7 +75,10 @@ function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
   );
 }
 
-function getPreviewReloadKey(preview: FilePreview): number | undefined {
+function getPreviewReloadKey(
+  preview: FilePreview | undefined,
+): number | undefined {
+  if (preview === undefined) return undefined;
   if (preview.kind === "unsupported") return preview.sizeBytes;
   return preview.kind === "text" ? preview.content.length : undefined;
 }
@@ -89,7 +92,7 @@ function ThreadStoragePdf({
     target.threadId,
     target.relativePath,
   );
-  if (!preview.isSuccess) {
+  if (preview.data === undefined && !preview.isError) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Loading PDF…
