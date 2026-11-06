@@ -40,6 +40,16 @@ import { markTurnTraceSpan } from "../system/turn-trace.js";
 
 import { BB_UPDATE_PLAN_TOOL } from "./thread-plan-tool.js";
 
+// The single home of the plan-keeping rule for every bb agent; skills and
+// plugins add only what is specific to them and point here.
+const PLAN_INSTRUCTIONS = [
+  "Keep a visible progress plan with `bb_update_plan`, or with a native plan/todo tool when one is available. It is the user's window into your work.",
+  "- Post the plan before your first substantial action: 3-8 steps, each one short action phrase in the language the user writes in, in plain words (\"Find where the draft is lost\"), not tool names.",
+  "- Exactly one step is in_progress. Update the plan as each step finishes and whenever the plan changes. Send the full plan on each update.",
+  "- Waiting for the user or another agent is a step of its own (\"Waiting for your choice\").",
+  "- A task that outgrows about 8 steps, or has independent results, is several tasks: tell whoever assigned it.",
+].join("\n");
+
 const UPDATE_ENVIRONMENT_DIRECTORY_INSTRUCTIONS =
   "If the user asks you to move this thread to another checkout, worktree, or directory, make sure the target directory exists, then call `update_environment_directory` with its absolute path. After it succeeds, end the current turn; bb starts the next turn in the updated environment automatically so you can continue there.";
 
@@ -101,8 +111,7 @@ function resolveDynamicTools(
     },
     {
       tool: BB_UPDATE_PLAN_TOOL,
-      instructions:
-        "Use `bb_update_plan` to keep a visible progress plan unless a native plan/todo tool is available. Send the full plan on each update.",
+      instructions: PLAN_INSTRUCTIONS,
       pluginId: null,
     },
     ...pluginTools.map((contribution) => ({

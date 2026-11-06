@@ -1226,6 +1226,9 @@ describe("thread runtime config", () => {
       expect(runtimeConfig.instructions).toContain(
         "update_environment_directory",
       );
+      expect(runtimeConfig.instructions).toContain(
+        "Post the plan before your first substantial action",
+      );
       expect(pluginContexts[0]?.environment.workspaceProvisionType).toBe(
         "unmanaged",
       );
