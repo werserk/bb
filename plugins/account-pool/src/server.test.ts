@@ -7253,13 +7253,6 @@ describe("Account Pool nested proxy", () => {
       availability: { claude: true, codex: false },
       stopParent: false,
     },
-    {
-      label: "the parent is unreachable",
-      provider: "claude" as const,
-      parentMode: undefined,
-      availability: undefined,
-      stopParent: true,
-    },
   ])("neutralises inherited routing when $label", async (args) => {
     const parent = await startParent(
       args.availability === undefined
@@ -7282,6 +7275,136 @@ describe("Account Pool nested proxy", () => {
         },
       ),
     ).resolves.toEqual(neutralised(args.provider));
+  });
+
+  it.each(["claude-code", "codex"])(
+    "preserves %s routing auth when parent discovery fails after a successful turn",
+    async (provider) => {
+      const state = { availabilityStatus: 200 };
+      const parent = await startParent(state);
+      cleanups.push(parent.upstream.close);
+      const host = await createChild({ parentUrl: parent.upstream.url });
+      const context = {
+        threadId: "thread-one",
+        projectId: "project-one",
+        hostId: "host-one",
+      };
+      const before = await host.harness.behavior.resolveProviderEnv(
+        provider,
+        context,
+      );
+      state.availabilityStatus = 503;
+      const after = await host.harness.behavior.resolveProviderEnv(
+        provider,
+        context,
+      );
+      expect(after).toEqual(before);
+      const authName =
+        provider === "claude-code"
+          ? "ANTHROPIC_AUTH_TOKEN"
+          : "CODEX_POOL_AUTH_TOKEN";
+      const token = after.find((entry) => entry.name === authName)?.value;
+      expect(token).toEqual(expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u));
+      expect(token).not.toBe(PARENT_TOKEN);
+      const observed = await host.harness.behavior.fetchHttp(
+        "GET",
+        "/availability",
+        {
+          headers: { "x-bb-account-pool-token": String(token) },
+        },
+      );
+      expect(observed.status).toBe(200);
+      expect(await observed.json()).toEqual({ claude: true, codex: true });
+      const response = await host.harness.behavior.fetchHttp(
+        "POST",
+        provider === "claude-code" ? "/v1/messages" : "/v1/responses",
+        {
+          headers: { authorization: `Bearer ${String(token)}` },
+          body: "{}",
+        },
+      );
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(parent.records.at(-1)?.token).toBe(PARENT_TOKEN);
+      expect(parent.records.at(-1)?.authorization).toBeNull();
+    },
+  );
+
+  it("keeps cold Claude launches authenticated when the parent is unreachable", async () => {
+    const parent = await startParent({});
+    await parent.upstream.close();
+    const host = await createChild({ parentUrl: parent.upstream.url });
+    const token = await resolveToken(host);
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(token).not.toBe(PARENT_TOKEN);
+  });
+
+  it.each([401, 403])(
+    "withdraws routing on explicit parent HTTP %s",
+    async (availabilityStatus) => {
+      const state = { availabilityStatus: 200 };
+      const parent = await startParent(state);
+      cleanups.push(parent.upstream.close);
+      const host = await createChild({ parentUrl: parent.upstream.url });
+      await resolveToken(host);
+      state.availabilityStatus = availabilityStatus;
+      expect(
+        await host.harness.behavior.resolveProviderEnv("claude-code", {
+          threadId: "thread-one",
+          projectId: "project-one",
+          hostId: "host-one",
+        }),
+      ).toEqual(neutralised("claude"));
+    },
+  );
+
+  it("publishes one routing snapshot and local withdrawals during a parent outage", async () => {
+    let reads = 0;
+    const parent = await startUpstream((request, response) => {
+      if (request.url === "/availability") {
+        reads++;
+        response.statusCode = reads === 1 ? 200 : 503;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ claude: true, codex: true }));
+      } else response.end("{}");
+    });
+    cleanups.push(parent.close);
+    const host = await createChild({ parentUrl: parent.url });
+    const token = await resolveToken(host);
+    await host.harness.behavior.callRpc("routing.set", {
+      provider: "claude",
+      enabled: false,
+    });
+    const before = reads;
+    const response = await host.harness.behavior.fetchHttp(
+      "GET",
+      "/availability",
+      {
+        headers: { "x-bb-account-pool-token": token },
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ claude: false, codex: true });
+    expect(reads - before).toBe(1);
+    expect(
+      await host.harness.behavior.resolveProviderEnv("claude-code", {
+        threadId: "thread-one",
+        projectId: "project-one",
+        hostId: "host-one",
+      }),
+    ).toEqual(neutralised("claude"));
+    await host.harness.behavior.callRpc("routing.set", {
+      provider: "codex",
+      enabled: false,
+    });
+    const disabled = await host.harness.behavior.fetchHttp(
+      "GET",
+      "/availability",
+      {
+        headers: { "x-bb-account-pool-token": token },
+      },
+    );
+    expect(await disabled.json()).toEqual({ claude: false, codex: false });
   });
 
   it("contributes self-pointing routing and the marker while proxying", async () => {

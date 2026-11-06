@@ -153,4 +153,85 @@ describe("ParentAvailability", () => {
     await client.get();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+  it("keeps the last route across a timeout without caching false availability", async () => {
+    let clock = 0;
+    let failed = false;
+    const fetchImpl = vi.fn(async () => {
+      if (failed) throw new DOMException("synthetic timeout", "TimeoutError");
+      return Response.json({ claude: true, codex: false });
+    });
+    const client = new ParentAvailability({
+      parent: { baseUrl: BASE_URL, token: TOKEN },
+      fetch: fetchImpl,
+      now: () => clock,
+    });
+    expect(await client.getForRouting()).toEqual({
+      claude: true,
+      codex: false,
+    });
+    clock = 30001;
+    failed = true;
+    expect(await client.get()).toEqual({ claude: false, codex: false });
+    expect(await client.getForRouting()).toEqual({
+      claude: true,
+      codex: false,
+    });
+    failed = false;
+    clock = 31002;
+    expect(await client.get()).toEqual({ claude: true, codex: false });
+  });
+
+  it("keeps configured cold routing on a transport failure without reporting a healthy parent", async () => {
+    const client = availability({
+      fetchImpl: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    expect(await client.getForRouting()).toEqual({ claude: true, codex: true });
+    expect(await client.get()).toEqual({ claude: false, codex: false });
+  });
+
+  it("does not resurrect a withdrawn route after a later transport failure", async () => {
+    let clock = 0;
+    let status = 200;
+    const client = availability({
+      fetchImpl: async () => {
+        if (status === 0) throw new Error("ECONNRESET");
+        return Response.json({ claude: true, codex: true }, { status });
+      },
+      now: () => clock,
+    });
+    expect((await client.getForRouting()).claude).toBe(true);
+    clock = 1001;
+    status = 401;
+    expect((await client.getForRouting()).claude).toBe(false);
+    clock = 2002;
+    status = 0;
+    expect((await client.getForRouting()).claude).toBe(false);
+  });
+
+  it.each([404, 408, 429, 500, 503])(
+    "keeps cold routing on transient HTTP %s and retries promptly",
+    async (status) => {
+      let clock = 0;
+      const client = new ParentAvailability({
+        parent: { baseUrl: BASE_URL, token: TOKEN },
+        now: () => clock,
+        fetch: async () =>
+          clock === 0
+            ? new Response(null, { status })
+            : Response.json({ claude: false, codex: true }),
+      });
+      expect(await client.getObserved()).toBeNull();
+      expect(await client.getForRouting()).toEqual({
+        claude: true,
+        codex: true,
+      });
+      clock = 1001;
+      expect(await client.getForRouting()).toEqual({
+        claude: false,
+        codex: true,
+      });
+    },
+  );
 });

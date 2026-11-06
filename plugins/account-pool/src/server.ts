@@ -280,10 +280,15 @@ export function createAccountPoolPlugin(
       createRpcHandlers(operations, login, codexLogin, config),
     );
     registerPoolCli(bb, operations, login, codexLogin, config);
-    const canServe = async (provider: PoolProvider): Promise<boolean> => {
+    const canServe = async (
+      provider: PoolProvider,
+      forRouting = false,
+    ): Promise<boolean> => {
       if (!(await operations.isRoutingEnabled(provider))) return false;
       if (proxyingParent() !== null && availability !== null) {
-        return (await availability.get())[provider];
+        return (
+          await (forRouting ? availability.getForRouting() : availability.get())
+        )[provider];
       }
       return operations.hasUsableEnabledAccount(provider);
     };
@@ -315,7 +320,7 @@ export function createAccountPoolPlugin(
         const { threadId } = context;
         const bypassed =
           threadId !== null && (await routing.isBypassed(threadId));
-        if (!bypassed && (await canServe(provider))) {
+        if (!bypassed && (await canServe(provider, true))) {
           const token = await hubTokens.forHost(context.hostId);
           if (threadId !== null) {
             await bb.storage.kv.set(`retry-route:${threadId}`, provider);
@@ -462,6 +467,17 @@ export function createAccountPoolPlugin(
       async (context) => {
         if ((await hub.authenticate(context.req.raw)) === null) {
           return new Response(null, { status: 401 });
+        }
+        if (proxyingParent() !== null && availability !== null) {
+          const route = await availability.getForRouting();
+          return Response.json(
+            poolAvailabilitySchema.parse({
+              claude:
+                (await operations.isRoutingEnabled("claude")) && route.claude,
+              codex:
+                (await operations.isRoutingEnabled("codex")) && route.codex,
+            }),
+          );
         }
         return Response.json(
           poolAvailabilitySchema.parse({

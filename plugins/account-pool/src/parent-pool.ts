@@ -12,6 +12,7 @@ export const HUB_TOKEN_HEADER = "x-bb-account-pool-token";
 
 const DEFAULT_AVAILABILITY_TTL_MS = 30_000;
 const AVAILABILITY_TIMEOUT_MS = 2_000;
+const FAILED_AVAILABILITY_TTL_MS = 1_000;
 
 const parentUrlSchema = z.string().refine((value) => {
   try {
@@ -70,22 +71,39 @@ interface ParentAvailabilityOptions {
 }
 
 export class ParentAvailability {
-  private cached: { value: PoolAvailability; expiresAt: number } | null = null;
+  private cached: { value: PoolAvailability | null; expiresAt: number } | null =
+    null;
+  private lastKnown: PoolAvailability | null = null;
 
   constructor(private readonly options: ParentAvailabilityOptions) {}
 
   async get(): Promise<PoolAvailability> {
+    return (await this.getObserved()) ?? UNAVAILABLE_POOL;
+  }
+
+  async getForRouting(): Promise<PoolAvailability> {
+    return (
+      (await this.getObserved()) ??
+      this.lastKnown ?? { claude: true, codex: true }
+    );
+  }
+
+  async getObserved(): Promise<PoolAvailability | null> {
     const cached = this.cached;
     if (cached !== null && cached.expiresAt > this.options.now()) {
       return cached.value;
     }
     const value = await this.load();
-    const ttlMs = this.options.ttlMs ?? DEFAULT_AVAILABILITY_TTL_MS;
+    if (value !== null) this.lastKnown = value;
+    const ttlMs = Math.min(
+      this.options.ttlMs ?? DEFAULT_AVAILABILITY_TTL_MS,
+      value === null ? FAILED_AVAILABILITY_TTL_MS : Infinity,
+    );
     this.cached = { value, expiresAt: this.options.now() + ttlMs };
     return value;
   }
 
-  private async load(): Promise<PoolAvailability> {
+  private async load(): Promise<PoolAvailability | null> {
     try {
       const response = await this.options.fetch(
         `${this.options.parent.baseUrl}${AVAILABILITY_PATH}`,
@@ -101,9 +119,12 @@ export class ParentAvailability {
       this.options.onError?.(
         new Error(`parent availability returned HTTP ${response.status}`),
       );
+      if (response.status === 401 || response.status === 403) {
+        return UNAVAILABLE_POOL;
+      }
     } catch (error) {
       this.options.onError?.(error);
     }
-    return UNAVAILABLE_POOL;
+    return null;
   }
 }
