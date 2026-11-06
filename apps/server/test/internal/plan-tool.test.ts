@@ -54,7 +54,12 @@ describe("bb_update_plan", () => {
                 explanation: "Working",
                 plan: [
                   { step: "Inspect", status: "completed" },
-                  { step: "Build", status: "in_progress" },
+                  {
+                    step: "Build",
+                    status: "in_progress",
+                    note: "  читает изменения  ",
+                    actor: "  ревьюер  ",
+                  },
                   { step: "Check", status: "pending" },
                 ],
               },
@@ -62,21 +67,37 @@ describe("bb_update_plan", () => {
           },
         );
         expect(await readJson(response)).toMatchObject({ success: true });
-        const timeline = buildThreadTimelineWithProfile(harness.db, thread, {
-          eventBudget: 1000,
-          completedTurnDisplay: "collapse",
-          includeClearedContextHistory: false,
-          includeDiagnosticOperations: false,
-          compactionOfferEnabled: false,
-          summarizeShellCommands: true,
-          includeNestedRows: true,
-          maxInlineOutputChars: null,
-          maxSeq: 0,
-          page: { kind: "latest", segmentLimit: 20 },
-        }).response;
+        seedEvent(harness.deps, {
+          threadId: thread.id,
+          sequence: 3,
+          type: "turn/completed",
+          scope: turnScope("turn-plan"),
+          data: { providerThreadId: "provider-plan", status: "completed" },
+        });
+        const timeline = buildThreadTimelineWithProfile(
+          harness.db,
+          { ...thread, status: "idle" },
+          {
+            eventBudget: 1000,
+            completedTurnDisplay: "collapse",
+            includeClearedContextHistory: false,
+            includeDiagnosticOperations: false,
+            compactionOfferEnabled: false,
+            summarizeShellCommands: true,
+            includeNestedRows: true,
+            maxInlineOutputChars: null,
+            maxSeq: 0,
+            page: { kind: "latest", segmentLimit: 20 },
+          },
+        ).response;
         expect(timeline.pendingTodos?.items).toMatchObject([
           { text: "Inspect", status: "completed" },
-          { text: "Build", status: "in_progress" },
+          {
+            text: "Build",
+            status: "in_progress",
+            note: "читает изменения",
+            actor: "ревьюер",
+          },
           { text: "Check", status: "pending" },
         ]);
         const rows = harness.db
@@ -94,7 +115,12 @@ describe("bb_update_plan", () => {
             explanation: "Working",
             steps: [
               { step: "Inspect", status: "completed" },
-              { step: "Build", status: "active" },
+              {
+                step: "Build",
+                status: "active",
+                note: "читает изменения",
+                actor: "ревьюер",
+              },
               { step: "Check", status: "pending" },
             ],
           },
@@ -104,6 +130,18 @@ describe("bb_update_plan", () => {
   );
 
   it.each([
+    ...[
+      { note: "line\nbreak" },
+      { actor: "line\rbreak" },
+      { note: "x".repeat(1001) },
+      { actor: "x".repeat(101) },
+      { note: 42 },
+      { actor: "   " },
+    ].map((fields) => ({
+      input: { plan: [{ step: "Step", status: "pending", ...fields }] },
+      turnId: "turn-plan",
+      crossHost: false,
+    })),
     {
       input: { plan: [{ step: "Bad", status: "unknown" }] },
       turnId: "turn-plan",

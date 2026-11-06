@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { threadEventPlanStepSchema } from "./provider-event.js";
 
 const threadTimelinePendingTodoItemStatusSchema = z.enum([
   "pending",
@@ -13,6 +14,8 @@ const threadTimelinePendingTodoItemSchema = z.object({
   id: z.string(),
   text: z.string(),
   status: threadTimelinePendingTodoItemStatusSchema,
+  note: threadEventPlanStepSchema.shape.note,
+  actor: threadEventPlanStepSchema.shape.actor,
 });
 export type ThreadTimelinePendingTodoItem = z.infer<
   typeof threadTimelinePendingTodoItemSchema

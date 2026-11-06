@@ -59,6 +59,8 @@ function extractPlanStepsCandidate(
     items.push({
       id: todoIdFor(meta.seq, index),
       text,
+      ...(step.note === undefined ? {} : { note: step.note }),
+      ...(step.actor === undefined ? {} : { actor: step.actor }),
       status: PLAN_STEP_TODO_STATUSES[step.status ?? "pending"],
     });
   }
@@ -66,11 +68,9 @@ function extractPlanStepsCandidate(
 }
 
 export function extractThreadTimelinePendingTodos(
-  threadStatus: Thread["status"],
+  _threadStatus: Thread["status"],
   events: readonly ThreadEventWithMeta[],
 ): ThreadTimelinePendingTodos | null {
-  if (threadStatus !== "active") return null;
-
   let best: SnapshotCandidate | null = null;
   for (const { event, meta } of getOrderedThreadEvents(events)) {
     const candidate = extractPlanStepsCandidate(event, meta);

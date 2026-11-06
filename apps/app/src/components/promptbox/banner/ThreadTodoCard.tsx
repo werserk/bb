@@ -138,6 +138,22 @@ function TodoBody({
             >
               {item.text}
             </span>
+            {item.actor && (
+              <span
+                className="max-w-24 truncate text-muted-foreground"
+                title={item.actor}
+              >
+                {item.actor}
+              </span>
+            )}
+            {item.note && (
+              <span
+                className="min-w-0 flex-1 truncate text-muted-foreground"
+                title={item.note}
+              >
+                {item.note}
+              </span>
+            )}
           </li>
         );
       })}

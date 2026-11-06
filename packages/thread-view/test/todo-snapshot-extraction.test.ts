@@ -146,12 +146,54 @@ describe("extractThreadTimelinePendingTodos", () => {
     expect(result?.sourceSeq).toBe(42);
   });
 
-  it("returns null unless the thread is active", () => {
+  it("preserves optional step notes and helper tags", () => {
+    const step = {
+      step: "Review",
+      status: "active" as const,
+      note: "Reviewer reads changes",
+      actor: "Reviewer",
+    };
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        planStepsEvent({ seq: 1, steps: [step] }),
+      ])?.items[0],
+    ).toMatchObject({ text: step.step, note: step.note, actor: step.actor });
+  });
+
+  it("keeps a completed plan until a replacement or explicit clear", () => {
+    const done = planStepsEvent({
+      seq: 1,
+      steps: [{ step: "Done", status: "completed" }],
+    });
+    expect(
+      extractThreadTimelinePendingTodos("idle", [done])?.items[0].status,
+    ).toBe("completed");
+    const next = planStepsEvent({
+      seq: 2,
+      steps: [{ step: "Next task", status: "pending" }],
+    });
+    expect(
+      extractThreadTimelinePendingTodos("idle", [done, next])?.items[0].text,
+    ).toBe("Next task");
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        done,
+        next,
+        planStepsEvent({ seq: 3, steps: [] }),
+      ])?.items,
+    ).toEqual([]);
+  });
+
+  it("keeps the latest plan after a turn ends, including errors", () => {
     const events = [
       planStepsEvent({ seq: 1, steps: [{ step: "x", status: "active" }] }),
     ];
-    expect(extractThreadTimelinePendingTodos("idle", events)).toBeNull();
-    expect(extractThreadTimelinePendingTodos("error", events)).toBeNull();
+    expect(extractThreadTimelinePendingTodos("idle", events)).toEqual(
+      extractThreadTimelinePendingTodos(ACTIVE, events),
+    );
+    expect(extractThreadTimelinePendingTodos("error", events)).toEqual(
+      extractThreadTimelinePendingTodos(ACTIVE, events),
+    );
     expect(extractThreadTimelinePendingTodos(ACTIVE, events)).not.toBeNull();
   });
 });

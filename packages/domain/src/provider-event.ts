@@ -138,6 +138,20 @@ const threadEventPlanStepStatusSchema = z.enum([
 export const threadEventPlanStepSchema = z.object({
   step: z.string(),
   status: threadEventPlanStepStatusSchema.optional(),
+  note: z
+    .string()
+    .trim()
+    .min(1)
+    .max(1000)
+    .regex(/^[^\r\n\u2028\u2029]*$/u)
+    .optional(),
+  actor: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(/^[^\r\n\u2028\u2029]*$/u)
+    .optional(),
 });
 export type ThreadEventPlanStep = z.infer<typeof threadEventPlanStepSchema>;
 

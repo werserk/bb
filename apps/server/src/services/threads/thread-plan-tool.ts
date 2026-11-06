@@ -3,7 +3,12 @@ import {
   hasStoredTurnStarted,
   listStoredTurnCompletedKeys,
 } from "@bb/db";
-import { turnScope, type DynamicTool, type ToolCallResponse } from "@bb/domain";
+import {
+  turnScope,
+  threadEventPlanStepSchema,
+  type DynamicTool,
+  type ToolCallResponse,
+} from "@bb/domain";
 import { z } from "zod";
 import type { AppDeps } from "../../types.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
@@ -16,6 +21,8 @@ const planInputSchema = z
           .object({
             step: z.string().trim().min(1).max(1000),
             status: z.enum(["pending", "in_progress", "completed"]),
+            note: threadEventPlanStepSchema.shape.note,
+            actor: threadEventPlanStepSchema.shape.actor,
           })
           .strict(),
       )
@@ -36,7 +43,7 @@ delete inputSchema.$schema;
 export const BB_UPDATE_PLAN_TOOL: DynamicTool = {
   name: "bb_update_plan",
   description:
-    "Replace this thread's visible progress plan. Send the full list of steps with pending, in_progress or completed status. An empty plan clears the list. Use this tool unless a native plan/todo tool is available.",
+    "Replace this thread's visible progress plan. Send the full list of steps with pending, in_progress or completed status. Optional note describes the current action and actor tags the helper, both single-line. The plan stays visible after the turn until replaced; an empty plan clears the list. Use this tool unless a native plan/todo tool is available.",
   inputSchema,
   presentation,
 };
@@ -85,8 +92,8 @@ export function handleUpdatePlanToolCall(
             id: `plan:${args.turnId}:${args.callId}`,
             status: "completed",
             presentation,
-            steps: parsed.data.plan.map(({ step, status }) => ({
-              step,
+            steps: parsed.data.plan.map(({ status, ...step }) => ({
+              ...step,
               status: status === "in_progress" ? ("active" as const) : status,
             })),
             ...(parsed.data.explanation === undefined
