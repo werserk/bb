@@ -45,7 +45,7 @@ import { BB_UPDATE_PLAN_TOOL } from "./thread-plan-tool.js";
 const PLAN_INSTRUCTIONS = [
   "Keep a visible progress plan with `bb_update_plan`, or with a native plan/todo tool when one is available. It is the user's window into your work.",
   "- Post the plan before your first substantial action: 3-8 steps, each one short action phrase in the language the user writes in, in plain words (\"Find where the draft is lost\"), not tool names.",
-  "- Exactly one step is in_progress. Update the plan as each step finishes and whenever the plan changes. Send the full plan on each update.",
+  "- While work remains, exactly one step is in_progress. Update the plan as each step finishes and whenever the plan changes. Send the full plan on each update.",
   "- Waiting for the user or another agent is a step of its own (\"Waiting for your choice\").",
   "- A task that outgrows about 8 steps, or has independent results, is several tasks: tell whoever assigned it.",
 ].join("\n");
