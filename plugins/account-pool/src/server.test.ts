@@ -7407,6 +7407,37 @@ describe("Account Pool nested proxy", () => {
     expect(await disabled.json()).toEqual({ claude: false, codex: false });
   });
 
+  it("does not publish a cold fallback as confirmed availability after a parent restart", async () => {
+    const parent = await startParent({ availabilityStatus: 503 });
+    cleanups.push(parent.upstream.close);
+    const host = await createChild({ parentUrl: parent.upstream.url });
+    const token = await resolveToken(host);
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const response = await host.harness.behavior.fetchHttp(
+      "GET",
+      "/availability",
+      {
+        headers: { "x-bb-account-pool-token": token },
+      },
+    );
+    expect(response.status).toBe(503);
+    for (const provider of ["claude", "codex"]) {
+      await host.harness.behavior.callRpc("routing.set", {
+        provider,
+        enabled: false,
+      });
+    }
+    const disabled = await host.harness.behavior.fetchHttp(
+      "GET",
+      "/availability",
+      {
+        headers: { "x-bb-account-pool-token": token },
+      },
+    );
+    expect(disabled.status).toBe(200);
+    expect(await disabled.json()).toEqual({ claude: false, codex: false });
+  });
+
   it("contributes self-pointing routing and the marker while proxying", async () => {
     const parent = await startParent({});
     cleanups.push(parent.upstream.close);

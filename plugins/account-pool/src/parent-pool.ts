@@ -82,10 +82,11 @@ export class ParentAvailability {
   }
 
   async getForRouting(): Promise<PoolAvailability> {
-    return (
-      (await this.getObserved()) ??
-      this.lastKnown ?? { claude: true, codex: true }
-    );
+    return (await this.getConfirmed()) ?? { claude: true, codex: true };
+  }
+
+  async getConfirmed(): Promise<PoolAvailability | null> {
+    return (await this.getObserved()) ?? this.lastKnown;
   }
 
   async getObserved(): Promise<PoolAvailability | null> {

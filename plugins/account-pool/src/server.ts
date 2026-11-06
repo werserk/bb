@@ -18,6 +18,7 @@ import {
   accountPoolConfigSchema,
   accountPoolConfigSetInputSchema,
   poolAvailabilitySchema,
+  UNAVAILABLE_POOL,
   type AccountPoolConfigController,
   type PoolProvider,
   type PoolStatus,
@@ -469,13 +470,19 @@ export function createAccountPoolPlugin(
           return new Response(null, { status: 401 });
         }
         if (proxyingParent() !== null && availability !== null) {
-          const route = await availability.getForRouting();
+          const enabled = {
+            claude: await operations.isRoutingEnabled("claude"),
+            codex: await operations.isRoutingEnabled("codex"),
+          };
+          const route =
+            enabled.claude || enabled.codex
+              ? await availability.getConfirmed()
+              : UNAVAILABLE_POOL;
+          if (route === null) return new Response(null, { status: 503 });
           return Response.json(
             poolAvailabilitySchema.parse({
-              claude:
-                (await operations.isRoutingEnabled("claude")) && route.claude,
-              codex:
-                (await operations.isRoutingEnabled("codex")) && route.codex,
+              claude: enabled.claude && route.claude,
+              codex: enabled.codex && route.codex,
             }),
           );
         }
