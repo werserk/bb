@@ -192,7 +192,6 @@ function buildPromptAreaElement({
         parentThreadSection={null}
         pendingInteractions={pendingInteractions}
         queuedMessageCount={queuedMessageCount}
-        pendingTodos={null}
         projectId="proj_1"
         contextEnvironmentId={null}
         resolveMentionLink={() => null}

@@ -1,3 +1,4 @@
+import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
   useCallback,
   useEffect,
@@ -200,7 +201,6 @@ export function useThreadComposerAddToChat(thread: {
     [isCompactViewport, promptDraft],
   );
 }
-
 
 function useChildThreadsSection(
   threadId: string,
@@ -516,7 +516,9 @@ export function ThreadScreen({
         isThreadTimelinePending={isThreadTimelinePending}
         timelineError={Boolean(timeline.timelineError)}
         loadingContent={
-          isPanelPresentation ? <ThreadTimelinePanelLoadingSkeleton /> : undefined
+          isPanelPresentation ? (
+            <ThreadTimelinePanelLoadingSkeleton />
+          ) : undefined
         }
         timelineErrorClassName={
           isPanelPresentation ? "mx-2 mt-4 text-destructive" : undefined
@@ -588,7 +590,6 @@ export function ThreadScreen({
       }
       pendingInteractions={pendingInteractions}
       queuedMessageCount={thread.queuedMessageCount}
-      pendingTodos={timeline.pendingTodos}
       activePromptMode={timeline.activePromptMode}
       goal={timeline.goal}
       providerCommands={timeline.providerCommands}
@@ -603,69 +604,89 @@ export function ThreadScreen({
     />
   ) : null;
 
-  switch (presentation.kind) {
-    case "page":
-      return (
-        <div
-          data-thread-window=""
-          className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
-        >
-          <PageShell
-            key={thread.id}
-            scrollBehavior="bottom-anchor"
-            scrollAnchorThreadId={thread.id}
-            scrollContentInsetEndPx={contextCardInset}
-            shellClassName="!mx-0 !mt-0 md:!mx-0 md:!mt-0"
-            scrollAreaClassName="scroll-pt-4"
-            contentClassName="gap-2 pt-4"
-            footerClassName="chat-prompt-box"
-            footer={promptArea}
-            scrollOverlay={
-              <>
-                <ThreadContextCard />
-                <div className="pointer-events-auto my-auto">
-                  <ThreadTableOfContents
-                    contextBoundarySeq={timeline.contextBoundarySeq}
-                    threadId={thread.id}
-                    timelineRows={timelineRows}
-                    hasOlderTimelineRows={timeline.hasOlderTimelineRows}
-                    loadOlderTimelineRows={timeline.loadOlderTimelineRows}
-                    onNavigateToRow={setTimelineNavigationTargetRowId}
-                  />
-                </div>
-              </>
-            }
+  const chat = (() => {
+    switch (presentation.kind) {
+      case "page":
+        return (
+          <div
+            data-thread-window=""
+            className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
           >
-            {surface}
-          </PageShell>
-        </div>
-      );
-    case "panel":
-      return (
-        <WithoutThreadContextCard>
-          <ThreadScreenPanelShell
-            presentation={presentation}
-            promptArea={promptArea}
-            surface={surface}
-            threadId={thread.id}
-          />
-        </WithoutThreadContextCard>
-      );
-    case "transcript":
-      return (
-        <WithoutThreadContextCard>
-          {presentation.layout === "contained" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
+            <PageShell
+              key={thread.id}
+              scrollBehavior="bottom-anchor"
+              scrollAnchorThreadId={thread.id}
+              scrollContentInsetEndPx={contextCardInset}
+              shellClassName="!mx-0 !mt-0 md:!mx-0 md:!mt-0"
+              scrollAreaClassName="scroll-pt-4"
+              contentClassName="gap-2 pt-4"
+              footerClassName="chat-prompt-box"
+              footer={promptArea}
+              scrollOverlay={
+                <>
+                  <ThreadContextCard />
+                  <div className="pointer-events-auto my-auto">
+                    <ThreadTableOfContents
+                      contextBoundarySeq={timeline.contextBoundarySeq}
+                      threadId={thread.id}
+                      timelineRows={timelineRows}
+                      hasOlderTimelineRows={timeline.hasOlderTimelineRows}
+                      loadOlderTimelineRows={timeline.loadOlderTimelineRows}
+                      onNavigateToRow={setTimelineNavigationTargetRowId}
+                    />
+                  </div>
+                </>
+              }
+            >
               {surface}
-            </div>
-          ) : (
-            <div className="bg-background px-2 pb-3 pt-3">{surface}</div>
+            </PageShell>
+          </div>
+        );
+      case "panel":
+        return (
+          <WithoutThreadContextCard>
+            <ThreadScreenPanelShell
+              presentation={presentation}
+              promptArea={promptArea}
+              surface={surface}
+              threadId={thread.id}
+            />
+          </WithoutThreadContextCard>
+        );
+      case "transcript":
+        return (
+          <WithoutThreadContextCard>
+            {presentation.layout === "contained" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
+                {surface}
+              </div>
+            ) : (
+              <div className="bg-background px-2 pb-3 pt-3">{surface}</div>
+            )}
+          </WithoutThreadContextCard>
+        );
+    }
+  })();
+  return (
+    <div
+      className="@container/thread-chat flex min-h-0 min-w-0 flex-1 flex-col"
+      data-thread-chat=""
+    >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 @min-[880px]/thread-chat:flex-row">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+        {thread.archivedAt === null &&
+          resolveEnvironmentGoneStatus(environment) === null && (
+            <ThreadPlanCard
+              key={thread.id}
+              pendingTodos={timeline.pendingTodos}
+              rows={timelineRows}
+              waitingForOwner={hasPendingInteraction}
+            />
           )}
-        </WithoutThreadContextCard>
-      );
-  }
+      </div>
+    </div>
+  );
 }
-
 
 function ThreadScreenPanelShell({
   presentation,

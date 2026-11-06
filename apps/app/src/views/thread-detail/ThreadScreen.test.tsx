@@ -98,7 +98,10 @@ const SIDE_CHAT_PRESENTATION: ThreadScreenPresentation = {
   tone: "sidebar",
 };
 
-function renderScreen(presentation: ThreadScreenPresentation) {
+function renderScreen(
+  presentation: ThreadScreenPresentation,
+  overrides: Partial<Parameters<typeof ThreadScreen>[0]> = {},
+) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   return render(
     <Wrapper>
@@ -122,6 +125,7 @@ function renderScreen(presentation: ThreadScreenPresentation) {
           unreadDividerPlacement: null,
         }}
         workspaceRootPath={undefined}
+        {...overrides}
       />
     </Wrapper>,
   );
@@ -191,4 +195,42 @@ describe("ThreadScreen", () => {
       focusKeyBefore,
     );
   });
+});
+
+it.each<ThreadScreenPresentation>([
+  { kind: "page" },
+  SIDE_CHAT_PRESENTATION,
+  { kind: "transcript", layout: "contained" },
+])("places one plan outside the composer on $kind", (presentation) => {
+  const timeline = {
+    ...TIMELINE,
+    pendingTodos: {
+      sourceSeq: 1,
+      updatedAt: 1,
+      items: [
+        { id: "one", text: "Inspect output", status: "in_progress" as const },
+      ],
+    },
+  };
+  const { container } = renderScreen(presentation, { timeline });
+  expect(container.querySelectorAll("[data-thread-plan]")).toHaveLength(1);
+  expect(screen.getByText("Inspect output")).toBeTruthy();
+  expect(mocks.promptAreaProps.at(-1) ?? {}).not.toHaveProperty("pendingTodos");
+});
+it("hides the retained plan in an archived thread", () => {
+  const timeline = {
+    ...TIMELINE,
+    pendingTodos: {
+      sourceSeq: 1,
+      updatedAt: 1,
+      items: [
+        { id: "one", text: "Inspect output", status: "pending" as const },
+      ],
+    },
+  };
+  const { container } = renderScreen(SIDE_CHAT_PRESENTATION, {
+    timeline,
+    thread: { ...THREAD, archivedAt: 1 },
+  });
+  expect(container.querySelector("[data-thread-plan]")).toBeNull();
 });

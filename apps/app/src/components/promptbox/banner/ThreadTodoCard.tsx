@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type {
   ThreadTimelinePendingTodoItem,
   ThreadTimelinePendingTodoItemStatus,
@@ -23,12 +24,6 @@ import {
   AnimatedDisclosureBody,
 } from "@bb/shared-ui/prompt-stack-disclosure";
 
-const STATUS_SORT_RANK: Record<ThreadTimelinePendingTodoItemStatus, number> = {
-  in_progress: 0,
-  pending: 1,
-  completed: 2,
-};
-
 const STATUS_ACTIVITY_STATE: Record<
   ThreadTimelinePendingTodoItemStatus,
   ActivityRowState
@@ -40,12 +35,12 @@ const STATUS_ACTIVITY_STATE: Record<
 
 interface ThreadTodoCardProps {
   pendingTodos: ThreadTimelinePendingTodos | null;
+  state?: "active" | "waiting" | "finished" | "earlier";
+  locale?: string;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
-const BODY_ID = "thread-todo-card-body";
-const TOGGLE_ID = "thread-todo-card-toggle";
 const TODO_HEADER_BUTTON_CLASS = activityRowClass(
   "active",
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
@@ -53,20 +48,9 @@ const TODO_HEADER_BUTTON_CLASS = activityRowClass(
 const TODO_ACTIVE_ROW_CLASS = "shadow-none ring-0";
 const TODO_ACTIVE_ICON_CLASS = "text-foreground";
 
-function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]): {
-  visible: string;
-  aria: string;
-} {
-  let completedCount = 0;
-  for (const item of items) {
-    if (item.status === "completed") completedCount += 1;
-  }
-  return {
-    visible: `${completedCount}/${items.length} complete`,
-    aria: `${completedCount} of ${items.length} ${
-      items.length === 1 ? "item" : "items"
-    } complete`,
-  };
+function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]) {
+  const count = items.filter((item) => item.status === "completed").length;
+  return { aria: `${count} of ${items.length} items complete` };
 }
 
 function TodoStatusIcon({
@@ -109,12 +93,9 @@ function TodoBody({
 }: {
   items: readonly ThreadTimelinePendingTodoItem[];
 }) {
-  const ordered = [...items].sort(
-    (a, b) => STATUS_SORT_RANK[a.status] - STATUS_SORT_RANK[b.status],
-  );
   return (
-    <ul className="max-h-40 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
-      {ordered.map((item) => {
+    <ul className="max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
+      {items.map((item) => {
         const activityState = STATUS_ACTIVITY_STATE[item.status];
         const isActive = activityState === "active";
         return (
@@ -123,37 +104,39 @@ function TodoBody({
             className={activityRowClass(
               activityState,
               cn(
-                "flex min-w-0 items-center gap-2 text-xs",
+                "flex min-w-0 items-start gap-2 text-xs",
                 isActive && TODO_ACTIVE_ROW_CLASS,
               ),
             )}
           >
             <TodoStatusIcon status={item.status} />
-            <span
-              className={activityTextClass(
-                activityState,
-                "min-w-0 flex-1 truncate",
+            <div className="min-w-0 flex-1">
+              <span
+                className={activityTextClass(
+                  activityState,
+                  "min-w-0 break-words",
+                )}
+                title={item.text}
+              >
+                {item.text}
+              </span>
+              {item.actor && (
+                <span
+                  className="ml-2 inline-block max-w-24 truncate rounded border px-1 text-muted-foreground align-bottom"
+                  title={item.actor}
+                >
+                  {item.actor}
+                </span>
               )}
-              title={item.text}
-            >
-              {item.text}
-            </span>
-            {item.actor && (
-              <span
-                className="max-w-24 truncate text-muted-foreground"
-                title={item.actor}
-              >
-                {item.actor}
-              </span>
-            )}
-            {item.note && (
-              <span
-                className="min-w-0 flex-1 truncate text-muted-foreground"
-                title={item.note}
-              >
-                {item.note}
-              </span>
-            )}
+              {item.note && (
+                <span
+                  className="mt-1 block break-words text-muted-foreground"
+                  title={item.note}
+                >
+                  {item.note}
+                </span>
+              )}
+            </div>
           </li>
         );
       })}
@@ -163,38 +146,83 @@ function TodoBody({
 
 export function ThreadTodoCard({
   pendingTodos,
+  state = "active",
+  locale = typeof navigator === "undefined" ? "en" : navigator.language,
   isExpanded,
   onToggle,
 }: ThreadTodoCardProps) {
+  const bodyId = useId();
+  const toggleId = useId();
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
   const items = pendingTodos?.items ?? [];
   if (items.length === 0) {
     return null;
   }
   const summary = getTodoSummary(items);
+  const ru = locale.toLowerCase().startsWith("ru");
+  const labels = ru
+    ? {
+        active: "План",
+        waiting: "План · ждёт тебя",
+        finished: "План выполнен",
+        earlier: "План прошлой задачи",
+      }
+    : {
+        active: "Plan",
+        waiting: "Plan · waiting for you",
+        finished: "Plan finished",
+        earlier: "Plan from an earlier task",
+      };
+  const muted = state === "earlier" || state === "finished";
+  const time = new Date(pendingTodos?.updatedAt ?? 0).toLocaleTimeString(
+    locale,
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    },
+  );
+  const progressLabel = ru
+    ? `${items.filter((item) => item.status === "completed").length} из ${items.length} шагов выполнено`
+    : summary.aria;
+  const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}`;
+  const metadata = `${ru ? "обновлено в" : "updated at"} ${time}${state === "earlier" ? (ru ? " · из прошлой задачи" : " · from an earlier task") : ""}`;
   return (
     <PromptStackCard
-      ariaLabel="To-do list"
-      className="overflow-hidden"
+      ariaLabel={labels[state]}
+      className={cn(
+        "overflow-hidden rounded-xl",
+        state === "waiting" && "border-warning text-warning",
+        muted &&
+          "text-muted-foreground [&_li]:!text-muted-foreground [&_li_span]:!text-muted-foreground [&_li_svg]:!text-muted-foreground",
+      )}
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
       <div className="flex items-center">
         <button
           type="button"
-          id={TOGGLE_ID}
+          id={toggleId}
           aria-expanded={isExpanded}
-          aria-controls={BODY_ID}
-          aria-label={`To-do list: ${summary.aria}`}
+          aria-controls={bodyId}
+          aria-label={`${title}: ${progressLabel}`}
           ref={focus.triggerRef}
           onClick={focus.onTriggerClick}
           className={cn(
             TODO_HEADER_BUTTON_CLASS,
+            state === "waiting" && "!text-warning",
+            muted && "!text-muted-foreground",
             PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
           )}
         >
           <Icon
-            name="ListTodo"
-            className={activityIconClass("active", "size-3.5 shrink-0")}
+            name={
+              state === "finished"
+                ? "Check"
+                : state === "waiting"
+                  ? "CircleAlert"
+                  : "ListTodo"
+            }
+            className="size-3.5 shrink-0"
             aria-hidden="true"
           />
           <span
@@ -203,20 +231,23 @@ export function ThreadTodoCard({
               "min-w-0 flex-1 truncate text-left",
             )}
           >
-            {summary.visible}
+            {title}
           </span>
           <PromptStackHoverChevron isExpanded={isExpanded} />
         </button>
       </div>
       <AnimatedDisclosureBody
-        id={BODY_ID}
-        labelledBy={TOGGLE_ID}
+        id={bodyId}
+        labelledBy={toggleId}
         isExpanded={isExpanded}
         collapsedBorder="none"
-        collapseLabel="Collapse to-do list"
+        collapseLabel={ru ? "Свернуть план" : "Collapse plan"}
         collapseRef={focus.collapseRef}
         onCollapse={focus.onCollapseClick}
       >
+        {muted && (
+          <p className="px-3 pt-2 text-xs text-muted-foreground">{metadata}</p>
+        )}
         <TodoBody items={items} />
       </AnimatedDisclosureBody>
     </PromptStackCard>

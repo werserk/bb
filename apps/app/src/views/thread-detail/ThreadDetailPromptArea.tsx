@@ -30,7 +30,6 @@ import type {
   ThreadTimelineActivePromptMode,
   ThreadTimelineGoal,
   ThreadTimelineModelFallback,
-  ThreadTimelinePendingTodos,
   ThreadWithRuntime,
 } from "@bb/domain";
 import type {
@@ -65,7 +64,6 @@ import {
   type ThreadPromptChildThreadsSection,
 } from "@/components/promptbox/banner/ThreadPromptContextBanner";
 import { ThreadGoalCard } from "@/components/promptbox/banner/ThreadGoalCard";
-import { ThreadTodoCard } from "@/components/promptbox/banner/ThreadTodoCard";
 import { ThreadPromptModeCard } from "@/components/promptbox/banner/ThreadPromptModeCard";
 import { ThreadWorkflowStack } from "@/components/promptbox/banner/ThreadWorkflowStack";
 import { ThreadBackgroundCommandsCard } from "@/components/promptbox/banner/ThreadBackgroundCommandsCard";
@@ -205,7 +203,6 @@ interface ThreadDetailPromptAreaProps {
   queuedMessageCount: number;
   projectId: string;
   resolveMentionLink: PromptMentionLinkResolver;
-  pendingTodos: ThreadTimelinePendingTodos | null;
   activePromptMode: ThreadTimelineActivePromptMode | null;
   goal: ThreadTimelineGoal | null;
   providerCommands: readonly ProviderCommand[] | null;
@@ -412,7 +409,6 @@ export function ThreadDetailPromptArea({
   queuedMessageCount,
   projectId,
   resolveMentionLink,
-  pendingTodos,
   activePromptMode,
   goal,
   providerCommands,
@@ -595,7 +591,6 @@ export function ThreadDetailPromptArea({
   >(null);
   const [isChildThreadsExpanded, setIsChildThreadsExpanded] = useState(false);
   const [isGoalExpanded, setIsGoalExpanded] = useState(false);
-  const [isTodoExpanded, setIsTodoExpanded] = useState(false);
   const [isPromptModeExpanded, setIsPromptModeExpanded] = useState(false);
   const [expandedWorkflowIds, setExpandedWorkflowIds] = useState<
     ReadonlySet<string>
@@ -2069,15 +2064,6 @@ export function ThreadDetailPromptArea({
         />
         {shouldHideComposer ? null : activePromptModeCard}
         {shouldHideComposer ? null : activeGoalCard}
-        <ThreadTodoCard
-          pendingTodos={
-            thread.archivedAt === null && environmentGoneStatus === null
-              ? pendingTodos
-              : null
-          }
-          isExpanded={isTodoExpanded}
-          onToggle={() => setIsTodoExpanded((value) => !value)}
-        />
         {environmentHostId &&
         thread.archivedAt === null &&
         environmentGoneStatus === null ? (
@@ -2199,7 +2185,6 @@ export function ThreadDetailPromptArea({
       queuedMessageEditor,
       activeGoalCard,
       activePromptModeCard,
-      isTodoExpanded,
       activeWorkflows,
       isWorkflowStackExpanded,
       expandedWorkflowIds,
@@ -2210,7 +2195,6 @@ export function ThreadDetailPromptArea({
       parentThreadSection,
       childThreadsSection,
       orderedPendingInteractions,
-      pendingTodos,
       displayedProcessingQueuedMessage,
       queuedMessageCount,
       queuedMessages,

@@ -26,7 +26,7 @@ it("shows a completed plan with its step note and helper until cleared", () => {
       onToggle={() => {}}
     />,
   );
-  expect(screen.getByText("1/1 complete")).toBeTruthy();
+  expect(screen.getByText("Plan")).toBeTruthy();
   expect(screen.getByText("Changes checked")).toBeTruthy();
   expect(screen.getByText("Reviewer")).toBeTruthy();
   rerender(
