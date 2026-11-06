@@ -537,14 +537,14 @@ export function createPushNotificationsPlugin(
               const threadId = input.positionals.thread;
               let row: ThreadNotifications;
               try {
-                if (input.options.level !== undefined) {
-                  await preferences.set(threadId, input.options.level);
-                }
                 if (input.options["child-level"] !== undefined) {
                   await preferences.setChildLevel(
                     threadId,
                     input.options["child-level"],
                   );
+                }
+                if (input.options.level !== undefined) {
+                  await preferences.set(threadId, input.options.level);
                 }
                 row = await preferences.get(threadId);
               } catch (error) {

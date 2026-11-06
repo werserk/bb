@@ -96,6 +96,7 @@ interface SetupOptions {
   expo?: FakeExpo;
   fetch?: PushSenderFetch;
   now?: () => number;
+  failOwnLevelWrite?: boolean;
 }
 
 async function setup(options: SetupOptions = {}) {
@@ -160,6 +161,8 @@ async function setup(options: SetupOptions = {}) {
         },
         updatePluginMetadata: async ({ threadId, set, remove }) => {
           if (!threads.has(threadId)) throw new Error("Thread not found");
+          if (options.failOwnLevelWrite && set?.notifications)
+            throw new Error("Own write failed");
           const next = { ...(metadata.get(threadId) ?? {}), ...set };
           for (const key of remove ?? []) delete next[key];
           if (Object.keys(next).length === 0) metadata.delete(threadId);
@@ -1816,6 +1819,32 @@ describe("thread notification levels", () => {
 });
 
 describe("per-thread child defaults", () => {
+  it("persists the child default before an own-level write fails in the CLI", async () => {
+    const options = { failOwnLevelWrite: false };
+    const h = await setup(options);
+    try {
+      h.setThread({ id: "root" });
+      await h.setLevel("root", "muted");
+      options.failOwnLevelWrite = true;
+      const result = await h.harness.behavior.runCli([
+        "thread",
+        "root",
+        "--level",
+        "all",
+        "--child-level",
+        "questions-only",
+        "--json",
+      ]);
+      expect(result.exitCode).toBe(1);
+      expect(h.metadata.get("root")).toMatchObject({
+        notifications: { own: "muted" },
+        childNotifications: { level: "questions-only" },
+      });
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   it("resolves nearest defaults, preserves caps and keys, clears and republishes", async () => {
     const h = await setup();
     try {
