@@ -1193,7 +1193,11 @@ function selectStandardTimelineEventRows(
           ? measureThreadTimelineStage(profile, "group-context-query", () =>
               listLatestTimelineHeadStateRows(db, thread.id).filter(
                 (row) =>
-                  row.sequence <= maxSeq && !visibleSequences.has(row.sequence),
+                  row.sequence <= maxSeq &&
+                  !visibleSequences.has(row.sequence) &&
+                  ((row.itemKind !== "planSteps" &&
+                    row.type !== "turn/plan/updated") ||
+                    row.sequence >= epochSequenceStart),
               ),
             )
           : [],

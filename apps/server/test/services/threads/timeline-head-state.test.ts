@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   encodeClientTurnRequestIdNumber,
+  THREAD_CONTEXT_CLEAR_OPERATION,
   threadScope,
   turnScope,
 } from "@bb/domain";
@@ -228,6 +229,108 @@ const baseOptions = {
 };
 
 describe("timeline head state under a budgeted window", () => {
+  it.each(["idle", "error"] as const)(
+    "keeps an out-of-page plan for a %s thread",
+    (status) => {
+      const { db, thread } = setup();
+      try {
+        seedThreadWithEarlyHeadState(db, thread, 100, 1, false);
+        const latest = buildThreadTimelineWithProfile(
+          db,
+          { ...thread, status },
+          {
+            ...baseOptions,
+            completedTurnDisplay: "collapse",
+            eventBudget: 8,
+            page: { kind: "latest", segmentLimit: 2 },
+          },
+        );
+        expect(
+          latest.response.rows.every((row) => row.sourceSeqStart >= 390),
+        ).toBe(true);
+        expect(
+          latest.response.pendingTodos?.items.map((item) => item.text),
+        ).toEqual(["Shipping the thing", "Write the docs"]);
+        expect(latest.profile.eventRowCount).toBeLessThan(20);
+      } finally {
+        db.$client.close();
+      }
+    },
+  );
+
+  it.each(["idle", "error"] as const)(
+    "clears an older plan at the context boundary for a %s thread while retaining history access",
+    (status) => {
+      const { db, thread } = setup();
+      try {
+        seedThreadWithEarlyHeadState(db, thread, 100, 1, false);
+        insertEvents(db, noopNotifier, [
+          {
+            threadId: thread.id,
+            sequence: 1000,
+            type: "system/operation",
+            scope: threadScope(),
+            itemId: null,
+            itemKind: null,
+            parentToolCallId: null,
+            data: JSON.stringify({
+              operation: THREAD_CONTEXT_CLEAR_OPERATION,
+              operationId: "clear",
+              status: "completed",
+              message: "Fresh context",
+            }),
+          },
+        ]);
+        const options = {
+          ...baseOptions,
+          completedTurnDisplay: "collapse" as const,
+          eventBudget: 8,
+          page: { kind: "latest" as const, segmentLimit: 2 },
+        };
+        expect(
+          buildThreadTimelineWithProfile(
+            db,
+            { ...thread, status },
+            { ...options, includeClearedContextHistory: true },
+          ).response.pendingTodos?.items,
+        ).toHaveLength(2);
+        expect(
+          buildThreadTimelineWithProfile(db, { ...thread, status }, options)
+            .response.pendingTodos,
+        ).toBeNull();
+        insertEvents(db, noopNotifier, [
+          {
+            threadId: thread.id,
+            sequence: 1001,
+            type: "item/completed",
+            scope: turnScope("turn-101"),
+            providerThreadId,
+            itemId: "fresh-plan",
+            itemKind: "planSteps",
+            parentToolCallId: null,
+            data: JSON.stringify({
+              item: {
+                type: "planSteps",
+                id: "fresh-plan",
+                status: "completed",
+                steps: [{ step: "Fresh task", status: "pending" }],
+              },
+            }),
+          },
+        ]);
+        expect(
+          buildThreadTimelineWithProfile(
+            db,
+            { ...thread, status },
+            options,
+          ).response.pendingTodos?.items.map((item) => item.text),
+        ).toEqual(["Fresh task"]);
+      } finally {
+        db.$client.close();
+      }
+    },
+  );
+
   it("keeps goal, todos, and a running workflow when the budget excludes the turn that set them", () => {
     const { db, thread } = setup();
     seedThreadWithEarlyHeadState(db, thread, 12, 60, true);
