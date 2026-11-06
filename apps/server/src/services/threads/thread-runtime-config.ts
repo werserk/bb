@@ -38,6 +38,8 @@ import { readWorkspaceAgentContext } from "./workspace-agent-context.js";
 import { resolveDeprecatedWorkspaceProvisionType } from "../environments/environment-response.js";
 import { markTurnTraceSpan } from "../system/turn-trace.js";
 
+import { BB_UPDATE_PLAN_TOOL } from "./thread-plan-tool.js";
+
 const UPDATE_ENVIRONMENT_DIRECTORY_INSTRUCTIONS =
   "If the user asks you to move this thread to another checkout, worktree, or directory, make sure the target directory exists, then call `update_environment_directory` with its absolute path. After it succeeds, end the current turn; bb starts the next turn in the updated environment automatically so you can continue there.";
 
@@ -95,6 +97,12 @@ function resolveDynamicTools(
     {
       tool: UPDATE_ENVIRONMENT_DIRECTORY_TOOL,
       instructions: UPDATE_ENVIRONMENT_DIRECTORY_INSTRUCTIONS,
+      pluginId: null,
+    },
+    {
+      tool: BB_UPDATE_PLAN_TOOL,
+      instructions:
+        "Use `bb_update_plan` to keep a visible progress plan unless a native plan/todo tool is available. Send the full plan on each update.",
       pluginId: null,
     },
     ...pluginTools.map((contribution) => ({
