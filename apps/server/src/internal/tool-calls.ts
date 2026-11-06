@@ -21,6 +21,11 @@ import {
 } from "../services/threads/thread-environment-directory.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
 
+import {
+  BB_UPDATE_PLAN_TOOL,
+  handleUpdatePlanToolCall,
+} from "../services/threads/thread-plan-tool.js";
+
 const textEncoder = new TextEncoder();
 
 function streamToolCallResponse(
@@ -83,6 +88,18 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             input: payload.arguments,
             thread,
             turnId: payload.turnId,
+          }),
+        );
+      }
+
+      if (payload.tool === BB_UPDATE_PLAN_TOOL.name) {
+        return context.json(
+          handleUpdatePlanToolCall(deps, {
+            threadId: thread.id,
+            providerThreadId: payload.providerThreadId,
+            turnId: payload.turnId,
+            callId: payload.callId,
+            input: payload.arguments,
           }),
         );
       }

@@ -232,6 +232,7 @@ describe("thread runtime config", () => {
           expect.objectContaining({
             name: "update_environment_directory",
           }),
+          expect.objectContaining({ name: "bb_update_plan" }),
         ]);
         expect(startCommand.instructions).toContain(
           "update_environment_directory",
@@ -258,6 +259,7 @@ describe("thread runtime config", () => {
           expect.objectContaining({
             name: "update_environment_directory",
           }),
+          expect.objectContaining({ name: "bb_update_plan" }),
         ]);
         expect(submitCommand.resumeContext.instructions).toContain(
           "update_environment_directory",
@@ -358,6 +360,7 @@ describe("thread runtime config", () => {
           expect.objectContaining({
             name: "update_environment_directory",
           }),
+          expect.objectContaining({ name: "bb_update_plan" }),
         ]);
         expect(startCommand.instructions).toContain(
           "update_environment_directory",
@@ -384,6 +387,7 @@ describe("thread runtime config", () => {
           expect.objectContaining({
             name: "update_environment_directory",
           }),
+          expect.objectContaining({ name: "bb_update_plan" }),
         ]);
         expect(submitCommand.resumeContext.instructions).toContain(
           "update_environment_directory",
@@ -1211,6 +1215,7 @@ describe("thread runtime config", () => {
             required: ["path"],
           }),
         }),
+        expect.objectContaining({ name: "bb_update_plan" }),
       ]);
       expect(runtimeConfig.instructions).not.toContain(
         "You are working inside bb, an agentic IDE",
