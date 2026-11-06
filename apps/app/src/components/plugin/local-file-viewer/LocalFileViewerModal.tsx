@@ -7,6 +7,7 @@ import {
   WorkspaceFilePreviewTabContent,
 } from "@/components/secondary-panel/ThreadSecondaryPanelTabContent";
 import { PluginThreadChat } from "@/components/plugin/PluginThreadChat";
+import type { FilePreview } from "@bb/client-core";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useThreadStorageFilePreview } from "@/hooks/queries/thread-panel-queries";
 import {
@@ -74,6 +75,11 @@ function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
   );
 }
 
+function getPreviewReloadKey(preview: FilePreview): number | undefined {
+  if (preview.kind === "unsupported") return preview.sizeBytes;
+  return preview.kind === "text" ? preview.content.length : undefined;
+}
+
 function ThreadStoragePdf({
   target,
 }: {
@@ -83,11 +89,18 @@ function ThreadStoragePdf({
     target.threadId,
     target.relativePath,
   );
+  if (!preview.isSuccess) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading PDF…
+      </div>
+    );
+  }
   return (
     <PdfViewerFrame
       title={getFileName(target.relativePath)}
       url={getDownloadUrl(target)}
-      reloadKey={preview.dataUpdatedAt}
+      reloadKey={getPreviewReloadKey(preview.data)}
     />
   );
 }
@@ -182,8 +195,7 @@ export function LocalFileViewerModal({
           aria-labelledby={
             compact && homeThread ? "local-file-artifact-tab" : undefined
           }
-          hidden={compact && homeThread !== null && tab !== "artifact"}
-          className="min-h-0 min-w-0 flex-[1.7] flex-col overflow-hidden"
+          className="min-h-0 min-w-0 flex-[1.5] flex-col overflow-hidden"
           style={{
             display:
               compact && homeThread !== null && tab !== "artifact"
@@ -222,11 +234,10 @@ export function LocalFileViewerModal({
             id="local-file-chat"
             role={compact ? "tabpanel" : undefined}
             aria-labelledby={compact ? "local-file-chat-tab" : undefined}
-            hidden={compact && tab !== "chat"}
-            className="min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l"
+            className="min-h-0 min-w-[340px] flex-1 flex-col overflow-hidden border-l"
             style={{ display: compact && tab !== "chat" ? "none" : "flex" }}
           >
-            <ArtifactThreadChat key={homeThread} threadId={homeThread} />
+            <ArtifactThreadChat threadId={homeThread} />
           </section>
         ) : null}
       </div>

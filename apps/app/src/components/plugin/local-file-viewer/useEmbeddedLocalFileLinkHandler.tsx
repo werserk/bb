@@ -1,13 +1,27 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { getThreadEntity } from "@/hooks/cache-owners/thread-entity-store";
-import { resolveHomeThread } from "@/lib/local-file-viewer-target";
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { appToast } from "@/components/ui/app-toast";
 import type { ThreadTimelineLocalFileLinkHandler } from "@/components/thread/timeline";
+import { getThreadEntity } from "@/hooks/cache-owners/thread-entity-store";
 import { useThreadStorageLocation } from "@/hooks/queries/thread-panel-queries";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { resolveEmbeddedLocalFileTarget } from "@/lib/embedded-local-file-target";
+import { resolveHomeThread } from "@/lib/local-file-viewer-target";
 import { openCoreModal } from "@/lib/modal-host";
+
+function showUnavailable(path: string): void {
+  appToast.error("Can't open this file here", {
+    description: path,
+    action: {
+      label: "Copy path",
+      onClick: () => {
+        void copyToClipboardWithToast(path, {
+          successMessage: "Path copied",
+        });
+      },
+    },
+  });
+}
 
 interface UseEmbeddedLocalFileLinkHandlerArgs {
   enabled: boolean;
@@ -46,17 +60,7 @@ export function useEmbeddedLocalFileLinkHandler({
         return false;
       }
       if (resolved.kind === "unavailable") {
-        appToast.error("Can't open this file here", {
-          description: resolved.path,
-          action: {
-            label: "Copy path",
-            onClick: () => {
-              void copyToClipboardWithToast(resolved.path, {
-                successMessage: "Path copied",
-              });
-            },
-          },
-        });
+        showUnavailable(resolved.path);
         return true;
       }
       const homeThreadId = resolveHomeThread(resolved);
@@ -64,16 +68,22 @@ export function useEmbeddedLocalFileLinkHandler({
         homeThreadId === null
           ? null
           : getThreadEntity(queryClient, homeThreadId)?.thread.title;
-      openCoreModal("core/local-file-viewer", {
-        title: (
-          resolved.relativePath.split(/[\\/]/).at(-1) ?? resolved.relativePath
-        ).slice(0, 200),
-        ...(title ? { context: title.slice(0, 200) } : {}),
-        params: {
-          ...resolved,
-          lineRange: resolved.lineRange === null ? null : { ...resolved.lineRange },
-        },
-      });
+      try {
+        openCoreModal("core/local-file-viewer", {
+          title: (
+            resolved.relativePath.split(/[\\/]/).at(-1) ??
+            resolved.relativePath
+          ).slice(0, 200),
+          ...(title ? { context: title.slice(0, 200) } : {}),
+          params: {
+            ...resolved,
+            lineRange:
+              resolved.lineRange === null ? null : { ...resolved.lineRange },
+          },
+        });
+      } catch {
+        showUnavailable(resolved.path);
+      }
       return true;
     },
     [

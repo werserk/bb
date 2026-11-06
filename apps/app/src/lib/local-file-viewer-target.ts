@@ -13,7 +13,7 @@ const relativePath = z
   .refine(
     (path) =>
       !path.includes("\0") &&
-      !/^(?:[\\/]|[a-z]:)/iu.test(path) &&
+      !/^(?:[\\/]|[a-z]:[\\/])/iu.test(path) &&
       !path
         .split(/[\\/]/u)
         .some((segment) => segment === ".." || segment === "."),
@@ -52,28 +52,7 @@ export function parseLocalFileViewerTarget(
   return result.success ? result.data : null;
 }
 
-interface EnvironmentThreads {
-  complete: boolean;
-  threads: readonly {
-    id: string;
-    environmentId: string | null;
-    archived: boolean;
-  }[];
-}
-
-export function resolveHomeThread(
-  value: unknown,
-  membership?: EnvironmentThreads,
-): string | null {
+export function resolveHomeThread(value: unknown): string | null {
   const target = parseLocalFileViewerTarget(value);
-  if (target === null) return null;
-  if (target.kind === "thread-storage") return target.threadId;
-  if (!membership?.complete) return null;
-  const threads = membership.threads.filter(
-    (thread) =>
-      !thread.archived && thread.environmentId === target.environmentId,
-  );
-  return threads.length === 1 && isRawThreadId(threads[0]!.id)
-    ? threads[0]!.id
-    : null;
+  return target?.kind === "thread-storage" ? target.threadId : null;
 }
