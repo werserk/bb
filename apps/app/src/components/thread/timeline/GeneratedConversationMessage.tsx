@@ -240,7 +240,7 @@ function systemMessageTitleSegments(
     case "ownership-removed":
       return threadSubjectTitleSegments(subject, "unassigned");
     case "child-needs-attention":
-      return threadSubjectTitleSegments(subject, "needs attention");
+      return threadSubjectTitleSegments(subject, "needs you");
     case "child-completed":
       return threadSubjectTitleSegments(subject, "finished");
     case "child-failed":

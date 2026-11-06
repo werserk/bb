@@ -215,8 +215,8 @@ describe("OwnerPostRow", () => {
       cards.map((card) => card.getAttribute("data-thread-card-status")),
     ).toEqual(["running", "waiting", "error", "unknown"]);
     expect(cards[0]?.textContent).toContain("Fix the flaky test");
-    expect(cards[0]?.textContent).toContain(THREAD_CARD_STATUS_LABELS.running);
-    expect(cards[1]?.textContent).toContain(THREAD_CARD_STATUS_LABELS.waiting);
+    expect(cards[0]?.textContent).toContain("Working");
+    expect(cards[1]?.textContent).toContain("Needs you");
     expect(cards[2]?.querySelector(".truncate")).toBeTruthy();
     expect(cards[0]?.getAttribute("href")).toBe(
       "/projects/proj_1/threads/thr_running",
