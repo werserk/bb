@@ -263,6 +263,7 @@ async function setup(options: SetupOptions = {}) {
 
   return {
     ...fake,
+    metadata,
     addSubscription,
     cleanup,
     clientSignals: () => signals(CLIENT_NOTIFICATION_CHANNEL),
@@ -846,7 +847,10 @@ describe("push sender", () => {
     const host = await setup();
     try {
       await host.addSubscription();
-      const thread = host.setThread({ id: "thread-questions", status: "active" });
+      const thread = host.setThread({
+        id: "thread-questions",
+        status: "active",
+      });
       await host.setLevel(thread.id, "questions-only");
 
       await host.harness.behavior.emitThreadEvent("thread.failed", {
@@ -1490,6 +1494,8 @@ describe("thread notification levels", () => {
         { thread: host.threads.get(worker.id)!, previousParentThreadId: null },
       );
       const capped = {
+        childLevel: "inherit",
+        inheritedChildLevel: null,
         own: "inherit",
         ancestorCap: { level: "muted", threadId: muted.id },
       };
@@ -1520,6 +1526,8 @@ describe("thread notification levels", () => {
         visibility: "hidden",
       });
       const capped = {
+        childLevel: "inherit",
+        inheritedChildLevel: null,
         own: "inherit",
         ancestorCap: { level: "muted", threadId: root.id },
       };
@@ -1527,7 +1535,12 @@ describe("thread notification levels", () => {
       await host.setLevel(root.id, "muted");
       await expect(host.listLevels([root.id, worker.id])).resolves.toEqual({
         threads: {
-          [root.id]: { own: "muted", ancestorCap: null },
+          [root.id]: {
+            own: "muted",
+            ancestorCap: null,
+            childLevel: "inherit",
+            inheritedChildLevel: null,
+          },
           [worker.id]: capped,
         },
       });
@@ -1554,13 +1567,23 @@ describe("thread notification levels", () => {
 
       await host.setLevel(root.id, "muted");
       const capped = {
+        childLevel: "inherit",
+        inheritedChildLevel: null,
         own: "inherit",
         ancestorCap: { level: "muted", threadId: root.id },
       };
       await expect(
         host.listLevels(["root", "child", "other"]),
       ).resolves.toEqual({
-        threads: { root: { own: "muted", ancestorCap: null }, child: capped },
+        threads: {
+          root: {
+            own: "muted",
+            ancestorCap: null,
+            childLevel: "inherit",
+            inheritedChildLevel: null,
+          },
+          child: capped,
+        },
       });
       await host.setLevel(root.id, "inherit");
       await expect(
@@ -1582,7 +1605,14 @@ describe("thread notification levels", () => {
       await expect(
         host.listLevels([archived.id, plain.id, "missing"]),
       ).resolves.toEqual({
-        threads: { archived: { own: "muted", ancestorCap: null } },
+        threads: {
+          archived: {
+            own: "muted",
+            ancestorCap: null,
+            childLevel: "inherit",
+            inheritedChildLevel: null,
+          },
+        },
       });
       await expect(host.listLevels([])).rejects.toMatchObject({
         code: "invalid_input",
@@ -1781,6 +1811,57 @@ describe("thread notification levels", () => {
       });
     } finally {
       await host.cleanup();
+    }
+  });
+});
+
+describe("per-thread child defaults", () => {
+  it("resolves nearest defaults, preserves caps and keys, clears and republishes", async () => {
+    const h = await setup();
+    try {
+      h.setThread({ id: "root" });
+      h.setThread({ id: "middle", parentThreadId: "root" });
+      h.setThread({ id: "leaf", parentThreadId: "middle" });
+      const setChild = (threadId: string, level: string) =>
+        h.harness.behavior.callRpc("threadNotifications.setChildLevel", {
+          threadId,
+          level,
+        });
+      await setChild("root", "all");
+      expect(await h.listLevels(["root"])).toMatchObject({
+        threads: { root: { childLevel: "all" } },
+      });
+      expect(await h.getLevel("leaf")).toMatchObject({
+        effective: "all",
+        source: "ancestor-child-default",
+      });
+      await setChild("middle", "questions-only");
+      expect(await h.getLevel("leaf")).toMatchObject({
+        effective: "questions-only",
+        source: "ancestor-child-default",
+      });
+      await h.setLevel("root", "muted");
+      expect(await h.getLevel("leaf")).toMatchObject({
+        effective: "muted",
+        source: "ancestor",
+      });
+      await h.setLevel("root", "inherit");
+      expect(h.metadata.get("root")).toMatchObject({
+        childNotifications: { level: "all" },
+      });
+      await setChild("middle", "inherit");
+      h.setThread({ id: "later", parentThreadId: "leaf" });
+      expect(await h.getLevel("later")).toMatchObject({ effective: "all" });
+      await setChild("root", "inherit");
+      expect(h.metadata.get("root")?.childNotifications).toBeUndefined();
+      await expect(setChild("missing", "all")).rejects.toThrow();
+      expect(h.harness.experimental_rpcInvalidations).toContainEqual([
+        "thread:root",
+        "thread:middle",
+        "thread:leaf",
+      ]);
+    } finally {
+      await h.cleanup();
     }
   });
 });

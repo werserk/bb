@@ -79,3 +79,11 @@ target client.
 
 Inspect `status` before changing a channel, and change only the requested
 channel or device.
+
+Root threads expose **Notifications for new threads**. It stores a separate
+`childNotifications: { level }` metadata key; `inherit` removes that key.
+Descendants start from their own level, then the nearest ancestor child level,
+then the global child default, then the global default. Ancestor own-level caps
+still only lower the result. A thread's child level never affects itself.
+`bb push-notifications thread <id> --child-level <inherit|all|input-only|questions-only|muted>`
+uses the same writer as the menu and `threadNotifications.setChildLevel` RPC.

@@ -106,7 +106,8 @@ describe("device notification settings", () => {
 
 const { experimental_useAppPanel, useBbNavigate, useSdk } =
   await import("@get-bb/plugin-sdk/app");
-const { notificationsThreadAction } = await import("./notificationsAction.js");
+const { notificationsThreadAction, childNotificationsThreadAction } =
+  await import("./notificationsAction.js");
 
 function makeTarget(
   overrides: Partial<PluginThreadActionTarget> = {},
@@ -134,8 +135,10 @@ type BulkItemFor = (
 function Probe({
   threadIds,
   onItem,
+  child = false,
 }: {
   threadIds: readonly string[];
+  child?: boolean;
   onItem(item: ItemFor, bulkItem: BulkItemFor): void;
 }) {
   const data = notificationsThreadAction.useData!({ threadIds });
@@ -145,7 +148,10 @@ function Probe({
   useLayoutEffect(() => {
     onItem(
       (thread) =>
-        notificationsThreadAction.item({
+        (child
+          ? childNotificationsThreadAction
+          : notificationsThreadAction
+        ).item({
           thread,
           data,
           sdk,
@@ -168,6 +174,7 @@ function Probe({
 function renderNotifications(
   stored: Record<string, ThreadNotificationInputs>,
   threadIds: readonly string[],
+  child = false,
 ) {
   let itemFor: ItemFor | null = null;
   let bulkItemFor: BulkItemFor | null = null;
@@ -180,16 +187,30 @@ function renderNotifications(
     pushNotificationsRpcContract["threadNotifications.keyed"].input;
   const view = renderSlot(
     { component: Probe },
-    { threadIds, onItem },
+    { threadIds, onItem, child },
     {
       experimental_rpcContract: {
         "threadNotifications.keyed":
           pushNotificationsRpcContract["threadNotifications.keyed"],
         "threadNotifications.set":
           pushNotificationsRpcContract["threadNotifications.set"],
+        "threadNotifications.setChildLevel":
+          pushNotificationsRpcContract["threadNotifications.setChildLevel"],
       },
       settings: { defaultLevel: "all", childLevel: "input-only" },
       rpc: {
+        "threadNotifications.setChildLevel": (input) => {
+          const { threadId, level } =
+            pushNotificationsRpcContract[
+              "threadNotifications.setChildLevel"
+            ].input.parse(input);
+          const saved = {
+            ...(current[threadId] ?? { own: "inherit", ancestorCap: null }),
+            childLevel: level,
+          };
+          current = { ...current, [threadId]: saved };
+          return saved;
+        },
         "threadNotifications.keyed": async (input) => {
           const threads = Object.fromEntries(
             listInput
@@ -387,5 +408,24 @@ describe("thread notifications action", () => {
       hint: "Limited by a parent thread",
     });
     expect(summary()?.selected).toBe("muted");
+  });
+});
+
+describe("child notifications action", () => {
+  it("retains child-only rows, selects and clears through the keyed mutation", async () => {
+    const { item, summary, stored } = renderNotifications(
+      { thr_top: { own: "inherit", ancestorCap: null, childLevel: "all" } },
+      ["thr_top"],
+      true,
+    );
+    await waitFor(() => expect(summary()?.selected).toBe("all"));
+    expect(item()?.choices?.items.filter((x) => x.selected)).toHaveLength(1);
+    expect(item({ parentThreadId: "parent" })).toBeNull();
+    expect(item({ archivedAt: 1 })).toBeNull();
+    await act(async () => {
+      await item()?.run({ value: "inherit", requestRename: async () => null });
+    });
+    await waitFor(() => expect(summary()?.selected).toBe("inherit"));
+    expect(stored().thr_top?.childLevel).toBe("inherit");
   });
 });

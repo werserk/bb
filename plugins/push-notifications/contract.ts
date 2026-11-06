@@ -144,6 +144,17 @@ export const pushNotificationsRpcContract = defineRpcContract({
       .strict(),
     output: threadNotificationInputsSchema,
   },
+  "threadNotifications.setChildLevel": {
+    experimental_description:
+      "Set the level descendants of a thread start from, in place of the global child-thread default. inherit clears it. Ancestor caps still apply. Used by a project's coordinator thread.",
+    input: z
+      .object({
+        threadId: z.string().min(1),
+        level: ownNotificationLevelSchema,
+      })
+      .strict(),
+    output: threadNotificationInputsSchema,
+  },
 });
 
 export type PushSubscription = z.infer<typeof pushSubscriptionSchema>;

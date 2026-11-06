@@ -17,7 +17,10 @@ import {
   createClientDelivery,
   notificationPermission,
 } from "./client.js";
-import { notificationsThreadAction } from "./notificationsAction.js";
+import {
+  notificationsThreadAction,
+  childNotificationsThreadAction,
+} from "./notificationsAction.js";
 
 function NotificationDelivery() {
   const navigate = useBbNavigate();
@@ -160,4 +163,5 @@ export default definePluginApp((app) => {
   });
   app.slots.settingsSection({ id: "device", component: NotificationSettings });
   app.slots.experimental_threadAction(notificationsThreadAction);
+  app.slots.experimental_threadAction(childNotificationsThreadAction);
 });

@@ -28,6 +28,7 @@ export interface ThreadNotificationsData {
   error: string | null;
   unloadedThreadIds: ReadonlySet<string> | null;
   retry(): Promise<void>;
+  setChildLevel(threadId: string, level: OwnNotificationLevel): Promise<void>;
   setLevels(
     threadIds: readonly string[],
     level: OwnNotificationLevel,
@@ -49,7 +50,11 @@ function selectNotificationRows(
   return {
     levels: Object.fromEntries(
       Object.entries(rows).filter(
-        ([, value]) => value.own !== "inherit" || value.ancestorCap !== null,
+        ([, value]) =>
+          value.own !== "inherit" ||
+          value.ancestorCap !== null ||
+          !!value.inheritedChildLevel ||
+          (value.childLevel ?? "inherit") !== "inherit",
       ),
     ),
     loaded: Object.fromEntries(Object.keys(rows).map((key) => [key, true])),
@@ -69,6 +74,28 @@ function useThreadNotificationsData({
       }));
     },
   });
+  const { mutate: saveChildLevel } = experimental_useRpcMutation({
+    contract: pushNotificationsRpcContract,
+    method: "threadNotifications.setChildLevel",
+    optimistic: ({ threadId, level }, cache) => {
+      cache.updateKey("threadNotifications.keyed", threadId, (current) => ({
+        ...current,
+        childLevel: level,
+      }));
+    },
+  });
+  const setChildLevel = useCallback(
+    async (threadId: string, level: OwnNotificationLevel) => {
+      try {
+        await saveChildLevel({ threadId, level });
+      } catch (error) {
+        toast.error("Failed to update notifications", {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
+    },
+    [saveChildLevel],
+  );
   const { values } = useSettings();
   const query = experimental_useRpcKeyedQuery({
     contract: pushNotificationsRpcContract,
@@ -107,8 +134,24 @@ function useThreadNotificationsData({
   const defaults = useMemo(() => parseDefaults(values), [values]);
 
   return useMemo(
-    () => ({ levels, defaults, setLevels, error, unloadedThreadIds, retry }),
-    [defaults, levels, setLevels, error, unloadedThreadIds, retry],
+    () => ({
+      levels,
+      defaults,
+      setLevels,
+      setChildLevel,
+      error,
+      unloadedThreadIds,
+      retry,
+    }),
+    [
+      defaults,
+      levels,
+      setLevels,
+      setChildLevel,
+      error,
+      unloadedThreadIds,
+      retry,
+    ],
   );
 }
 
@@ -250,6 +293,50 @@ export const notificationsThreadAction: PluginThreadActionRegistration<ThreadNot
             active.map((thread) => thread.id),
             level.data,
           );
+        },
+      };
+    },
+  };
+
+export const childNotificationsThreadAction: PluginThreadActionRegistration<ThreadNotificationsData> =
+  {
+    id: "childNotifications",
+    title: "Notifications for new threads",
+    icon: "BellDot",
+    group: experimental_THREAD_ACTION_GROUPS.state,
+    order: 51,
+    useData: useThreadNotificationsData,
+    item: ({ thread, data }) => {
+      if (thread.archivedAt !== null || thread.parentThreadId !== null)
+        return null;
+      const level = data.levels.get(thread.id)?.childLevel ?? "inherit";
+      const unavailable = data.unloadedThreadIds?.has(thread.id) ?? false;
+      return {
+        label: "Notifications for new threads",
+        detail: unavailable
+          ? "Notifications unavailable"
+          : NOTIFICATION_LEVEL_LABELS[level],
+        icon: "BellDot",
+        choices: {
+          ...(data.error === null ? {} : { hint: data.error }),
+          items: [
+            ...(unavailable
+              ? []
+              : ownNotificationLevelSchema.options.map((id) => ({
+                  id,
+                  label: NOTIFICATION_LEVEL_LABELS[id],
+                  selected: id === level,
+                }))),
+            ...(data.error === null ? [] : [{ id: "retry", label: "Retry" }]),
+          ],
+        },
+        run: async ({ value }) => {
+          if (value === "retry") {
+            await data.retry();
+            return;
+          }
+          const parsed = ownNotificationLevelSchema.safeParse(value);
+          if (parsed.success) await data.setChildLevel(thread.id, parsed.data);
         },
       };
     },

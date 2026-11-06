@@ -297,6 +297,8 @@ export function createPushNotificationsPlugin(
       }),
       "threadNotifications.set": ({ threadId, level }) =>
         preferences.set(threadId, level),
+      "threadNotifications.setChildLevel": ({ threadId, level }) =>
+        preferences.setChildLevel(threadId, level),
     });
 
     bb.cli.register(
@@ -508,7 +510,7 @@ export function createPushNotificationsPlugin(
           thread: cliCommand({
             summary: "Show or set a thread's notification level",
             description:
-              "Without --level, prints the resolved level and where it comes from. A thread uses its own level, else childLevel if it has a parent, else defaultLevel; every ancestor's own level caps it.",
+              "Without --level or --child-level, prints the resolved level and where it comes from. A thread uses its own level, else the child level of its nearest ancestor that sets one (--child-level), else the global childLevel if it has a parent, else defaultLevel; every ancestor's own level caps it.",
             positionals: [
               {
                 name: "thread",
@@ -523,6 +525,12 @@ export function createPushNotificationsPlugin(
                 description:
                   "Set the thread's own level; inherit clears it so the parent or default applies",
               },
+              "child-level": {
+                type: "enum",
+                values: ownNotificationLevelSchema.options,
+                description:
+                  "Set the level this thread's descendants start from; inherit clears it so the global child-thread default applies",
+              },
               json: JSON_OPTION,
             },
             async run(input) {
@@ -531,6 +539,12 @@ export function createPushNotificationsPlugin(
               try {
                 if (input.options.level !== undefined) {
                   await preferences.set(threadId, input.options.level);
+                }
+                if (input.options["child-level"] !== undefined) {
+                  await preferences.setChildLevel(
+                    threadId,
+                    input.options["child-level"],
+                  );
                 }
                 row = await preferences.get(threadId);
               } catch (error) {
