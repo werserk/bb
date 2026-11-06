@@ -43,7 +43,8 @@ bb plugin config push-notifications set expoPushUrl <url>
   notification levels don't apply.
 - `thread` prints a thread's resolved notification level and its source;
   `--level` sets the thread's own level. A thread uses its own level, else
-  `childLevel` if it has a parent (default `input-only`; `inherit` follows
+  the nearest ancestor child level if it has a parent, else global
+  `childLevel` (default `input-only`; `inherit` follows
   `defaultLevel`), else `defaultLevel` (default `all`). Every ancestor's own
   level also caps its child threads. `all` notifies on finished turns too,
   `input-only` keeps questions, approvals, and errors only, and `muted` sends
