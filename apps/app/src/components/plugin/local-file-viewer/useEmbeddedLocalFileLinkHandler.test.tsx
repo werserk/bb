@@ -1,179 +1,119 @@
 // @vitest-environment jsdom
 
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEmbeddedLocalFileLinkHandler } from "./useEmbeddedLocalFileLinkHandler";
 
-const STORAGE_ROOT = "/home/me/.bb/thread-storage/thr_own";
-
 const mocks = vi.hoisted(() => ({
-  filePreview: vi.fn(),
-  toastError: vi.fn(),
+  open: vi.fn(),
+  toast: vi.fn(),
+  entity: vi.fn(),
 }));
-
+vi.mock("@/lib/modal-host", () => ({ openCoreModal: mocks.open }));
+vi.mock("@/components/ui/app-toast", () => ({
+  appToast: { error: mocks.toast },
+}));
+vi.mock("@/hooks/cache-owners/thread-entity-store", () => ({
+  getThreadEntity: mocks.entity,
+}));
 vi.mock("@/hooks/queries/thread-panel-queries", () => ({
   useThreadStorageLocation: () => ({
-    data: {
-      hostId: "host_1",
-      storageRootPath: "/home/me/.bb/thread-storage/thr_own",
-    },
+    data: { storageRootPath: "/home/me/.bb/thread-storage/thr_abcd234567" },
   }),
-  useThreadStorageFilePreview: (...args: unknown[]) =>
-    mocks.filePreview(...args),
 }));
 
-vi.mock("@/components/ui/app-toast", () => ({
-  appToast: { error: mocks.toastError, success: vi.fn() },
-}));
+const STORAGE_PATH = "/home/me/.bb/thread-storage/thr_abcd234567/report.md";
+const OTHER_PATH = "/home/me/.bb/thread-storage/thr_bcde234567/new.pdf";
+const APP_ROUTE = "/projects/proj_abc/threads/thr_abc";
 
-vi.mock("@/components/secondary-panel/ThreadStorageFilePreview", () => ({
-  SecondaryPanelFilePreview: (props: {
-    activePath: string;
-    filePreview?: { kind: string; name?: string };
-  }) => (
-    <div data-testid="preview">
-      {props.filePreview?.kind === "unsupported"
-        ? `No preview for ${props.activePath}`
-        : `preview:${props.activePath}`}
-    </div>
-  ),
-}));
-
-function Harness({
-  environmentId = "env_1",
-}: {
-  environmentId?: string | null;
-}) {
-  const { onOpenLocalFileLink, viewer } = useEmbeddedLocalFileLinkHandler({
-    enabled: true,
-    environmentId,
-    threadId: "thr_own",
-    workspaceRootPath: "/home/me/work/repo",
+function Handler({ enabled = true }: { enabled?: boolean }) {
+  const { onOpenLocalFileLink } = useEmbeddedLocalFileLinkHandler({
+    enabled,
+    environmentId: "env_1",
+    threadId: "thr_abcd234567",
+    workspaceRootPath: "/repo",
   });
-  const open = (path: string) =>
-    onOpenLocalFileLink?.({ lineRange: null, openTargetId: null, path }) ??
-    null;
   return (
     <>
-      <button
-        type="button"
-        onClick={() => open(`${STORAGE_ROOT}/shots/a1.png`)}
-      >
-        open storage
-      </button>
-      <button type="button" onClick={() => open("/etc/passwd")}>
-        open outside
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          window.__routeResult = open("/projects/proj_abc/threads/thr_abc");
-        }}
-      >
-        open route
-      </button>
-      {viewer}
+      {[STORAGE_PATH, OTHER_PATH, "/etc/passwd", APP_ROUTE].map(path => (
+        <button
+          key={path}
+          onClick={() => onOpenLocalFileLink?.({
+            path,
+            lineRange: null,
+            openTargetId: null,
+          })}
+        >
+          {path}
+        </button>
+      ))}
     </>
   );
 }
 
-declare global {
-  interface Window {
-    __routeResult?: boolean | null;
-  }
+function Harness({ enabled = true }: { enabled?: boolean }) {
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <Handler enabled={enabled} />
+    </QueryClientProvider>
+  );
 }
 
-beforeEach(() => {
-  mocks.filePreview.mockReset();
-  mocks.toastError.mockReset();
-  mocks.filePreview.mockReturnValue({
-    data: undefined,
-    error: null,
-    isFetching: false,
-    isLoading: true,
-    refetch: vi.fn(),
-  });
-});
+beforeEach(() => vi.resetAllMocks());
 afterEach(cleanup);
 
 describe("useEmbeddedLocalFileLinkHandler", () => {
-  it("opens a thread-storage file in the viewer dialog", () => {
+  it("opens the shared modal and replaces the target on a second link", () => {
     render(<Harness />);
-    fireEvent.click(screen.getByText("open storage"));
-    expect(screen.getByRole("dialog")).not.toBeNull();
-    expect(screen.getByText("a1.png")).not.toBeNull();
-    expect(screen.getByTestId("preview").textContent).toBe(
-      "preview:shots/a1.png",
+    fireEvent.click(screen.getByText(STORAGE_PATH));
+    expect(mocks.open).toHaveBeenLastCalledWith(
+      "core/local-file-viewer",
+      expect.objectContaining({
+        title: "report.md",
+        params: expect.objectContaining({
+          threadId: "thr_abcd234567",
+          relativePath: "report.md",
+        }),
+      }),
     );
-    expect(mocks.filePreview).toHaveBeenCalledWith(
-      "thr_own",
-      "shots/a1.png",
-      expect.anything(),
-    );
-    expect(
-      screen.getByRole("link", { name: "Download" }).getAttribute("href"),
-    ).toContain("/threads/thr_own/thread-storage/files/shots/a1.png");
-  });
-
-  it("shows the unsupported-file fallback from the preview surface", () => {
-    mocks.filePreview.mockReturnValue({
-      data: {
-        kind: "unsupported",
-        path: "export.bin",
-        url: "/x",
-        mimeType: "application/octet-stream",
-        sizeBytes: 18,
-        reason: "binary",
-      },
-      error: null,
-      isFetching: false,
-      isLoading: false,
-      refetch: vi.fn(),
-    });
-    render(<Harness />);
-    fireEvent.click(screen.getByText("open storage"));
-    expect(screen.getByTestId("preview").textContent).toContain(
-      "No preview for",
+    fireEvent.click(screen.getByText(OTHER_PATH));
+    expect(mocks.open).toHaveBeenLastCalledWith(
+      "core/local-file-viewer",
+      expect.objectContaining({
+        title: "new.pdf",
+        params: expect.objectContaining({ threadId: "thr_bcde234567" }),
+      }),
     );
   });
 
-  it("toasts and makes no preview request for a path outside served roots", () => {
+  it("uses a cached thread title within the host text limit", () => {
+    mocks.entity.mockReturnValue({ thread: { title: "a".repeat(201) } });
     render(<Harness />);
-    fireEvent.click(screen.getByText("open outside"));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(mocks.filePreview).not.toHaveBeenCalled();
-    expect(mocks.toastError).toHaveBeenCalledWith(
+    fireEvent.click(screen.getByText(STORAGE_PATH));
+    expect(mocks.open.mock.calls[0]?.[1].context).toBe("a".repeat(200));
+  });
+
+  it("toasts for unavailable paths without opening", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByText("/etc/passwd"));
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith(
       "Can't open this file here",
       expect.objectContaining({ description: "/etc/passwd" }),
     );
   });
 
-  it("leaves app routes to normal navigation", () => {
+  it("leaves app routes to navigation", () => {
     render(<Harness />);
-    fireEvent.click(screen.getByText("open route"));
-    expect(window.__routeResult).toBe(false);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByText(APP_ROUTE));
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 
-  it("closes on Escape and returns focus to the link", async () => {
-    render(<Harness />);
-    const trigger = screen.getByText("open storage");
-    trigger.focus();
-    fireEvent.click(trigger);
-    expect(screen.getByRole("dialog")).not.toBeNull();
-    await act(async () => {
-      fireEvent.keyDown(document.activeElement ?? document.body, {
-        key: "Escape",
-      });
-    });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  it("does nothing when disabled", () => {
+    render(<Harness enabled={false} />);
+    fireEvent.click(screen.getByText(STORAGE_PATH));
+    expect(mocks.open).not.toHaveBeenCalled();
   });
 });

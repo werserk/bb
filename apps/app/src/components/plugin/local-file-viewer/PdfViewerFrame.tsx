@@ -8,6 +8,7 @@ type PdfState =
   | { status: "error"; message: string };
 
 interface PdfViewerFrameProps {
+  reloadKey?: string | number;
   title: string;
   url: string;
 }
@@ -32,32 +33,40 @@ async function loadPdfBlob(url: string, signal: AbortSignal): Promise<Blob> {
   });
 }
 
-export function PdfViewerFrame({ title, url }: PdfViewerFrameProps) {
+export function PdfViewerFrame({ reloadKey, title, url }: PdfViewerFrameProps) {
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [state, setState] = useState<PdfState>({ status: "loading" });
+  const requestKey = JSON.stringify([url, reloadKey ?? null, reloadNonce]);
+  const [loaded, setLoaded] = useState<{
+    requestKey: string;
+    state: PdfState;
+  } | null>(null);
+  const state: PdfState =
+    loaded?.requestKey === requestKey ? loaded.state : { status: "loading" };
 
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl: string | null = null;
-    setState({ status: "loading" });
     void loadPdfBlob(url, controller.signal)
       .then((blob) => {
         if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
-        setState({ status: "ready", url: objectUrl });
+        setLoaded({ requestKey, state: { status: "ready", url: objectUrl } });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        setState({
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
+        setLoaded({
+          requestKey,
+          state: {
+            status: "error",
+            message: error instanceof Error ? error.message : String(error),
+          },
         });
       });
     return () => {
       controller.abort();
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
-  }, [reloadNonce, url]);
+  }, [requestKey, url]);
 
   if (state.status === "error") {
     return (

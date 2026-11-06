@@ -16,6 +16,8 @@ import { applyAppFrameGeometry, getBbDesktopInfo } from "./lib/bb-desktop";
 import { applyCachedAppThemeCss } from "./lib/themes";
 import { installStaleChunkRecovery } from "./lib/stale-chunk-recovery";
 import { moveStylesheetPropertiesToRegistry } from "./lib/stylesheet-property-registry";
+import { registerCoreModal } from "./lib/modal-host";
+import { LocalFileViewerModal } from "./components/plugin/local-file-viewer/LocalFileViewerModal";
 import "./app.css";
 
 installStaleChunkRecovery();
@@ -25,6 +27,7 @@ Error.stackTraceLimit = 50;
 
 installAppQueryClientBrowserEvents(appQueryClient);
 registerProviderCliInstallQueryClient(appQueryClient);
+registerCoreModal("core/local-file-viewer", LocalFileViewerModal);
 
 initializePreferredTheme();
 applyCachedAppThemeCss();

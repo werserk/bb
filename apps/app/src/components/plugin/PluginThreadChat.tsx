@@ -350,7 +350,6 @@ function PluginThreadChatBody({
           }}
           workspaceRootPath={workspaceRootPath}
         />
-        {embeddedLocalFileLinks.viewer}
       </PluginComposerHostScopeProvider>
     </ThreadProviderContext.Provider>
   );

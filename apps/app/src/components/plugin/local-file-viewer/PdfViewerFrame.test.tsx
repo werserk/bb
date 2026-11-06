@@ -55,6 +55,22 @@ describe("PdfViewerFrame", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:pdf-1");
   });
 
+  it("refetches the same URL when reloadKey changes and releases the old blob", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(pdfResponse("application/pdf")),
+    );
+    const { rerender } = render(
+      <PdfViewerFrame title="doc.pdf" url="/doc.pdf" reloadKey={1} />,
+    );
+    await screen.findByTitle("doc.pdf");
+    rerender(
+      <PdfViewerFrame title="doc.pdf" url="/doc.pdf" reloadKey={2} />,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await screen.findByTitle("doc.pdf");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:pdf-1");
+  });
+
   it("refuses a response that is not application/pdf", async () => {
     fetchMock.mockResolvedValue(pdfResponse("text/html"));
     render(<PdfViewerFrame title="doc.pdf" url="/api/v1/x/doc.pdf" />);

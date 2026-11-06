@@ -1,13 +1,13 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getThreadEntity } from "@/hooks/cache-owners/thread-entity-store";
+import { resolveHomeThread } from "@/lib/local-file-viewer-target";
+import { useCallback } from "react";
 import { appToast } from "@/components/ui/app-toast";
 import type { ThreadTimelineLocalFileLinkHandler } from "@/components/thread/timeline";
 import { useThreadStorageLocation } from "@/hooks/queries/thread-panel-queries";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { resolveEmbeddedLocalFileTarget } from "@/lib/embedded-local-file-target";
-import {
-  LocalFileViewerDialog,
-  type LocalFileViewerTarget,
-} from "./LocalFileViewerDialog";
+import { openCoreModal } from "@/lib/modal-host";
 
 interface UseEmbeddedLocalFileLinkHandlerArgs {
   enabled: boolean;
@@ -18,7 +18,6 @@ interface UseEmbeddedLocalFileLinkHandlerArgs {
 
 interface EmbeddedLocalFileLinkHandler {
   onOpenLocalFileLink: ThreadTimelineLocalFileLinkHandler | undefined;
-  viewer: ReactNode;
 }
 
 export function useEmbeddedLocalFileLinkHandler({
@@ -27,8 +26,7 @@ export function useEmbeddedLocalFileLinkHandler({
   threadId,
   workspaceRootPath,
 }: UseEmbeddedLocalFileLinkHandlerArgs): EmbeddedLocalFileLinkHandler {
-  const [target, setTarget] = useState<LocalFileViewerTarget | null>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const queryClient = useQueryClient();
   const storageLocationQuery = useThreadStorageLocation(threadId ?? "", {
     enabled: enabled && threadId !== null,
   });
@@ -61,29 +59,33 @@ export function useEmbeddedLocalFileLinkHandler({
         });
         return true;
       }
-      const activeElement = document.activeElement;
-      returnFocusRef.current =
-        activeElement instanceof HTMLElement ? activeElement : null;
-      setTarget(resolved);
+      const homeThreadId = resolveHomeThread(resolved);
+      const title =
+        homeThreadId === null
+          ? null
+          : getThreadEntity(queryClient, homeThreadId)?.thread.title;
+      openCoreModal("core/local-file-viewer", {
+        title: (
+          resolved.relativePath.split(/[\\/]/).at(-1) ?? resolved.relativePath
+        ).slice(0, 200),
+        ...(title ? { context: title.slice(0, 200) } : {}),
+        params: {
+          ...resolved,
+          lineRange: resolved.lineRange === null ? null : { ...resolved.lineRange },
+        },
+      });
       return true;
     },
-    [environmentId, threadId, threadStorageRootPath, workspaceRootPath],
-  );
-
-  const viewer = useMemo(
-    () =>
-      enabled ? (
-        <LocalFileViewerDialog
-          target={target}
-          onClose={() => setTarget(null)}
-          returnFocusRef={returnFocusRef}
-        />
-      ) : null,
-    [enabled, target],
+    [
+      environmentId,
+      queryClient,
+      threadId,
+      threadStorageRootPath,
+      workspaceRootPath,
+    ],
   );
 
   return {
     onOpenLocalFileLink: enabled ? onOpenLocalFileLink : undefined,
-    viewer,
   };
 }

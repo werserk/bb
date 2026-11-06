@@ -61,3 +61,13 @@ Two contract packages define the boundaries between components:
 **`@bb/host-daemon-contract`**: the protocol between the server and host daemons. Command types, event types, session lifecycle, the local API for app/CLI.
 
 Implementation packages never import across these boundaries. The server doesn't know how workspaces are provisioned. The daemon doesn't know about threads or projects beyond what commands tell it.
+
+### Local file viewer
+
+The app registers `core/local-file-viewer` at startup in `apps/app/src/main.tsx`.
+Embedded file links use the shared modal host, with a validated JSON file target.
+The modal reuses the secondary-panel preview and embeds `PluginThreadChat` for
+thread-storage files; workspace files stay alone because cached thread lists do
+not prove unique environment membership. Compact layouts retain both panes behind
+Artifact and Chat tabs. Thread-storage PDFs use the existing preview query update
+timestamp to reload their blob after realtime invalidation.
