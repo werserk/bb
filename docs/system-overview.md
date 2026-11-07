@@ -94,5 +94,6 @@ The server dispatch checkpoint honors the requested send mode for service and
 owner turns alike. The host uses its existing provider steer path; queue remains
 a native queued message. The thread-view service projection hides service inputs
 and replies, preserves owner input including pending steers, and exposes unfinished
-service work through the native pending turn row (with the original start time).
+service work as normal work rows alongside a native pending turn timer (with the
+original start time).
 Completed service history stays hidden; owner replies after a steer stay visible.

@@ -109,26 +109,19 @@ export function classifyServiceTurns(
       );
       if (!showLiveWork || liveTurns.size === 0) return visible;
       for (const [turnId, { meta, event }] of liveTurns) {
-        const children = visible.filter(
-          (row) => row.turnId === turnId && row.kind === "work",
-        );
-        for (const child of children) visible.splice(visible.indexOf(child), 1);
         visible.push({
           id: `service-activity:${meta.id}`,
           threadId: event.threadId,
           turnId,
           sourceSeqStart: meta.seq,
-          sourceSeqEnd: Math.max(
-            meta.seq,
-            ...children.map((row) => row.sourceSeqEnd),
-          ),
+          sourceSeqEnd: meta.seq,
           startedAt: meta.createdAt,
           createdAt: meta.createdAt,
           kind: "turn",
           status: "pending",
-          summaryCount: children.length,
+          summaryCount: 0,
           completedAt: null,
-          children,
+          children: [],
         });
       }
       return visible.sort((a, b) => a.sourceSeqStart - b.sourceSeqStart);

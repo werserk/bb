@@ -148,6 +148,7 @@ describe("service presentation", () => {
 it("shows live service work while retaining hidden service input and replies", () => {
   const { rows } = fixture("self-reminder");
   const live = timeline(rows, false, "active");
+  expect(live.rows.some((row) => row.kind === "work")).toBe(true);
   expect(JSON.stringify(live.rows)).toContain("secret details");
   expect(JSON.stringify(live.rows)).not.toContain("private reply");
   expect(JSON.stringify(live.rows)).not.toContain("ordinary wording");
