@@ -88,6 +88,10 @@ it.each([
   expect(screen.getByRole("img", { name: label })).toBeTruthy();
   expect(screen.getByText("Assertion failed")).toBeTruthy();
   expect(
-    screen.getByRole("button", { name: /1 of 2 items complete/ }),
+    screen.getByRole("button", {
+      name: locale.startsWith("ru")
+        ? /Выполнено: 1\/2/
+        : /1 of 2 items complete/,
+    }),
   ).toBeTruthy();
 });
