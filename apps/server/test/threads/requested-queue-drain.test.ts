@@ -210,6 +210,10 @@ describe("the requested queue drain", () => {
         hostId: "host-child-outcome-notice",
         status: "idle",
       });
+      const child = seedThread(harness.deps, {
+        projectId: thread.projectId,
+        parentThreadId: thread.id,
+      });
       createQueuedThreadMessage(harness.db, harness.deps.hub, {
         threadId: thread.id,
         content: textInput(
@@ -227,11 +231,11 @@ describe("the requested queue drain", () => {
           kind: "child-interrupted",
           subject: {
             kind: "thread",
-            threadId: "thr_child",
+            threadId: child.id,
             threadName: "Worker child",
             outcomes: [
               {
-                threadId: "thr_child",
+                threadId: child.id,
                 status: "interrupted",
                 interruption: {
                   reason: "host-daemon-restarted",
@@ -257,7 +261,7 @@ describe("the requested queue drain", () => {
       expect(requests[0]?.systemMessageSubject).toMatchObject({
         outcomes: [
           {
-            threadId: "thr_child",
+            threadId: child.id,
             status: "interrupted",
             interruption: {
               reason: "host-daemon-restarted",

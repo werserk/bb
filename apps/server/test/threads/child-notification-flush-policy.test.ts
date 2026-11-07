@@ -24,6 +24,11 @@ import {
   seedThreadRuntimeState,
 } from "../helpers/seed.js";
 import { withThreadContextClearGuard } from "../../src/services/threads/thread-context-mutation-guard.js";
+import {
+  sendQueuedMessage,
+  sendNextQueuedMessageIfPresent,
+} from "../../src/services/threads/queued-messages.js";
+import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import type { TestAppHarness } from "../helpers/test-app.js";
 
 function systemRequests(harness: TestAppHarness, threadId: string) {
@@ -186,6 +191,88 @@ describe("child notification flush policy", () => {
       expect(systemRequests(harness, parent.id)[0]?.systemMessageKind).toBe(
         "child-failed",
       );
+    });
+  });
+  it.each([
+    "off",
+    "off-auto",
+    "needs-attention",
+    "reparented",
+    "auto",
+    "unrelated",
+    "mixed",
+  ] as const)("rechecks a queued notice at drain: %s", async (change) => {
+    await withChildThreadNotificationClock(async (harness) => {
+      const { parent, child, project } = seedFamily(harness);
+      const children = [child];
+      if (change === "mixed")
+        children.push(
+          seedThread(harness.deps, {
+            projectId: project.id,
+            parentThreadId: parent.id,
+          }),
+        );
+      const outcomes = children.map((child) => ({
+        threadId: child.id,
+        status: "failed" as const,
+      }));
+      const input = [
+        { type: "text" as const, text: "Saved child result", mentions: [] },
+      ];
+      await withThreadContextClearGuard(parent.id, async () => {
+        await queueParentSystemMessage(harness.deps, {
+          parentThreadId: parent.id,
+          input,
+          systemMessageKind:
+            change === "needs-attention"
+              ? "child-needs-attention"
+              : change === "unrelated"
+                ? "ownership-removed"
+                : children.length > 1
+                  ? "child-outcome-batch"
+                  : "child-failed",
+          systemMessageSubject:
+            children.length > 1
+              ? { kind: "thread-batch", count: children.length, outcomes }
+              : {
+                  kind: "thread",
+                  threadId: child.id,
+                  threadName: "Worker",
+                  outcomes,
+                },
+        });
+        expect(listQueuedThreadMessages(harness.db, parent.id)).toHaveLength(1);
+      });
+      const row = listQueuedThreadMessages(harness.db, parent.id)[0]!;
+      if (change === "reparented") {
+        const p2 = seedThread(harness.deps, { projectId: project.id });
+        updateThread(harness.db, harness.deps.hub, child.id, {
+          parentThreadId: p2.id,
+        });
+      } else if (change !== "auto") {
+        updateThread(harness.db, harness.deps.hub, child.id, {
+          parentNotifications: "off",
+        });
+      }
+      if (change === "off-auto") {
+        await sendNextQueuedMessageIfPresent(harness.deps, {
+          threadId: parent.id,
+        });
+      } else {
+        await sendQueuedMessage(harness.deps, {
+          claimPolicy: { kind: "explicit-send" },
+          mode: "auto",
+          queuedMessageId: row.id,
+          threadId: parent.id,
+        });
+      }
+      expect(listQueuedThreadMessages(harness.db, parent.id)).toEqual([]);
+      if (change === "auto" || change === "unrelated") {
+        expect(systemRequests(harness, parent.id)).toHaveLength(1);
+        expect(systemRequests(harness, parent.id)[0]?.input).toEqual(input);
+      } else {
+        expect(systemRequests(harness, parent.id)).toEqual([]);
+      }
     });
   });
 });

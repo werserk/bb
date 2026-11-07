@@ -26,6 +26,7 @@ import {
 } from "@bb/domain";
 import type {
   PromptInput,
+  QueuedMessageSystemNotice,
   QueuedMessageWaitingOn,
   Thread,
   ThreadQueuedMessage,
@@ -110,6 +111,11 @@ import {
   ThreadContextClearInProgressError,
   withThreadSendGuard,
 } from "./thread-context-mutation-guard.js";
+
+import {
+  isParentNotifiableChildThread,
+  type ParentNotificationOutcome,
+} from "./thread-parent.js";
 
 interface SendQueuedMessageArgs {
   claimPolicy: QueuedThreadMessageGroupClaimPolicy;
@@ -641,6 +647,57 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   return queuedMessage;
 }
 
+function isQueuedChildNotificationCurrent(
+  deps: Pick<AppDeps, "db">,
+  parentThreadId: string,
+  notice: QueuedMessageSystemNotice,
+): boolean {
+  switch (notice.kind) {
+    case "child-completed":
+    case "child-failed":
+    case "child-interrupted":
+    case "child-needs-attention":
+    case "child-outcome-batch":
+      break;
+    default:
+      return true;
+  }
+  const subject = notice.subject;
+  if (
+    !subject ||
+    (subject.kind !== "thread" && subject.kind !== "thread-batch")
+  )
+    return false;
+  const status: ParentNotificationOutcome =
+    notice.kind === "child-completed"
+      ? "completed"
+      : notice.kind === "child-failed"
+        ? "failed"
+        : notice.kind === "child-needs-attention"
+          ? "needs-attention"
+          : "interrupted";
+  const outcomes =
+    notice.kind === "child-needs-attention"
+      ? subject.kind === "thread"
+        ? [{ threadId: subject.threadId, status }]
+        : []
+      : (subject.outcomes ??
+        (subject.kind === "thread" && notice.kind !== "child-outcome-batch"
+          ? [{ threadId: subject.threadId, status }]
+          : []));
+  return (
+    outcomes.length > 0 &&
+    outcomes.every((outcome) => {
+      const child = getThread(deps.db, outcome.threadId);
+      return (
+        child !== null &&
+        child.parentThreadId === parentThreadId &&
+        isParentNotifiableChildThread(child, outcome.status)
+      );
+    })
+  );
+}
+
 /**
  * Delivers a claimed row that is one of core's own system notices.
  *
@@ -662,12 +719,14 @@ async function sendClaimedSystemNotice(
     JSON.parse(lead.systemNotice),
   );
   const queuedMessage = toThreadQueuedMessage(lead);
-  const delivered = await deliverParentSystemMessage(deps, {
-    input: queuedMessage.content,
-    parentThread: args.thread,
-    systemMessageKind: notice.kind,
-    systemMessageSubject: notice.subject,
-  });
+  const delivered =
+    !isQueuedChildNotificationCurrent(deps, args.thread.id, notice) ||
+    (await deliverParentSystemMessage(deps, {
+      input: queuedMessage.content,
+      parentThread: args.thread,
+      systemMessageKind: notice.kind,
+      systemMessageSubject: notice.subject,
+    }));
   if (!delivered) {
     // The thread changed under the drain. Leave the row claimed-and-released
     // by the caller's error path rather than consuming a notice nobody got.
