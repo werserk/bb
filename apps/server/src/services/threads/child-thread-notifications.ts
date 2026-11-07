@@ -401,7 +401,9 @@ async function flushChildThreadTurnNotificationBatch(
     const items = batch.items.filter((item) => {
       const child = getThread(deps.db, item.childThread.id);
       return (
-        child !== null && isParentNotifiableChildThread(child, item.turnStatus)
+        child !== null &&
+        child.parentThreadId === parentThreadId &&
+        isParentNotifiableChildThread(child, item.turnStatus)
       );
     });
     if (items.length === 0) return;

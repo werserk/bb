@@ -1,4 +1,5 @@
 import {
+  deleteThread,
   getThread,
   listEvents,
   listQueuedThreadMessages,
@@ -122,6 +123,69 @@ describe("child notification flush policy", () => {
           status: item.turnStatus,
         })),
       });
+    });
+  });
+  it.each(["reparented", "deleted", "stuck", "all-off"] as const)(
+    "drops buffered outcomes when %s before flush",
+    async (change) => {
+      await withChildThreadNotificationClock(async (harness) => {
+        const { parent, child, project } = seedFamily(harness);
+        const children = [child];
+        if (change === "all-off")
+          children.push(
+            seedThread(harness.deps, {
+              projectId: project.id,
+              parentThreadId: parent.id,
+            }),
+          );
+        for (const child of children) {
+          await queueChildThreadTurnNotificationBestEffort(harness.deps, {
+            childThread: child,
+            parentThreadId: parent.id,
+            turnStatus: "completed",
+          });
+          if (change === "deleted") {
+            deleteThread(harness.db, harness.deps.hub, child.id);
+            expect(getThread(harness.db, child.id)).toBeNull();
+          } else if (change === "reparented") {
+            const p2 = seedThread(harness.deps, { projectId: project.id });
+            updateThread(harness.db, harness.deps.hub, child.id, {
+              parentThreadId: p2.id,
+            });
+          } else {
+            updateThread(harness.db, harness.deps.hub, child.id, {
+              parentNotifications: change === "stuck" ? "stuck" : "off",
+            });
+          }
+        }
+        await flushChildThreadNotifications();
+        await vi.waitFor(() =>
+          withThreadContextClearGuard(parent.id, async () => {}),
+        );
+        expect(systemRequests(harness, parent.id)).toEqual([]);
+        expect(listQueuedThreadMessages(harness.db, parent.id)).toEqual([]);
+      });
+    },
+  );
+
+  it("keeps failed outcomes after switching to stuck", async () => {
+    await withChildThreadNotificationClock(async (harness) => {
+      const { parent, child } = seedFamily(harness);
+      await queueChildThreadTurnNotificationBestEffort(harness.deps, {
+        childThread: child,
+        parentThreadId: parent.id,
+        turnStatus: "failed",
+      });
+      updateThread(harness.db, harness.deps.hub, child.id, {
+        parentNotifications: "stuck",
+      });
+      await flushChildThreadNotifications();
+      await vi.waitFor(() =>
+        expect(systemRequests(harness, parent.id)).toHaveLength(1),
+      );
+      expect(systemRequests(harness, parent.id)[0]?.systemMessageKind).toBe(
+        "child-failed",
+      );
     });
   });
 });
