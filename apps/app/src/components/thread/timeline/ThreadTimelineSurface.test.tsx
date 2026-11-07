@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -203,7 +210,11 @@ describe("ThreadTimelineSurface working indicator", () => {
       props: Pick<
         ComponentProps<typeof ThreadTimelineSurface>,
         "isThreadTimelinePending" | "showOngoingIndicator" | "timelineRows"
-      >,
+      > & {
+        activeThinking?: ComponentProps<
+          typeof ThreadTimelineSurface
+        >["activeThinking"];
+      },
     ) => (
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
@@ -243,6 +254,36 @@ describe("ThreadTimelineSurface working indicator", () => {
       }),
     );
     expect(indicatorHeightWrapper().style.height).toBe("0px");
+  });
+
+  it("shows owner reasoning alongside the pending service timer after a steer", () => {
+    const { surface, view } = renderSurface();
+    view.rerender(
+      surface({
+        isThreadTimelinePending: false,
+        showOngoingIndicator: true,
+        activeThinking: {
+          id: "owner-thinking",
+          text: "OWNER_THOUGHT",
+          startedAt: 1000,
+          updatedAt: 2000,
+        },
+        timelineRows: [
+          turnRow({
+            id: "service-activity",
+            turnId: "service",
+            status: "pending",
+          }),
+        ],
+      }),
+    );
+    const thinking = screen.getByText("Thinking…");
+    expect(
+      thinking.closest<HTMLElement>('[style*="height 180ms"]')?.style.height,
+    ).toBe("44px");
+    fireEvent.click(thinking);
+    expect(screen.getByText("OWNER_THOUGHT")).not.toBeNull();
+    expect(screen.queryByText("Working...")).toBeNull();
   });
 
   function indicatorHeightWrapper(): HTMLElement {

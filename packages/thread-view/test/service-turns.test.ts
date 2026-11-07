@@ -264,3 +264,17 @@ it("clears live service activity on interruption even without a completed event"
   );
   expect(JSON.stringify(result.rows)).not.toContain("service-activity:");
 });
+
+it("uses only the root service timer while a nested agent runs", () => {
+  const { e, rows } = fixture("self-reminder");
+  const result = timeline(
+    [...rows, e.turnStarted({ turnId: "subagent", parentToolCallId: "task" })],
+    false,
+    "active",
+  );
+  expect(
+    result.rows.filter(
+      (row) => row.kind === "turn" && row.status === "pending",
+    ),
+  ).toEqual([expect.objectContaining({ turnId: "turn-1" })]);
+});

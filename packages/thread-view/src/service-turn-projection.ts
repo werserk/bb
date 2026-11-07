@@ -55,6 +55,7 @@ export function classifyServiceTurns(
       liveTurns.clear();
     if (
       entry.event.type === "turn/started" &&
+      !entry.event.parentToolCallId &&
       (turnIds.has(turnId) || hiddenAt(entry.meta.seq))
     )
       liveTurns.set(turnId, entry);

@@ -96,7 +96,9 @@ provider steer path; queue remains a native queued message. Upstream idle-main-r
 delivery into turns held open by background agents is unchanged. The thread-view service projection hides service inputs
 and replies, preserves owner input including pending steers, and exposes unfinished
 service work as normal work rows alongside a native pending turn timer (with the
-original start time, bounded to the current root turn). The timeline omits the
+original start time, bounded to the current root turn; nested agent turns do not
+add timers). The timeline omits the
 extra Working indicator while a pending turn timer exists and suppresses service
-reasoning text.
+reasoning text. After an owner steer, active owner thinking remains visible
+alongside the timer.
 Completed service history stays hidden; owner replies after a steer stay visible.
