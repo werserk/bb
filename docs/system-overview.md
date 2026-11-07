@@ -87,3 +87,12 @@ thread-storage files; workspace files stay alone because cached thread lists do
 not prove unique environment membership. Compact layouts retain both panes behind
 Artifact and Chat tabs. Thread-storage PDFs use the existing preview query update
 timestamp to reload their blob after realtime invalidation.
+
+### Service turn presentation
+
+The server dispatch checkpoint honors the requested send mode for service and
+owner turns alike. The host uses its existing provider steer path; queue remains
+a native queued message. The thread-view service projection hides service inputs
+and replies, preserves owner input including pending steers, and exposes unfinished
+service work through the native pending turn row (with the original start time).
+Completed service history stays hidden; owner replies after a steer stay visible.

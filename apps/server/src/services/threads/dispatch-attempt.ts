@@ -372,12 +372,7 @@ async function runDispatchAttempt(
   const sendNow = args.source.kind === "drain" && args.source.sendNow;
   const respectManualStopPause =
     args.source.kind === "drain" && args.source.respectManualStopPause;
-  const attempt = resolveDispatchAttemptKind(
-    thread,
-    latestServiceTurn(deps.db, thread.id) && thread.status === "active"
-      ? "queue-if-active"
-      : payload.mode,
-  );
+  const attempt = resolveDispatchAttemptKind(thread, payload.mode);
 
   const execution = await buildExecutionOptions(
     deps,

@@ -1228,21 +1228,17 @@ export function buildThreadTimelineFromEvents(
             providerId: args.options.providerId,
             threadStatus: args.options.threadStatus,
           }),
-    activeThinking: serviceCurrent ? null : projection.state.activeThinking,
-    activeWorkflows: (serviceCurrent
-      ? []
-      : projection.state.activeWorkflows
-    ).flatMap((message) => {
+    activeThinking: projection.state.activeThinking,
+    activeWorkflows: projection.state.activeWorkflows.flatMap((message) => {
       const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
       return row ? [row] : [];
     }),
-    activeBackgroundCommands: (serviceCurrent
-      ? []
-      : projection.state.activeBackgroundCommands
-    ).flatMap((message) => {
-      const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
-      return row ? [row] : [];
-    }),
+    activeBackgroundCommands: projection.state.activeBackgroundCommands.flatMap(
+      (message) => {
+        const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
+        return row ? [row] : [];
+      },
+    ),
     contextWindowUsage: extractThreadContextWindowUsage(
       args.contextWindowEvents,
     ),
@@ -1265,7 +1261,13 @@ export function buildThreadTimelineFromEvents(
           args.options.threadStatus,
           stateEvents,
         ),
-    rows: hideService ? service.filterRows(rows) : rows,
+    rows: hideService
+      ? service.filterRows(
+          rows,
+          args.options.threadStatus === "active" ||
+            args.options.threadStatus === "stopping",
+        )
+      : rows,
   };
 }
 

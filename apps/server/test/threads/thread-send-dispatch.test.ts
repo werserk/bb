@@ -13,6 +13,7 @@ import {
 } from "@bb/db";
 import type { EnvironmentRow } from "@bb/db";
 import {
+  encodeClientTurnRequestIdNumber,
   changedMessageSchema,
   threadScope,
   turnScope,
@@ -2141,3 +2142,81 @@ describe("turn held open for background work", () => {
     });
   });
 });
+
+it.each(["steer", "queue-if-active"] as const)(
+  "honors %s during a service turn",
+  async (mode) => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedProviderThreadFixture({
+        harness,
+        status: "active",
+        value: 970,
+      });
+      seedStoredEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 3,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: {
+          direction: "outbound",
+          requestId: encodeClientTurnRequestIdNumber({ value: 970 }),
+          serviceTurn: {
+            version: 1,
+            visibility: "hidden",
+            reason: "self-reminder",
+            origin: { pluginId: "wprojects", senderThreadId: null },
+          },
+          input: textInput("service"),
+          target: { kind: "new-turn" },
+          execution: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            source: "client/turn/requested",
+          },
+          initiator: "system",
+          senderThreadId: null,
+          request: { method: "turn/start", params: {} },
+          source: "tell",
+        },
+      });
+      seedTurnStarted(harness.deps, {
+        environmentId: environment.id,
+        providerThreadId: "provider-send-dispatch-970",
+        sequence: 4,
+        threadId: thread.id,
+        turnId: "service",
+      });
+      vi.spyOn(harness.hub, "hasDaemonForHost").mockReturnValue(true);
+      const result = await acceptThreadSendRequest(harness.deps, {
+        thread: getThread(harness.db, thread.id)!,
+        payload: {
+          input: textInput("owner message"),
+          mode,
+          model: "gpt-5",
+          permissionMode: "full",
+          reasoningLevel: "medium",
+          serviceTier: "default",
+        },
+      });
+      expect(result, JSON.stringify(result)).toMatchObject({
+        ok: true,
+        delivery: mode === "steer" ? "sent" : "queued",
+      });
+      if (mode === "steer")
+        expect(
+          listQueuedThreadCommands(harness, "turn.submit", thread.id),
+        ).toEqual([
+          expect.objectContaining({
+            target: { mode: "steer", expectedTurnId: "service" },
+          }),
+        ]);
+      else
+        expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([
+          expect.objectContaining({ serviceTurn: null }),
+        ]);
+    });
+  },
+);

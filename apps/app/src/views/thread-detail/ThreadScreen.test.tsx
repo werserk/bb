@@ -308,29 +308,3 @@ it("collapses and reopens a completed older-turn plan through ThreadScreen", () 
   expect(screen.queryByText(/from an earlier task/)).toBeNull();
   expect(screen.getByText("Checked result")).toBeTruthy();
 });
-
-it.each([
-  ["en-US", "Busy with service work; your message is next"],
-  ["ru-RU", "занят служебной работой, твоё сообщение следующее"],
-])("shows localized content-free service busy state in %s", (locale, label) => {
-  const language = vi
-    .spyOn(navigator, "language", "get")
-    .mockReturnValue(locale);
-  renderScreen(
-    { kind: "page" },
-    {
-      thread: {
-        ...THREAD,
-        serviceTurn: {
-          version: 1,
-          visibility: "hidden",
-          reason: "future-rotation",
-          origin: { pluginId: "wprojects", senderThreadId: null },
-        },
-      },
-    },
-  );
-  expect(screen.getByRole("status").textContent).toContain(label);
-  expect(screen.queryByText("Background")).toBeNull();
-  language.mockRestore();
-});

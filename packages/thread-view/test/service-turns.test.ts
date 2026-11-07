@@ -54,12 +54,13 @@ function fixture(reason: (typeof reasons)[number]) {
 function timeline(
   events: ThreadEventRow[],
   includeService = false,
+  threadStatus: "active" | "idle" = "idle",
 ) {
   return buildThreadTimelineFromEvents({
     acceptedClientRequestContext: EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
     contextWindowEvents: [],
     events: fromRows(events),
-    options: { ...options, includeService },
+    options: { ...options, includeService, threadStatus },
   });
 }
 describe("service presentation", () => {
@@ -71,7 +72,7 @@ describe("service presentation", () => {
       expect(hidden.rows).toEqual([]);
       expect(hidden.pendingTodos).toBeNull();
       expect(hidden.activeThinking).toBeNull();
-      expect(hidden.serviceTurn).toEqual({ busy: true, failed: false });
+      expect(hidden.serviceTurn).toEqual({ busy: false, failed: false });
       expect(timeline(rows, true).rows.length).toBeGreaterThan(0);
     },
   );
@@ -142,4 +143,66 @@ describe("service presentation", () => {
     expect(text).not.toContain("Private before acceptance");
     expect(text).toContain("Owner reply");
   });
+});
+
+it("shows live service work while retaining hidden service input and replies", () => {
+  const { rows } = fixture("self-reminder");
+  const live = timeline(rows, false, "active");
+  expect(JSON.stringify(live.rows)).toContain("secret details");
+  expect(JSON.stringify(live.rows)).not.toContain("private reply");
+  expect(JSON.stringify(live.rows)).not.toContain("ordinary wording");
+});
+it("keeps an owner steer visible inside a service turn before acceptance", () => {
+  const { e, rows } = fixture("self-reminder");
+  const owner = e.clientTurnRequested({
+    text: "Owner steer",
+    initiator: "user",
+    target: { kind: "steer", expectedTurnId: "turn-1" },
+  });
+  expect(
+    JSON.stringify(timeline([...rows, owner], false, "active").rows),
+  ).toContain("Owner steer");
+});
+
+it("keeps native elapsed-time bounds even before the first service tool", () => {
+  const { e, request } = fixture("self-reminder");
+  const start = e.turnStarted();
+  const live = timeline(
+    [
+      request,
+      start,
+      e.inputAccepted({ clientRequestId: request.data.requestId }),
+    ],
+    false,
+    "active",
+  );
+  expect(live.rows).toEqual([
+    expect.objectContaining({
+      kind: "turn",
+      status: "pending",
+      startedAt: start.createdAt,
+      completedAt: null,
+    }),
+  ]);
+});
+
+it("shows the reply to an accepted owner steer in the same provider turn", () => {
+  const { e, rows } = fixture("self-reminder");
+  const owner = e.clientTurnRequested({
+    text: "Owner steer",
+    initiator: "user",
+    target: { kind: "steer", expectedTurnId: "turn-1" },
+  });
+  const result = timeline(
+    [
+      ...rows,
+      owner,
+      e.inputAccepted({ clientRequestId: owner.data.requestId }),
+      e.assistantCompleted({ text: "Owner answer" }),
+    ],
+    false,
+    "active",
+  );
+  expect(JSON.stringify(result.rows)).toContain("Owner answer");
+  expect(JSON.stringify(result.rows)).not.toContain("private reply");
 });

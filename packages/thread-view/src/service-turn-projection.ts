@@ -46,6 +46,17 @@ export function classifyServiceTurns(
       request.serviceTurn !== undefined
     );
   };
+  const liveTurns = new Map<string, ThreadEventWithMetaLike>();
+  for (const entry of [...events].sort((a, b) => a.meta.seq - b.meta.seq)) {
+    const turnId = getThreadEventScopeTurnId(entry.event.scope);
+    if (!turnId) continue;
+    if (
+      entry.event.type === "turn/started" &&
+      (turnIds.has(turnId) || hiddenAt(entry.meta.seq))
+    )
+      liveTurns.set(turnId, entry);
+    if (entry.event.type === "turn/completed") liveTurns.delete(turnId);
+  }
   return {
     requestIds,
     turnIds,
@@ -53,19 +64,33 @@ export function classifyServiceTurns(
       latest?.event.type === "client/turn/requested" &&
       latest.event.serviceTurn !== undefined,
     hides({ event, meta }: ThreadEventWithMetaLike) {
-      const turnId = getThreadEventScopeTurnId(event.scope);
       return (
         hiddenAt(meta.seq) ||
         (event.type === "system/thread/interrupted" &&
           event.serviceTurn !== undefined) ||
-        requestSequences.has(meta.seq) ||
-        (turnId !== undefined && turnIds.has(turnId))
+        requestSequences.has(meta.seq)
       );
     },
-    filterRows(rows: readonly TimelineRow[]): TimelineRow[] {
+    filterRows(
+      rows: readonly TimelineRow[],
+      showLiveWork = false,
+    ): TimelineRow[] {
       const exceptions = (row: TimelineRow): TimelineRow[] => {
+        if (
+          row.kind === "conversation" &&
+          row.role === "user" &&
+          row.initiator === "user"
+        )
+          return [row];
         if (row.kind === "turn")
           return (row.children ?? []).flatMap(exceptions);
+        if (
+          showLiveWork &&
+          row.turnId !== null &&
+          liveTurns.has(row.turnId) &&
+          row.kind === "work"
+        )
+          return [row];
         if (
           row.kind === "work" &&
           (row.workKind === "question" ||
@@ -77,13 +102,36 @@ export function classifyServiceTurns(
           return [row];
         return [];
       };
-      return rows.flatMap((row) =>
-        hiddenAt(row.sourceSeqStart) ||
-        (row.turnId !== null && turnIds.has(row.turnId)) ||
-        requestSequences.has(row.sourceSeqStart)
+      const visible = rows.flatMap((row) =>
+        hiddenAt(row.sourceSeqStart) || requestSequences.has(row.sourceSeqStart)
           ? exceptions(row)
           : [row],
       );
+      if (!showLiveWork || liveTurns.size === 0) return visible;
+      for (const [turnId, { meta, event }] of liveTurns) {
+        const children = visible.filter(
+          (row) => row.turnId === turnId && row.kind === "work",
+        );
+        for (const child of children) visible.splice(visible.indexOf(child), 1);
+        visible.push({
+          id: `service-activity:${meta.id}`,
+          threadId: event.threadId,
+          turnId,
+          sourceSeqStart: meta.seq,
+          sourceSeqEnd: Math.max(
+            meta.seq,
+            ...children.map((row) => row.sourceSeqEnd),
+          ),
+          startedAt: meta.createdAt,
+          createdAt: meta.createdAt,
+          kind: "turn",
+          status: "pending",
+          summaryCount: children.length,
+          completedAt: null,
+          children,
+        });
+      }
+      return visible.sort((a, b) => a.sourceSeqStart - b.sourceSeqStart);
     },
   };
 }
