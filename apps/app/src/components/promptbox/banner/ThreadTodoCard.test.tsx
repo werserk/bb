@@ -59,3 +59,31 @@ it("uses neutral Russian progress and a midnight h23 time in the collapsed heade
     }),
   ).toBeTruthy();
 });
+
+it("marks a failed step without counting it as done", () => {
+  render(
+    <ThreadTodoCard
+      pendingTodos={{
+        sourceSeq: 1,
+        updatedAt: 1,
+        items: [
+          { id: "ok", text: "Build", status: "completed" },
+          {
+            id: "fail",
+            text: "Verify",
+            status: "failed",
+            note: "Assertion failed",
+            actor: "Reviewer",
+          },
+        ],
+      }}
+      isExpanded
+      onToggle={() => {}}
+    />,
+  );
+  expect(screen.getByRole("img", { name: "Failed" })).toBeTruthy();
+  expect(screen.getByText("Assertion failed")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /1 of 2 items complete/ }),
+  ).toBeTruthy();
+});

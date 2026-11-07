@@ -82,3 +82,16 @@ it("recognizes an accepted new-turn message even when its empty turn has no grou
     ]),
   ).toBeNull();
 });
+
+it("does not collapse or complete a failed plan after a newer turn", () => {
+  const failed: ThreadTimelinePendingTodos = {
+    ...plan,
+    items: [
+      { id: "a", text: "Build", status: "completed" },
+      { id: "b", text: "Verify", status: "failed" },
+    ],
+  };
+  expect(
+    threadPlanState(failed, { sourceSeq: 20, startedAt: 200 }, false),
+  ).toEqual({ state: "active", autoCollapse: false });
+});

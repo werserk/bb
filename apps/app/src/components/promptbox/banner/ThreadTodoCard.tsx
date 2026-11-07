@@ -31,6 +31,7 @@ const STATUS_ACTIVITY_STATE: Record<
   in_progress: "active",
   pending: "pending",
   completed: "completed",
+  failed: "failed",
 };
 
 interface ThreadTodoCardProps {
@@ -75,6 +76,15 @@ function TodoStatusIcon({
           name="Check"
           className={cn(className, activityIconClass(activityState))}
           aria-hidden="true"
+        />
+      );
+    case "failed":
+      return (
+        <Icon
+          name="CircleX"
+          role="img"
+          aria-label="Failed"
+          className={cn(className, activityIconClass(activityState))}
         />
       );
     case "pending":

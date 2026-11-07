@@ -5,6 +5,7 @@ const threadTimelinePendingTodoItemStatusSchema = z.enum([
   "pending",
   "in_progress",
   "completed",
+  "failed",
 ]);
 export type ThreadTimelinePendingTodoItemStatus = z.infer<
   typeof threadTimelinePendingTodoItemStatusSchema

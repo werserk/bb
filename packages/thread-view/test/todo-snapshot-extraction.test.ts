@@ -1,4 +1,8 @@
-import { jsonObjectSchema, turnScope } from "@bb/domain";
+import {
+  jsonObjectSchema,
+  turnScope,
+  threadTimelinePendingTodosSchema,
+} from "@bb/domain";
 import type { Thread, ThreadEventPlanStep } from "@bb/domain";
 import { describe, expect, it } from "vitest";
 import { extractThreadTimelinePendingTodos } from "../src/todo-snapshot-extraction.js";
@@ -82,10 +86,41 @@ describe("extractThreadTimelinePendingTodos", () => {
         { id: "seq:2:0", text: "Read the spec", status: "completed" },
         { id: "seq:2:1", text: "Writing the code", status: "in_progress" },
         { id: "seq:2:2", text: "Run the tests", status: "pending" },
-        { id: "seq:2:3", text: "Flaky step", status: "completed" },
+        { id: "seq:2:3", text: "Flaky step", status: "failed" },
         { id: "seq:2:5", text: "No status", status: "pending" },
       ],
     });
+  });
+
+  it("retains failed truth and metadata through snapshot serialization", () => {
+    const snapshot = extractThreadTimelinePendingTodos("idle", [
+      planStepsEvent({
+        seq: 8,
+        steps: [
+          { step: "Build", status: "completed" },
+          {
+            step: "Verify",
+            status: "failed",
+            note: "Assertion failed",
+            actor: "Reviewer",
+          },
+        ],
+      }),
+    ]);
+    const restored = threadTimelinePendingTodosSchema.parse(
+      JSON.parse(JSON.stringify(snapshot)),
+    );
+    expect(restored.items.map((item) => item.status)).toEqual([
+      "completed",
+      "failed",
+    ]);
+    expect(restored.items[1]).toMatchObject({
+      note: "Assertion failed",
+      actor: "Reviewer",
+    });
+    expect(
+      restored.items.filter((item) => item.status === "completed"),
+    ).toHaveLength(1);
   });
 
   it("picks the newest snapshot by sequence even when the input is unordered", () => {

@@ -42,7 +42,7 @@ const PLAN_STEP_TODO_STATUSES: Readonly<
   pending: "pending",
   active: "in_progress",
   completed: "completed",
-  failed: "completed",
+  failed: "failed",
 };
 
 function extractPlanStepsCandidate(
