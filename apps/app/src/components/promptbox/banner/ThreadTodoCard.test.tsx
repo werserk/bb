@@ -60,9 +60,13 @@ it("uses neutral Russian progress and a midnight h23 time in the collapsed heade
   ).toBeTruthy();
 });
 
-it("marks a failed step without counting it as done", () => {
+it.each([
+  ["en-US", "Failed"],
+  ["ru-RU", "Ошибка"],
+])("marks a failed step without counting it as done in %s", (locale, label) => {
   render(
     <ThreadTodoCard
+      locale={locale}
       pendingTodos={{
         sourceSeq: 1,
         updatedAt: 1,
@@ -81,7 +85,7 @@ it("marks a failed step without counting it as done", () => {
       onToggle={() => {}}
     />,
   );
-  expect(screen.getByRole("img", { name: "Failed" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: label })).toBeTruthy();
   expect(screen.getByText("Assertion failed")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: /1 of 2 items complete/ }),

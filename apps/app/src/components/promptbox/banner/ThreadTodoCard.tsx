@@ -1,3 +1,4 @@
+import { threadPresentationText as t } from "@bb/thread-view";
 import { useId } from "react";
 import type {
   ThreadTimelinePendingTodoItem,
@@ -56,8 +57,10 @@ function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]) {
 
 function TodoStatusIcon({
   status,
+  failedLabel,
 }: {
   status: ThreadTimelinePendingTodoItemStatus;
+  failedLabel: string;
 }) {
   const className = "size-3.5 shrink-0";
   const activityState = STATUS_ACTIVITY_STATE[status];
@@ -80,7 +83,7 @@ function TodoStatusIcon({
       );
     case "failed":
       return (
-        <span role="img" aria-label="Failed">
+        <span role="img" aria-label={failedLabel}>
           <Icon
             name="CircleX"
             aria-hidden="true"
@@ -101,8 +104,10 @@ function TodoStatusIcon({
 
 function TodoBody({
   items,
+  failedLabel,
 }: {
   items: readonly ThreadTimelinePendingTodoItem[];
+  failedLabel: string;
 }) {
   return (
     <ul className="max-h-40 @min-[880px]/thread-chat:max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
@@ -120,7 +125,7 @@ function TodoBody({
               ),
             )}
           >
-            <TodoStatusIcon status={item.status} />
+            <TodoStatusIcon status={item.status} failedLabel={failedLabel} />
             <div className="min-w-0 flex-1">
               <span
                 className={activityTextClass(
@@ -257,7 +262,7 @@ export function ThreadTodoCard({
         {muted && (
           <p className="px-3 pt-2 text-xs text-muted-foreground">{metadata}</p>
         )}
-        <TodoBody items={items} />
+        <TodoBody items={items} failedLabel={t("plan.failed", locale)} />
       </AnimatedDisclosureBody>
     </PromptStackCard>
   );
