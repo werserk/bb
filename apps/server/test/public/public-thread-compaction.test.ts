@@ -543,9 +543,13 @@ describe("public thread compaction", () => {
             mentions: [],
           },
         ];
+        const child = seedThread(harness.deps, {
+          projectId: thread.projectId,
+          parentThreadId: thread.id,
+        });
         const subject = {
           kind: "thread" as const,
-          threadId: "child-notice",
+          threadId: child.id,
           threadName: "Child",
         };
         expect(

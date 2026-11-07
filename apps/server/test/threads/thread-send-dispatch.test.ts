@@ -959,6 +959,14 @@ describe("startup queue waits", () => {
         status: "active",
         value: 62,
       });
+      const child = seedThread(harness.deps, {
+        projectId: thread.projectId,
+        parentThreadId: thread.id,
+      });
+      const otherChild = seedThread(harness.deps, {
+        projectId: thread.projectId,
+        parentThreadId: thread.id,
+      });
       const input = textInput("child finished");
 
       await expect(
@@ -968,7 +976,7 @@ describe("startup queue waits", () => {
           systemMessageKind: "child-completed",
           systemMessageSubject: {
             kind: "thread",
-            threadId: "child-1",
+            threadId: child.id,
             threadName: "Child",
           },
         }),
@@ -986,7 +994,7 @@ describe("startup queue waits", () => {
         kind: "child-completed",
         subject: {
           kind: "thread",
-          threadId: "child-1",
+          threadId: child.id,
           threadName: "Child",
         },
       });
@@ -1037,7 +1045,7 @@ describe("startup queue waits", () => {
           systemMessageKind: "child-completed",
           systemMessageSubject: {
             kind: "thread",
-            threadId: "child-2",
+            threadId: otherChild.id,
             threadName: "Other child",
           },
         }),

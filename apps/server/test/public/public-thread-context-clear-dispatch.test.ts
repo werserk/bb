@@ -45,7 +45,11 @@ function seedFixture(harness: TestAppHarness) {
     providerThreadId: "provider-before-clear",
     threadId: thread.id,
   });
-  return { host, session, thread };
+  const child = seedThread(harness.deps, {
+    projectId: project.id,
+    parentThreadId: thread.id,
+  });
+  return { host, session, thread, child };
 }
 
 function registerResponder(
@@ -83,7 +87,7 @@ describe("context clear dispatch races", () => {
     async (source) => {
       await withTestHarness(async (harness) => {
         const fixture = seedFixture(harness);
-        const { thread } = fixture;
+        const { thread, child } = fixture;
         const entered = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
         const responder = registerResponder(harness, fixture, async () => {});
@@ -119,7 +123,11 @@ describe("context clear dispatch races", () => {
                 parentThreadId: thread.id,
                 input: textInput("Child completed"),
                 systemMessageKind: "child-completed",
-                systemMessageSubject: null,
+                systemMessageSubject: {
+                  kind: "thread",
+                  threadId: child.id,
+                  threadName: "Child",
+                },
               });
         try {
           await entered.promise;
@@ -156,7 +164,7 @@ describe("context clear dispatch races", () => {
     async (source) => {
       await withTestHarness(async (harness) => {
         const fixture = seedFixture(harness);
-        const { thread } = fixture;
+        const { thread, child } = fixture;
         const stopping = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
         const responder = registerResponder(harness, fixture, async () => {
@@ -177,7 +185,14 @@ describe("context clear dispatch races", () => {
             payload: { kind: "inline" },
             systemNotice:
               source === "queued notice"
-                ? { kind: "child-completed", subject: null }
+                ? {
+                    kind: "child-completed",
+                    subject: {
+                      kind: "thread",
+                      threadId: child.id,
+                      threadName: "Child",
+                    },
+                  }
                 : null,
           });
         }
@@ -193,7 +208,11 @@ describe("context clear dispatch races", () => {
                 parentThreadId: thread.id,
                 input: textInput("Child completed during clear"),
                 systemMessageKind: "child-completed",
-                systemMessageSubject: null,
+                systemMessageSubject: {
+                  kind: "thread",
+                  threadId: child.id,
+                  threadName: "Child",
+                },
               }),
             ).resolves.toBe(true);
           }
