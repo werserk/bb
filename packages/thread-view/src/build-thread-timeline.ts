@@ -1,3 +1,7 @@
+import {
+  createBufferedTextInstanceKey,
+  resolveBufferedTextIdentity,
+} from "./buffered-text-identity.js";
 import { classifyServiceTurns } from "./service-turn-projection.js";
 import type {
   ProviderCommand,
@@ -41,6 +45,7 @@ import { assertNever } from "./assert-never.js";
 import {
   durationToCompactString,
   getMessageStartedAt,
+  messageId,
 } from "./format-helpers.js";
 import { getFileChangeDiffStats } from "./file-change-summary.js";
 import { getEventProjectionMessageScopeTurnId } from "./message-scope.js";
@@ -1186,6 +1191,31 @@ export function buildThreadTimelineFromEvents(
     turnMessageDetail: "full",
   } satisfies Parameters<typeof buildEventProjection>[1];
   const projection = buildEventProjection(args.events, projectionOptions);
+  const activeThinking = projection.state.activeThinking;
+  const serviceThinking =
+    hideService &&
+    activeThinking !== null &&
+    classificationEvents.some((entry) => {
+      const { event } = entry;
+      if (
+        event.type !== "item/started" ||
+        event.item.type !== "reasoning" ||
+        !service.hides(entry)
+      )
+        return false;
+      const identity = resolveBufferedTextIdentity({
+        decoded: event,
+        kind: "reasoning",
+      });
+      return (
+        identity !== null &&
+        messageId(
+          event.threadId,
+          "op",
+          `reasoning:${createBufferedTextInstanceKey(identity)}`,
+        ) === activeThinking.id
+      );
+    });
 
   const rows = [
     ...buildTimelineRows(projection, {
@@ -1228,7 +1258,7 @@ export function buildThreadTimelineFromEvents(
             providerId: args.options.providerId,
             threadStatus: args.options.threadStatus,
           }),
-    activeThinking: serviceCurrent ? null : projection.state.activeThinking,
+    activeThinking: serviceCurrent || serviceThinking ? null : activeThinking,
     activeWorkflows: projection.state.activeWorkflows.flatMap((message) => {
       const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
       return row ? [row] : [];

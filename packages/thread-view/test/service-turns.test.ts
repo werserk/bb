@@ -278,3 +278,63 @@ it("uses only the root service timer while a nested agent runs", () => {
     ),
   ).toEqual([expect.objectContaining({ turnId: "turn-1" })]);
 });
+
+it.each([false, true])(
+  "keeps in-flight service reasoning hidden after owner steer (accepted=%s)",
+  (accepted) => {
+    const { e, rows } = fixture("self-reminder");
+    const started = e.reasoningStarted({ itemId: "service-thinking" });
+    const delta = e.reasoningDelta({
+      itemId: "service-thinking",
+      delta: "SVC_THOUGHT\n",
+    });
+    const owner = e.clientTurnRequested({
+      text: "Owner steer",
+      initiator: "user",
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+    });
+    const events = [
+      ...rows,
+      started,
+      delta,
+      owner,
+      ...(accepted
+        ? [e.inputAccepted({ clientRequestId: owner.data.requestId })]
+        : []),
+      e.reasoningDelta({
+        itemId: "service-thinking",
+        delta: "still service reasoning\n",
+      }),
+    ];
+    expect(timeline(events, false, "active").activeThinking).toBeNull();
+    expect(timeline(events, true, "active").activeThinking?.text).toContain(
+      "SVC_THOUGHT",
+    );
+  },
+);
+
+it("shows new owner reasoning after a steer while older service reasoning is still open", () => {
+  const { e, rows } = fixture("self-reminder");
+  const started = e.reasoningStarted({ itemId: "service-thinking" });
+  const delta = e.reasoningDelta({
+    itemId: "service-thinking",
+    delta: "SVC_THOUGHT\n",
+  });
+  const owner = e.clientTurnRequested({
+    text: "Owner steer",
+    initiator: "user",
+    target: { kind: "steer", expectedTurnId: "turn-1" },
+  });
+  const events = [
+    ...rows,
+    started,
+    delta,
+    owner,
+    e.inputAccepted({ clientRequestId: owner.data.requestId }),
+    e.reasoningStarted({ itemId: "owner-thinking" }),
+    e.reasoningDelta({ itemId: "owner-thinking", delta: "OWNER_THOUGHT\n" }),
+  ];
+  expect(timeline(events, false, "active").activeThinking?.text).toContain(
+    "OWNER_THOUGHT",
+  );
+});

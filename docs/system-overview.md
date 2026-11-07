@@ -100,5 +100,6 @@ original start time, bounded to the current root turn; nested agent turns do not
 add timers). The timeline omits the
 extra Working indicator while a pending turn timer exists and suppresses service
 reasoning text. After an owner steer, active owner thinking remains visible
-alongside the timer.
+alongside the timer. In-flight reasoning whose item started in the hidden
+service range stays hidden across an owner steer, including after acceptance.
 Completed service history stays hidden; owner replies after a steer stay visible.
