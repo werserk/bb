@@ -594,15 +594,15 @@ describe("ThreadDetailPromptArea", () => {
     );
   });
 
-  it("shows queued work while its message details are loading", () => {
+  it("does not expose a raw queue count before service classification is loaded", () => {
     mocks.queuedMessages = undefined;
 
     renderPromptArea({ queuedMessageCount: 1 });
 
-    screen.getByRole("status", { name: "Loading queued messages" });
-    expect(screen.getByLabelText("Queued messages").textContent).toContain(
-      "Queue1",
-    );
+    expect(
+      screen.queryByRole("status", { name: "Loading queued messages" }),
+    ).toBeNull();
+    expect(screen.queryByLabelText("Queued messages")).toBeNull();
   });
 
   it("keeps sent-message edit submission out of the normal send path", () => {

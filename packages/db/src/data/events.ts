@@ -4579,7 +4579,7 @@ export function listStoredServiceTurnContextRows(db: DbQueryConnection, threadId
 }
 
 export function listLatestTurnRequestEventRows(db: DbQueryConnection, threadIds: readonly string[]): StoredEventRow[] {
-  return queryInSqliteVariableBatches<string,StoredEventRow>({dedupeKey:id=>id, fixedVariableCount:0, variableCountPerValue:1, values:[...threadIds], queryBatch:ids=>db.select().from(events).where(and(inArray(events.threadId,[...ids]),eq(events.type,"client/turn/requested"),sql`${events.sequence} = (SELECT MAX(candidate.sequence) FROM events candidate WHERE candidate.thread_id = ${events.threadId} AND candidate.type = 'client/turn/requested')`)).all()});
+  return queryInSqliteVariableBatches<string,StoredEventRow>({dedupeKey:id=>id, fixedVariableCount:1, variableCountPerValue:1, values:[...threadIds], queryBatch:ids=>db.select().from(events).where(and(inArray(events.threadId,[...ids]),eq(events.type,"client/turn/requested"),sql`${events.sequence} = (SELECT MAX(candidate.sequence) FROM events candidate WHERE candidate.thread_id = ${events.threadId} AND candidate.type = 'client/turn/requested')`)).all()});
 }
 
 export function getLatestTurnRequestEventRow(db: DbQueryConnection, threadId: string): StoredEventRow | undefined {

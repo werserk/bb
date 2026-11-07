@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { readThreadStartupContextOfKind } from "./thread-startup-store.js";
 import {
   getAppSettings,
   getProjectExecutionDefaults,
@@ -6,6 +8,7 @@ import {
 } from "@bb/db";
 import {
   DEFAULT_SERVICE_TIER,
+  recordedThreadExecutionOptionsSchema,
   isStandardReasoningLevel,
   providerServiceTierOptions,
   reconcileServiceTier,
@@ -83,7 +86,17 @@ function getStoredThreadExecutionOptions(
     return lastExecution;
   }
   const queuedStart = getQueuedThreadStartMessage(deps.db, thread.id);
-  if (queuedStart === null) return null;
+  if (queuedStart === null)
+    return (
+      readThreadStartupContextOfKind(
+        deps.db,
+        thread.id,
+        "pending",
+        z.object({
+          execution: recordedThreadExecutionOptionsSchema.optional(),
+        }),
+      )?.execution ?? null
+    );
   const queued = toThreadQueuedMessage(queuedStart);
   return {
     model: queued.model,
@@ -294,6 +307,7 @@ function resolveProviderServiceTier(
       ? `Provider ${args.providerId} does not support service tiers.`
       : `Provider ${args.providerId} does not support the ${candidate} service tier. Supported service tiers: ${[
           DEFAULT_SERVICE_TIER,
+          recordedThreadExecutionOptionsSchema,
           ...supported.map((tier) => tier.id),
         ].join(", ")}.`,
   );

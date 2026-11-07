@@ -261,4 +261,36 @@ it("allocates an empty plugin thread without dispatching a visible bootstrap", a
     expect(body).toMatchObject({ status: "pending" });
     const events = await h.app.request(`/api/v1/threads/${body.id}/events`);
     expect(await events.json()).toEqual([]);
+    vi.spyOn(h.pluginService, "resolveRpcCaller").mockReturnValue({
+      ok: true,
+      caller: { kind: "plugin", pluginId: "wprojects" },
+    });
+    const send = await h.app.request(`/api/v1/threads/${body.id}/send`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-bb-plugin-caller": "fixture",
+      },
+      body: JSON.stringify({
+        input: [{ type: "text", text: "first hidden bootstrap" }],
+        mode: "queue-if-active",
+        sendAt: Date.now() + 86400000,
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: "coordinator-background",
+          origin: { pluginId: "wprojects", senderThreadId: null },
+        },
+      }),
+    });
+    const result = await send.json();
+    expect(send.status, JSON.stringify(result)).toBe(200);
+    expect(result).toMatchObject({
+      delivery: "queued",
+      queuedMessage: {
+        model: "gpt-5",
+        permissionMode: "full",
+        serviceTurn: { reason: "coordinator-background" },
+      },
+    });
   }));

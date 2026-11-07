@@ -1,7 +1,12 @@
 import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
-import { markThreadDeleted, getEnvironment, getThread } from "@bb/db";
+import {
+  markThreadDeleted,
+  getEnvironment,
+  getThread,
+  setThreadStartupContext,
+} from "@bb/db";
 import {
   describeSessionOptionConflict,
   modelSessionOptionConflict,
@@ -481,6 +486,16 @@ async function createPendingThreadAndAttemptFirstDispatch(
       args.request,
       executionPlanArgs,
     );
+    if (args.request.input.length === 0 && args.request.originKind === null) {
+      setThreadStartupContext(deps.db, {
+        threadId: thread.id,
+        startupContext: JSON.stringify({
+          kind: "pending",
+          ...startContext,
+          execution,
+        }),
+      });
+    }
     if (args.request.input.length > 0 || args.request.originKind !== null)
       await attemptDispatch(deps, {
         thread,
