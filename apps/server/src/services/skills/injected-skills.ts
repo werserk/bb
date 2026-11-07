@@ -127,6 +127,36 @@ interface HashedFile {
 const MAX_REGISTERED_SKILL_TREES = 4_096;
 const MAX_FILE_HASH_ATTEMPTS = 3;
 const HASH_REUSE_SETTLE_NS = 2_000_000_000n;
+// Each awaited fs call costs one event-loop turn, so a sequential walk of a large skills tree
+// scales with loop latency. Bounded concurrency keeps the walk to a few turns under load.
+const SKILL_WALK_FS_CONCURRENCY = 32;
+let activeSkillWalkFsOps = 0;
+const queuedSkillWalkFsOps: Array<() => void> = [];
+
+async function limitSkillWalkFs<T>(operation: () => Promise<T>): Promise<T> {
+  while (activeSkillWalkFsOps >= SKILL_WALK_FS_CONCURRENCY) {
+    await new Promise<void>((resolve) => queuedSkillWalkFsOps.push(resolve));
+  }
+  activeSkillWalkFsOps += 1;
+  try {
+    return await operation();
+  } finally {
+    activeSkillWalkFsOps -= 1;
+    queuedSkillWalkFsOps.shift()?.();
+  }
+}
+
+// Runs in parallel, returns results in input order and throws the first failure in input order.
+async function mapInOrder<T, R>(
+  items: readonly T[],
+  map: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const settled = await Promise.allSettled(items.map(map));
+  return settled.map((result) => {
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
+  });
+}
 
 export class SkillTreeRegistry {
   readonly #manifestsByHash = new Map<string, SkillTreeManifest>();
@@ -185,32 +215,35 @@ export class SkillTreeRegistry {
     currentPath: string,
     previousFiles: ReadonlyMap<string, SkillTreeFile>,
   ): Promise<SkillTreeFile[]> {
-    const files: SkillTreeFile[] = [];
-    for (const entry of (
-      await fsPromises.readdir(currentPath, { withFileTypes: true })
-    ).sort(sortDirentsByName)) {
+    const entries = (
+      await limitSkillWalkFs(() =>
+        fsPromises.readdir(currentPath, { withFileTypes: true }),
+      )
+    ).sort(sortDirentsByName);
+    const collected = await mapInOrder(entries, async (entry) => {
       if (
         currentPath === rootPath &&
         entry.name === REGISTRY_SKILL_PROVENANCE_FILE_NAME
       ) {
-        continue;
+        return [];
       }
       const entryPath = path.join(currentPath, entry.name);
-      const linkStat = await fsPromises.lstat(entryPath);
+      const linkStat = await limitSkillWalkFs(() =>
+        fsPromises.lstat(entryPath),
+      );
       if (
         linkStat.isSymbolicLink() &&
         !(currentPath === rootPath && entry.name === SKILL_FILE_NAME)
       ) {
         throw new Error(`Skill tree contains a symlink: ${entryPath}`);
       }
-      const stat = linkStat.isSymbolicLink()
-        ? await fsPromises.stat(entryPath, { bigint: true })
-        : await fsPromises.lstat(entryPath, { bigint: true });
+      const stat = await limitSkillWalkFs(() =>
+        linkStat.isSymbolicLink()
+          ? fsPromises.stat(entryPath, { bigint: true })
+          : fsPromises.lstat(entryPath, { bigint: true }),
+      );
       if (stat.isDirectory()) {
-        files.push(
-          ...(await this.#collectFiles(rootPath, entryPath, previousFiles)),
-        );
-        continue;
+        return this.#collectFiles(rootPath, entryPath, previousFiles);
       }
       if (!stat.isFile()) {
         throw new Error(`Skill tree entry is not a regular file: ${entryPath}`);
@@ -227,15 +260,18 @@ export class SkillTreeRegistry {
               },
               stat,
             }
-          : await this.#hashFile(entryPath, stat);
-      files.push({
-        ...hashed,
-        mode: Number(hashedStat.mode & 0o777n),
-        path: normalizeRelativePath(path.relative(rootPath, entryPath)),
-        sizeBytes: Number(hashedStat.size),
-        sourcePath: entryPath,
-      });
-    }
+          : await limitSkillWalkFs(() => this.#hashFile(entryPath, stat));
+      return [
+        {
+          ...hashed,
+          mode: Number(hashedStat.mode & 0o777n),
+          path: normalizeRelativePath(path.relative(rootPath, entryPath)),
+          sizeBytes: Number(hashedStat.size),
+          sourcePath: entryPath,
+        },
+      ];
+    });
+    const files: SkillTreeFile[] = collected.flat();
     return files;
   }
 
@@ -425,41 +461,46 @@ export function resolveProjectSkillSourceFromContent(
 async function readSkillsRoot(
   args: SkillRootScanArgs,
 ): Promise<HostDaemonInjectedSkillSource[]> {
-  const sources: HostDaemonInjectedSkillSource[] = [];
   const files = await scanSkillFiles({
     path: args.skillsRootPath,
     shape: "skill",
     boundaryPath: null,
   });
-  for (const file of files) {
-    const candidatePath = path.dirname(file.filePath);
-    const validated = validateSkillContent(args.logger, {
-      candidatePath,
-      content: file.content,
-      directoryName: file.name,
-      sourceType: args.sourceType,
-    });
-    if (validated === null) continue;
-    try {
-      const manifest = await args.skillTreeRegistry.readTree(candidatePath);
-      sources.push({
-        kind: "tree",
-        sourceType: args.sourceType,
-        name: validated.name,
-        description: validated.description,
-        treeHash: manifest.treeHash,
-        entryPath: SKILL_FILE_NAME,
-      });
-    } catch (error) {
-      logInvalidSkill({
-        ...args,
+  const sources = await mapInOrder(
+    files,
+    async (file): Promise<HostDaemonInjectedSkillSource | null> => {
+      const candidatePath = path.dirname(file.filePath);
+      const validated = validateSkillContent(args.logger, {
         candidatePath,
-        reason:
-          error instanceof Error ? error.message : "Unable to read skill tree",
+        content: file.content,
+        directoryName: file.name,
+        sourceType: args.sourceType,
       });
-    }
-  }
-  return sources;
+      if (validated === null) return null;
+      try {
+        const manifest = await args.skillTreeRegistry.readTree(candidatePath);
+        return {
+          kind: "tree",
+          sourceType: args.sourceType,
+          name: validated.name,
+          description: validated.description,
+          treeHash: manifest.treeHash,
+          entryPath: SKILL_FILE_NAME,
+        };
+      } catch (error) {
+        logInvalidSkill({
+          ...args,
+          candidatePath,
+          reason:
+            error instanceof Error
+              ? error.message
+              : "Unable to read skill tree",
+        });
+        return null;
+      }
+    },
+  );
+  return sources.filter((source) => source !== null);
 }
 
 export async function resolveServerOwnedSkillCatalogEntries(

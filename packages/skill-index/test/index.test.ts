@@ -8,7 +8,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import fsPromises from "node:fs/promises";
+import { afterEach, expect, it, vi } from "vitest";
 import { firstPerIdentity, scanSkillFiles } from "../src/index.js";
 
 const roots: string[] = [];
@@ -97,4 +98,50 @@ it("does not charge supporting files to the entry budget", async () => {
     );
   expect(await names("skill")).toEqual(["alpha", "beta"]);
   expect(await names("skill-recursive")).toEqual(["alpha", "inner", "beta"]);
+});
+
+it("scans a skills root concurrently within the limit and keeps entry order", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "skill-index-"));
+  roots.push(root);
+  const names = Array.from({ length: 80 }, (_, index) => `skill-${index}`);
+  for (const name of names) {
+    await mkdir(path.join(root, name));
+    await writeFile(
+      path.join(root, name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: ${name}\n---\n`,
+    );
+  }
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const originalStat = fsPromises.stat.bind(fsPromises) as (
+    ...args: unknown[]
+  ) => Promise<unknown>;
+  const stat = vi.spyOn(fsPromises, "stat").mockImplementation((async (
+    ...args: unknown[]
+  ) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      return await originalStat(...args);
+    } finally {
+      inFlight -= 1;
+    }
+  }) as unknown as typeof fsPromises.stat);
+  let scanned;
+  try {
+    scanned = await scanSkillFiles({
+      path: root,
+      shape: "skill",
+      boundaryPath: null,
+    });
+  } finally {
+    stat.mockRestore();
+  }
+
+  expect(scanned.map((file) => file.name)).toEqual(
+    [...names].sort((a, b) => a.localeCompare(b)),
+  );
+  expect(maxInFlight).toBeGreaterThan(8);
+  expect(maxInFlight).toBeLessThanOrEqual(32);
 });

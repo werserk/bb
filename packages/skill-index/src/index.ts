@@ -8,6 +8,28 @@ export const SKILL_FILE_NAME = "SKILL.md";
 const MAX_SCAN_DEPTH = 24;
 const MAX_SCAN_ENTRY_COUNT = 1_000;
 const MAX_SKILL_FILE_BYTES = 25 * 1024 * 1024;
+// Each awaited fs call costs one event-loop turn; under a busy loop a sequential scan of a
+// large skills root takes tens of seconds. Independent skill directories are read concurrently.
+const SKILL_SCAN_CONCURRENCY = 32;
+
+// Order-preserving worker pool: results line up with `items`, at most `limit` calls in flight.
+async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  map: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await map(items[index]!);
+      }
+    }),
+  );
+  return results;
+}
 
 export interface SkillScanRoot {
   path: string;
@@ -104,12 +126,13 @@ export async function findSkillFiles(
     filePath: string,
     name: string,
     linked: boolean,
+    sink: SkillFile[] = files,
   ): Promise<void> {
     const realPath = await resolveSkillPath(filePath, root.boundaryPath);
     if (realPath === null) return;
     const stat = await fs.stat(realPath).catch(() => null);
     if (!stat?.isFile()) return;
-    files.push({
+    sink.push({
       filePath,
       realPath,
       name,
@@ -120,6 +143,7 @@ export async function findSkillFiles(
     directory: string,
     depth: number,
     linked: boolean,
+    sink: SkillFile[] = files,
   ): Promise<void> {
     if (depth > MAX_SCAN_DEPTH) return;
     const leaf =
@@ -161,18 +185,19 @@ export async function findSkillFiles(
         path.join(directory, SKILL_FILE_NAME),
         path.basename(directory),
         linked,
+        sink,
       );
     }
     if (leaf) return;
-    for (const entry of entries) {
-      if (root.shape !== "command" && entry.isFile()) continue;
+    async function visit(entry: Dirent, entrySink: SkillFile[]): Promise<void> {
+      if (root.shape !== "command" && entry.isFile()) return;
       const entryPath = path.join(directory, entry.name);
       const target = await resolveSkillPath(entryPath, root.boundaryPath);
-      if (target === null) continue;
+      if (target === null) return;
       const entryStat = await fs.stat(target).catch(() => null);
       const entryLinked = linked || entry.isSymbolicLink();
       if (entryStat?.isDirectory()) {
-        await walk(entryPath, depth + 1, entryLinked);
+        await walk(entryPath, depth + 1, entryLinked, entrySink);
       } else if (root.shape === "command" && entry.name.endsWith(".md")) {
         await add(
           entryPath,
@@ -182,9 +207,25 @@ export async function findSkillFiles(
             .split(path.sep)
             .join(":"),
           entryLinked,
+          entrySink,
         );
       }
     }
+    if (root.shape === "skill" && depth === 0) {
+      // Children are leaf skill directories: independent, so read them concurrently and keep entry order.
+      const perEntry = await mapLimit(
+        entries,
+        SKILL_SCAN_CONCURRENCY,
+        async (entry) => {
+          const entrySink: SkillFile[] = [];
+          await visit(entry, entrySink);
+          return entrySink;
+        },
+      );
+      sink.push(...perEntry.flat());
+      return;
+    }
+    for (const entry of entries) await visit(entry, sink);
   }
   if (root.shape === "skill-file" || root.shape === "command-file") {
     await add(
@@ -201,19 +242,22 @@ export async function findSkillFiles(
 export async function scanSkillFiles(
   root: SkillScanRoot,
 ): Promise<IndexedSkillFile[]> {
-  const indexed: IndexedSkillFile[] = [];
-  for (const file of await findSkillFiles(root)) {
-    const stat = await fs.stat(file.realPath).catch(() => null);
-    if (stat === null || stat.size > MAX_SKILL_FILE_BYTES) continue;
-    const bytes = await fs.readFile(file.realPath).catch(() => null);
-    if (bytes === null || bytes.length > MAX_SKILL_FILE_BYTES) continue;
-    indexed.push({
-      ...file,
-      content: bytes.toString("utf8"),
-      contentSha256: createHash("sha256").update(bytes).digest("hex"),
-    });
-  }
-  return indexed;
+  const indexed = await mapLimit(
+    await findSkillFiles(root),
+    SKILL_SCAN_CONCURRENCY,
+    async (file): Promise<IndexedSkillFile | null> => {
+      const stat = await fs.stat(file.realPath).catch(() => null);
+      if (stat === null || stat.size > MAX_SKILL_FILE_BYTES) return null;
+      const bytes = await fs.readFile(file.realPath).catch(() => null);
+      if (bytes === null || bytes.length > MAX_SKILL_FILE_BYTES) return null;
+      return {
+        ...file,
+        content: bytes.toString("utf8"),
+        contentSha256: createHash("sha256").update(bytes).digest("hex"),
+      };
+    },
+  );
+  return indexed.filter((file) => file !== null);
 }
 
 interface SkillMentionCandidate {

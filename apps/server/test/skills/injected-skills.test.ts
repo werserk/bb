@@ -1,4 +1,4 @@
-import {
+import fsPromises, {
   chmod,
   mkdir,
   readFile,
@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { makeTempDir } from "@bb/test-helpers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveBuiltinSkillsRootPath } from "../../src/services/skills/builtin-skills-copy.js";
 import {
   resolveProjectSkillSourceFromContent,
@@ -120,6 +120,102 @@ async function expectedTreeSource(args: {
     entryPath: "SKILL.md",
   };
 }
+
+async function writeOrderFixture(rootPath: string): Promise<string> {
+  const skillRoot = await writeSkill({ rootPath, name: "walk-order" });
+  const files: Record<string, string> = {
+    "a/b/deep.md": "deep\n",
+    "a/b/c/leaf.md": "leaf\n",
+    "a/z.md": "z\n",
+    "b.md": "b\n",
+    "references/x/y/ref.md": "ref\n",
+    "references/x/note.md": "note\n",
+    "scripts/run.sh": "#!/bin/sh\n",
+  };
+  for (const [relative, content] of Object.entries(files)) {
+    const filePath = path.join(skillRoot, relative);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content);
+    await chmod(filePath, 0o644);
+  }
+  return skillRoot;
+}
+
+describe("skill tree walk", () => {
+  it("keeps entry order and tree hash stable for nested directories and a SKILL.md symlink", async () => {
+    const temp = await makeTempDir();
+    const skillRoot = await writeOrderFixture(path.join(temp, "skills"));
+    const realSkillFile = path.join(temp, "real-SKILL.md");
+    await rename(path.join(skillRoot, "SKILL.md"), realSkillFile);
+    await symlink(realSkillFile, path.join(skillRoot, "SKILL.md"));
+
+    const manifest = await new SkillTreeRegistry().readTree(skillRoot);
+
+    expect(manifest.files.map((file) => file.path)).toEqual([
+      "SKILL.md",
+      "a/b/c/leaf.md",
+      "a/b/deep.md",
+      "a/z.md",
+      "b.md",
+      "references/x/note.md",
+      "references/x/y/ref.md",
+      "scripts/run.sh",
+    ]);
+    expect(manifest.treeHash).toBe(
+      "14c1515a2869610da544ba06da8c2dcd0a12bbaef68999f07b44b86c477704b6",
+    );
+  });
+
+  it("reports the first symlink in entry order", async () => {
+    const temp = await makeTempDir();
+    const skillRoot = await writeOrderFixture(path.join(temp, "skills"));
+    await symlink(
+      path.join(skillRoot, "b.md"),
+      path.join(skillRoot, "a/z-link"),
+    );
+    await symlink(
+      path.join(skillRoot, "b.md"),
+      path.join(skillRoot, "a/b/c/a-link"),
+    );
+
+    await expect(new SkillTreeRegistry().readTree(skillRoot)).rejects.toThrow(
+      "a/b/c/a-link",
+    );
+  });
+
+  it("stats entries concurrently but within the fs limit", async () => {
+    const temp = await makeTempDir();
+    const skillRoot = await writeOrderFixture(path.join(temp, "skills"));
+    for (let index = 0; index < 60; index += 1) {
+      await writeFile(path.join(skillRoot, `bulk-${index}.md`), `${index}\n`);
+    }
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const originalLstat = fsPromises.lstat.bind(fsPromises) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    const lstat = vi.spyOn(fsPromises, "lstat").mockImplementation((async (
+      ...args: unknown[]
+    ) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return await originalLstat(...args);
+      } finally {
+        inFlight -= 1;
+      }
+    }) as unknown as typeof fsPromises.lstat);
+    try {
+      await new SkillTreeRegistry().readTree(skillRoot);
+    } finally {
+      lstat.mockRestore();
+    }
+
+    expect(maxInFlight).toBeGreaterThan(8);
+    expect(maxInFlight).toBeLessThanOrEqual(32);
+  });
+});
 
 describe("injected skill source discovery", () => {
   it("hashes trees deterministically and includes content, paths, and modes", async () => {
