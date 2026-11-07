@@ -813,6 +813,7 @@ async function admitPendingThread(
         const starting = getThread(tx, args.thread.id);
         if (starting === null) throw new PendingThreadAdmissionLost();
         requestThreadProvision(deps, {
+          serviceTurn: args.payload.serviceTurn,
           thread: starting,
           environmentIntent: startContext.environmentIntent,
           execution,

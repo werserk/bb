@@ -293,4 +293,27 @@ it("allocates an empty plugin thread without dispatching a visible bootstrap", a
         serviceTurn: { reason: "coordinator-background" },
       },
     });
+    const queuedId = result.queuedMessage.id;
+    const dispatched = await h.app.request(
+      `/api/v1/threads/${body.id}/queued-messages/${queuedId}/send`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "auto" }),
+      },
+    );
+    expect(dispatched.status, await dispatched.text()).toBe(200);
+    const retained = await (
+      await h.app.request(`/api/v1/threads/${body.id}/events`)
+    ).json();
+    expect(
+      retained.find(
+        (row: { type: string }) => row.type === "client/turn/requested",
+      ),
+    ).toMatchObject({
+      data: {
+        initiator: "system",
+        serviceTurn: { reason: "coordinator-background", visibility: "hidden" },
+      },
+    });
   }));

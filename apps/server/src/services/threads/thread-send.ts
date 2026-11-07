@@ -618,6 +618,7 @@ async function sendThreadMessageWithoutContextClear(
 
   if (
     await dispatchTurnDuringReprovision({
+      serviceTurn: payload.serviceTurn,
       beforeRequestAppendInTransaction: beforeAppendInTransaction,
       deps,
       environment,

@@ -8,6 +8,7 @@ import { getPreparingEnvironment } from "@bb/db";
 import { getThread, type DbTransaction, type EnvironmentRow } from "@bb/db";
 import {
   type EnvironmentProviderSelection,
+  type ServiceTurnDescriptor,
   type PromptInput,
   type ResolvedThreadExecutionOptions,
   type SystemMessageKind,
@@ -56,6 +57,7 @@ import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { recordAcceptedPromptHistoryEntry } from "../prompt-history.js";
 
 interface RequestThreadProvisionArgs {
+  serviceTurn?: ServiceTurnDescriptor;
   environmentIntent: ThreadProvisionEnvironmentIntent;
   execution: ResolvedThreadExecutionOptions;
   fork: ThreadForkDescriptor | null;
@@ -67,6 +69,7 @@ interface RequestThreadProvisionArgs {
 }
 
 interface RequestThreadTargetReprovisionArgs {
+  serviceTurn?: ServiceTurnDescriptor;
   beforeRequestAppendInTransaction?: (args: { tx: DbTransaction }) => void;
   environment: EnvironmentRow;
   execution: ResolvedThreadExecutionOptions;
@@ -293,8 +296,8 @@ export function requestThreadProvision(
 ): ThreadProvisionContext {
   return deps.db.transaction(() => {
     const { initiator, senderThreadId } = resolveDispatchAuthor({
-      retrying: false,
-      senderThreadId: null,
+      retrying: args.serviceTurn !== undefined,
+      senderThreadId: args.serviceTurn?.origin.senderThreadId ?? null,
       startedOnBehalfOf: args.startedOnBehalfOf,
     });
     const target: TurnRequestTarget = { kind: "thread-start" };
@@ -302,6 +305,7 @@ export function requestThreadProvision(
       threadId: args.thread.id,
       environmentId: args.thread.environmentId,
       type: "client/turn/requested",
+      serviceTurn: args.serviceTurn,
       input: args.input,
       execution: args.execution,
       initiator,
@@ -439,6 +443,7 @@ function appendReprovisionTurnRequest(
             threadId: args.thread.id,
             environmentId: args.environment.id,
             type: "client/turn/requested",
+            serviceTurn: args.serviceTurn,
             input: args.input,
             ...(args.inputGroups !== undefined
               ? { inputGroups: args.inputGroups }
