@@ -4,7 +4,7 @@ import type {
   ThreadEventTurnStatus,
   ChildThreadOutcome,
 } from "@bb/domain";
-import { listActiveBackgroundTaskCountsByThreadIds } from "@bb/db";
+import { getThread, listActiveBackgroundTaskCountsByThreadIds } from "@bb/db";
 import { renderTemplate } from "@bb/templates";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import {
@@ -22,6 +22,7 @@ import {
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
 import { getLastThreadOutput } from "./thread-data.js";
+import { isParentNotifiableChildThread } from "./thread-parent.js";
 
 export type ChildThreadNotificationSource = ParentSystemThreadMentionSource;
 
@@ -397,12 +398,19 @@ async function flushChildThreadTurnNotificationBatch(
   childThreadTurnNotificationBatches.delete(parentThreadId);
 
   try {
+    const items = batch.items.filter((item) => {
+      const child = getThread(deps.db, item.childThread.id);
+      return (
+        child !== null && isParentNotifiableChildThread(child, item.turnStatus)
+      );
+    });
+    if (items.length === 0) return;
     await queueParentSystemMessage(deps, {
       input: buildChildThreadTurnStatusBatchInput({
-        items: batch.items,
+        items,
       }),
       parentThreadId,
-      ...childThreadTurnStatusBatchTaxonomy(batch.items),
+      ...childThreadTurnStatusBatchTaxonomy(items),
     });
   } catch (error) {
     deps.logger.error(
