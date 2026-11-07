@@ -307,7 +307,6 @@ function resolveProviderServiceTier(
       ? `Provider ${args.providerId} does not support service tiers.`
       : `Provider ${args.providerId} does not support the ${candidate} service tier. Supported service tiers: ${[
           DEFAULT_SERVICE_TIER,
-          recordedThreadExecutionOptionsSchema,
           ...supported.map((tier) => tier.id),
         ].join(", ")}.`,
   );

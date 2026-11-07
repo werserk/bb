@@ -158,7 +158,6 @@ export function resolveThreadTimelineSurface(
     options.includeClearedContextHistory,
     options.includeService ?? false,
     options.includeDiagnosticOperations,
-    options.includeService ?? false,
     options.includeNestedRows ?? false,
     options.deferContent ?? false,
     options.maxInlineOutputChars,
