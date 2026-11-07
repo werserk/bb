@@ -692,6 +692,8 @@ function prepareQueuedSystemNotice(
       isCurrent({ threadId: item.childThread.id, status: item.turnStatus }),
     );
     if (items.length === 0) return null;
+    if (items.length === notice.childOutcomeSnapshots.length)
+      return { ...original, childOutcomeSnapshots: items };
     return {
       input: buildChildThreadTurnStatusBatchInput({ items }),
       ...childThreadTurnStatusBatchTaxonomy(items),
@@ -719,15 +721,16 @@ function prepareQueuedSystemNotice(
             ? [{ threadId: subject.threadId, status }]
             : []));
   const current = outcomes.length > 0 && outcomes.every(isCurrent);
-  deps.logger.debug(
-    {
-      parentThreadId,
-      systemMessageKind: notice.kind,
-      reason: "missing-render-snapshots",
-      dropped: !current,
-    },
-    "Queued child notice uses legacy policy",
-  );
+  if (notice.kind !== "child-needs-attention")
+    deps.logger.debug(
+      {
+        parentThreadId,
+        systemMessageKind: notice.kind,
+        reason: "missing-render-snapshots",
+        dropped: !current,
+      },
+      "Queued child notice uses legacy policy",
+    );
   return current ? original : null;
 }
 

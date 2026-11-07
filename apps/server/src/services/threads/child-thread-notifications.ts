@@ -242,7 +242,13 @@ function getChildThreadCompletionOutput(
   if (args.turnStatus !== "completed") {
     return null;
   }
-  return getLastThreadOutput(deps.db, args.childThread.id);
+  const output = getLastThreadOutput(deps.db, args.childThread.id)?.trim();
+  return output
+    ? truncateChildThreadOutput(
+        output,
+        CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
+      )
+    : null;
 }
 
 function getChildThreadActiveWorkflowCount(

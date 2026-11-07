@@ -191,18 +191,6 @@ export const queuedMessagePayloadSchema = z.discriminatedUnion("kind", [
 ]);
 export type QueuedMessagePayload = z.infer<typeof queuedMessagePayloadSchema>;
 
-/**
- * Core's own taxonomy for a queued row that is a SYSTEM notice rather than
- * someone's message — today, the "your child thread finished" notice a parent
- * gets while it is busy answering a question.
- *
- * Null for every ordinary row, which is the overwhelming majority. It exists
- * because such a notice is dispatched as an `initiator: "system"` turn whose
- * event carries this taxonomy, and a notice that queued and then dispatched
- * without it would be a different turn than the one that would have been sent
- * a moment earlier. The `deferred_thread_messages` table used to carry it; the
- * queue is the one queue now, so it carries it here.
- */
 const queuedChildOutcomeRenderSnapshotSchema = z.object({
   childThread: z.object({
     id: z.string(),
@@ -216,6 +204,18 @@ const queuedChildOutcomeRenderSnapshotSchema = z.object({
   interruption: childThreadOutcomeSchema.shape.interruption,
 });
 
+/**
+ * Core's own taxonomy for a queued row that is a SYSTEM notice rather than
+ * someone's message — today, the "your child thread finished" notice a parent
+ * gets while it is busy answering a question.
+ *
+ * Null for every ordinary row, which is the overwhelming majority. It exists
+ * because such a notice is dispatched as an `initiator: "system"` turn whose
+ * event carries this taxonomy, and a notice that queued and then dispatched
+ * without it would be a different turn than the one that would have been sent
+ * a moment earlier. The `deferred_thread_messages` table used to carry it; the
+ * queue is the one queue now, so it carries it here.
+ */
 export const queuedMessageSystemNoticeSchema = z.object({
   kind: systemMessageKindSchema,
   subject: systemMessageSubjectSchema.nullable(),

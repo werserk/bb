@@ -56,13 +56,17 @@ it is archived.
 
 Child outcome notices carry optional render snapshots in the existing
 `system_notice` JSON. The server captures the child label, output, workflow
-count and failure/interruption context before queueing. At drain it filters
-snapshots against each child's current parent and notification policy, then
-uses the flush builder for both text and taxonomy. One survivor becomes a
+count and failure/interruption context before queueing; captured output is
+trimmed and bounded to 4000 characters. At drain it filters snapshots against
+each child's current parent and notification policy. If all survive, the
+stored content is delivered unchanged, including edits. Otherwise it uses
+the flush builder for both text and taxonomy. One survivor becomes a
 single-child notice; no survivors consumes the row without delivery. This
 preserves the captured outcome even if the child has since run another turn.
 Legacy rows without snapshots keep the all-or-nothing policy check and log
-that fallback at debug level. The SQL schema and daemon protocol are unchanged.
+that fallback at debug level for outcome notices. Needs-attention notices use
+their subject directly without a missing-snapshots log. The SQL schema and daemon
+protocol are unchanged.
 
 ### Transport contracts
 
