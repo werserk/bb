@@ -637,6 +637,22 @@ describe("active thread disconnect reconciliation triggers", () => {
         hostName: "Test Host",
       });
       expect(JSON.parse(parentNotices[0]!.systemNotice!)).toEqual({
+        childOutcomeSnapshots: [
+          {
+            activeWorkflowCount: 0,
+            childThread: {
+              id: child.id,
+              projectId: project.id,
+              title: "Worker child",
+            },
+            interruption: {
+              reason: "host-daemon-restarted",
+              cause: "host-connection-lost",
+            },
+            terminalOutput: null,
+            turnStatus: "interrupted",
+          },
+        ],
         kind: "child-interrupted",
         subject: {
           kind: "thread",
