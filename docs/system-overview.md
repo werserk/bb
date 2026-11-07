@@ -52,6 +52,18 @@ it. During the grace it still counts as live, so its environment and machine
 are not retired under it. A thread start still in flight is stopped as soon as
 it is archived.
 
+### Queued child notifications
+
+Child outcome notices carry optional render snapshots in the existing
+`system_notice` JSON. The server captures the child label, output, workflow
+count and failure/interruption context before queueing. At drain it filters
+snapshots against each child's current parent and notification policy, then
+uses the flush builder for both text and taxonomy. One survivor becomes a
+single-child notice; no survivors consumes the row without delivery. This
+preserves the captured outcome even if the child has since run another turn.
+Legacy rows without snapshots keep the all-or-nothing policy check and log
+that fallback at debug level. The SQL schema and daemon protocol are unchanged.
+
 ### Transport contracts
 
 Two contract packages define the boundaries between components:

@@ -10,6 +10,7 @@ import type {
   PromptInput,
   PromptMentionResource,
   PromptTextMention,
+  QueuedMessageSystemNotice,
   ResolvedThreadExecutionOptions,
   SystemMessageKind,
   SystemMessageSubject,
@@ -66,6 +67,7 @@ export class ParentSystemMessageCompactionActiveError extends Error {}
 export interface ParentSystemMessageTaxonomy {
   systemMessageKind: SystemMessageKind;
   systemMessageSubject: SystemMessageSubject | null;
+  childOutcomeSnapshots?: QueuedMessageSystemNotice["childOutcomeSnapshots"];
 }
 
 interface QueueParentSystemMessageArgs extends ParentSystemMessageTaxonomy {
@@ -284,6 +286,7 @@ async function queueActiveParentSystemMessage(
         systemNotice: {
           kind: args.systemMessageKind,
           subject: args.systemMessageSubject,
+          childOutcomeSnapshots: args.childOutcomeSnapshots,
         },
       },
       threadId: args.thread.id,
@@ -472,6 +475,7 @@ export async function queueParentSystemMessage(
         parentThread,
         systemMessageKind: args.systemMessageKind,
         systemMessageSubject: args.systemMessageSubject,
+        childOutcomeSnapshots: args.childOutcomeSnapshots,
       });
     } catch (error) {
       hostUnavailable = isHostUnavailableApiError(error);
@@ -519,6 +523,7 @@ export async function queueParentSystemMessage(
     systemNotice: {
       kind: args.systemMessageKind,
       subject: args.systemMessageSubject,
+      childOutcomeSnapshots: args.childOutcomeSnapshots,
     },
   });
   if (!hasPendingInteraction && !hostUnavailable) {
@@ -617,5 +622,6 @@ async function attemptParentSystemMessageDelivery(
     environment: readyEnvironment,
     systemMessageKind: args.systemMessageKind,
     systemMessageSubject: args.systemMessageSubject,
+    childOutcomeSnapshots: args.childOutcomeSnapshots,
   });
 }

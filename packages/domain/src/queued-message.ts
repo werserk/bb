@@ -2,6 +2,7 @@ import { z } from "zod";
 import { pluginIdSchema } from "./plugin-id.js";
 import { clientTurnRequestIdSchema } from "./protocol-ids.js";
 import {
+  childThreadOutcomeSchema,
   systemMessageKindSchema,
   systemMessageSubjectSchema,
 } from "./system-message.js";
@@ -202,9 +203,25 @@ export type QueuedMessagePayload = z.infer<typeof queuedMessagePayloadSchema>;
  * a moment earlier. The `deferred_thread_messages` table used to carry it; the
  * queue is the one queue now, so it carries it here.
  */
+const queuedChildOutcomeRenderSnapshotSchema = z.object({
+  childThread: z.object({
+    id: z.string(),
+    projectId: z.string(),
+    title: z.string().nullable(),
+  }),
+  activeWorkflowCount: z.number().int().nonnegative(),
+  terminalOutput: z.string().nullable(),
+  turnStatus: childThreadOutcomeSchema.shape.status,
+  failureContext: z.string().optional(),
+  interruption: childThreadOutcomeSchema.shape.interruption,
+});
+
 export const queuedMessageSystemNoticeSchema = z.object({
   kind: systemMessageKindSchema,
   subject: systemMessageSubjectSchema.nullable(),
+  childOutcomeSnapshots: z
+    .array(queuedChildOutcomeRenderSnapshotSchema)
+    .optional(),
 });
 export type QueuedMessageSystemNotice = z.infer<
   typeof queuedMessageSystemNoticeSchema

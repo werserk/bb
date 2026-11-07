@@ -3,6 +3,7 @@ import type {
   SystemMessageSubject,
   ThreadEventTurnStatus,
   ChildThreadOutcome,
+  QueuedMessageSystemNotice,
 } from "@bb/domain";
 import { getThread, listActiveBackgroundTaskCountsByThreadIds } from "@bb/db";
 import { renderTemplate } from "@bb/templates";
@@ -26,14 +27,9 @@ import { isParentNotifiableChildThread } from "./thread-parent.js";
 
 export type ChildThreadNotificationSource = ParentSystemThreadMentionSource;
 
-export interface ChildThreadTurnNotificationBatchItem {
-  activeWorkflowCount: number;
-  childThread: ChildThreadNotificationSource;
-  terminalOutput: string | null;
-  turnStatus: ThreadEventTurnStatus;
-  failureContext?: string;
-  interruption?: ChildThreadOutcome["interruption"];
-}
+export type ChildThreadTurnNotificationBatchItem = NonNullable<
+  QueuedMessageSystemNotice["childOutcomeSnapshots"]
+>[number];
 
 interface ChildThreadTurnNotificationBatch {
   items: ChildThreadTurnNotificationBatchItem[];
@@ -304,7 +300,7 @@ function childThreadSubject(
   };
 }
 
-function childThreadTurnStatusBatchTaxonomy(
+export function childThreadTurnStatusBatchTaxonomy(
   items: ChildThreadTurnNotificationBatchItem[],
 ): ParentSystemMessageTaxonomy {
   const outcomes: ChildThreadOutcome[] = items.map((item) => ({
@@ -413,6 +409,14 @@ async function flushChildThreadTurnNotificationBatch(
       }),
       parentThreadId,
       ...childThreadTurnStatusBatchTaxonomy(items),
+      childOutcomeSnapshots: items.map((item) => ({
+        ...item,
+        childThread: {
+          id: item.childThread.id,
+          projectId: item.childThread.projectId,
+          title: item.childThread.title,
+        },
+      })),
     });
   } catch (error) {
     deps.logger.error(
