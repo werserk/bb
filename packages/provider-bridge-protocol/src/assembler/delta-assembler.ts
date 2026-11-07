@@ -1302,6 +1302,26 @@ export function createDeltaAssembler(
       }
 
       case "turn.open": {
+        if (
+          options.providerId === "claude-code" &&
+          delta.providerTurnId !== undefined &&
+          delta.parentRef === undefined
+        ) {
+          if (!state.bbTurnIdByProviderTurnId.has(delta.providerTurnId)) {
+            const turnId = ensureTurnOpen(state, events);
+            state.bbTurnIdByProviderTurnId.set(delta.providerTurnId, turnId);
+            state.providerTurnIdByBbTurnId.set(turnId, delta.providerTurnId);
+            trimOldestEntries(
+              state.bbTurnIdByProviderTurnId,
+              MAX_ID_MAP_ENTRIES,
+            );
+            trimOldestEntries(
+              state.providerTurnIdByBbTurnId,
+              MAX_ID_MAP_ENTRIES,
+            );
+          }
+          return;
+        }
         if (delta.providerTurnId !== undefined) {
           const parentToolCallId = mapParentRef(state, delta.parentRef);
           events.push({

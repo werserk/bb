@@ -226,8 +226,26 @@ for (const providerId of ["claude-code", "codex"]) {
             expect(result.success).toBe(true);
             return JSON.parse(result.contentItems[0].text);
           };
+          const finishClaudeTurn = (status: "completed" | "interrupted") => {
+            if (providerId !== "claude-code") return;
+            const events = adapter.translateEvent({
+              jsonrpc: "2.0",
+              method: "thread/delta",
+              params: {
+                threadId: thread.id,
+                deltas: [{ kind: "turn.boundary", status }],
+              },
+            });
+            expect(
+              events.find((event) => event.type === "turn/completed")?.scope,
+            ).toEqual({
+              kind: "turn",
+              turnId: activeTurnId,
+            });
+          };
           const oldTurnId = start("old-turn");
           const oldResponse = await post("old-call", "old-turn");
+          finishClaudeTurn("completed");
           const newTurnId = start("new-turn");
           const lateResponse = await post("late-call", "old-turn");
           const responses = await Promise.all([
@@ -273,6 +291,7 @@ for (const providerId of ["claude-code", "codex"]) {
           expect((await stopResponse).status).toBe(200);
           await stopping.json();
           expect(stoppedContext.signal.aborted).toBe(true);
+          finishClaudeTurn("interrupted");
           const restartTurnId = start("restart-turn");
           const restarted = await post("restart-call", "restart-turn");
           expect(contexts.at(-1)!.signal.aborted).toBe(false);
