@@ -207,3 +207,60 @@ it("shows the reply to an accepted owner steer in the same provider turn", () =>
   expect(JSON.stringify(result.rows)).toContain("Owner answer");
   expect(JSON.stringify(result.rows)).not.toContain("private reply");
 });
+
+it("does not expose live service reasoning text", () => {
+  const { e, rows } = fixture("self-reminder");
+  const events = [
+    ...rows,
+    e.reasoningStarted({ itemId: "thinking" }),
+    e.reasoningDelta({
+      itemId: "thinking",
+      delta: "private service reasoning\n",
+    }),
+  ];
+  const live = timeline(events, false, "active");
+  expect(JSON.stringify(live.activeThinking)).not.toContain(
+    "private service reasoning",
+  );
+  expect(JSON.stringify(live.rows)).not.toContain("private service reasoning");
+  expect(timeline(events, true, "active").activeThinking?.text).toContain(
+    "private service reasoning",
+  );
+});
+
+it.each([false, true])(
+  "bounds service activity to the latest root turn (interrupted=%s)",
+  (interrupted) => {
+    const { e, rows } = fixture("self-reminder");
+    const owner = e.clientTurnRequested({
+      text: "Owner next",
+      initiator: "user",
+    });
+    const result = timeline(
+      [
+        ...rows,
+        ...(interrupted ? [e.systemThreadInterrupted()] : []),
+        owner,
+        e.turnStarted({ turnId: "owner-next" }),
+        e.inputAccepted({
+          clientRequestId: owner.data.requestId,
+          turnId: "owner-next",
+        }),
+      ],
+      false,
+      "active",
+    );
+    expect(JSON.stringify(result.rows)).not.toContain("service-activity:");
+    expect(JSON.stringify(result.rows)).not.toContain("secret details");
+  },
+);
+
+it("clears live service activity on interruption even without a completed event", () => {
+  const { e, rows } = fixture("self-reminder");
+  const result = timeline(
+    [...rows, e.systemThreadInterrupted()],
+    false,
+    "active",
+  );
+  expect(JSON.stringify(result.rows)).not.toContain("service-activity:");
+});

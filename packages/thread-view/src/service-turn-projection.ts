@@ -48,8 +48,11 @@ export function classifyServiceTurns(
   };
   const liveTurns = new Map<string, ThreadEventWithMetaLike>();
   for (const entry of [...events].sort((a, b) => a.meta.seq - b.meta.seq)) {
+    if (entry.event.type === "system/thread/interrupted") liveTurns.clear();
     const turnId = getThreadEventScopeTurnId(entry.event.scope);
     if (!turnId) continue;
+    if (entry.event.type === "turn/started" && !entry.event.parentToolCallId)
+      liveTurns.clear();
     if (
       entry.event.type === "turn/started" &&
       (turnIds.has(turnId) || hiddenAt(entry.meta.seq))

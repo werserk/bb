@@ -200,6 +200,9 @@ export function ThreadTimelineSurface({
   );
   const isOngoingIndicatorVisible =
     showOngoingIndicator &&
+    !timelineRowsWithPendingStop.some(
+      (row) => row.kind === "turn" && row.status === "pending",
+    ) &&
     (timelineRowsWithPendingStop.length > 0 || isOngoingIndicatorSustained);
   const showLoadOlderRows =
     hasOlderTimelineRows &&

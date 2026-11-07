@@ -18,7 +18,6 @@ import { prependOlderTimelineRows } from "@bb/client-core";
 import { Command } from "commander";
 import {
   formatThreadTimelineText,
-  threadPresentationText as t,
   type ThreadTimelineTextFormat,
 } from "@bb/thread-view";
 import { BbHttpError, type BbSdk } from "@bb/sdk";
@@ -390,14 +389,6 @@ export function registerShowCommand(
             : statusPayload;
         printThreadStatus(visiblePayload, environmentInfo, fetchedPullRequest);
 
-        if (
-          !opts.includeService &&
-          thread.serviceTurn &&
-          (thread.status === "active" || thread.status === "stopping")
-        )
-          console.log(
-            `  ${t("service.busy", Intl.DateTimeFormat().resolvedOptions().locale)}`,
-          );
         printPendingTodos(pendingTodos);
 
         if (fetchedWorkStatus !== undefined) {

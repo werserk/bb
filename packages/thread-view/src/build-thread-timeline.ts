@@ -1228,7 +1228,7 @@ export function buildThreadTimelineFromEvents(
             providerId: args.options.providerId,
             threadStatus: args.options.threadStatus,
           }),
-    activeThinking: projection.state.activeThinking,
+    activeThinking: serviceCurrent ? null : projection.state.activeThinking,
     activeWorkflows: projection.state.activeWorkflows.flatMap((message) => {
       const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
       return row ? [row] : [];

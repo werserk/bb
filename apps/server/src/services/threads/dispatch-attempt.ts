@@ -1,3 +1,4 @@
+import { latestServiceTurn } from "./service-turns.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
 import {
   cancelPreparingMachinePause,
@@ -58,7 +59,11 @@ import {
 } from "./queue-waits.js";
 import { applyLoggedThreadLifecycleEventInTransaction } from "./lifecycle-outcome.js";
 import { buildExecutionOptions } from "./thread-commands.js";
-import { getActiveTurnId, isManualCompactionActive } from "./thread-events.js";
+import {
+  getActiveTurnId,
+  isActiveTurnMainRunIdle,
+  isManualCompactionActive,
+} from "./thread-events.js";
 import { requireThreadCommandEnvironment } from "./thread-command-environment.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 import {
@@ -313,6 +318,15 @@ async function runDispatchAttempt(
   // everything the user lined up behind it.
   ensureThreadIsWritable(thread, true);
   assertThreadHostAcceptsWork(deps.db, thread);
+  if (
+    payload.mode === "queue-if-active" &&
+    !payload.serviceTurn &&
+    !latestServiceTurn(deps.db, thread.id) &&
+    isActiveTurnMainRunIdle(deps, thread)
+  ) {
+    payload = { ...payload, mode: "steer-if-active" };
+    args = { ...args, payload };
+  }
   if (args.trigger === "user" && args.source.kind === "inline") {
     // Reject what can never deliver while the sender is still listening; a
     // drain has nobody to tell, and its rows were validated when they were queued.
@@ -358,7 +372,14 @@ async function runDispatchAttempt(
   const sendNow = args.source.kind === "drain" && args.source.sendNow;
   const respectManualStopPause =
     args.source.kind === "drain" && args.source.respectManualStopPause;
-  const attempt = resolveDispatchAttemptKind(thread, payload.mode);
+  const attempt = resolveDispatchAttemptKind(
+    thread,
+    author.initiator !== "user" &&
+      thread.status === "active" &&
+      latestServiceTurn(deps.db, thread.id)
+      ? "queue-if-active"
+      : payload.mode,
+  );
 
   const execution = await buildExecutionOptions(
     deps,

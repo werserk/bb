@@ -137,6 +137,29 @@ describe("bb thread show command output", () => {
     },
   );
 
+  it("does not promise that owner input is next during service work", async () => {
+    stubServerApi({
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "service",
+          projectId: "proj-1",
+          providerId: "codex",
+          status: "active",
+          serviceTurn: {
+            version: 1,
+            visibility: "hidden",
+            reason: "self-reminder",
+            origin: { pluginId: "wprojects", senderThreadId: null },
+          },
+        }),
+      "v1.threads.:id.timeline.$get": fixtures.makeEmptyTimelineGetMock(),
+    });
+    await runCommand(["thread", "show", "service"], register);
+    expect(collectLogLines(vi.mocked(console.log)).join("\n")).not.toContain(
+      "your message is next",
+    );
+  });
+
   it("bb thread show --self resolves from BB_THREAD_ID", async () => {
     vi.stubEnv("BB_THREAD_ID", "thread-show-self");
     const thread: domain.Thread = fixtures.makeThread({
@@ -322,7 +345,10 @@ describe("bb thread show command output", () => {
     );
 
     expect(rpc.bodies).toEqual([
-      { environmentId: "env-uncommitted-diff", target: { type: "uncommitted" } },
+      {
+        environmentId: "env-uncommitted-diff",
+        target: { type: "uncommitted" },
+      },
     ]);
     const output = collectLogLines(vi.mocked(console.log)).join("\n");
     expect(output).toContain("Git diff:");

@@ -6,7 +6,7 @@ import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BottomAnchorContext } from "@/components/ui/bottom-anchored-scroll-body.js";
-import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
+import { conversationRow, turnRow } from "@/test/fixtures/thread-timeline-rows";
 import { ThreadTimelineSurface } from "./ThreadTimelineSurface";
 import { createInertScrollPositionKeeper } from "@/test/scroll-position-keeper";
 
@@ -226,6 +226,24 @@ describe("ThreadTimelineSurface working indicator", () => {
     });
     return { styleChanges, surface, view };
   }
+
+  it("uses the pending turn timer without a second Working indicator", () => {
+    const { surface, view } = renderSurface();
+    view.rerender(
+      surface({
+        isThreadTimelinePending: false,
+        showOngoingIndicator: true,
+        timelineRows: [
+          turnRow({
+            id: "service-activity",
+            turnId: "service",
+            status: "pending",
+          }),
+        ],
+      }),
+    );
+    expect(indicatorHeightWrapper().style.height).toBe("0px");
+  });
 
   function indicatorHeightWrapper(): HTMLElement {
     const wrapper = screen

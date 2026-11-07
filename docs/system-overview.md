@@ -90,10 +90,13 @@ timestamp to reload their blob after realtime invalidation.
 
 ### Service turn presentation
 
-The server dispatch checkpoint honors the requested send mode for service and
-owner turns alike. The host uses its existing provider steer path; queue remains
-a native queued message. The thread-view service projection hides service inputs
+The server dispatch checkpoint honors owner send modes during service turns;
+agent and system senders retain forced queue isolation. The host uses its existing
+provider steer path; queue remains a native queued message. Upstream idle-main-run
+delivery into turns held open by background agents is unchanged. The thread-view service projection hides service inputs
 and replies, preserves owner input including pending steers, and exposes unfinished
 service work as normal work rows alongside a native pending turn timer (with the
-original start time).
+original start time, bounded to the current root turn). The timeline omits the
+extra Working indicator while a pending turn timer exists and suppresses service
+reasoning text.
 Completed service history stays hidden; owner replies after a steer stay visible.
