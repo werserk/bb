@@ -6169,8 +6169,17 @@ describe("bridge", () => {
             input: [{ type: "text", text: "probe" }],
           }),
         );
+        await vi.waitFor(() =>
+          expect(JSON.stringify(bridge.messages)).toContain("tool-origin-"),
+        );
+        expect(JSON.stringify(bridge.messages)).not.toContain(
+          '"kind":"input.accepted"',
+        );
         await readNextPrompt(getLatestQueryCall());
         await bridge.waitForResponse(2);
+        expect(JSON.stringify(bridge.messages)).toContain(
+          '"kind":"input.accepted"',
+        );
         const server = getLatestQueryOptions().mcpServers?.["bb-bridge"];
         if (!server || server.type !== "sdk")
           throw new Error("Expected native SDK MCP server");

@@ -2649,23 +2649,19 @@ async function runTurnInput(
     ) {
       threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}`;
     }
-    if (threadSession.toolOrigin.turnId !== undefined)
-      emitCanonicalTurnInputAccepted(
-        threadSession,
-        acceptance,
-        params.threadId,
-      );
+    if (threadSession.toolOrigin.turnId !== undefined) {
+      // Register the query origin before it can call tools. Input acceptance
+      // still waits for the SDK to consume the prompt below.
+      sendThreadDeltas(params.threadId, [
+        { kind: "turn.open", providerTurnId: threadSession.toolOrigin.turnId },
+      ]);
+    }
     await pushPromptInput(
       threadSession,
       promptText,
       params.permissionEscalation,
     );
-    if (threadSession.toolOrigin.turnId === undefined)
-      emitCanonicalTurnInputAccepted(
-        threadSession,
-        acceptance,
-        params.threadId,
-      );
+    emitCanonicalTurnInputAccepted(threadSession, acceptance, params.threadId);
     threadSession.attachment.permissionEscalation = params.permissionEscalation;
     sendResult(id, { threadId: params.threadId });
   } catch (error) {
