@@ -28,9 +28,11 @@ const STATUS_BULLET: Record<ThreadTimelinePendingTodoItemStatus, string> = {
   in_progress: "[>]",
   pending: "[ ]",
   completed: "[x]",
+  failed: "[!]",
 };
 
 const STATUS_RANK: Record<ThreadTimelinePendingTodoItemStatus, number> = {
+  failed: -1,
   in_progress: 0,
   pending: 1,
   completed: 2,
