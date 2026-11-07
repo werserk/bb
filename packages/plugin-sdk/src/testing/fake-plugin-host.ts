@@ -1120,7 +1120,7 @@ function createFakePluginHostInternal(
 
   const agents: PluginAgents = {
     experimental_toolContextCapabilities() {
-      return { callerIdentity: true };
+      return { callerIdentity: true, exactTurnOrigin: false };
     },
     configure(provider) {
       assertLive();

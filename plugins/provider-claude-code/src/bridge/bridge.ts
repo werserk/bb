@@ -250,6 +250,7 @@ interface ClaudeSessionRestart {
 
 interface ThreadSession {
   commandListGeneration: number;
+  toolOrigin: { turnId?: string; retired?: boolean };
   contextUsageCollector: ClaudeContextUsageCollector;
   session: SdkSession;
   attachment: ThreadAttachment;
@@ -439,8 +440,9 @@ function resolvePendingSessionWork(
   threadSession: ThreadSession,
   message: string,
 ): void {
+  threadSession.toolOrigin.retired = true;
   threadSession.contextUsageCollector.cancel();
-  toolCallTracker.resolvePendingToolCalls(threadSession, message);
+  toolCallTracker.resolvePendingToolCalls(threadSession.toolOrigin, message);
   resolvePendingInteractiveRequests(threadSession, message);
 }
 
@@ -633,28 +635,28 @@ async function applyPermissionSettings(
   return needsRestart;
 }
 
-function createForwardToolCall(getThreadId: () => string): ToolCallForwarder {
+function createForwardToolCall(
+  attachment: ThreadAttachment,
+  origin: { turnId?: string; retired?: boolean },
+  scope: object,
+): ToolCallForwarder {
   return (toolName, args) => {
-    const threadId = getThreadId();
-    const attachment = threadAttachments.get(threadId);
-    const threadSession = attachment?.residentSession;
-    if (
-      !attachment ||
-      attachment.closing ||
-      !threadSession ||
-      threadSession.closing
-    ) {
+    if (origin.turnId === undefined || origin.retired) {
       return Promise.resolve({
-        content: "Thread session not found",
+        content: origin.retired
+          ? "Originating tool query has ended"
+          : "Tool query has no originating turn",
         isError: true,
       });
     }
     return forwardToolCall({
       arguments: args,
-      providerThreadId: attachment.providerThreadId ?? threadId,
-      scope: threadSession,
-      threadId,
+      providerThreadId:
+        attachment.providerThreadId ?? attachment.threadIdRef.current,
+      scope,
+      threadId: attachment.threadIdRef.current,
       toolName,
+      turnId: origin.turnId,
     });
   };
 }
@@ -1029,7 +1031,14 @@ function emitCanonicalTurnInputAccepted(
   threadSession.contextUsageCollector.invalidate();
   sendThreadDeltas(
     threadId,
-    threadSession.translator.acceptInput(threadId, acceptance.clientRequestId),
+    threadSession.translator
+      .acceptInput(threadId, acceptance.clientRequestId)
+      .map((delta) =>
+        delta.kind === "turn.open" &&
+        threadSession.toolOrigin.turnId !== undefined
+          ? { ...delta, providerTurnId: threadSession.toolOrigin.turnId }
+          : delta,
+      ),
   );
 }
 
@@ -1146,8 +1155,21 @@ function createThreadAttachment(
 
 function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const sessionSerial = nextSessionSerial();
+  const toolOrigin: { turnId?: string; retired?: boolean } = {};
+  const toolScope = toolOrigin;
+  const options = { ...attachment.sessionOptions };
+  const tools = attachment.sessionConstructionConfig.dynamicTools;
+  if (tools && tools.length > 0) {
+    options.mcpServers = {
+      [BB_BRIDGE_MCP_SERVER_NAME]: buildBridgeMcpServer(
+        tools,
+        createForwardToolCall(attachment, toolOrigin, toolScope),
+      ),
+    };
+    options.allowedTools = getAllowedToolNames(tools);
+  }
   const session = new SdkSession(
-    attachment.sessionOptions,
+    options,
     createOnSdkMessage({
       sessionSerial,
       threadIdRef: attachment.threadIdRef,
@@ -1172,6 +1194,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   );
   const threadSession: ThreadSession = {
     commandListGeneration: 0,
+    toolOrigin,
     contextUsageCollector: new ClaudeContextUsageCollector(),
     session,
     attachment,
@@ -1514,7 +1537,13 @@ async function getWritableThreadSession(
         showRuntimeNote: false,
       }
     : intent === "new-turn"
-      ? threadSession.restartBeforeNextTurn
+      ? (threadSession.restartBeforeNextTurn ??
+        (threadSession.toolOrigin.turnId !== undefined
+          ? {
+              reason: "Claude tool query replaced at the turn boundary",
+              showRuntimeNote: false,
+            }
+          : null))
       : null;
   if (replacement === null) {
     return threadSession;
@@ -2390,14 +2419,6 @@ function attachThreadSession(
     sessionOptions.sessionId = providerThreadId;
   }
   sessionOptions.canUseTool = createCanUseTool(threadIdRef);
-  if (params.dynamicTools && params.dynamicTools.length > 0) {
-    const mcpServer = buildBridgeMcpServer(
-      params.dynamicTools,
-      createForwardToolCall(() => threadIdRef.current),
-    );
-    sessionOptions.mcpServers = { [BB_BRIDGE_MCP_SERVER_NAME]: mcpServer };
-    sessionOptions.allowedTools = getAllowedToolNames(params.dynamicTools);
-  }
 
   const attachment = createThreadAttachment({
     liveSettings: toInitialLiveSessionSettings(params),
@@ -2621,12 +2642,30 @@ async function runTurnInput(
   }
 
   try {
+    if (
+      threadSession.toolOrigin.turnId === undefined &&
+      (threadSession.attachment.sessionConstructionConfig.dynamicTools
+        ?.length ?? 0) > 0
+    ) {
+      threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}`;
+    }
+    if (threadSession.toolOrigin.turnId !== undefined)
+      emitCanonicalTurnInputAccepted(
+        threadSession,
+        acceptance,
+        params.threadId,
+      );
     await pushPromptInput(
       threadSession,
       promptText,
       params.permissionEscalation,
     );
-    emitCanonicalTurnInputAccepted(threadSession, acceptance, params.threadId);
+    if (threadSession.toolOrigin.turnId === undefined)
+      emitCanonicalTurnInputAccepted(
+        threadSession,
+        acceptance,
+        params.threadId,
+      );
     threadSession.attachment.permissionEscalation = params.permissionEscalation;
     sendResult(id, { threadId: params.threadId });
   } catch (error) {

@@ -1122,6 +1122,8 @@ export interface PluginAgentToolContext {
   threadId: string;
   projectId: string;
   /** Calling turn from the authenticated daemon payload; absent when unavailable.
+   * Claude uses a query-run origin mapped by the daemon; Codex maps native IDs
+   * when known (otherwise raw); legacy Pi/ACP may use arrival-time resolution.
    * This identifies the caller, not whether that turn is still active. */
   turnId?: string;
   /** Daemon tool-call identity, for correlation with native tool events. */
@@ -1692,7 +1694,10 @@ export interface PluginProviderDeclaration {
 export interface PluginAgents {
   /** Feature-detect trusted caller identity support. Individual calls may still
    * omit turnId; consumers requiring identity must refuse such calls. */
-  experimental_toolContextCapabilities(): { callerIdentity: true };
+  experimental_toolContextCapabilities(): {
+    callerIdentity: true;
+    exactTurnOrigin: boolean;
+  };
   /**
    * Select this plugin's statically registered tools and manifest skills for
    * each thread/session resolution, with optional dynamic instructions. The

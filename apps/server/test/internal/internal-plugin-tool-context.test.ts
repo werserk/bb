@@ -1,3 +1,10 @@
+import { spawn } from "node:child_process";
+import { vi } from "vitest";
+import { createBridgeProtocolAdapter } from "@bb/agent-runtime/test";
+import {
+  handleRuntimeProviderRequest,
+  RuntimeToolCalls,
+} from "@bb/agent-runtime/test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +30,24 @@ for (const providerId of ["claude-code", "codex"]) {
       await withTestHarness(async (harness) => {
         const root = await mkdtemp(join(tmpdir(), "bb-caller-context-"));
         const contexts: PluginAgentToolContext[] = [];
+        const child = spawn(process.execPath, [
+          "-e",
+          "process.stdin.pipe(process.stdout)",
+        ]);
+        child.stdout?.resume();
+        const daemonCalls = new RuntimeToolCalls();
+        const adapter = createBridgeProtocolAdapter({
+          id: providerId,
+          capabilities: {
+            supportsThreadRename: false,
+            supportsThreadArchive: false,
+            supportsServiceTier: false,
+            fork: "checkpoint",
+            permissionModes: ["full"],
+          },
+          process: { command: "node", args: [] },
+        });
+        const activeTurnLookup = vi.fn(() => "new-turn");
         const pending = new Map<string, () => void>();
         try {
           await mkdir(join(root, "plugin"));
@@ -50,6 +75,7 @@ for (const providerId of ["claude-code", "codex"]) {
           const api = harness.pluginService.getApi("caller-context")!;
           expect(api.agents.experimental_toolContextCapabilities()).toEqual({
             callerIdentity: true,
+            exactTurnOrigin: false,
           });
           api.agents.registerTool({
             name: "caller_context",
@@ -87,7 +113,7 @@ for (const providerId of ["claude-code", "codex"]) {
               turnId,
               providerThreadId: `${providerId}-session`,
             });
-          const post = (
+          const postRaw = (
             callId: string,
             turnId?: string,
             tool = "caller_context",
@@ -108,6 +134,60 @@ for (const providerId of ["claude-code", "codex"]) {
                 arguments: { turnId: "forged-turn", callId: "forged-call" },
               }),
             });
+          const post = (
+            callId: string,
+            turnId?: string,
+            tool = "caller_context",
+            authenticated = true,
+          ): Promise<Response> => {
+            if (turnId === undefined || !authenticated)
+              return Promise.resolve(
+                postRaw(callId, turnId, tool, authenticated),
+              );
+            return new Promise((resolve, reject) => {
+              handleRuntimeProviderRequest({
+                parsedId: callId,
+                parsedMethod: "item/tool/call",
+                rawRequest: {
+                  jsonrpc: "2.0",
+                  id: callId,
+                  method: "item/tool/call",
+                  params: {
+                    threadId: thread.id,
+                    providerThreadId: `${providerId}-session`,
+                    turnId,
+                    callId,
+                    tool,
+                    arguments: {},
+                  },
+                },
+                providerProcess: {
+                  adapter,
+                  child,
+                  interactiveRequestScope: thread.id,
+                },
+                toolCalls: daemonCalls,
+                getActiveTurnId: activeTurnLookup,
+                getThreadExecutionOptions: () => undefined,
+                resolveThreadId: () => thread.id,
+                onInteractiveRequest: async () => ({ decision: "deny" }),
+                onToolCall: async (request) => {
+                  try {
+                    const response = await postRaw(
+                      request.callId,
+                      request.turnId,
+                      request.tool,
+                    );
+                    resolve(response.clone());
+                    return await response.json();
+                  } catch (error) {
+                    reject(error);
+                    throw error;
+                  }
+                },
+              });
+            });
+          };
           const finish = async (response: Response, callId: string) => {
             expect(response.status).toBe(200);
             pending.get(callId)!();
@@ -179,6 +259,7 @@ for (const providerId of ["claude-code", "codex"]) {
               (await post("missing-builtin", undefined, tool)).status,
             ).toBe(400);
           }
+          expect(activeTurnLookup).not.toHaveBeenCalled();
           const count = contexts.length;
           expect(
             (
@@ -192,6 +273,7 @@ for (const providerId of ["claude-code", "codex"]) {
           ).toBe(401);
           expect(contexts).toHaveLength(count);
         } finally {
+          child.kill();
           for (const finish of pending.values()) finish();
           await rm(root, { recursive: true, force: true });
         }

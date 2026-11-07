@@ -24,6 +24,7 @@ export interface ForwardBridgeToolCallArgs {
   scope: object;
   threadId: string;
   toolName: string;
+  turnId?: string;
 }
 
 export interface PendingToolCallTracker {
@@ -54,7 +55,7 @@ export function createPendingToolCallTracker(options: {
             params: {
               threadId: args.threadId,
               providerThreadId: args.providerThreadId,
-              turnId: null,
+              turnId: args.turnId ?? null,
               callId: `call-${requestId}`,
               tool: args.toolName,
               arguments: args.arguments,

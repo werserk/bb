@@ -4321,3 +4321,5 @@ Thread create permits empty `input: []` with declared `origin: "plugin"`, retain
 ## bb.agents.experimental_toolContextCapabilities
 
 Returns `{ callerIdentity: true }` when native plugin tool contexts preserve the authenticated daemon payload's optional `turnId` and `callId`. Missing turn IDs remain absent; no current-turn lookup or argument fallback. Core built-in plan and environment tools use the same authenticated route and require turn identity. Stabilization requires both provider paths, old daemon compatibility, late calls across rollover, parallel calls and Stop/restart tests. Identity is caller provenance, not active-turn authorization.
+
+Claude tool calls carry an immutable query-run origin token mapped to a bb turn by the daemon; Codex supplies its native turn ID, mapped when known (L3: an unmapped Codex ID still passes through raw for compatibility); Pi/ACP legacy bridges can use arrival-time fallback. `exactTurnOrigin` stays false until every shipped provider path supplies an exact origin.

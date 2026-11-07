@@ -8,3 +8,9 @@ export {
   type ScriptedEchoLaunchScript,
   type ScriptedEchoRequestRecord,
 } from "./runtime-test-harness.js";
+
+export { createBridgeProtocolAdapter } from "../bridge-protocol-adapter.js";
+export {
+  handleRuntimeProviderRequest,
+  RuntimeToolCalls,
+} from "../runtime-provider-requests.js";
