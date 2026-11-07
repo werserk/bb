@@ -1226,6 +1226,14 @@ describe("thread runtime config", () => {
       expect(runtimeConfig.instructions).toContain(
         "update_environment_directory",
       );
+      for (const clause of [
+        "Post the plan before your first substantial action",
+        "exactly one step is in_progress",
+        "Waiting for the user or another agent is a step of its own",
+        "is several tasks: tell whoever assigned it",
+      ]) {
+        expect(runtimeConfig.instructions.split(clause)).toHaveLength(2);
+      }
       expect(pluginContexts[0]?.environment.workspaceProvisionType).toBe(
         "unmanaged",
       );
