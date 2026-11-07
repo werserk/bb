@@ -234,3 +234,76 @@ it("hides the retained plan in an archived thread", () => {
   });
   expect(container.querySelector("[data-thread-plan]")).toBeNull();
 });
+
+const laterTurnRow: import("@bb/server-contract").TimelineUserConversationRow =
+  {
+    id: "later",
+    threadId: THREAD.id,
+    turnId: "later",
+    kind: "conversation",
+    role: "user",
+    sourceSeqStart: 20,
+    sourceSeqEnd: 20,
+    startedAt: 200,
+    createdAt: 200,
+    messageSeq: 20,
+    text: "Continue",
+    attachments: null,
+    initiator: "user",
+    senderThreadId: null,
+    systemMessageKind: "unlabeled",
+    systemMessageSubject: null,
+    mentions: [],
+    turnRequest: { kind: "message", status: "accepted", isGrouped: false },
+  };
+it.each([false, true])(
+  "keeps an unfinished older-turn plan current, waiting=%s",
+  (waiting) => {
+    if (waiting) mocks.pendingInteractions = [makePluginInteraction()];
+    renderScreen(SIDE_CHAT_PRESENTATION, {
+      timeline: {
+        ...TIMELINE,
+        timelineRows: [laterTurnRow],
+        pendingTodos: {
+          sourceSeq: 10,
+          updatedAt: 100,
+          items: [
+            { id: "one", text: "Continue the task", status: "in_progress" },
+          ],
+        },
+      },
+    });
+    expect(
+      screen
+        .getByRole("button", {
+          name: waiting ? /^Plan · waiting for you:/ : /^Plan:/,
+        })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.queryByText(/earlier task/)).toBeNull();
+  },
+);
+it("collapses and reopens a completed older-turn plan through ThreadScreen", () => {
+  renderScreen(
+    { kind: "page" },
+    {
+      timeline: {
+        ...TIMELINE,
+        timelineRows: [laterTurnRow],
+        pendingTodos: {
+          sourceSeq: 10,
+          updatedAt: 100,
+          items: [{ id: "one", text: "Checked result", status: "completed" }],
+        },
+      },
+    },
+  );
+  const toggle = screen.getByRole("button", {
+    name: /^Plan from an earlier task.*1\/1/,
+  });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText(/updated at .* · from an earlier task/)).toBeTruthy();
+  expect(screen.getByText("Checked result")).toBeTruthy();
+});

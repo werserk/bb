@@ -6,6 +6,22 @@ import { ThreadPlanCard } from "./ThreadPlanCard";
 import { ThreadTodoCard } from "@/components/promptbox/banner/ThreadTodoCard";
 
 afterEach(cleanup);
+const rows: import("@bb/server-contract").TimelineRow[] = [
+  {
+    kind: "turn",
+    id: "later",
+    threadId: "thread",
+    turnId: "later",
+    sourceSeqStart: 20,
+    sourceSeqEnd: 21,
+    startedAt: 200,
+    createdAt: 200,
+    completedAt: 201,
+    status: "completed",
+    summaryCount: 0,
+    children: [],
+  },
+];
 const plan: ThreadTimelinePendingTodos = {
   sourceSeq: 10,
   updatedAt: 100,
@@ -21,7 +37,7 @@ const plan: ThreadTimelinePendingTodos = {
 };
 it("collapses on completion, allows reopening, and clears explicitly", () => {
   const { rerender, container } = render(
-    <ThreadPlanCard pendingTodos={plan} rows={[]} waitingForOwner={false} />,
+    <ThreadPlanCard pendingTodos={plan} rows={rows} waitingForOwner={false} />,
   );
   expect(
     screen
@@ -34,9 +50,11 @@ it("collapses on completion, allows reopening, and clears explicitly", () => {
     items: [{ ...plan.items[0]!, status: "completed" }],
   };
   rerender(
-    <ThreadPlanCard pendingTodos={done} rows={[]} waitingForOwner={false} />,
+    <ThreadPlanCard pendingTodos={done} rows={rows} waitingForOwner={false} />,
   );
-  const toggle = screen.getByRole("button", { name: /^Plan finished/ });
+  const toggle = screen.getByRole("button", {
+    name: /^Plan from an earlier task/,
+  });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
@@ -45,11 +63,11 @@ it("collapses on completion, allows reopening, and clears explicitly", () => {
   rerender(
     <ThreadPlanCard
       pendingTodos={{ ...done, items: [] }}
-      rows={[]}
+      rows={rows}
       waitingForOwner={false}
     />,
   );
-  expect(container.querySelector("aside")).toBeNull();
+  expect(container.querySelector("[data-thread-plan]")).toBeNull();
 });
 it("shows waiting and localized stale metadata with unique disclosure ids", () => {
   const { rerender } = render(

@@ -50,7 +50,7 @@ const TODO_ACTIVE_ICON_CLASS = "text-foreground";
 
 function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]) {
   const count = items.filter((item) => item.status === "completed").length;
-  return { aria: `${count} of ${items.length} items complete` };
+  return { count, aria: `${count} of ${items.length} items complete` };
 }
 
 function TodoStatusIcon({
@@ -94,7 +94,7 @@ function TodoBody({
   items: readonly ThreadTimelinePendingTodoItem[];
 }) {
   return (
-    <ul className="max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
+    <ul className="max-h-40 @min-[880px]/thread-chat:max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
       {items.map((item) => {
         const activityState = STATUS_ACTIVITY_STATE[item.status];
         const isActive = activityState === "active";
@@ -179,13 +179,13 @@ export function ThreadTodoCard({
     {
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hourCycle: "h23",
     },
   );
   const progressLabel = ru
-    ? `${items.filter((item) => item.status === "completed").length} из ${items.length} шагов выполнено`
+    ? `Выполнено: ${summary.count}/${items.length}`
     : summary.aria;
-  const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}`;
+  const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}${!isExpanded ? ` · ${summary.count}/${items.length}` : ""}`;
   const metadata = `${ru ? "обновлено в" : "updated at"} ${time}${state === "earlier" ? (ru ? " · из прошлой задачи" : " · from an earlier task") : ""}`;
   return (
     <PromptStackCard

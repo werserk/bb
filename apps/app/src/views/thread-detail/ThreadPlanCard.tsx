@@ -31,7 +31,7 @@ export function ThreadPlanCard({
       : !state?.autoCollapse;
   if (!pendingTodos?.items.length || !state) return null;
   return (
-    <aside
+    <div
       className="order-first ml-auto w-full min-w-0 max-w-sm shrink-0 p-3 @min-[880px]/thread-chat:order-last @min-[880px]/thread-chat:w-80 @min-[880px]/thread-chat:overflow-y-auto"
       data-thread-plan=""
     >
@@ -43,6 +43,6 @@ export function ThreadPlanCard({
           setDisclosure({ key: disclosureKey, expanded: !expanded })
         }
       />
-    </aside>
+    </div>
   );
 }

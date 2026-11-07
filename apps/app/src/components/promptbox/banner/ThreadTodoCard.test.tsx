@@ -38,3 +38,24 @@ it("shows a completed plan with its step note and helper until cleared", () => {
   );
   expect(screen.queryByText("Review")).toBeNull();
 });
+
+it("uses neutral Russian progress and a midnight h23 time in the collapsed header", () => {
+  render(
+    <ThreadTodoCard
+      pendingTodos={{
+        sourceSeq: 1,
+        updatedAt: new Date(2026, 0, 1, 0, 5).getTime(),
+        items: [{ id: "one", text: "Done", status: "completed" }],
+      }}
+      state="finished"
+      isExpanded={false}
+      onToggle={() => {}}
+      locale="ru-RU"
+    />,
+  );
+  expect(
+    screen.getByRole("button", {
+      name: /План выполнен · 00:05 · 1\/1: Выполнено: 1\/1/,
+    }),
+  ).toBeTruthy();
+});

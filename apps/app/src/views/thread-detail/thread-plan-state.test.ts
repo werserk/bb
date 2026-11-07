@@ -16,7 +16,11 @@ describe("thread plan state", () => {
   });
   it("collapses only after a newer turn, including equal timestamps", () => {
     expect(
-      threadPlanState(plan, { sourceSeq: 11, startedAt: 100 }, true),
+      threadPlanState(
+        { ...plan, items: [{ ...plan.items[0]!, status: "completed" }] },
+        { sourceSeq: 11, startedAt: 100 },
+        true,
+      ),
     ).toEqual({ state: "earlier", autoCollapse: true });
     expect(
       threadPlanState(plan, { sourceSeq: 9, startedAt: 110 }, false).state,
@@ -32,7 +36,7 @@ describe("thread plan state", () => {
     };
     expect(threadPlanState(finished, null, true)).toEqual({
       state: "finished",
-      autoCollapse: true,
+      autoCollapse: false,
     });
     expect(
       threadPlanState(finished, { sourceSeq: 20, startedAt: 200 }, true).state,
@@ -62,7 +66,7 @@ it("recognizes an accepted new-turn message even when its empty turn has no grou
     turnRequest: { kind: "message", status: "accepted", isGrouped: false },
   };
   expect(threadPlanState(plan, latestPlanTurn([message]), false).state).toBe(
-    "earlier",
+    "active",
   );
   expect(
     latestPlanTurn([

@@ -29,12 +29,13 @@ export function threadPlanState(
   const completed =
     plan.items.length > 0 &&
     plan.items.every((item) => item.status === "completed");
-  const state = stale
-    ? "earlier"
-    : completed
-      ? "finished"
-      : waitingForOwner
-        ? "waiting"
-        : "active";
-  return { state, autoCollapse: stale || completed } as const;
+  const state =
+    completed && stale
+      ? "earlier"
+      : completed
+        ? "finished"
+        : waitingForOwner
+          ? "waiting"
+          : "active";
+  return { state, autoCollapse: stale && completed } as const;
 }
