@@ -67,7 +67,6 @@ import {
 import { appendClientTurnEventInTransaction } from "./thread-events.js";
 import {
   getActiveTurnId,
-  isActiveTurnMainRunIdle,
   getLastProviderThreadId,
   isManualCompactionActive,
 } from "./thread-events.js";
@@ -167,9 +166,7 @@ export function createAutomaticQueuedMessageGroupEligibility(
           return member.sendAt !== null && member.sendAt <= args.now;
         case "thread-busy":
           return (
-            args.thread.status === "idle" ||
-            args.thread.status === "pending" ||
-            isActiveTurnMainRunIdle(deps, args.thread)
+            args.thread.status === "idle" || args.thread.status === "pending"
           );
         case "stopping":
           return (
@@ -308,10 +305,7 @@ export async function createQueuedMessageForThread(
       initiator: "user",
     });
   }
-  if (
-    (currentThread.status === "idle" && hasProviderSession) ||
-    isActiveTurnMainRunIdle(deps, currentThread)
-  ) {
+  if (currentThread.status === "idle" && hasProviderSession) {
     requestQueuedMessageDispatch(deps, {
       kind: "thread-ready",
       threadId: thread.id,

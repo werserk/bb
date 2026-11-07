@@ -2020,7 +2020,7 @@ describe("turn held open for background work", () => {
     });
   }
 
-  it("queues while the main run works and delivers once only background work holds the turn", async () => {
+  it("keeps queued messages until the whole turn finishes", async () => {
     await withTestHarness(async (harness) => {
       const { sessionId, thread } = seedProviderThreadFixture({
         harness,
@@ -2055,28 +2055,17 @@ describe("turn held open for background work", () => {
         threadId: thread.id,
         events: [mainRunEvent(thread.id, "idle")],
       });
-      await vi.waitFor(() => {
-        expect(
-          listQueuedThreadCommands(harness, "turn.submit", thread.id),
-        ).toEqual([
-          expect.objectContaining({
-            input: textInput("while working"),
-            target: { mode: "auto", expectedTurnId: "turn-held" },
-          }),
-        ]);
+      await queuedDispatch.runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
       });
-      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
-      expect(getThread(harness.db, thread.id)?.status).toBe("active");
-
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", thread.id),
+      ).toEqual([]);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
       await expect(
         queueIfActive(harness, thread, "while only agents run"),
-      ).resolves.toEqual({ ok: true, delivery: "sent" });
-      expect(
-        listQueuedThreadCommands(harness, "turn.submit", thread.id).at(-1),
-      ).toMatchObject({
-        input: textInput("while only agents run"),
-        target: { mode: "steer", expectedTurnId: "turn-held" },
-      });
+      ).resolves.toMatchObject({ delivery: "queued" });
 
       await postTurnEvents(harness, {
         sessionId,
@@ -2092,7 +2081,7 @@ describe("turn held open for background work", () => {
     });
   });
 
-  it("delivers a message queued while only background work holds the turn", async () => {
+  it("retains a manually queued message while background work holds the turn", async () => {
     await withTestHarness(async (harness) => {
       const { sessionId, thread } = seedProviderThreadFixture({
         harness,
@@ -2128,17 +2117,14 @@ describe("turn held open for background work", () => {
         payload: { input: textInput("queued while held") },
       });
       expect(queued.waitingOn).toEqual({ kind: "thread-busy" });
-      await vi.waitFor(() => {
-        expect(
-          listQueuedThreadCommands(harness, "turn.submit", thread.id),
-        ).toEqual([
-          expect.objectContaining({
-            input: textInput("queued while held"),
-            target: { mode: "auto", expectedTurnId: "turn-held" },
-          }),
-        ]);
+      await queuedDispatch.runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
       });
-      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", thread.id),
+      ).toEqual([]);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
     });
   });
 });
@@ -2220,3 +2206,43 @@ it.each(["steer", "queue-if-active"] as const)(
     });
   },
 );
+
+it("keeps explicit queue mode queued when the normal main run is idle", async () => {
+  await withTestHarness(async (harness) => {
+    const { environment, thread } = seedProviderThreadFixture({
+      harness,
+      status: "active",
+      value: 971,
+    });
+    seedTurnStarted(harness.deps, {
+      environmentId: environment.id,
+      threadId: thread.id,
+      sequence: 3,
+      turnId: "normal",
+    });
+    seedStoredEvent(harness.deps, {
+      environmentId: environment.id,
+      threadId: thread.id,
+      sequence: 4,
+      scope: turnScope("normal"),
+      type: "turn/mainRun/updated",
+      data: { state: "idle" },
+    });
+    vi.spyOn(harness.hub, "hasDaemonForHost").mockReturnValue(true);
+    const result = await acceptThreadSendRequest(harness.deps, {
+      thread: getThread(harness.db, thread.id)!,
+      payload: {
+        input: textInput("queue after this turn"),
+        mode: "queue-if-active",
+        model: "gpt-5",
+        permissionMode: "full",
+        reasoningLevel: "medium",
+        serviceTier: "default",
+      },
+    });
+    expect(result).toMatchObject({ ok: true, delivery: "queued" });
+    expect(listQueuedThreadCommands(harness, "turn.submit", thread.id)).toEqual(
+      [],
+    );
+  });
+});

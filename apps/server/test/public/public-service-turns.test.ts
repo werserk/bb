@@ -17,7 +17,7 @@ import { withTestHarness } from "../helpers/test-app.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import { getThread, insertThreadPluginMetadata } from "@bb/db";
 
-it("keeps a hidden delivery discoverable by the raw 2a event probe while its timeline is empty", async () => {
+it("keeps service input hidden while exposing a live turn timer", async () => {
   await withTestHarness(async (h) => {
     const { host } = seedHostSession(h.deps),
       { project } = seedProjectWithSource(h.deps, { hostId: host.id });
@@ -118,9 +118,16 @@ it("keeps a hidden delivery discoverable by the raw 2a event probe while its tim
           row.data.item.text === "private service reply",
       ),
     ).toBe(true);
-    expect((await sdk.threads.timeline({ threadId: thread.id })).rows).toEqual(
-      [],
-    );
+    const live = await sdk.threads.timeline({ threadId: thread.id });
+    expect(live.rows).toEqual([
+      expect.objectContaining({
+        kind: "turn",
+        status: "pending",
+        completedAt: null,
+      }),
+    ]);
+    expect(JSON.stringify(live.rows)).not.toContain("private service reply");
+    expect(JSON.stringify(live.rows)).not.toContain("private service input");
     expect(
       (
         await sdk.threads.timeline({
