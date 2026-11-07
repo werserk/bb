@@ -1,5 +1,6 @@
 import {
   GIT_PLUGIN_ID,
+  getThreadEventScopeTurnId,
   type WorkspaceDiffTarget,
   resolveEnvironmentMergeBaseBranch,
   type Environment,
@@ -17,6 +18,7 @@ import { prependOlderTimelineRows } from "@bb/client-core";
 import { Command } from "commander";
 import {
   formatThreadTimelineText,
+  threadPresentationText as t,
   type ThreadTimelineTextFormat,
 } from "@bb/thread-view";
 import { BbHttpError, type BbSdk } from "@bb/sdk";
@@ -393,7 +395,9 @@ export function registerShowCommand(
           thread.serviceTurn &&
           (thread.status === "active" || thread.status === "stopping")
         )
-          console.log("  занят служебной работой, твоё сообщение следующее");
+          console.log(
+            `  ${t("service.busy", Intl.DateTimeFormat().resolvedOptions().locale)}`,
+          );
         printPendingTodos(pendingTodos);
 
         if (fetchedWorkStatus !== undefined) {
@@ -589,11 +593,9 @@ export function registerShowCommand(
         async (id: string | undefined, opts: ThreadOutputCommandOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
           const sdk = createCliBbSdk(getUrl());
-          const thread = await sdk.threads.get({ threadId });
-          const result =
-            !opts.includeService && thread.serviceTurn
-              ? { output: await visibleThreadOutput(sdk, threadId) }
-              : await sdk.threads.output({ threadId });
+          const result = opts.includeService
+            ? await sdk.threads.output({ threadId })
+            : { output: await visibleThreadOutput(sdk, threadId) };
           if (outputJson(opts, result)) return;
           if (result.output) {
             console.log(result.output);
@@ -865,20 +867,35 @@ async function visibleThreadOutput(
   threadId: string,
 ): Promise<string | null> {
   const { rows } = await listAllThreadLogEvents(sdk, threadId, undefined);
-  let hidden = false,
-    output: string | null = null;
+  const serviceRequests = new Set<string>();
+  const serviceTurns = new Map<string, boolean>();
   for (const row of rows) {
-    if (row.type === "client/turn/requested")
+    if (row.type === "client/turn/requested" && row.data.serviceTurn)
+      serviceRequests.add(row.data.requestId);
+    if (row.type === "turn/input/accepted") {
+      const turnId = getThreadEventScopeTurnId(row.scope);
+      if (turnId)
+        serviceTurns.set(turnId, serviceRequests.has(row.data.clientRequestId));
+    }
+  }
+  let hidden = false;
+  let output: string | null = null;
+  for (const row of rows) {
+    if (row.type === "client/turn/requested") {
       hidden = Boolean(row.data.serviceTurn);
-    if (hidden) continue;
+      output = null;
+    }
+    const turnId = getThreadEventScopeTurnId(row.scope);
+    const service =
+      turnId === undefined ? hidden : (serviceTurns.get(turnId) ?? hidden);
     if (
       row.type === "item/completed" &&
       row.data.item.type === "agentMessage" &&
       row.data.item.text.length
     )
-      output = row.data.item.text;
+      output = service ? null : row.data.item.text;
     if (row.type === "system/manager/user_message" && row.data.text.length)
-      output = row.data.text;
+      output = service ? null : row.data.text;
   }
   return output;
 }

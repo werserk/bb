@@ -1,3 +1,4 @@
+import { threadPresentationText as t } from "@bb/thread-view";
 import { Icon } from "@bb/shared-ui/icon";
 import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
@@ -686,7 +687,10 @@ export function ThreadScreen({
               className="size-4 animate-spin"
               aria-hidden="true"
             />
-            занят служебной работой, твоё сообщение следующее
+            {t(
+              "service.busy",
+              typeof navigator === "undefined" ? "en" : navigator.language,
+            )}
           </div>
         )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 @min-[880px]/thread-chat:flex-row">

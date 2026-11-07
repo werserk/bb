@@ -26,6 +26,17 @@ describe("bb thread output command output", () => {
           providerId: "codex",
         }),
       "v1.threads.:id.output.$get": getOutput,
+      "v1.threads.:id.events.$get": async () => [
+        {
+          id: "e",
+          threadId: "thread-output",
+          scope: { kind: "thread" },
+          seq: 1,
+          createdAt: 1,
+          type: "system/manager/user_message",
+          data: { text: "FINAL" },
+        },
+      ],
     });
 
     await expect(runCommand(["thread", "output"], register)).rejects.toThrow(
@@ -49,13 +60,22 @@ describe("bb thread output command output", () => {
           providerId: "codex",
         }),
       "v1.threads.:id.output.$get": getOutput,
+      "v1.threads.:id.events.$get": async () => [
+        {
+          id: "e",
+          threadId: "thread-output",
+          scope: { kind: "thread" },
+          seq: 1,
+          createdAt: 1,
+          type: "system/manager/user_message",
+          data: { text: "FINAL" },
+        },
+      ],
     });
 
     await runCommand(["thread", "output", "--self"], register);
 
-    expect(getOutput).toHaveBeenCalledWith({
-      param: { id: "thread-output-context" },
-    });
+    expect(getOutput).not.toHaveBeenCalled();
     expect(collectLogLines(vi.mocked(console.error))).not.toContain(
       "Thread thread-output-context (from BB_THREAD_ID)",
     );
@@ -72,10 +92,21 @@ describe("bb thread output command output", () => {
           providerId: "codex",
         }),
       "v1.threads.:id.output.$get": getOutput,
+      "v1.threads.:id.events.$get": async () => [
+        {
+          id: "e",
+          threadId: "thread-output",
+          scope: { kind: "thread" },
+          seq: 1,
+          createdAt: 1,
+          type: "system/manager/user_message",
+          data: { text: "FINAL" },
+        },
+      ],
     });
 
     await runCommand(
-      ["thread", "output", "thread-json-output", "--json"],
+      ["thread", "output", "thread-json-output", "--json", "--include-service"],
       register,
     );
 
@@ -84,5 +115,115 @@ describe("bb thread output command output", () => {
     ).toEqual({
       output: "FINAL",
     });
+  });
+  it.each(["active", "error", "idle"] as const)(
+    "hides the previous service answer while a later %s owner turn has no answer",
+    async (status) => {
+      const hidden = {
+        version: 1,
+        visibility: "hidden",
+        reason: "direction-result",
+        origin: { pluginId: "wprojects", senderThreadId: null },
+      };
+      const event = (
+        seq: number,
+        type: string,
+        data: unknown,
+        turnId?: string,
+      ) => ({
+        id: `e${seq}`,
+        threadId: "thread-output",
+        seq,
+        createdAt: seq,
+        scope: turnId ? { kind: "turn", turnId } : { kind: "thread" },
+        type,
+        data,
+      });
+      const events = [
+        event(1, "client/turn/requested", {
+          requestId: "service",
+          serviceTurn: hidden,
+        }),
+        event(
+          2,
+          "turn/input/accepted",
+          { clientRequestId: "service" },
+          "hidden-turn",
+        ),
+        event(
+          3,
+          "item/completed",
+          { item: { type: "agentMessage", text: "PRIVATE" } },
+          "hidden-turn",
+        ),
+        event(4, "client/turn/requested", { requestId: "owner" }),
+      ];
+      stubServerApi({
+        "v1.threads.:id.$get": async () =>
+          fixtures.makeThread({
+            id: "thread-output",
+            projectId: "p",
+            providerId: "codex",
+            status,
+          }),
+        "v1.threads.:id.output.$get": async () => ({ output: "PRIVATE" }),
+        "v1.threads.:id.events.$get": async () => events,
+      });
+      await runCommand(["thread", "output", "thread-output"], register);
+      expect(collectLogLines(vi.mocked(console.log))).toEqual(["(no output)"]);
+    },
+  );
+  it("classifies a late service answer by its accepted turn rather than the latest owner request", async () => {
+    const hidden = {
+      version: 1,
+      visibility: "hidden",
+      reason: "direction-result",
+      origin: { pluginId: "wprojects", senderThreadId: null },
+    };
+    const event = (
+      seq: number,
+      type: string,
+      data: unknown,
+      turnId?: string,
+    ) => ({
+      id: `e${seq}`,
+      threadId: "thread-output",
+      seq,
+      createdAt: seq,
+      scope: turnId ? { kind: "turn", turnId } : { kind: "thread" },
+      type,
+      data,
+    });
+    const events = [
+      event(1, "client/turn/requested", {
+        requestId: "service",
+        serviceTurn: hidden,
+      }),
+      event(
+        2,
+        "turn/input/accepted",
+        { clientRequestId: "service" },
+        "hidden-turn",
+      ),
+      event(3, "client/turn/requested", { requestId: "owner" }),
+      event(
+        4,
+        "item/completed",
+        { item: { type: "agentMessage", text: "PRIVATE" } },
+        "hidden-turn",
+      ),
+    ];
+    stubServerApi({
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "thread-output",
+          projectId: "p",
+          providerId: "codex",
+        }),
+      "v1.threads.:id.output.$get": async () => ({ output: "PRIVATE" }),
+      "v1.threads.:id.events.$get": async () => events,
+    });
+    await runCommand(["thread", "output", "thread-output"], register);
+    expect(collectLogLines(vi.mocked(console.log))).toEqual(["(no output)"]);
   });
 });

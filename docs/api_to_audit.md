@@ -4313,3 +4313,7 @@ The descriptor persists in nullable `queued_thread_messages.service_turn` and op
 Release class: data-protocol, additive migration. No daemon wire change; both daemon/server version pairs work. An old server ignores the new column after upgrade; rollback keeps the column and degrades presentation to F7 collapsed background rows.
 
 Hidden service dispatch also exposes `MessageDispatchHookContext.experimental_serviceTurn` and `PluginTurnFailedEvent.experimental_serviceTurn`; both optional typed descriptors, never inferred from input text. Reason accepts lowercase `[a-z0-9-]{1,64}` tokens (D8).
+
+## Pending allocation by plugin origin
+
+Thread create permits empty `input: []` with declared `origin: "plugin"`, retaining pending execution defaults without provider dispatch. This is an allocation contract shared with plugin thread spawning, not hidden-turn authorization: the public create origin is not an authenticated plugin identity. Hidden service send separately requires an authenticated plugin token, managed target and sender scope, and explicit v1 capability. Audit whether empty pending allocation should require plugin authentication before stabilizing this behaviour; unrelated plugin-origin creation can currently use it.

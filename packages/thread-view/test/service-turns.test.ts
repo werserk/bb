@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ThreadEventRow } from "@bb/domain";
 import {
   createTimelineEventFactory,
   fromRows,
@@ -51,7 +52,7 @@ function fixture(reason: (typeof reasons)[number]) {
   };
 }
 function timeline(
-  events: ReturnType<typeof fixture>["rows"],
+  events: ThreadEventRow[],
   includeService = false,
 ) {
   return buildThreadTimelineFromEvents({
