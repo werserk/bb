@@ -8,11 +8,8 @@ export const SKILL_FILE_NAME = "SKILL.md";
 const MAX_SCAN_DEPTH = 24;
 const MAX_SCAN_ENTRY_COUNT = 1_000;
 const MAX_SKILL_FILE_BYTES = 25 * 1024 * 1024;
-// Each awaited fs call costs one event-loop turn; under a busy loop a sequential scan of a
-// large skills root takes tens of seconds. Independent skill directories are read concurrently.
 const SKILL_SCAN_CONCURRENCY = 32;
 
-// Order-preserving worker pool: results line up with `items`, at most `limit` calls in flight.
 async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
@@ -212,7 +209,6 @@ export async function findSkillFiles(
       }
     }
     if (root.shape === "skill" && depth === 0) {
-      // Children are leaf skill directories: independent, so read them concurrently and keep entry order.
       const perEntry = await mapLimit(
         entries,
         SKILL_SCAN_CONCURRENCY,

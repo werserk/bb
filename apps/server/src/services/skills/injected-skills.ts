@@ -127,8 +127,6 @@ interface HashedFile {
 const MAX_REGISTERED_SKILL_TREES = 4_096;
 const MAX_FILE_HASH_ATTEMPTS = 3;
 const HASH_REUSE_SETTLE_NS = 2_000_000_000n;
-// Each awaited fs call costs one event-loop turn, so a sequential walk of a large skills tree
-// scales with loop latency. Bounded concurrency keeps the walk to a few turns under load.
 const SKILL_WALK_FS_CONCURRENCY = 32;
 let activeSkillWalkFsOps = 0;
 const queuedSkillWalkFsOps: Array<() => void> = [];
@@ -146,7 +144,6 @@ async function limitSkillWalkFs<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-// Runs in parallel, returns results in input order and throws the first failure in input order.
 async function mapInOrder<T, R>(
   items: readonly T[],
   map: (item: T) => Promise<R>,
