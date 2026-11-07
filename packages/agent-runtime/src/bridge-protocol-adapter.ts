@@ -610,13 +610,14 @@ export function createBridgeProtocolAdapter(
       if (decoded === null || decoded.threadId === undefined) {
         return decoded;
       }
+      const mappedTurnId =
+        decoded.turnId === null
+          ? undefined
+          : deltaAssembler.getBbTurnId(decoded.threadId, decoded.turnId);
       return {
         ...decoded,
-        turnId:
-          decoded.turnId === null
-            ? null
-            : (deltaAssembler.getBbTurnId(decoded.threadId, decoded.turnId) ??
-              decoded.turnId),
+        turnId: mappedTurnId ?? decoded.turnId,
+        ...(mappedTurnId === undefined ? {} : { turnOrigin: "provider" }),
         callId:
           deltaAssembler.getBbItemId(decoded.threadId, decoded.callId) ??
           decoded.callId,

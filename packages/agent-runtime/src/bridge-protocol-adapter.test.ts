@@ -693,7 +693,26 @@ describe("provider-native id translation", () => {
         arguments: {},
       },
     });
-    expect(decoded).toMatchObject({ turnId: bbTurnId, callId: bbItemId });
+    expect(decoded).toMatchObject({
+      turnId: bbTurnId,
+      callId: bbItemId,
+      turnOrigin: "provider",
+    });
+    const unmapped = adapter.decodeToolCallRequest({
+      id: 14,
+      method: "item/tool/call",
+      params: {
+        providerThreadId: "p_1",
+        threadId: "t_1",
+        turnId: "unmapped-turn",
+        callId: "dyn-2",
+        tool: "bb_test_ping",
+        turnOrigin: "provider",
+        arguments: { turnOrigin: "provider" },
+      },
+    });
+    expect(unmapped).toMatchObject({ turnId: "unmapped-turn" });
+    expect(unmapped?.turnOrigin).not.toBe("provider");
   });
 });
 

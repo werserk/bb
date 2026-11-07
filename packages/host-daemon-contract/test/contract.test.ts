@@ -3667,6 +3667,29 @@ describe("plugin tool caller identity wire compatibility", () => {
       original,
     );
   });
+  it.each(["provider", "arrival"])(
+    "preserves optional turn origin %s and remains readable by an older server",
+    (turnOrigin) => {
+      const payload = { ...original, turnOrigin };
+      expect(contract.hostDaemonToolCallRequestSchema.parse(payload)).toEqual(
+        payload,
+      );
+      const previousServerSchema =
+        contract.hostDaemonToolCallRequestSchema.omit({ turnOrigin: true });
+      expect(previousServerSchema.parse(payload)).toEqual(original);
+    },
+  );
+  it.each(["argument", null, 1])(
+    "rejects invalid turn origin %j",
+    (turnOrigin) => {
+      expect(
+        contract.hostDaemonToolCallRequestSchema.safeParse({
+          ...original,
+          turnOrigin,
+        }).success,
+      ).toBe(false);
+    },
+  );
   it("preserves missing turn identity and never supplies a default", () => {
     const { turnId: _turnId, ...missing } = original;
     expect(contract.hostDaemonToolCallRequestSchema.parse(missing)).toEqual(

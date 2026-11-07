@@ -47,7 +47,8 @@ for (const providerId of ["claude-code", "codex"]) {
           },
           process: { command: "node", args: [] },
         });
-        const activeTurnLookup = vi.fn(() => "new-turn");
+        let activeTurnId = "";
+        const activeTurnLookup = vi.fn(() => activeTurnId);
         const pending = new Map<string, () => void>();
         try {
           await mkdir(join(root, "plugin"));
@@ -76,6 +77,7 @@ for (const providerId of ["claude-code", "codex"]) {
           expect(api.agents.experimental_toolContextCapabilities()).toEqual({
             callerIdentity: true,
             exactTurnOrigin: false,
+            perCallTurnOrigin: true,
           });
           api.agents.registerTool({
             name: "caller_context",
@@ -89,7 +91,11 @@ for (const providerId of ["claude-code", "codex"]) {
                   once: true,
                 });
               });
-              return JSON.stringify({ turnId: ctx.turnId, callId: ctx.callId });
+              return JSON.stringify({
+                turnId: ctx.turnId,
+                callId: ctx.callId,
+                turnOrigin: ctx.turnOrigin,
+              });
             },
           });
           const { session } = seedHostSession(harness.deps);
@@ -106,18 +112,36 @@ for (const providerId of ["claude-code", "codex"]) {
             providerId,
             status: "active",
           });
-          const start = (turnId: string) =>
+          const start = (providerTurnId: string) => {
+            const events = adapter.translateEvent({
+              jsonrpc: "2.0",
+              method: "thread/delta",
+              params: {
+                threadId: thread.id,
+                deltas: [{ kind: "turn.open", providerTurnId }],
+              },
+            });
+            const started = events.find(
+              (event) => event.type === "turn/started",
+            );
+            if (started?.scope.kind !== "turn")
+              throw new Error("Missing mapped turn");
+            const turnId = started.scope.turnId;
+            activeTurnId = turnId;
             seedTurnStarted(harness.deps, {
               threadId: thread.id,
               environmentId: environment.id,
               turnId,
               providerThreadId: `${providerId}-session`,
             });
+            return turnId;
+          };
           const postRaw = (
             callId: string,
             turnId?: string,
             tool = "caller_context",
             authenticated = true,
+            turnOrigin?: "provider" | "arrival",
           ) =>
             harness.app.request("/internal/session/tool-call", {
               method: "POST",
@@ -129,20 +153,25 @@ for (const providerId of ["claude-code", "codex"]) {
                 threadId: thread.id,
                 providerThreadId: `${providerId}-session`,
                 ...(turnId === undefined ? {} : { turnId }),
+                ...(turnOrigin === undefined ? {} : { turnOrigin }),
                 callId,
                 tool,
-                arguments: { turnId: "forged-turn", callId: "forged-call" },
+                arguments: {
+                  turnId: "forged-turn",
+                  callId: "forged-call",
+                  turnOrigin: "provider",
+                },
               }),
             });
           const post = (
             callId: string,
-            turnId?: string,
+            turnId?: string | null,
             tool = "caller_context",
             authenticated = true,
           ): Promise<Response> => {
             if (turnId === undefined || !authenticated)
               return Promise.resolve(
-                postRaw(callId, turnId, tool, authenticated),
+                postRaw(callId, turnId ?? undefined, tool, authenticated),
               );
             return new Promise((resolve, reject) => {
               handleRuntimeProviderRequest({
@@ -177,6 +206,8 @@ for (const providerId of ["claude-code", "codex"]) {
                       request.callId,
                       request.turnId,
                       request.tool,
+                      true,
+                      request.turnOrigin,
                     );
                     resolve(response.clone());
                     return await response.json();
@@ -195,21 +226,25 @@ for (const providerId of ["claude-code", "codex"]) {
             expect(result.success).toBe(true);
             return JSON.parse(result.contentItems[0].text);
           };
-          start("old-turn");
+          const oldTurnId = start("old-turn");
           const oldResponse = await post("old-call", "old-turn");
-          start("new-turn");
+          const newTurnId = start("new-turn");
           const lateResponse = await post("late-call", "old-turn");
           const responses = await Promise.all([
             post("parallel-a", "new-turn"),
             post("parallel-b", "new-turn"),
           ]);
           expect(
-            contexts.map(({ turnId, callId }) => ({ turnId, callId })),
+            contexts.map(({ turnId, callId, turnOrigin }) => ({
+              turnId,
+              callId,
+              turnOrigin,
+            })),
           ).toEqual([
-            { turnId: "old-turn", callId: "old-call" },
-            { turnId: "old-turn", callId: "late-call" },
-            { turnId: "new-turn", callId: "parallel-a" },
-            { turnId: "new-turn", callId: "parallel-b" },
+            { turnId: oldTurnId, callId: "old-call", turnOrigin: "provider" },
+            { turnId: oldTurnId, callId: "late-call", turnOrigin: "provider" },
+            { turnId: newTurnId, callId: "parallel-a", turnOrigin: "provider" },
+            { turnId: newTurnId, callId: "parallel-b", turnOrigin: "provider" },
           ]);
           expect(
             contexts.every(
@@ -238,16 +273,54 @@ for (const providerId of ["claude-code", "codex"]) {
           expect((await stopResponse).status).toBe(200);
           await stopping.json();
           expect(stoppedContext.signal.aborted).toBe(true);
-          start("restart-turn");
+          const restartTurnId = start("restart-turn");
           const restarted = await post("restart-call", "restart-turn");
           expect(contexts.at(-1)!.signal.aborted).toBe(false);
           expect(await finish(restarted, "restart-call")).toEqual({
-            turnId: "restart-turn",
+            turnId: restartTurnId,
             callId: "restart-call",
+            turnOrigin: "provider",
           });
-          expect(stoppedContext.turnId).toBe("new-turn");
-          const missing = await post("missing-turn");
+          expect(stoppedContext.turnId).toBe(newTurnId);
+          expect(stoppedContext.turnOrigin).toBe("provider");
+          expect(activeTurnLookup).not.toHaveBeenCalled();
+          const stoppedLate = await post("stopped-query-late", "old-turn");
+          expect(await finish(stoppedLate, "stopped-query-late")).toEqual({
+            turnId: oldTurnId,
+            callId: "stopped-query-late",
+            turnOrigin: "provider",
+          });
+          const fallback = await post("legacy-fallback", null);
+          expect(await finish(fallback, "legacy-fallback")).toEqual({
+            turnId: restartTurnId,
+            callId: "legacy-fallback",
+            turnOrigin: "arrival",
+          });
+          expect(activeTurnLookup).toHaveBeenCalledTimes(1);
+          activeTurnLookup.mockClear();
+          const unmapped = await post(
+            "unmapped-call",
+            "unmapped-provider-turn",
+          );
+          expect(await finish(unmapped, "unmapped-call")).toEqual({
+            turnId: "unmapped-provider-turn",
+            callId: "unmapped-call",
+            turnOrigin: "arrival",
+          });
+          const legacy = await postRaw("old-daemon", restartTurnId);
+          expect(await finish(legacy, "old-daemon")).toEqual({
+            turnId: restartTurnId,
+            callId: "old-daemon",
+          });
+          const missing = await postRaw(
+            "missing-turn",
+            undefined,
+            "caller_context",
+            true,
+            "provider",
+          );
           expect(contexts.at(-1)).not.toHaveProperty("turnId");
+          expect(contexts.at(-1)).not.toHaveProperty("turnOrigin");
           expect(await finish(missing, "missing-turn")).toEqual({
             callId: "missing-turn",
           });

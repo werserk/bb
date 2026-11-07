@@ -972,7 +972,11 @@ export function createPluginApi(options: {
 
   const agents: PluginAgents = {
     experimental_toolContextCapabilities() {
-      return { callerIdentity: true, exactTurnOrigin: false };
+      return {
+        callerIdentity: true,
+        exactTurnOrigin: false,
+        perCallTurnOrigin: true,
+      };
     },
     configure(provider) {
       assertLive();

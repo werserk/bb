@@ -902,6 +902,7 @@ export const hostDaemonToolCallRequestSchema = toolCallRequestSchema
     threadId: true,
     providerThreadId: true,
     turnId: true,
+    turnOrigin: true,
     callId: true,
     tool: true,
     arguments: true,

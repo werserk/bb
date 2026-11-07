@@ -137,7 +137,12 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
                 threadId: thread.id,
                 projectId: thread.projectId,
                 ...(payload.turnId !== undefined
-                  ? { turnId: payload.turnId }
+                  ? {
+                      turnId: payload.turnId,
+                      ...(payload.turnOrigin === undefined
+                        ? {}
+                        : { turnOrigin: payload.turnOrigin }),
+                    }
                   : {}),
                 callId: payload.callId,
                 signal,

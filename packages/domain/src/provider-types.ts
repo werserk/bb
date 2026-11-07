@@ -169,6 +169,7 @@ export const toolCallRequestSchema = z.object({
   threadId: z.string().min(1),
   providerThreadId: z.string().min(1),
   turnId: z.string().min(1),
+  turnOrigin: z.enum(["provider", "arrival"]).optional(),
   callId: z.string().min(1),
   tool: z.string().min(1),
   arguments: z.unknown().optional(),

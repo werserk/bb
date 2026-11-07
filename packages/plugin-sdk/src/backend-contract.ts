@@ -1126,6 +1126,11 @@ export interface PluginAgentToolContext {
    * when known (otherwise raw); legacy Pi/ACP may use arrival-time resolution.
    * This identifies the caller, not whether that turn is still active. */
   turnId?: string;
+  /** Origin of turnId from the authenticated daemon payload. "provider" means
+   * the provider's origin was mapped to a bb turn; "arrival" means active-turn
+   * fallback or an unmapped provider ID. Absent without turnId or on old daemons.
+   * Provenance does not establish that the turn is still active. */
+  turnOrigin?: "provider" | "arrival";
   /** Daemon tool-call identity, for correlation with native tool events. */
   callId?: string;
   /**
@@ -1697,6 +1702,7 @@ export interface PluginAgents {
   experimental_toolContextCapabilities(): {
     callerIdentity: true;
     exactTurnOrigin: boolean;
+    perCallTurnOrigin: true;
   };
   /**
    * Select this plugin's statically registered tools and manifest skills for

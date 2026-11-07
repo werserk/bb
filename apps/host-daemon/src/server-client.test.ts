@@ -596,35 +596,43 @@ describe("createServerClient", () => {
 });
 
 describe("dynamic tool cancellation", () => {
-  it("passes cancellation to the tool-call HTTP transport", async () => {
-    const controller = new AbortController();
-    let transportSignal: AbortSignal | null | undefined;
-    const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
-      transportSignal = init?.signal;
-      return Response.json({ success: true, contentItems: [] });
-    });
-    const client = createServerClient({
-      fetchFn,
-      getSessionId: () => "session-1",
-      hostKey: "key",
-      logger: createLogger(),
-      serverUrl: "http://localhost",
-    });
-    await client.callTool(
-      {
-        requestId: 1,
-        threadId: "thread",
-        providerThreadId: "provider-thread",
-        turnId: "turn",
-        callId: "call",
-        tool: "question",
-      },
-      controller.signal,
-    );
-    controller.abort();
-    expect(transportSignal?.aborted).toBe(true);
-    expect(
-      JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)),
-    ).not.toHaveProperty("signal");
-  });
+  it.each([undefined, "provider", "arrival"] as const)(
+    "preserves origin %s and cancellation in the tool-call HTTP transport",
+    async (turnOrigin) => {
+      const controller = new AbortController();
+      let transportSignal: AbortSignal | null | undefined;
+      const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
+        transportSignal = init?.signal;
+        return Response.json({ success: true, contentItems: [] });
+      });
+      const client = createServerClient({
+        fetchFn,
+        getSessionId: () => "session-1",
+        hostKey: "key",
+        logger: createLogger(),
+        serverUrl: "http://localhost",
+      });
+      await client.callTool(
+        {
+          requestId: 1,
+          threadId: "thread",
+          providerThreadId: "provider-thread",
+          turnId: "turn",
+          ...(turnOrigin === undefined ? {} : { turnOrigin }),
+          callId: "call",
+          tool: "question",
+        },
+        controller.signal,
+      );
+      controller.abort();
+      expect(transportSignal?.aborted).toBe(true);
+      const payload = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+      if (turnOrigin === undefined)
+        expect(payload).not.toHaveProperty("turnOrigin");
+      else expect(payload.turnOrigin).toBe(turnOrigin);
+      expect(
+        JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)),
+      ).not.toHaveProperty("signal");
+    },
+  );
 });

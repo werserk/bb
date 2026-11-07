@@ -1,6 +1,7 @@
 import type {
   PendingInteractionPayload,
   PendingInteractionResolution,
+  ToolCallRequest,
 } from "@bb/domain";
 
 export interface ProviderRequestCommandPlan {
@@ -38,6 +39,7 @@ export interface DecodedToolCallRequest {
   requestId: string | number;
   providerThreadId: string;
   turnId: string | null;
+  turnOrigin?: ToolCallRequest["turnOrigin"];
   callId: string;
   tool: string;
   arguments?: unknown;

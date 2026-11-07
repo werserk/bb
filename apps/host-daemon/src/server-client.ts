@@ -523,6 +523,9 @@ export function createServerClient(
         threadId: request.threadId,
         providerThreadId: request.providerThreadId,
         turnId: request.turnId,
+        ...(request.turnOrigin === undefined
+          ? {}
+          : { turnOrigin: request.turnOrigin }),
         callId: request.callId,
         tool: request.tool,
         ...(request.arguments !== undefined

@@ -201,6 +201,7 @@ function handleToolCallProviderRequest(
     threadId: resolvedThreadId,
     providerThreadId: toolCallReq.providerThreadId,
     turnId: resolvedTurnId,
+    turnOrigin: toolCallReq.turnOrigin ?? "arrival",
     callId: toolCallReq.callId,
     tool: toolCallReq.tool,
     ...(toolCallReq.arguments !== undefined
