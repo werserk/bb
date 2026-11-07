@@ -299,11 +299,12 @@ it("collapses and reopens a completed older-turn plan through ThreadScreen", () 
     },
   );
   const toggle = screen.getByRole("button", {
-    name: /^Plan from an earlier task.*1\/1/,
+    name: /^Plan completed.*1\/1/,
   });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText(/updated at .* · from an earlier task/)).toBeTruthy();
+  expect(screen.getByText(/updated at/)).toBeTruthy();
+  expect(screen.queryByText(/from an earlier task/)).toBeNull();
   expect(screen.getByText("Checked result")).toBeTruthy();
 });

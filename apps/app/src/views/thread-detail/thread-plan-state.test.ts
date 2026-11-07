@@ -21,7 +21,7 @@ describe("thread plan state", () => {
         { sourceSeq: 11, startedAt: 100 },
         true,
       ),
-    ).toEqual({ state: "earlier", autoCollapse: true });
+    ).toEqual({ state: "finished", autoCollapse: true });
     expect(
       threadPlanState(plan, { sourceSeq: 9, startedAt: 110 }, false).state,
     ).toBe("active");
@@ -40,7 +40,7 @@ describe("thread plan state", () => {
     });
     expect(
       threadPlanState(finished, { sourceSeq: 20, startedAt: 200 }, true).state,
-    ).toBe("earlier");
+    ).toBe("finished");
   });
 });
 

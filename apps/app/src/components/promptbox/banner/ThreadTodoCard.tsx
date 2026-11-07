@@ -36,7 +36,7 @@ const STATUS_ACTIVITY_STATE: Record<
 
 interface ThreadTodoCardProps {
   pendingTodos: ThreadTimelinePendingTodos | null;
-  state?: "active" | "waiting" | "finished" | "earlier";
+  state?: "active" | "waiting" | "finished";
   locale?: string;
   isExpanded: boolean;
   onToggle: () => void;
@@ -80,12 +80,13 @@ function TodoStatusIcon({
       );
     case "failed":
       return (
-        <Icon
-          name="CircleX"
-          role="img"
-          aria-label="Failed"
-          className={cn(className, activityIconClass(activityState))}
-        />
+        <span role="img" aria-label="Failed">
+          <Icon
+            name="CircleX"
+            aria-hidden="true"
+            className={cn(className, activityIconClass(activityState))}
+          />
+        </span>
       );
     case "pending":
       return (
@@ -174,16 +175,14 @@ export function ThreadTodoCard({
     ? {
         active: "План",
         waiting: "План · ждёт тебя",
-        finished: "План выполнен",
-        earlier: "План прошлой задачи",
+        finished: "План завершён",
       }
     : {
         active: "Plan",
         waiting: "Plan · waiting for you",
-        finished: "Plan finished",
-        earlier: "Plan from an earlier task",
+        finished: "Plan completed",
       };
-  const muted = state === "earlier" || state === "finished";
+  const muted = state === "finished";
   const time = new Date(pendingTodos?.updatedAt ?? 0).toLocaleTimeString(
     locale,
     {
@@ -196,7 +195,7 @@ export function ThreadTodoCard({
     ? `Выполнено: ${summary.count}/${items.length}`
     : summary.aria;
   const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}${!isExpanded ? ` · ${summary.count}/${items.length}` : ""}`;
-  const metadata = `${ru ? "обновлено в" : "updated at"} ${time}${state === "earlier" ? (ru ? " · из прошлой задачи" : " · from an earlier task") : ""}`;
+  const metadata = `${ru ? "обновлено в" : "updated at"} ${time}`;
   return (
     <PromptStackCard
       ariaLabel={labels[state]}

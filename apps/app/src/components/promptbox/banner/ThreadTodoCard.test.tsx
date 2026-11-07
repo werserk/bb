@@ -55,7 +55,7 @@ it("uses neutral Russian progress and a midnight h23 time in the collapsed heade
   );
   expect(
     screen.getByRole("button", {
-      name: /План выполнен · 00:05 · 1\/1: Выполнено: 1\/1/,
+      name: /План завершён · 00:05 · 1\/1: Выполнено: 1\/1/,
     }),
   ).toBeTruthy();
 });

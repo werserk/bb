@@ -53,7 +53,7 @@ it("collapses on completion, allows reopening, and clears explicitly", () => {
     <ThreadPlanCard pendingTodos={done} rows={rows} waitingForOwner={false} />,
   );
   const toggle = screen.getByRole("button", {
-    name: /^Plan from an earlier task/,
+    name: /^Plan completed/,
   });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);
@@ -84,7 +84,7 @@ it("shows waiting and localized stale metadata with unique disclosure ids", () =
     <>
       <ThreadTodoCard
         pendingTodos={plan}
-        state="earlier"
+        state="finished"
         isExpanded
         onToggle={() => {}}
         locale="ru-RU"
@@ -97,7 +97,8 @@ it("shows waiting and localized stale metadata with unique disclosure ids", () =
       />
     </>,
   );
-  expect(screen.getByText(/обновлено в .* · из прошлой задачи/)).toBeTruthy();
+  expect(screen.getByText(/обновлено в/)).toBeTruthy();
+  expect(screen.queryByText(/из прошлой задачи/)).toBeNull();
   const ids = screen
     .getAllByRole("button", { expanded: true })
     .map((button) => button.id)
