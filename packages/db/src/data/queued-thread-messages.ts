@@ -1818,7 +1818,7 @@ export interface QueuedThreadMessageCounts {
  */
 export function listQueuedThreadMessageCountsByThreadIds(
   db: DbQueryConnection,
-  args: { threadIds: readonly string[] },
+  args: { threadIds: readonly string[]; includeService?: boolean },
 ): QueuedThreadMessageCounts[] {
   return queryInSqliteVariableBatches({
     dedupeKey: (threadId) => threadId,
@@ -1839,6 +1839,7 @@ export function listQueuedThreadMessageCountsByThreadIds(
           and(
             inArray(queuedThreadMessages.threadId, [...threadIds]),
             liveQueuedThreadMessage(),
+            args.includeService === false ? isNull(queuedThreadMessages.serviceTurn) : undefined,
           ),
         )
         .groupBy(queuedThreadMessages.threadId)

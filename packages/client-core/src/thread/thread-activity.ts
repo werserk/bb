@@ -146,13 +146,13 @@ export function threadListIndicatorStateForThread(
     hasUnreadError:
       unreadDone && !thread.serviceTurn && thread.status === "error",
     hasUnreadSuccess:
-      unreadDone && !thread.serviceTurn && thread.status !== "error",
+      unreadDone && (Boolean(thread.serviceTurn) || thread.status !== "error"),
     isBackgroundAgentActive:
       !thread.serviceTurn && hasActiveBackgroundAgentActivity(thread),
     isBackgroundCommandActive:
       !thread.serviceTurn && hasActiveBackgroundCommandActivity(thread),
     isGoalActive: !thread.serviceTurn && hasActiveGoalActivity(thread),
-    queuedWork: thread.serviceTurn ? "none" : thread.queuedWork,
+    queuedWork: thread.queuedWork,
     isPlanModeActive: !thread.serviceTurn && hasActivePlanModeActivity(thread),
     isRuntimeActive: isRuntimeBusyThread(thread),
     isWorkflowActive: !thread.serviceTurn && hasActiveWorkflowActivity(thread),

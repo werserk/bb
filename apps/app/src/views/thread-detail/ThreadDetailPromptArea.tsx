@@ -459,7 +459,8 @@ export function ThreadDetailPromptArea({
       ),
     [queuedMessagesQuery.data],
   );
-  const queuedMessagesPending = false;
+  const queuedMessagesPending =
+    queuedMessagesQuery.data === undefined && queuedMessageCount > 0;
   const queuedMessagesRef =
     useLatestRef<readonly ThreadQueuedMessage[]>(queuedMessages);
   const [bottomPluginFocusNonce, setBottomPluginFocusNonce] = useState(0);

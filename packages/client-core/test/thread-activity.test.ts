@@ -182,18 +182,18 @@ describe("thread-activity", () => {
       },
     );
 
-    it.each([
-      "isBackgroundAgentActive",
-      "isBackgroundCommandActive",
-    ] as const)("shows the unread success dot over concurrent %s", (flag) => {
-      expect(
-        resolveThreadListIndicator({
-          ...idleIndicatorState,
-          hasUnreadSuccess: true,
-          [flag]: true,
-        }),
-      ).toBe("unread-success");
-    });
+    it.each(["isBackgroundAgentActive", "isBackgroundCommandActive"] as const)(
+      "shows the unread success dot over concurrent %s",
+      (flag) => {
+        expect(
+          resolveThreadListIndicator({
+            ...idleIndicatorState,
+            hasUnreadSuccess: true,
+            [flag]: true,
+          }),
+        ).toBe("unread-success");
+      },
+    );
 
     it("shows a running workflow over unread success and a failed queued send", () => {
       expect(
@@ -606,5 +606,24 @@ describe("thread-activity", () => {
         unreadError: false,
       });
     });
+  });
+});
+
+it("retains explicit owner-post attention after a hidden service failure", () => {
+  const thread = makeThreadListEntry({
+    status: "error",
+    runtime: { displayStatus: "idle" },
+    latestAttentionAt: 20,
+    lastReadAt: 10,
+    serviceTurn: {
+      version: 1,
+      visibility: "hidden",
+      reason: "self-reminder",
+      origin: { pluginId: "fixture", senderThreadId: null },
+    },
+  });
+  expect(threadListIndicatorStateForThread(thread, false)).toMatchObject({
+    hasUnreadError: false,
+    hasUnreadSuccess: true,
   });
 });

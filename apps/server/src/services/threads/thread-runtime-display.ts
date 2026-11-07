@@ -364,6 +364,7 @@ export function toThreadResponseFromThread(
     canSpawnChild: canThreadSpawnChild(deps, { thread: args.thread }),
     queuedMessageCount:
       listQueuedThreadMessageCountsByThreadIds(deps.db, {
+        includeService: false,
         threadIds: [args.thread.id],
       })[0]?.queuedMessageCount ?? 0,
   };
@@ -543,6 +544,7 @@ function buildThreadQueuedWorkByThreadId(
 ): Map<string, ThreadQueuedWork> {
   const result = new Map<string, ThreadQueuedWork>();
   for (const counts of listQueuedThreadMessageCountsByThreadIds(deps.db, {
+    includeService: false,
     threadIds: threads.map((thread) => thread.id),
   })) {
     if (counts.queuedMessageCount === 0) continue;

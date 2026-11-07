@@ -13,6 +13,7 @@ import {
   holdQueuedThreadMessageForEdit,
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
+  listQueuedThreadMessageCountsByThreadIds,
   releaseQueuedMessageClaim,
   releaseQueuedThreadMessageEditHold,
   releaseStaleQueuedMessageClaims,
@@ -2121,4 +2122,15 @@ describe("service queue provenance", () => {
     expect(claimNextQueuedThreadMessageGroup(db, noopNotifier, thread.id, () => true)?.map(row => row.id)).toEqual([owner.id]);
     db.$client.close();
   });
+});
+
+it("keeps raw service queue rows while excluding them from owner badge counts", () => {
+  const { db, thread } = setup();
+  const service = queueTurnEndMessage(db, thread.id, defaultInput);
+  db.$client.prepare("UPDATE queued_thread_messages SET service_turn=? WHERE id=?").run(JSON.stringify({version:1,visibility:"hidden",reason:"future-seed",origin:{pluginId:"fixture",senderThreadId:null}}),service.id);
+  expect(listQueuedThreadMessageCountsByThreadIds(db,{threadIds:[thread.id],includeService:false})).toEqual([]);
+  expect(listQueuedThreadMessages(db,thread.id)).toHaveLength(1);
+  queueTurnEndMessage(db,thread.id,altInput);
+  expect(listQueuedThreadMessageCountsByThreadIds(db,{threadIds:[thread.id],includeService:false})[0]?.queuedMessageCount).toBe(1);
+  expect(listQueuedThreadMessageCountsByThreadIds(db,{threadIds:[thread.id]})[0]?.queuedMessageCount).toBe(2);
 });
