@@ -6,6 +6,7 @@ import {
   stubServerApi,
 } from "../helpers/command-output-harness.js";
 import type { CommandRegistrar } from "../helpers/command-output-harness.js";
+import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
 describe("bb thread output command output", () => {
@@ -17,7 +18,15 @@ describe("bb thread output command output", () => {
   it("bb thread output requires a thread id or --self", async () => {
     vi.stubEnv("BB_THREAD_ID", "thread-output-context");
     const getOutput = vi.fn(async () => ({ output: "FINAL" }));
-    stubServerApi({ "v1.threads.:id.output.$get": getOutput });
+    stubServerApi({
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "thread-output",
+          projectId: "proj-test",
+          providerId: "codex",
+        }),
+      "v1.threads.:id.output.$get": getOutput,
+    });
 
     await expect(runCommand(["thread", "output"], register)).rejects.toThrow(
       "process.exit:1",
@@ -32,7 +41,15 @@ describe("bb thread output command output", () => {
   it("bb thread output --self resolves from BB_THREAD_ID", async () => {
     vi.stubEnv("BB_THREAD_ID", "thread-output-context");
     const getOutput = vi.fn(async () => ({ output: "FINAL" }));
-    stubServerApi({ "v1.threads.:id.output.$get": getOutput });
+    stubServerApi({
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "thread-output",
+          projectId: "proj-test",
+          providerId: "codex",
+        }),
+      "v1.threads.:id.output.$get": getOutput,
+    });
 
     await runCommand(["thread", "output", "--self"], register);
 
@@ -47,7 +64,15 @@ describe("bb thread output command output", () => {
 
   it("bb thread output --json prints the raw output payload", async () => {
     const getOutput = vi.fn(async () => ({ output: "FINAL" }));
-    stubServerApi({ "v1.threads.:id.output.$get": getOutput });
+    stubServerApi({
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "thread-output",
+          projectId: "proj-test",
+          providerId: "codex",
+        }),
+      "v1.threads.:id.output.$get": getOutput,
+    });
 
     await runCommand(
       ["thread", "output", "thread-json-output", "--json"],

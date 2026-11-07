@@ -4302,3 +4302,14 @@ precedence, bounded discovery failure, and module-ABI preservation after Node
 replacement. Settle the shared process-local instance lifecycle across SDK
 bundle versions and whether `bundledNpmCli` belongs on the public surface before
 removing the prefix.
+
+
+## Hidden service turns v1
+
+`bb.experimental_threads.experimental_serviceTurnCapabilities()` returns the server-owned `{serviceTurns:{version:1}}` capability (also `GET /api/v1/capabilities/service-turns`). `experimental_sendService` accepts typed reason, input, target and optional managed sender. It authenticates the calling plugin with its revocable caller credential, restricts both threads to its managed namespace and the same project, and always starts or queues a separate turn. Public unauthenticated descriptor injection is refused. Missing capability must retain pending work; method presence is not a capability.
+
+The descriptor persists in nullable `queued_thread_messages.service_turn` and optional requested/interrupt event JSON. Human timeline defaults filter full service turns, preserving successful typed owner posts and native interactions standalone. Raw SDK/events/queue/output and CLI JSON journals retain truth. CLI `--include-service` exposes retained detail. Service failures and interruptions do not raise native attention; explicit posts/questions retain their independent attention.
+
+Release class: data-protocol, additive migration. No daemon wire change; both daemon/server version pairs work. An old server ignores the new column after upgrade; rollback keeps the column and degrades presentation to F7 collapsed background rows.
+
+Hidden service dispatch also exposes `MessageDispatchHookContext.experimental_serviceTurn` and `PluginTurnFailedEvent.experimental_serviceTurn`; both optional typed descriptors, never inferred from input text. Reason accepts lowercase `[a-z0-9-]{1,64}` tokens (D8).

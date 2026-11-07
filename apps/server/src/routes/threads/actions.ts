@@ -1,9 +1,11 @@
+import { PLUGIN_RPC_CALLER_HEADER } from "../../services/plugins/plugin-rpc-caller.js";
 import { refreshProviderRetirement } from "../../services/environments/environment-engine.js";
 import {
   deleteQueuedThreadMessage,
   getEnvironment,
   getQueuedThreadMessage,
   getThread,
+  getThreadPluginMetadata,
   listActiveVisiblePinnedThreadRootsWithPendingInteractionState,
   pinThread,
   reorderPinnedThread,
@@ -202,7 +204,11 @@ function assertPinnedThreadOrderResult(
   }
 }
 
-export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
+export function registerThreadActionRoutes(
+  app: Hono,
+  deps: AppDeps,
+  plugins?: import("../../services/plugins/plugin-service.js").PluginService,
+): void {
   const { post, patch, del } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
@@ -210,6 +216,47 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.send, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    if (payload.serviceTurn) {
+      const resolution = plugins?.resolveRpcCaller(
+        context.req.header(PLUGIN_RPC_CALLER_HEADER),
+      );
+      if (
+        !resolution?.ok ||
+        resolution.caller.kind !== "plugin" ||
+        resolution.caller.pluginId !== payload.serviceTurn.origin.pluginId
+      ) {
+        throw new ApiError(
+          403,
+          "invalid_request",
+          "Service input requires an authenticated plugin",
+        );
+      }
+      const pluginId = resolution.caller.pluginId;
+      const managed = getThreadPluginMetadata(deps.db, thread.id, pluginId);
+      const senderId = payload.serviceTurn.origin.senderThreadId;
+      const sender = senderId === null ? null : getThread(deps.db, senderId);
+      const senderManaged = sender
+        ? getThreadPluginMetadata(deps.db, sender.id, pluginId)
+        : null;
+      if (
+        managed.corrupt ||
+        Object.keys(managed.metadata).length === 0 ||
+        senderId !== (payload.senderThreadId ?? null) ||
+        (senderId !== null &&
+          (!sender ||
+            sender.projectId !== thread.projectId ||
+            !senderManaged ||
+            senderManaged.corrupt ||
+            Object.keys(senderManaged.metadata).length === 0))
+      ) {
+        throw new ApiError(
+          403,
+          "invalid_request",
+          "Service input is outside the plugin managed scope",
+        );
+      }
+      payload = { ...payload, mode: "queue-if-active" };
+    }
     return context.json(
       await acceptThreadSendRequest(deps, { payload, thread }),
     );

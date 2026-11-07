@@ -1,3 +1,4 @@
+export { classifyServiceTurns } from "./service-turn-projection.js";
 export { formatThreadTimelineText } from "./format-timeline-text.js";
 export { parseAgentMessageEnvelope } from "./agent-message-envelope.js";
 export type { ThreadTimelineTextFormat } from "./format-timeline-text.js";

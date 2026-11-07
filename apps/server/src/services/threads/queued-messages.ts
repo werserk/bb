@@ -346,6 +346,7 @@ function sendQueuedMessagePayload(
 ): SendMessageRequest {
   return {
     input: queuedMessage.content,
+    serviceTurn: queuedMessage.serviceTurn ?? undefined,
     mode,
     model: queuedMessage.model,
     permissionMode: queuedMessage.permissionMode,

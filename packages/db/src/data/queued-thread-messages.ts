@@ -29,6 +29,7 @@ import {
   queuedMessageStateFor,
 } from "@bb/domain";
 import type {
+  ServiceTurnDescriptor,
   QueuedMessageLifecycleEventType,
   QueuedMessageLifecycleFrom,
   QueuedMessageState,
@@ -62,6 +63,7 @@ import { createOrderKeyAfter, createOrderKeyBetween } from "./order-keys.js";
 import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
 
 export interface CreateQueuedThreadMessageInput {
+  serviceTurn?: ServiceTurnDescriptor;
   threadId: string;
   content: PromptInput[];
   senderThreadId?: string | null;
@@ -501,6 +503,7 @@ function queuedMessageGroupingEnvelopeMatches(
 ): boolean {
   return (
     firstQueuedMessage !== null &&
+    JSON.stringify(queuedMessage.serviceTurn) === JSON.stringify(firstQueuedMessage.serviceTurn) &&
     queuedMessage.senderThreadId === firstQueuedMessage.senderThreadId &&
     queuedMessage.model === firstQueuedMessage.model &&
     queuedMessage.reasoningLevel === firstQueuedMessage.reasoningLevel &&
@@ -823,6 +826,7 @@ export function createQueuedThreadMessageInTransaction(
       id,
       threadId: input.threadId,
       content: JSON.stringify(input.content),
+      serviceTurn: input.serviceTurn ?? null,
       senderThreadId: input.senderThreadId ?? null,
       origin: input.origin ?? null,
       originPluginId: input.originPluginId ?? null,
@@ -1050,6 +1054,7 @@ function manuallyStoppedQueuePauseQuery(
       and(
         sql`${interruption.threadId} = ${threadId}`,
         eq(interruption.type, "system/thread/interrupted"),
+        sql`coalesce(json_extract(${interruption.data}, '$.serviceTurn.visibility'), '') != 'hidden'`,
         sql`json_extract(${interruption.data}, '$.reason') = 'manual-stop'`,
         notExists(
           db
@@ -1301,6 +1306,7 @@ export function claimNextQueuedThreadMessageGroup(
       const drainableGroups = partitionQueuedMessageGroups(
         queuedMessages,
       ).filter((rows) => rows.some(isIdleDrainableQueuedMessage));
+      drainableGroups.sort((a, b) => Number(a[0]?.serviceTurn != null) - Number(b[0]?.serviceTurn != null));
       const editHeldIndex = drainableGroups.findIndex((rows) =>
         isQueuedThreadMessageGroupEditHeld(rows, now),
       );

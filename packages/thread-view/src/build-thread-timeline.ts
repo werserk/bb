@@ -1,3 +1,4 @@
+import { classifyServiceTurns } from "./service-turn-projection.js";
 import type {
   ProviderCommand,
   ThreadContextWindowUsage,
@@ -87,6 +88,7 @@ interface ThreadTimelineFromEventsBaseOptions {
 }
 
 interface ThreadTimelineFromEventsOptions extends ThreadTimelineFromEventsBaseOptions {
+  includeService?: boolean;
   includeNestedRows: boolean;
 }
 
@@ -99,6 +101,7 @@ interface BuildThreadTimelineFromEventsArgs {
 }
 
 export interface ThreadTimelineFromEventsResult {
+  serviceTurn?: { busy: boolean; failed: boolean };
   activePromptMode: ThreadTimelineActivePromptMode | null;
   activeThinking: ActiveThinking | null;
   activeWorkflows: TimelineWorkflowWorkRow[];
@@ -1161,9 +1164,19 @@ function buildTimelineRows(
 export function buildThreadTimelineFromEvents(
   args: BuildThreadTimelineFromEventsArgs,
 ): ThreadTimelineFromEventsResult {
-  const stateEvents = args.headStateEvents?.length
-    ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
-    : args.events;
+  const classificationEvents = [
+    ...args.events,
+    ...(args.headStateEvents ?? []),
+    ...args.acceptedClientRequestContext.acceptedClientRequestEvents,
+  ];
+  const service = classifyServiceTurns(classificationEvents);
+  const hideService = args.options.includeService !== true;
+  const serviceCurrent = hideService && service.latestIsService;
+  const stateEvents = (
+    args.headStateEvents?.length
+      ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
+      : args.events
+  ).filter((event) => !hideService || !service.hides(event));
   const projectionOptions = {
     acceptedClientRequestContext: args.acceptedClientRequestContext,
     includeDiagnosticOperations: args.options.includeDiagnosticOperations,
@@ -1177,7 +1190,9 @@ export function buildThreadTimelineFromEvents(
   const rows = [
     ...buildTimelineRows(projection, {
       completedTurnDisplay: args.options.completedTurnDisplay,
-      includeNestedRows: args.options.includeNestedRows,
+      includeNestedRows:
+        args.options.includeNestedRows ||
+        (hideService && service.turnIds.size > 0),
       rowIdPrefix: ROOT_TIMELINE_ROW_ID_PREFIX,
       summarizeShellCommands: args.options.summarizeShellCommands,
       workspaceRoot: args.options.workspaceRoot,
@@ -1194,25 +1209,40 @@ export function buildThreadTimelineFromEvents(
   ];
 
   return {
-    activePromptMode: !args.options.isLatestPage
-      ? null
-      : extractThreadTimelineActivePromptMode({
-          events: args.events,
-          planCommand: args.options.planCommand,
-          providerId: args.options.providerId,
-          threadStatus: args.options.threadStatus,
-        }),
-    activeThinking: projection.state.activeThinking,
-    activeWorkflows: projection.state.activeWorkflows.flatMap((message) => {
+    ...(serviceCurrent
+      ? {
+          serviceTurn: {
+            busy:
+              args.options.threadStatus === "active" ||
+              args.options.threadStatus === "stopping",
+            failed: args.options.threadStatus === "error",
+          },
+        }
+      : {}),
+    activePromptMode:
+      serviceCurrent || !args.options.isLatestPage
+        ? null
+        : extractThreadTimelineActivePromptMode({
+            events: args.events,
+            planCommand: args.options.planCommand,
+            providerId: args.options.providerId,
+            threadStatus: args.options.threadStatus,
+          }),
+    activeThinking: serviceCurrent ? null : projection.state.activeThinking,
+    activeWorkflows: (serviceCurrent
+      ? []
+      : projection.state.activeWorkflows
+    ).flatMap((message) => {
       const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
       return row ? [row] : [];
     }),
-    activeBackgroundCommands: projection.state.activeBackgroundCommands.flatMap(
-      (message) => {
-        const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
-        return row ? [row] : [];
-      },
-    ),
+    activeBackgroundCommands: (serviceCurrent
+      ? []
+      : projection.state.activeBackgroundCommands
+    ).flatMap((message) => {
+      const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
+      return row ? [row] : [];
+    }),
     contextWindowUsage: extractThreadContextWindowUsage(
       args.contextWindowEvents,
     ),
@@ -1225,16 +1255,17 @@ export function buildThreadTimelineFromEvents(
     sessionOptions: !args.options.isLatestPage
       ? null
       : extractThreadSessionOptions(stateEvents),
-    modelFallback: !args.options.isLatestPage
-      ? null
-      : extractThreadTimelineModelFallback(args.events),
+    modelFallback:
+      serviceCurrent || !args.options.isLatestPage
+        ? null
+        : extractThreadTimelineModelFallback(args.events),
     pendingTodos: !args.options.isLatestPage
       ? null
       : extractThreadTimelinePendingTodos(
           args.options.threadStatus,
           stateEvents,
         ),
-    rows,
+    rows: hideService ? service.filterRows(rows) : rows,
   };
 }
 
@@ -1263,6 +1294,9 @@ function findTurnSummaryStartingAt(
 export function buildThreadTimelineTurnDetailsFromEvents(
   args: BuildThreadTimelineTurnDetailsFromEventsArgs,
 ): ThreadTimelineTurnDetailsFromEventsResult {
+  const service = classifyServiceTurns(args.events);
+  if (service.turnIds.has(args.options.turnId))
+    return { kind: "matched", rows: [] };
   const projection = buildEventProjectionEntries(args.events, {
     includeDiagnosticOperations: args.options.includeDiagnosticOperations,
     providerDisplayName: args.options.providerDisplayName,

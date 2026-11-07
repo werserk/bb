@@ -154,6 +154,9 @@ export function registerSystemRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.system;
+  app.get("/capabilities/service-turns", (context) =>
+    context.json({ serviceTurns: { version: 1 } }),
+  );
 
   const themeRoot = resolveThemeRootPath(deps.config.dataDir);
 

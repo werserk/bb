@@ -217,6 +217,8 @@ export interface PluginStorage {
  * for being read when it is used.
  */
 export interface PluginTurnFailedEvent {
+  /** Typed service origin, when this failure belongs to a hidden turn. */
+  experimental_serviceTurn?: import("@bb/domain").ServiceTurnDescriptor;
   /** The thread the failed turn ran on. */
   threadId: string;
   /**
@@ -644,6 +646,8 @@ export type PluginDispatchAttemptKind = "start-turn" | "join-turn";
  * on every drain, on restart, and on retry.
  */
 export interface MessageDispatchHookContext {
+  /** Authenticated service descriptor for this dispatch, independent of message wording. */
+  experimental_serviceTurn?: import("@bb/domain").ServiceTurnDescriptor;
   /**
    * The target thread. Never null: thread creation is unhooked — it is a cheap
    * row — so by the time the first message is decided about, the thread exists
@@ -2091,6 +2095,17 @@ export interface PluginThreadAttentionPolicy {
 }
 
 export interface PluginExperimentalThreads {
+  experimental_serviceTurnCapabilities(): { serviceTurns: { version: 1 } };
+  experimental_sendService(args: {
+    threadId: string;
+    input: import("@bb/domain").PromptInput[];
+    reason: import("@bb/domain").ServiceTurnDescriptor["reason"];
+    deliveryId?: string;
+    automaticRedelivery?: boolean;
+    senderThreadId?: string;
+    sendAt?: number;
+  }): Promise<import("@bb/server-contract").SendMessageResponse>;
+
   /**
    * Set (or with `null` clear) the attention policy of one thread. Held in
    * server memory only: nothing is stored, so a restart forgets it and the

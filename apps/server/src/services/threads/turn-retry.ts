@@ -213,6 +213,7 @@ export async function retryFailedTurn(
         // A retry never steers: it re-runs a turn, so a thread that is busy
         // again is something to wait behind rather than to interrupt.
         mode: "queue-if-active",
+        serviceTurn: failed.request.serviceTurn,
         ...retryInput(deps, { threadId: thread.id, failed }),
         ...retryExecution(failed),
         ...(request.sendAt === null ? {} : { sendAt: request.sendAt }),

@@ -246,6 +246,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         thread,
         {
           deferContent: query.deferContent === "true",
+          includeService: query.includeService === "true",
           includeNestedRows: query.includeNestedRows === "true",
           page: parseThreadTimelinePage(query),
           summaryOnly: query.summaryOnly === "true",
@@ -314,6 +315,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       getThreadMessage(deps.db, thread, {
         ...resolveConversationRowsOptions(thread),
         seq: parseInteger(seq, "seq"),
+        includeService: query.includeService === "true",
         before: parseOptionalInteger(query.before, "before") ?? 0,
         after: parseOptionalInteger(query.after, "after") ?? 0,
       }),

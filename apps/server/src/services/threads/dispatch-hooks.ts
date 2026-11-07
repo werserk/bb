@@ -83,6 +83,7 @@ export interface MessageDispatchHookPassRequest {
   thread: Thread;
   /** The thread's public DTO, as the hook context carries it. */
   threadResponse: ThreadResponse;
+  serviceTurn?: MessageDispatchHookContext["experimental_serviceTurn"];
   project: Project;
   environmentId: string | null;
   /**
@@ -357,6 +358,7 @@ function buildHookContext(
     ...droppedFromContractStillEmitted,
     ...summarizeDispatchProvenance(request),
     thread: request.threadResponse,
+    experimental_serviceTurn: request.serviceTurn,
     attempt: request.attempt,
     project: request.project,
     environment,

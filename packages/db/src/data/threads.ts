@@ -2400,7 +2400,7 @@ export function applyThreadLifecycleEventInTransaction(
       newStatus: evaluation.to,
       parentThreadId: thread.parentThreadId,
     }) &&
-    !(args.suppressIdleAttention === true && evaluation.to === "idle")
+    args.suppressIdleAttention !== true
   ) {
     set.latestAttentionAt = now;
   }

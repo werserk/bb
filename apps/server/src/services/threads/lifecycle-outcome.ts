@@ -1,3 +1,4 @@
+import { latestServiceTurn } from "./service-turns.js";
 import {
   getThread,
   applyThreadLifecycleEvent,
@@ -70,6 +71,12 @@ export function applyLoggedThreadLifecycleEvent(
   deps: ApplyLoggedThreadLifecycleEventDeps,
   args: ApplyThreadLifecycleEventArgs,
 ): ApplyThreadLifecycleEventOutcome {
+  args = {
+    ...args,
+    suppressIdleAttention:
+      args.suppressIdleAttention ||
+      latestServiceTurn(deps.db, args.threadId) !== undefined,
+  };
   const previousStatus = getThread(deps.db, args.threadId)?.status;
   const outcome = applyThreadLifecycleEvent(deps.db, args);
   if (outcome.applied && previousStatus !== undefined) {
@@ -95,6 +102,12 @@ export function applyLoggedThreadLifecycleEventInTransaction(
   args: ApplyThreadLifecycleEventArgs,
 ): ApplyThreadLifecycleEventOutcome {
   const previousStatus = getThread(deps.db, args.threadId)?.status;
+  args = {
+    ...args,
+    suppressIdleAttention:
+      args.suppressIdleAttention ||
+      latestServiceTurn(deps.db, args.threadId) !== undefined,
+  };
   const outcome = applyThreadLifecycleEventInTransaction(deps.db, args);
   if (outcome.applied && previousStatus !== undefined) {
     recordFinishedTurn(deps.db, args.threadId, args.event, previousStatus);

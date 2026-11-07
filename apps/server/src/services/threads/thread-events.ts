@@ -1,3 +1,5 @@
+import { getLatestTurnRequestEventRow } from "@bb/db";
+import type { ServiceTurnDescriptor } from "@bb/domain";
 import {
   appendStoredThreadEventsInTransaction,
   createEventId,
@@ -75,6 +77,7 @@ export interface TurnRequestRetryMarker {
 }
 
 interface ClientTurnRequestedEventArgs {
+  serviceTurn?: ServiceTurnDescriptor;
   /**
    * Set only when a `turn.failed` retry row is dispatching, marking this turn
    * as attempt N of an earlier request rather than something the user just
@@ -202,6 +205,7 @@ function buildClientTurnRequestedEventData(
   return {
     ...buildClientTurnBaseEventData(args),
     requestId,
+    ...(args.serviceTurn ? { serviceTurn: args.serviceTurn } : {}),
     ...(args.retryOf !== undefined
       ? {
           retryOfRequestId: args.retryOf.requestId,
@@ -720,12 +724,17 @@ export function appendThreadInterruptedEventInTransaction(
   db: DbTransaction,
   args: AppendThreadInterruptedEventArgs,
 ): number {
+  const request = getLatestTurnRequestEventRow(db, args.threadId);
+  const serviceTurn = request
+    ? parseStoredTurnRequestEvent(request).serviceTurn
+    : undefined;
   return appendThreadEventInTransaction(db, {
     threadId: args.threadId,
     type: "system/thread/interrupted",
     scope: threadScope(),
     data: {
       reason: args.reason,
+      ...(serviceTurn ? { serviceTurn } : {}),
     },
   });
 }

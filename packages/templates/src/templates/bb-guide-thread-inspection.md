@@ -69,6 +69,13 @@ Inspecting:
     --diff-merge-base <branch>             Override merge-base branch for diff
 
   Shows pull request status for the attached environment branch when available.
+  Human `show`, minimal/verbose `log`, and `output` hide typed service turns
+  by default; `--include-service` includes them for debugging. `show --json`,
+  `log --format json`, and SDK event reads always retain raw service events.
+  `wait` matches service events too and returns a content-free acknowledgement;
+  its `--include-service` flag does not change matching. Hidden turns do not
+  create unread attention. An active hidden turn shows only a busy state; Stop
+  interrupts it so the queued owner message can run.
 
   `thread context` reads the latest stored context measurement without starting
   a provider request; `--json` prints `{ usage: ... }` (`null` when unavailable).

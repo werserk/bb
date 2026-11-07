@@ -452,9 +452,14 @@ export function ThreadDetailPromptArea({
   const queuedMessagesQuery = useThreadQueuedMessages(thread.id, {
     enabled: true,
   });
-  const queuedMessages = queuedMessagesQuery.data ?? EMPTY_QUEUED_MESSAGES;
-  const queuedMessagesPending =
-    queuedMessagesQuery.data === undefined && queuedMessageCount > 0;
+  const queuedMessages = useMemo(
+    () =>
+      (queuedMessagesQuery.data ?? EMPTY_QUEUED_MESSAGES).filter(
+        (row) => !row.serviceTurn,
+      ),
+    [queuedMessagesQuery.data],
+  );
+  const queuedMessagesPending = false;
   const queuedMessagesRef =
     useLatestRef<readonly ThreadQueuedMessage[]>(queuedMessages);
   const [bottomPluginFocusNonce, setBottomPluginFocusNonce] = useState(0);
@@ -615,7 +620,7 @@ export function ThreadDetailPromptArea({
   const isWorkflowStackExpanded = workflowStackExpandedThreadId === thread.id;
   const [queueExpanded, setQueueExpanded] = useQueuedMessagesExpanded({
     threadId: thread.id,
-    queuedMessages: queuedMessagesQuery.data ?? null,
+    queuedMessages,
   });
   const [isBackgroundCommandsExpanded, setIsBackgroundCommandsExpanded] =
     useState(false);

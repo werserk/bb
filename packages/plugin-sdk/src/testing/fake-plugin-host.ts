@@ -1061,6 +1061,24 @@ function createFakePluginHostInternal(
   const aiServiceRegistrations: PluginAiServiceDeclaration[] = [];
   const attentionPolicies = new Map<string, PluginThreadAttentionPolicy>();
   const experimental_threads: PluginExperimentalThreads = {
+    experimental_serviceTurnCapabilities() {
+      return { serviceTurns: { version: 1 } };
+    },
+    async experimental_sendService(args) {
+      return sdk.threads.send({
+        ...args,
+        originPluginId: pluginId,
+        mode: "queue-if-active",
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: args.reason,
+          deliveryId: args.deliveryId,
+          automaticRedelivery: args.automaticRedelivery,
+          origin: { pluginId, senderThreadId: args.senderThreadId ?? null },
+        },
+      });
+    },
     setAttentionPolicy(threadId, policy) {
       assertLive();
       if (policy === null) attentionPolicies.delete(threadId);

@@ -1,3 +1,4 @@
+import { isServiceTurn } from "../services/threads/service-turns.js";
 import { getThread, hasRootStoredTurnStarted } from "@bb/db";
 import {
   requireThreadEventScopeTurnId,
@@ -53,13 +54,13 @@ export function applyTurnCompletedEvent(
   }
 
   const event = lifecycleEventForTurnCompletion(payload.status);
-  // Only a clean finish can be quiet: errors and interrupts keep their attention.
   const suppressIdleAttention =
-    event.type === "run.succeeded" &&
-    shouldSilenceBackgroundTurnAttention(deps.db, {
-      threadId: payload.threadId,
-      turnId,
-    });
+    isServiceTurn(deps.db, payload.threadId, turnId) ||
+    (event.type === "run.succeeded" &&
+      shouldSilenceBackgroundTurnAttention(deps.db, {
+        threadId: payload.threadId,
+        turnId,
+      }));
   const outcome = applyLoggedThreadLifecycleEvent(deps, {
     event,
     suppressIdleAttention,

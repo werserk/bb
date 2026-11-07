@@ -110,7 +110,7 @@ Interactions:
 
 Queued messages:
 
-  bb thread queue list [<thread-id>] [--wait-holder plugin:<plugin-id>]
+  bb thread queue list [<thread-id>] [--wait-holder plugin:<plugin-id>] [--include-service]
   bb thread queue create <thread-id> <message> [--file <path>] [--image <path>]
   bb thread queue update <thread-id> <message-id> <message> [--file <path>] [--image <path>]
                                            create and update also take --message-file <path>
@@ -118,6 +118,9 @@ Queued messages:
   bb thread queue reorder <thread-id> <message-id> [--after <id>] [--before <id>]
   bb thread queue group <thread-id> <boundary-id> --prefix <comma-separated-ids>
   bb thread queue delete <thread-id> <message-id>
+
+  Queue lists hide typed service inputs by default, including JSON; use
+  `--include-service` to inspect them. SDK queue reads always return all rows.
 
   The `Sender` column identifies agent threads and system notices; user messages
   leave it blank. The SDK and `--json` include `initiator` and `senderThreadId`.

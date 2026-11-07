@@ -253,6 +253,7 @@ const THREAD_EVENT_PAYLOAD_FIELDS = {
   "message.dispatched": ["entry"],
   "message.cancelled": ["entry"],
   "turn.failed": [
+    "experimental_serviceTurn",
     "threadId",
     "requestId",
     "turnId",

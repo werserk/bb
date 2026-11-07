@@ -1424,10 +1424,40 @@ export function createPluginApi(options: {
   };
 
   const experimental_threads: PluginExperimentalThreads = {
+    experimental_serviceTurnCapabilities() {
+      assertLive();
+      return { serviceTurns: { version: 1 } };
+    },
+    async experimental_sendService(args) {
+      assertLive();
+      const baseUrl = getLoopbackBaseUrl();
+      if (baseUrl === undefined) throw new Error("Server is not listening");
+      return createPluginRpcCallerSdk({
+        baseUrl,
+        token: rpcCaller.token,
+      }).threads.send({
+        threadId: args.threadId,
+        input: args.input,
+        originPluginId: pluginId,
+        mode: "queue-if-active",
+        senderThreadId: args.senderThreadId,
+        sendAt: args.sendAt,
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: args.reason,
+          deliveryId: args.deliveryId,
+          automaticRedelivery: args.automaticRedelivery,
+          origin: { pluginId, senderThreadId: args.senderThreadId ?? null },
+        },
+      });
+    },
     setAttentionPolicy(threadId, policy) {
       assertLive();
       if (typeof threadId !== "string" || threadId.length === 0) {
-        throw new Error("setAttentionPolicy: threadId must be a non-empty string");
+        throw new Error(
+          "setAttentionPolicy: threadId must be a non-empty string",
+        );
       }
       if (policy !== null && policy?.backgroundTurns !== "silent") {
         throw new Error(

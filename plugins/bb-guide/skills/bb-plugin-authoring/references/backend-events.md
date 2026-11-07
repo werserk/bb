@@ -49,9 +49,9 @@ the provider's own report, or the typed code of a request the provider rejected
 at the door; null when neither carried one), `inputAccepted` (whether the
 provider took the input into its conversation before failing), `rateLimits`
 (the latest `ProviderRateLimitState`, null when the provider reports no
-windows) and `attemptNumber` (1 on a first failure, 2 on the first retry's).
-There is no thread DTO and no copy of the message, because a retry is asked for
-BY REFERENCE:
+windows), `attemptNumber` (1 on a first failure, 2 on the first retry's),
+and optional `experimental_serviceTurn` (authenticated hidden-turn descriptor).
+Retry uses the request id by reference; no thread DTO or input copy is emitted:
 
 ```ts
 bb.events.on("turn.failed", async (event) => {

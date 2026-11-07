@@ -62,6 +62,7 @@ export interface SettleQueueRowArgs {
 
 /** The message a queued row will carry, as the queueing site supplies it. */
 export interface QueuedDispatchMessage {
+  serviceTurn?: import("@bb/domain").ServiceTurnDescriptor;
   input: PromptInput[];
   execution: ResolvedThreadExecutionOptions;
   senderThreadId: string | null;
@@ -124,6 +125,7 @@ export function recordQueuedMessageWait(
         return createQueuedThreadMessageInTransaction(tx, {
           threadId: args.thread.id,
           content: args.message.input,
+          serviceTurn: args.message.serviceTurn,
           senderThreadId: args.message.senderThreadId,
           origin: args.message.origin,
           originPluginId: args.message.originPluginId,

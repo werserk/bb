@@ -143,15 +143,19 @@ export function threadListIndicatorStateForThread(
   return {
     hasPendingInteraction: thread.hasPendingInteraction,
     hasUnsubmittedDraft,
-    hasUnreadError: unreadDone && thread.status === "error",
-    hasUnreadSuccess: unreadDone && thread.status !== "error",
-    isBackgroundAgentActive: hasActiveBackgroundAgentActivity(thread),
-    isBackgroundCommandActive: hasActiveBackgroundCommandActivity(thread),
-    isGoalActive: hasActiveGoalActivity(thread),
-    queuedWork: thread.queuedWork,
-    isPlanModeActive: hasActivePlanModeActivity(thread),
+    hasUnreadError:
+      unreadDone && !thread.serviceTurn && thread.status === "error",
+    hasUnreadSuccess:
+      unreadDone && !thread.serviceTurn && thread.status !== "error",
+    isBackgroundAgentActive:
+      !thread.serviceTurn && hasActiveBackgroundAgentActivity(thread),
+    isBackgroundCommandActive:
+      !thread.serviceTurn && hasActiveBackgroundCommandActivity(thread),
+    isGoalActive: !thread.serviceTurn && hasActiveGoalActivity(thread),
+    queuedWork: thread.serviceTurn ? "none" : thread.queuedWork,
+    isPlanModeActive: !thread.serviceTurn && hasActivePlanModeActivity(thread),
     isRuntimeActive: isRuntimeBusyThread(thread),
-    isWorkflowActive: hasActiveWorkflowActivity(thread),
+    isWorkflowActive: !thread.serviceTurn && hasActiveWorkflowActivity(thread),
   };
 }
 

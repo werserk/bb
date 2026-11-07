@@ -1,3 +1,4 @@
+import { latestServiceTurn, latestServiceTurns } from "./service-turns.js";
 import {
   getEnvironment,
   getSessionById,
@@ -105,6 +106,7 @@ interface ToThreadStatusChangeMetadataArgs {
   activity: ThreadActivityState;
   runtime: ThreadRuntimeState;
   thread: Thread;
+  serviceTurn: Thread["serviceTurn"];
 }
 
 interface PromptBannerActivityState extends Pick<
@@ -260,6 +262,7 @@ export function buildThreadStatusChangeMetadata(
       status: thread.status,
     }),
     thread,
+    serviceTurn: latestServiceTurn(deps.db, thread.id),
   });
 }
 
@@ -282,6 +285,10 @@ export function buildThreadStatusChangeMetadataByThreadId(
     hostConnected,
     hostId: args.environmentHostId,
   });
+  const services = latestServiceTurns(
+    deps.db,
+    args.threads.map((thread) => thread.id),
+  );
   return new Map(
     args.threads.map((thread) => [
       thread.id,
@@ -294,6 +301,7 @@ export function buildThreadStatusChangeMetadataByThreadId(
           status: thread.status,
         }),
         thread,
+        serviceTurn: services.get(thread.id),
       }),
     ]),
   );
@@ -306,7 +314,11 @@ function toThreadStatusChangeMetadata(
     projectId: args.thread.projectId,
     statusChange: {
       status: args.thread.status,
-      runtime: args.runtime,
+      serviceTurn: args.serviceTurn ?? null,
+      runtime:
+        args.serviceTurn && args.thread.status === "error"
+          ? { displayStatus: "idle" }
+          : args.runtime,
       activity: args.activity,
       latestAttentionAt: args.thread.latestAttentionAt,
       updatedAt: args.thread.updatedAt,
@@ -319,12 +331,14 @@ function toThreadResponseWithHost(
   args: ToThreadResponseWithHostArgs,
 ): ThreadWithRuntime {
   const thread = toPublicThread(args.thread);
+  const serviceTurn = latestServiceTurn(deps.db, thread.id);
   return {
     ...thread,
+    ...(serviceTurn ? { serviceTurn } : {}),
     runtime: resolveThreadRuntimeState(deps, {
       environmentHostId: args.environmentHostId,
       now: args.now,
-      status: thread.status,
+      status: serviceTurn && thread.status === "error" ? "idle" : thread.status,
     }),
   };
 }
@@ -571,7 +585,12 @@ export function toThreadListEntryResponses(
     deps,
     args.threads,
   );
+  const services = latestServiceTurns(
+    deps.db,
+    args.threads.map((thread) => thread.id),
+  );
   return args.threads.map((thread) => {
+    const serviceTurn = services.get(thread.id);
     const entry = toThreadListEntryResponseFromLatestSession({
       activity: activityByThreadId.get(thread.id) ?? EMPTY_THREAD_ACTIVITY,
       queuedWork: queuedWorkByThreadId.get(thread.id) ?? "none",
@@ -585,6 +604,10 @@ export function toThreadListEntryResponses(
       now: args.now,
       thread,
     });
+    if (serviceTurn) {
+      entry.serviceTurn = serviceTurn;
+      if (thread.status === "error") entry.runtime.displayStatus = "idle";
+    }
     return thread.environmentHostId === null &&
       (thread.status === "pending" || thread.status === "starting")
       ? {

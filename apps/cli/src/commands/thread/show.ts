@@ -47,6 +47,7 @@ import {
 import { fetchThreadPendingTodos, printPendingTodos } from "./pending-todos.js";
 
 interface ThreadShowCommandOptions {
+  includeService?: boolean;
   self?: boolean;
   workStatus?: boolean;
   gitDiff?: boolean;
@@ -57,6 +58,7 @@ interface ThreadShowCommandOptions {
 }
 
 interface ThreadLogCommandOptions {
+  includeService?: boolean;
   self?: boolean;
   json?: boolean;
   format?: string;
@@ -71,6 +73,7 @@ const THREAD_LOG_DEFAULT_EVENT_LIMIT = 100;
 const THREAD_LOG_TIMELINE_SEGMENT_LIMIT_MAX = 100;
 
 interface ThreadOutputCommandOptions {
+  includeService?: boolean;
   json?: boolean;
   self?: boolean;
 }
@@ -216,6 +219,7 @@ export function registerShowCommand(
 ): void {
   parent
     .command("show [id]")
+    .option("--include-service", "Include retained service execution details")
     .aliases(["get", "view", "status"])
     .description("Show thread details and pull request status")
     .option("--self", "Target the current thread (from BB_THREAD_ID)")
@@ -342,6 +346,7 @@ export function registerShowCommand(
         const pendingTodos = await fetchThreadPendingTodos({
           sdk,
           threadId,
+          includeService: opts.json || opts.includeService,
         });
 
         if (opts.json) {
@@ -368,8 +373,27 @@ export function registerShowCommand(
           return;
         }
 
-        printThreadStatus(statusPayload, environmentInfo, fetchedPullRequest);
+        const visiblePayload =
+          !opts.includeService && thread.serviceTurn
+            ? {
+                ...statusPayload,
+                thread: {
+                  ...thread,
+                  status:
+                    thread.status === "error"
+                      ? ("idle" as const)
+                      : thread.status,
+                },
+              }
+            : statusPayload;
+        printThreadStatus(visiblePayload, environmentInfo, fetchedPullRequest);
 
+        if (
+          !opts.includeService &&
+          thread.serviceTurn &&
+          (thread.status === "active" || thread.status === "stopping")
+        )
+          console.log("  занят служебной работой, твоё сообщение следующее");
         printPendingTodos(pendingTodos);
 
         if (fetchedWorkStatus !== undefined) {
@@ -427,6 +451,7 @@ export function registerShowCommand(
 
   parent
     .command("log [id]")
+    .option("--include-service", "Include retained service turns")
     .aliases(["messages", "timeline"])
     .description("Show thread event log")
     .option("--self", "Target the current thread (from BB_THREAD_ID)")
@@ -516,6 +541,7 @@ export function registerShowCommand(
         }
         const timelineQuery = {
           threadId,
+          ...(opts.includeService ? { includeService: "true" as const } : {}),
           ...(format === "verbose"
             ? { includeNestedRows: "true" as const }
             : {}),
@@ -554,6 +580,7 @@ export function registerShowCommand(
 
   parent
     .command("output [id]")
+    .option("--include-service", "Include service output")
     .description("Get the final output of a thread")
     .option("--self", "Target the current thread (from BB_THREAD_ID)")
     .option("--json", "Print machine-readable JSON output")
@@ -562,7 +589,11 @@ export function registerShowCommand(
         async (id: string | undefined, opts: ThreadOutputCommandOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
           const sdk = createCliBbSdk(getUrl());
-          const result = await sdk.threads.output({ threadId });
+          const thread = await sdk.threads.get({ threadId });
+          const result =
+            !opts.includeService && thread.serviceTurn
+              ? { output: await visibleThreadOutput(sdk, threadId) }
+              : await sdk.threads.output({ threadId });
           if (outputJson(opts, result)) return;
           if (result.output) {
             console.log(result.output);
@@ -676,6 +707,9 @@ async function printThreadLogMessage(
   const result = await sdk.threads.message({
     threadId,
     seq: Number(opts.message),
+    ...(opts.includeService || format === "json"
+      ? { includeService: "true" as const }
+      : {}),
     before: context,
     after: context,
   });
@@ -824,4 +858,27 @@ function resolveThreadTimelineTextFormat(
     return "verbose";
   }
   return "minimal";
+}
+
+async function visibleThreadOutput(
+  sdk: BbSdk,
+  threadId: string,
+): Promise<string | null> {
+  const { rows } = await listAllThreadLogEvents(sdk, threadId, undefined);
+  let hidden = false,
+    output: string | null = null;
+  for (const row of rows) {
+    if (row.type === "client/turn/requested")
+      hidden = Boolean(row.data.serviceTurn);
+    if (hidden) continue;
+    if (
+      row.type === "item/completed" &&
+      row.data.item.type === "agentMessage" &&
+      row.data.item.text.length
+    )
+      output = row.data.item.text;
+    if (row.type === "system/manager/user_message" && row.data.text.length)
+      output = row.data.text;
+  }
+  return output;
 }

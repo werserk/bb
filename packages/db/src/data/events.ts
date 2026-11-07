@@ -4564,3 +4564,24 @@ export function listOpenBackgroundTaskItemRowsForThread(
     row.itemId === null ? [] : [{ ...row, itemId: row.itemId }],
   );
 }
+
+
+export function listStoredServiceTurnContextRows(db: DbQueryConnection, threadId: string): StoredEventRow[] {
+  return db.select().from(events).where(and(eq(events.threadId, threadId), sql`${events}.rowid IN (
+    WITH hidden AS (
+      SELECT rowid, sequence, json_extract(data, '$.requestId') AS request_id
+      FROM events WHERE thread_id = ${threadId} AND type = 'client/turn/requested' AND json_extract(data, '$.serviceTurn.visibility') = 'hidden'
+    )
+    SELECT rowid FROM hidden
+    UNION SELECT (SELECT next.rowid FROM events next WHERE next.thread_id = ${threadId} AND next.type = 'client/turn/requested' AND next.sequence > hidden.sequence ORDER BY next.sequence LIMIT 1) FROM hidden
+    UNION SELECT accepted.rowid FROM events accepted WHERE accepted.thread_id = ${threadId} AND accepted.type = 'turn/input/accepted' AND json_extract(accepted.data, '$.clientRequestId') IN (SELECT request_id FROM hidden)
+  )`)).all();
+}
+
+export function listLatestTurnRequestEventRows(db: DbQueryConnection, threadIds: readonly string[]): StoredEventRow[] {
+  return queryInSqliteVariableBatches<string,StoredEventRow>({dedupeKey:id=>id, fixedVariableCount:0, variableCountPerValue:1, values:[...threadIds], queryBatch:ids=>db.select().from(events).where(and(inArray(events.threadId,[...ids]),eq(events.type,"client/turn/requested"),sql`${events.sequence} = (SELECT MAX(candidate.sequence) FROM events candidate WHERE candidate.thread_id = ${events.threadId} AND candidate.type = 'client/turn/requested')`)).all()});
+}
+
+export function getLatestTurnRequestEventRow(db: DbQueryConnection, threadId: string): StoredEventRow | undefined {
+  return db.select().from(events).where(and(eq(events.threadId, threadId), eq(events.type, "client/turn/requested"))).orderBy(desc(events.sequence)).limit(1).get();
+}

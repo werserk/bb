@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   activeThinkingSchema,
+  serviceTurnDescriptorSchema,
   callerExecutionInputSourceSchema,
   completedTurnDisplaySchema,
   environmentSchema,
@@ -205,7 +206,11 @@ export const createThreadRequestSchema = z
         path: ["originPluginId"],
       });
     }
-    if (value.originKind === null && value.input.length === 0) {
+    if (
+      value.originKind === null &&
+      value.origin !== "plugin" &&
+      value.input.length === 0
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "input must contain at least one entry",
@@ -280,6 +285,7 @@ export const forkThreadRequestSchema = z
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 
 const sendMessageRequestFieldsSchema = z.object({
+  serviceTurn: serviceTurnDescriptorSchema.optional(),
   input: z.array(promptInputSchema).min(1),
   model: z.string().optional(),
   serviceTier: serviceTierSchema.optional(),
@@ -1051,6 +1057,7 @@ export type TimelinePageMetadata = z.infer<typeof timelinePageMetadataSchema>;
 
 export const threadTimelineQuerySchema = z
   .object({
+    includeService: z.enum(["true", "false"]),
     includeNestedRows: z.enum(["true", "false"]),
     segmentLimit: z.string().regex(/^\d+$/),
     beforeAnchorSeq: z.string().regex(/^(0|[1-9]\d*)$/),
@@ -1129,6 +1136,7 @@ const threadMessageContextCountSchema = z
 
 export const threadMessageQuerySchema = z
   .object({
+    includeService: z.enum(["true", "false"]),
     before: threadMessageContextCountSchema,
     after: threadMessageContextCountSchema,
   })
@@ -1214,6 +1222,7 @@ export type ThreadTimelineSessionOption = z.infer<
 >;
 
 const threadTimelineWindowFieldsShape = {
+  serviceTurn: z.object({ busy: z.boolean(), failed: z.boolean() }).optional(),
   contextBoundarySeq: z.number().int().nonnegative().nullable(),
   completedTurnDisplay: completedTurnDisplaySchema,
   activePromptMode: threadTimelineActivePromptModeSchema.nullable(),
@@ -1231,6 +1240,7 @@ const threadTimelineWindowFieldsShape = {
 };
 
 export const THREAD_TIMELINE_WINDOW_FIELD_KEYS = [
+  "serviceTurn",
   "contextBoundarySeq",
   "completedTurnDisplay",
   "activePromptMode",

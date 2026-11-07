@@ -1,3 +1,4 @@
+import { serviceTurnDescriptorSchema } from "./service-turn.js";
 import { z } from "zod";
 import { jsonValueSchema, type JsonValue } from "./json-value.js";
 import {
@@ -284,6 +285,7 @@ export function realtimeSubscriptionTargetKey(
 
 export const threadStatusChangeMetadataSchema = z
   .object({
+    serviceTurn: serviceTurnDescriptorSchema.nullish(),
     status: threadStatusSchema,
     runtime: threadRuntimeStateSchema,
     activity: threadActivityStateSchema,

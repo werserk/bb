@@ -18,6 +18,7 @@ import { threadOriginKindValues } from "@bb/domain/thread-origin-kind";
 import { threadParentNotificationsValues } from "@bb/domain/thread-parent-notifications";
 import { threadVisibilityValues } from "@bb/domain/thread-visibility";
 import type {
+  ServiceTurnDescriptor,
   EnvironmentProviderSelection,
   JsonValue,
   EnvironmentStatus,
@@ -996,6 +997,9 @@ export const queuedThreadMessages = sqliteTable(
   {
     id: text("id").primaryKey(),
     systemNotice: text("system_notice"),
+    serviceTurn: text("service_turn", {
+      mode: "json",
+    }).$type<ServiceTurnDescriptor>(),
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),

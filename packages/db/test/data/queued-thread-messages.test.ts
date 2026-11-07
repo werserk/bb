@@ -2108,3 +2108,17 @@ describe("queued thread messages", () => {
     });
   });
 });
+
+
+describe("service queue provenance", () => {
+  it("persists a dedicated nullable descriptor and puts owner input first", () => {
+    const { db, thread } = setup();
+    const serviceTurn = {version: 1, visibility: "hidden", reason: "helper-result", origin: {pluginId: "wprojects", senderThreadId: "helper"}} as const;
+    const hidden = createQueuedThreadMessage(db, noopNotifier, {threadId: thread.id, content: defaultInput, serviceTurn, model: "gpt-5", reasoningLevel: "medium", permissionMode: "full", serviceTier: "default", waitingOn: null, sendAt: null, payload: {kind: "inline"}, systemNotice: null});
+    const owner = queueTurnEndMessage(db, thread.id, altInput);
+    expect(getQueuedThreadMessage(db, hidden.id)?.serviceTurn).toEqual(serviceTurn);
+    expect(getQueuedThreadMessage(db, owner.id)?.serviceTurn).toBeNull();
+    expect(claimNextQueuedThreadMessageGroup(db, noopNotifier, thread.id, () => true)?.map(row => row.id)).toEqual([owner.id]);
+    db.$client.close();
+  });
+});

@@ -39,18 +39,36 @@ import {
   updateEnvironmentRequestSchema,
   unmanagedBranchSpecSchema,
 } from "../src/index.js";
-import type {
-  WorkspaceResolutionFailure,
-} from "@bb/host-daemon-contract/workspace";
+import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract/workspace";
 
 interface OptionalServerFieldGroup {
   fields: readonly string[];
   reason: string;
 }
 
-const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 46;
+const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
 
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
+  {
+    reason:
+      "Service descriptors and human inspection options are additive; older persisted rows have none. Plan reasons and actors are optional native provider facts.",
+    fields: [
+      "sendMessageRequestSchema.serviceTurn",
+      "sendMessageRequestSchema.serviceTurn.automaticRedelivery",
+      "sendMessageRequestSchema.serviceTurn.deliveryId",
+      "sendQueuedMessageResponseSchema.queuedMessage.serviceTurn",
+      "sendQueuedMessageResponseSchema.queuedMessage.serviceTurn.automaticRedelivery",
+      "sendQueuedMessageResponseSchema.queuedMessage.serviceTurn.deliveryId",
+      "threadTimelineQuerySchema.includeService",
+      "threadTimelineResponseSchema.pendingTodos.items.actor",
+      "threadTimelineResponseSchema.pendingTodos.items.note",
+      "threadTimelineResponseSchema.rows.steps.actor",
+      "threadTimelineResponseSchema.rows.steps.note",
+      "threadTimelineResponseSchema.serviceTurn",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.actor",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.note",
+    ],
+  },
   {
     reason:
       "Older parent notices have no per-child outcomes. New notices omit interruption details for completed, failed, or unclassified turns; a recorded host-connection-loss cause is optional even when the interruption reason is known.",

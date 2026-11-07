@@ -481,30 +481,31 @@ async function createPendingThreadAndAttemptFirstDispatch(
       args.request,
       executionPlanArgs,
     );
-    await attemptDispatch(deps, {
-      thread,
-      payload: {
-        input: args.request.input,
-        mode: "start",
-        model: execution.model,
-        reasoningLevel: execution.reasoningLevel,
-        serviceTier: execution.serviceTier,
-        permissionMode: execution.permissionMode,
-        ...(args.request.executionInputSources !== undefined
-          ? { executionInputSources: args.request.executionInputSources }
-          : {}),
-        ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}),
-      },
-      source: { kind: "inline" },
-      queuePayload: { kind: "inline" },
-      pluginSubmission: args.request.pluginSubmission ?? null,
-      startContext,
-      executionDefaults: executionPlanArgs,
-      origin: args.request.origin,
-      originPluginId: args.request.originPluginId ?? null,
-      startedOnBehalfOf: args.request.startedOnBehalfOf,
-      trigger: "user",
-    });
+    if (args.request.input.length > 0 || args.request.originKind !== null)
+      await attemptDispatch(deps, {
+        thread,
+        payload: {
+          input: args.request.input,
+          mode: "start",
+          model: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          serviceTier: execution.serviceTier,
+          permissionMode: execution.permissionMode,
+          ...(args.request.executionInputSources !== undefined
+            ? { executionInputSources: args.request.executionInputSources }
+            : {}),
+          ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}),
+        },
+        source: { kind: "inline" },
+        queuePayload: { kind: "inline" },
+        pluginSubmission: args.request.pluginSubmission ?? null,
+        startContext,
+        executionDefaults: executionPlanArgs,
+        origin: args.request.origin,
+        originPluginId: args.request.originPluginId ?? null,
+        startedOnBehalfOf: args.request.startedOnBehalfOf,
+        trigger: "user",
+      });
   } catch (error) {
     emitPluginThreadDeleted({
       ...thread,

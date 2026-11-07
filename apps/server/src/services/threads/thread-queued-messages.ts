@@ -20,6 +20,7 @@ import { ApiError } from "../../errors.js";
 import { resolveDispatchAuthor } from "./dispatch-author.js";
 
 interface StoredQueuedThreadMessageRow {
+  serviceTurn?: import("@bb/domain").ServiceTurnDescriptor | null;
   origin: ThreadCreateOrigin | null;
   originPluginId: string | null;
   content: string;
@@ -161,7 +162,7 @@ export function toThreadQueuedMessage(
   row: StoredQueuedThreadMessageRow,
 ): ThreadQueuedMessage {
   const author =
-    row.systemNotice !== null
+    row.systemNotice !== null || row.serviceTurn != null
       ? { initiator: "system" as const, senderThreadId: null }
       : resolveDispatchAuthor({
           retrying: row.payloadKind === "retry",
@@ -169,6 +170,7 @@ export function toThreadQueuedMessage(
           startedOnBehalfOf: storedQueuedThreadMessageRequestedBy(row),
         });
   return threadQueuedMessageSchema.parse({
+    ...(row.serviceTurn ? { serviceTurn: row.serviceTurn } : {}),
     id: row.id,
     origin: row.origin,
     originPluginId: row.originPluginId,

@@ -197,6 +197,7 @@ describe("applyLoggedThreadLifecycleEvent", () => {
       metadata: {
         projectId,
         statusChange: {
+          serviceTurn: null,
           status: "active",
           runtime: {
             displayStatus: "active",

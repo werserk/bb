@@ -453,6 +453,7 @@ export interface ThreadOutputArgs {
 }
 
 export interface ThreadMessageArgs {
+  includeService?: "true" | "false";
   signal?: AbortSignal;
   threadId: string;
   seq: number;
@@ -808,6 +809,7 @@ function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
 function sendJson(args: ThreadSendArgs): SendMessageRequest {
   return {
     input: args.input,
+    serviceTurn: args.serviceTurn,
     mode: args.mode,
     model: args.model,
     permissionMode: args.permissionMode,
@@ -910,6 +912,9 @@ function searchQuery(args: ThreadSearchArgs): ThreadSearchQuery {
 
 function timelineQuery(args: ThreadTimelineArgs): ThreadTimelineQuery {
   return {
+    ...(args.includeService !== undefined
+      ? { includeService: args.includeService }
+      : {}),
     ...(args.deferContent !== undefined
       ? { deferContent: args.deferContent }
       : {}),
@@ -1457,6 +1462,9 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           {
             param: { id: input.threadId, seq: String(input.seq) },
             query: {
+              ...(input.includeService
+                ? { includeService: input.includeService }
+                : {}),
               ...(input.before === undefined
                 ? {}
                 : { before: String(input.before) }),

@@ -1,11 +1,8 @@
 # Frontend registration and major surfaces
-
 ## Frontend (`bb.app` entry)
-
 `app.tsx` default-exports `definePluginApp` from `@get-bb/plugin-sdk/app`.
 React and the SDK are **never bundled** — `bb plugin build` shims them to
 the host's shared runtime, so the bundle only works inside bb.
-
 ```tsx
 import {
   definePluginApp,
@@ -22,7 +19,6 @@ import {
 import { toast } from "sonner"; // shimmed to the host toaster
 import { Button } from "@/components/ui/button"; // vendored source YOU own
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-
 export default definePluginApp((app) => {
   app.contentScripts.register({
     id: "editor-enhancement",
@@ -150,7 +146,6 @@ export default definePluginApp((app) => {
   });
 });
 ```
-
 ### A button in the thread header
 
 A thread action with `placement: "header"` is a button in the open thread's

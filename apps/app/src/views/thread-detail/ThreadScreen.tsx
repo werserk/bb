@@ -1,3 +1,4 @@
+import { Icon } from "@bb/shared-ui/icon";
 import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
   useCallback,
@@ -672,6 +673,22 @@ export function ThreadScreen({
       className="@container/thread-chat flex min-h-0 min-w-0 flex-1 flex-col"
       data-thread-chat=""
     >
+      {thread.serviceTurn &&
+        (thread.status === "active" ||
+          thread.status === "starting" ||
+          thread.status === "stopping") && (
+          <div
+            role="status"
+            className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground"
+          >
+            <Icon
+              name="LoaderCircle"
+              className="size-4 animate-spin"
+              aria-hidden="true"
+            />
+            занят служебной работой, твоё сообщение следующее
+          </div>
+        )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 @min-[880px]/thread-chat:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
         {thread.archivedAt === null &&

@@ -308,3 +308,24 @@ it("collapses and reopens a completed older-turn plan through ThreadScreen", () 
   expect(screen.queryByText(/from an earlier task/)).toBeNull();
   expect(screen.getByText("Checked result")).toBeTruthy();
 });
+
+it("shows only content-free service busy state on mid-turn navigation", () => {
+  renderScreen(
+    { kind: "page" },
+    {
+      thread: {
+        ...THREAD,
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: "future-rotation",
+          origin: { pluginId: "wprojects", senderThreadId: null },
+        },
+      },
+    },
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "занят служебной работой, твоё сообщение следующее",
+  );
+  expect(screen.queryByText("Background")).toBeNull();
+});

@@ -1,3 +1,4 @@
+import { latestServiceTurn } from "./service-turns.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
 import {
   cancelPreparingMachinePause,
@@ -9,6 +10,7 @@ import {
   getThread,
   isThreadQueueAutoSendPaused,
   listRunningThreads,
+  listQueuedThreadMessages,
   type ClaimedQueuedThreadMessageRow,
   type RunningThreadRow,
 } from "@bb/db";
@@ -318,6 +320,8 @@ async function runDispatchAttempt(
   assertThreadHostAcceptsWork(deps.db, thread);
   if (
     payload.mode === "queue-if-active" &&
+    !payload.serviceTurn &&
+    !latestServiceTurn(deps.db, thread.id) &&
     isActiveTurnMainRunIdle(deps, thread)
   ) {
     payload = { ...payload, mode: "steer-if-active" };
@@ -360,7 +364,7 @@ async function runDispatchAttempt(
           titleProvided: interruptedStartupRequest.titleProvided,
         };
   const author = resolveDispatchAuthor({
-    retrying: args.retryOf !== undefined,
+    retrying: args.retryOf !== undefined || payload.serviceTurn !== undefined,
     senderThreadId,
     startedOnBehalfOf: args.startedOnBehalfOf,
   });
@@ -368,7 +372,12 @@ async function runDispatchAttempt(
   const sendNow = args.source.kind === "drain" && args.source.sendNow;
   const respectManualStopPause =
     args.source.kind === "drain" && args.source.respectManualStopPause;
-  const attempt = resolveDispatchAttemptKind(thread, payload.mode);
+  const attempt = resolveDispatchAttemptKind(
+    thread,
+    latestServiceTurn(deps.db, thread.id) && thread.status === "active"
+      ? "queue-if-active"
+      : payload.mode,
+  );
 
   const execution = await buildExecutionOptions(
     deps,
@@ -383,6 +392,7 @@ async function runDispatchAttempt(
   }
   const resolvedPayload = resolveExecutionIntoPayload(payload, execution);
   const queuedMessage: QueuedDispatchMessage = {
+    serviceTurn: payload.serviceTurn,
     input: payload.input,
     execution,
     senderThreadId,
@@ -430,6 +440,16 @@ async function runDispatchAttempt(
     const sendAt = payload.sendAt ?? null;
     if (!sendNow && sendAt !== null && sendAt > Date.now()) {
       continued.outcome = waitOn({ kind: "time" }, sendAt);
+      return;
+    }
+
+    if (
+      payload.serviceTurn &&
+      listQueuedThreadMessages(deps.db, thread.id).some(
+        (row) => row.serviceTurn === null,
+      )
+    ) {
+      continued.outcome = waitOn({ kind: "thread-busy" }, null);
       return;
     }
 
@@ -546,6 +566,7 @@ async function runDispatchAttempt(
     const outcome = await runMessageDispatchHookPass(deps, {
       thread,
       threadResponse: toThreadResponseFromThread(deps, { thread }),
+      serviceTurn: payload.serviceTurn,
       project: requirePublicProject(deps.db, thread.projectId),
       environmentId: thread.environmentId,
       intendedHostId:

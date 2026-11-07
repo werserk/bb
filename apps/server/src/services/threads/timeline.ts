@@ -1,3 +1,4 @@
+import { listStoredServiceTurnContextRows } from "@bb/db";
 import {
   projectConversationOutlineIncrementally,
   type ConversationOutlineSelection,
@@ -155,7 +156,9 @@ export function resolveThreadTimelineSurface(
   const workspaceRoot = resolveThreadWorkspaceRoot(db, thread);
   const cursorKey = JSON.stringify([
     options.includeClearedContextHistory,
+    options.includeService ?? false,
     options.includeDiagnosticOperations,
+    options.includeService ?? false,
     options.includeNestedRows ?? false,
     options.deferContent ?? false,
     options.maxInlineOutputChars,
@@ -199,6 +202,7 @@ export interface ThreadTimelineSurfaceOptions {
   deferContent?: boolean;
   includeClearedContextHistory: boolean;
   includeDiagnosticOperations: boolean;
+  includeService?: boolean;
   includeNestedRows?: boolean;
   maxInlineOutputChars: InlineOutputCharLimit;
   providerDisplayName?: string;
@@ -1401,6 +1405,11 @@ function buildThreadTimelineInternal(
         withRowMeta(row, decodeStoredEventRowCached(db, row)),
       ),
   );
+  headStateEvents.push(
+    ...listStoredServiceTurnContextRows(db, thread.id).map((row) =>
+      withRowMeta(row, decodeStoredEventRowCached(db, row)),
+    ),
+  );
   profile.eventRowCount += eventSelection.headStateRows.length;
   profile.eventDataBytes += byteLengthOfStoredEventRows(
     eventSelection.headStateRows,
@@ -1459,6 +1468,7 @@ function buildThreadTimelineInternal(
         events: decodedEvents,
         options: {
           ...commonProjectionOptions,
+          includeService: options.includeService,
           includeNestedRows,
           providerId: thread.providerId,
         },
@@ -1524,6 +1534,7 @@ function buildThreadTimelineInternal(
       options.page.kind === "latest" ? timeline.activeWorkflows : [],
     activeBackgroundCommands:
       options.page.kind === "latest" ? timeline.activeBackgroundCommands : [],
+    serviceTurn: timeline.serviceTurn,
     pendingTodos: timeline.pendingTodos,
     goal: timeline.goal,
     providerCommands: timeline.providerCommands,
@@ -1608,6 +1619,7 @@ export function buildThreadTimelineWithProfile(
 }
 
 interface BuildThreadConversationOutlineOptions {
+  includeService?: boolean;
   completedTurnDisplay: CompletedTurnDisplay;
   includeClearedContextHistory: boolean;
   maxSeq: number;
@@ -1724,8 +1736,12 @@ function buildThreadConversationRows(
       acceptedClientRequestContext,
       contextWindowEvents: [],
       events: decodedEvents,
+      headStateEvents: listStoredServiceTurnContextRows(db, thread.id).map(
+        toThreadEventWithMeta,
+      ),
       options: {
         completedTurnDisplay: options.completedTurnDisplay,
+        includeService: options.includeService,
         includeNestedRows: options.includeNestedRows,
         includeDiagnosticOperations: false,
         isLatestPage: true,
@@ -1789,6 +1805,9 @@ function selectThreadConversationOutline(
         acceptedClientRequestContext,
         contextWindowEvents: [],
         events: decodedEvents,
+        headStateEvents: listStoredServiceTurnContextRows(db, thread.id).map(
+          toThreadEventWithMeta,
+        ),
         options: {
           completedTurnDisplay: options.completedTurnDisplay,
           includeNestedRows: false,
@@ -1898,6 +1917,7 @@ export function buildThreadConversationOutlineProjectionKey(
     thread.titleFallback,
     options.completedTurnDisplay,
     options.includeClearedContextHistory,
+    options.includeService ?? false,
   ]);
 }
 
@@ -2258,7 +2278,10 @@ function buildTimelineTurnSummaryDetailsPage(
     THREAD_TIMELINE_EVENT_DATA_BYTE_LIMIT
       ? hydratedEventRows
       : eventRowsWithBackgroundTaskState;
-  const projectionEvents = projectionEventRows
+  const projectionEvents = mergeStoredEventRowsById([
+    ...projectionEventRows,
+    ...listStoredServiceTurnContextRows(db, thread.id),
+  ])
     .filter((row) => row.sequence <= snapshot.maxSeq)
     .map((row) => toThreadEventWithMeta(row));
   const children = buildThreadTimelineTurnDetailsFromEvents({

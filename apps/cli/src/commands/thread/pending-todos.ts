@@ -8,6 +8,7 @@ import type { BbSdk } from "@bb/sdk";
 interface FetchThreadPendingTodosArgs {
   sdk: Pick<BbSdk, "threads">;
   threadId: string;
+  includeService?: boolean;
 }
 
 export async function fetchThreadPendingTodos(
@@ -17,6 +18,7 @@ export async function fetchThreadPendingTodos(
     const response = await args.sdk.threads.timeline({
       threadId: args.threadId,
       summaryOnly: "true",
+      ...(args.includeService ? { includeService: "true" as const } : {}),
     });
     return response.pendingTodos;
   } catch {

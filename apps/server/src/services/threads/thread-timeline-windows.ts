@@ -45,6 +45,7 @@ type ThreadTimelineWindowDeps = Pick<
 >;
 
 export interface ThreadTimelineWindowRequest {
+  includeService?: boolean;
   deferContent: boolean;
   includeNestedRows: boolean;
   page: ThreadTimelinePageRequest;
@@ -104,6 +105,7 @@ function latestWindowKey(
     segmentLimit,
     request.deferContent,
     request.includeNestedRows,
+    request.includeService ?? false,
     request.summaryOnly,
   ].join("|");
 }
@@ -147,6 +149,7 @@ export function createThreadTimelineWindows(
       deferContent: request.deferContent,
       includeClearedContextHistory,
       includeDiagnosticOperations,
+      includeService: request.includeService,
       includeNestedRows: request.includeNestedRows,
       maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
       planCommand: resolveProviderPlanCommand(

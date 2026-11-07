@@ -1552,7 +1552,9 @@ function ThreadDetailViewInternal(
   const canAssignToParent = isThreadRoot;
   const canTakeOverThread = Boolean(thread.parentThreadId);
   const environmentProvisioningFailure =
-    thread.status === "error" && thread.environmentId === null
+    thread.status === "error" &&
+    !thread.serviceTurn &&
+    thread.environmentId === null
       ? hasThreadProvisioningFailure(timeline.timelineRows)
       : false;
   const threadEnvironmentProviderLookup = findEnvironmentDisplayProvider(
@@ -1911,21 +1913,19 @@ function ThreadDetailViewInternal(
     }
   };
   const panelTabs: readonly SecondaryPanelRenderableTab[] =
-    syncedOrderedSecondaryFileTabs.map(
-      (tab): SecondaryPanelRenderableTab => ({
-        ...presentPanelTab(tab),
-        tab,
-        renderContent: () => renderSecondaryTabContent(tab),
-        onSelect:
-          tab.kind === "terminal"
-            ? () => terminals.select(tab.terminalId)
-            : () => handleActivateFileTab(tab.id),
-        onClose:
-          tab.kind === "terminal"
-            ? () => terminals.close(tab.terminalId)
-            : () => closeTab(tab.id),
-      }),
-    );
+    syncedOrderedSecondaryFileTabs.map((tab): SecondaryPanelRenderableTab => ({
+      ...presentPanelTab(tab),
+      tab,
+      renderContent: () => renderSecondaryTabContent(tab),
+      onSelect:
+        tab.kind === "terminal"
+          ? () => terminals.select(tab.terminalId)
+          : () => handleActivateFileTab(tab.id),
+      onClose:
+        tab.kind === "terminal"
+          ? () => terminals.close(tab.terminalId)
+          : () => closeTab(tab.id),
+    }));
   const threadDetailContent = (
     <MarkdownLocalFileContextMenuContext.Provider
       value={getLocalFileContextMenuItems}

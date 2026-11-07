@@ -1,3 +1,4 @@
+import type { ServiceTurnDescriptor } from "@bb/domain";
 import {
   getEnvironment,
   getThread,
@@ -152,6 +153,7 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
+  serviceTurn?: ServiceTurnDescriptor;
   /** Retry provenance; absent for an original dispatch. */
   retryOf?: TurnRequestRetryMarker;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
@@ -407,6 +409,7 @@ export function captureUserMessageSentTelemetry(
 }
 
 function appendAndQueueSendThreadMessageInTransaction({
+  serviceTurn,
   retryOf,
   beforeAppendInTransaction,
   db,
@@ -433,6 +436,7 @@ function appendAndQueueSendThreadMessageInTransaction({
             threadId: thread.id,
             environmentId,
             type: "client/turn/requested",
+            ...(serviceTurn ? { serviceTurn } : {}),
             ...(retryOf !== undefined ? { retryOf } : {}),
             input,
             ...(inputGroups !== undefined ? { inputGroups } : {}),
@@ -565,11 +569,12 @@ async function sendThreadMessageWithoutContextClear(
   // `system` whatever the original was: nobody asked for it a second time, and
   // counting it as a user message would inflate every "messages sent" figure by
   // however many times the provider happened to be rate limited.
-  const { initiator } = resolveDispatchAuthor({
+  const { initiator: resolvedInitiator } = resolveDispatchAuthor({
     retrying: args.retryOf !== undefined,
     senderThreadId,
     startedOnBehalfOf: null,
   });
+  const initiator = payload.serviceTurn ? "system" : resolvedInitiator;
   const shouldCaptureUserMessageSent =
     args.trigger === "user" && initiator === "user" && input.length > 0;
   const telemetryInitiator = resolveTelemetryInitiator({
@@ -689,6 +694,7 @@ async function sendThreadMessageWithoutContextClear(
         }
       : await prepareReadyThreadTurnCommand(deps, commandArgs);
     const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+      serviceTurn: payload.serviceTurn,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
         beforeAppendInTransaction({ tx });
@@ -786,6 +792,7 @@ async function sendThreadMessageWithoutContextClear(
     requestId,
   });
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+    serviceTurn: payload.serviceTurn,
     ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
     beforeAppendInTransaction,
     db: deps.db,

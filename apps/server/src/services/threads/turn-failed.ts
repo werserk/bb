@@ -192,6 +192,9 @@ export function buildTurnFailedEvent(
   return {
     threadId,
     requestId: failed.request.requestId,
+    ...(failed.request.serviceTurn
+      ? { experimental_serviceTurn: failed.request.serviceTurn }
+      : {}),
     turnId: providerError?.turnId ?? null,
     errorInfo:
       providerErrorInfo ?? doorRejectionErrorInfo(db, { threadId, failed }),

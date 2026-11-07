@@ -45,6 +45,7 @@ interface HistoryOptions extends JsonOptions {
 }
 
 interface QueueListOptions extends JsonOptions {
+  includeService?: boolean;
   waitHolder?: string;
 }
 
@@ -320,6 +321,7 @@ export function registerOrganizationCommands(
     .description("Manage queued thread messages");
   queue
     .command("list [threadId]")
+    .option("--include-service", "Include service queue rows")
     .description("List queued messages; omit the thread to list every one")
     .option(
       "--wait-holder <holder>",
@@ -329,7 +331,7 @@ export function registerOrganizationCommands(
     .action(
       action(async (threadId: string | undefined, opts: QueueListOptions) => {
         const sdk = createCliBbSdk(getUrl());
-        const result =
+        const raw =
           threadId === undefined
             ? await sdk.threads.queue.list({
                 ...(opts.waitHolder
@@ -337,6 +339,9 @@ export function registerOrganizationCommands(
                   : {}),
               })
             : await sdk.threads.queuedMessages.list({ threadId });
+        const result = opts.includeService
+          ? raw
+          : raw.filter((row) => !row.serviceTurn);
         if (outputJson(opts, result)) return;
         if (result.length === 0) {
           console.log("No queued messages found");

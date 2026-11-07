@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { serviceTurnDescriptorSchema } from "./service-turn.js";
 import {
   approvalPendingInteractionResolutionSchema,
   interactionLifecycleSchema,
@@ -60,6 +61,7 @@ export type ClientTurnLifecycleEventData = z.infer<
 >;
 
 export const turnRequestEventDataSchema = z.object({
+  serviceTurn: serviceTurnDescriptorSchema.optional(),
   direction: z.literal("outbound"),
   requestId: clientTurnRequestIdSchema,
   // Retry provenance, written only when a `turn.failed` gate's retry row
@@ -187,6 +189,7 @@ export const systemUserQuestionLifecycleEventDataSchema = z.object({
 });
 
 export const systemThreadInterruptedEventDataSchema = z.object({
+  serviceTurn: serviceTurnDescriptorSchema.optional(),
   reason: systemThreadInterruptedReasonSchema,
   cause: z.literal("host-connection-lost").optional(),
 });

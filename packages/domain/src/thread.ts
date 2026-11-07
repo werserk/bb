@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { serviceTurnDescriptorSchema } from "./service-turn.js";
 import { threadCreateOriginSchema } from "./thread-create-origin.js";
 import { environmentWorkspaceDisplayKindSchema } from "./environment.js";
 import {
@@ -50,8 +51,8 @@ export type ThreadRuntimeState = z.infer<typeof threadRuntimeStateSchema>;
 
 export type ThreadActivityState = z.infer<typeof threadActivityStateSchema>;
 
-
 export const threadQueuedMessageSchema = z.object({
+  serviceTurn: serviceTurnDescriptorSchema.nullish(),
   id: z.string(),
   origin: threadCreateOriginSchema.nullable(),
   originPluginId: z.string().nullable(),
@@ -109,6 +110,7 @@ export const threadQueuedMessageSchema = z.object({
 export type ThreadQueuedMessage = z.infer<typeof threadQueuedMessageSchema>;
 
 export const threadSchema = z.object({
+  serviceTurn: serviceTurnDescriptorSchema.nullish(),
   id: z.string(),
   projectId: z.string(),
   environmentId: z.string().nullable(),

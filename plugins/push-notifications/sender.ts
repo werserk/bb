@@ -605,6 +605,7 @@ export function createPushSender(args: CreatePushSenderArgs): PushSender {
       turnsWithPost.delete(thread.id);
     },
     onThreadFailed({ thread, error }) {
+      if (thread.serviceTurn) return;
       turnsWithPost.delete(thread.id);
       schedule(thread.id, "thread-error", firstLine(error ?? ""));
     },
