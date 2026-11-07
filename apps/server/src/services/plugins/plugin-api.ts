@@ -971,6 +971,9 @@ export function createPluginApi(options: {
   let instructionProvider: PluginInstructionProvider | null = null;
 
   const agents: PluginAgents = {
+    experimental_toolContextCapabilities() {
+      return { callerIdentity: true };
+    },
     configure(provider) {
       assertLive();
       if (agentConfigurationProvider !== null) {

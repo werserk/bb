@@ -4317,3 +4317,7 @@ Hidden service dispatch also exposes `MessageDispatchHookContext.experimental_se
 ## Pending allocation by plugin origin
 
 Thread create permits empty `input: []` with declared `origin: "plugin"`, retaining pending execution defaults without provider dispatch. This is an allocation contract shared with plugin thread spawning, not hidden-turn authorization: the public create origin is not an authenticated plugin identity. Hidden service send separately requires an authenticated plugin token, managed target and sender scope, and explicit v1 capability. Audit whether empty pending allocation should require plugin authentication before stabilizing this behaviour; unrelated plugin-origin creation can currently use it.
+
+## bb.agents.experimental_toolContextCapabilities
+
+Returns `{ callerIdentity: true }` when native plugin tool contexts preserve the authenticated daemon payload's optional `turnId` and `callId`. Missing turn IDs remain absent; no current-turn lookup or argument fallback. Core built-in plan and environment tools use the same authenticated route and require turn identity. Stabilization requires both provider paths, old daemon compatibility, late calls across rollover, parallel calls and Stop/restart tests. Identity is caller provenance, not active-turn authorization.

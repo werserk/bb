@@ -897,6 +897,7 @@ export type HostDaemonDaemonWsMessage = z.infer<
 >;
 
 export const hostDaemonToolCallRequestSchema = toolCallRequestSchema
+  .partial({ turnId: true })
   .pick({
     threadId: true,
     providerThreadId: true,

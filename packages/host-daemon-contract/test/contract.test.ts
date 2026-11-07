@@ -3651,3 +3651,37 @@ describe("bounded file read contract", () => {
     ).toBe(false);
   });
 });
+
+describe("plugin tool caller identity wire compatibility", () => {
+  const original = {
+    sessionId: "session-old-daemon",
+    threadId: "thread",
+    providerThreadId: "provider-thread",
+    turnId: "turn-old-daemon",
+    callId: "call-old-daemon",
+    tool: "plugin_tool",
+    arguments: {},
+  };
+  it("accepts existing daemon payloads without rewriting their identity", () => {
+    expect(contract.hostDaemonToolCallRequestSchema.parse(original)).toEqual(
+      original,
+    );
+  });
+  it("preserves missing turn identity and never supplies a default", () => {
+    const { turnId: _turnId, ...missing } = original;
+    expect(contract.hostDaemonToolCallRequestSchema.parse(missing)).toEqual(
+      missing,
+    );
+    expect(
+      contract.hostDaemonToolCallRequestSchema.parse(missing),
+    ).not.toHaveProperty("turnId");
+    for (const turnId of ["", null, 7]) {
+      expect(
+        contract.hostDaemonToolCallRequestSchema.safeParse({
+          ...original,
+          turnId,
+        }).success,
+      ).toBe(false);
+    }
+  });
+});

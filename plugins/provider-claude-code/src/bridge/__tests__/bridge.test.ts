@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   chmodSync,
   mkdirSync,
@@ -6145,6 +6147,90 @@ describe("bridge", () => {
         bridge.restore();
       }
     });
+  });
+  it("forwards concurrent native MCP call IDs for daemon turn resolution", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const live = createControlledClaudeQuery();
+    queryMock.mockReturnValue(live);
+    const threadId = "thread-caller-context";
+    const client = new Client({ name: "caller-probe", version: "1" });
+    try {
+      bridge.sendRequest(1, "thread/start", {
+        threadId,
+        cwd: "/tmp/worktree",
+        instructionMode: "append",
+        options: canonicalOptions({}),
+        dynamicTools: [
+          {
+            name: "context_probe",
+            description: "Probe",
+            inputSchema: { type: "object" },
+          },
+        ],
+      });
+      await bridge.waitForResponse(1);
+      bridge.sendRequest(
+        2,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "probe" }],
+        }),
+      );
+      await readNextPrompt(getLatestQueryCall());
+      await bridge.waitForResponse(2);
+      const server = getLatestQueryOptions().mcpServers?.["bb-bridge"];
+      if (!server || server.type !== "sdk")
+        throw new Error("Expected native SDK MCP server");
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      await server.instance.connect(serverTransport);
+      await client.connect(clientTransport);
+      const first = client.callTool({
+        name: "context_probe",
+        arguments: { turnId: "forged" },
+      });
+      const second = client.callTool({ name: "context_probe", arguments: {} });
+      await vi.waitFor(() =>
+        expect(
+          bridge.messages.filter(
+            (m) => "method" in m && m.method === "item/tool/call",
+          ),
+        ).toHaveLength(2),
+      );
+      const calls = bridge.messages.filter(
+        (m) => "method" in m && m.method === "item/tool/call",
+      );
+      expect(calls[0].params).toMatchObject({
+        threadId,
+        turnId: null,
+        tool: "context_probe",
+        arguments: { turnId: "forged" },
+      });
+      expect(calls[1].params).toMatchObject({
+        threadId,
+        turnId: null,
+        tool: "context_probe",
+      });
+      const ids = calls.map(
+        (call) =>
+          z.object({ callId: z.string().min(1) }).parse(call.params).callId,
+      );
+      expect(ids[0]).not.toBe(ids[1]);
+      for (const call of calls)
+        handleLine(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: call.id,
+            result: { success: true, contentItems: [] },
+          }),
+        );
+      await Promise.all([first, second]);
+    } finally {
+      await client.close();
+      await stopBridgeThread({ bridge, queries: [live], threadId });
+      bridge.restore();
+    }
   });
 });
 

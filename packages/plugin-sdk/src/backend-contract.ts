@@ -1121,6 +1121,11 @@ export type PluginAgentToolResult =
 export interface PluginAgentToolContext {
   threadId: string;
   projectId: string;
+  /** Calling turn from the authenticated daemon payload; absent when unavailable.
+   * This identifies the caller, not whether that turn is still active. */
+  turnId?: string;
+  /** Daemon tool-call identity, for correlation with native tool events. */
+  callId?: string;
   /**
    * Aborts when the tool-call request is cancelled, the thread is stopped or
    * deleted, or this plugin is disposed. Opening a form with `bb.ui.requestInput`
@@ -1685,6 +1690,9 @@ export interface PluginProviderDeclaration {
 }
 
 export interface PluginAgents {
+  /** Feature-detect trusted caller identity support. Individual calls may still
+   * omit turnId; consumers requiring identity must refuse such calls. */
+  experimental_toolContextCapabilities(): { callerIdentity: true };
   /**
    * Select this plugin's statically registered tools and manifest skills for
    * each thread/session resolution, with optional dynamic instructions. The

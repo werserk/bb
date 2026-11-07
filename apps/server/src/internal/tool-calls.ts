@@ -81,7 +81,18 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         );
       }
 
-      if (payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME) {
+      if (
+        payload.turnId === undefined &&
+        (payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME ||
+          payload.tool === BB_UPDATE_PLAN_TOOL.name)
+      ) {
+        throw new ApiError(400, "invalid_request", "This tool requires turnId");
+      }
+
+      if (
+        payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME &&
+        payload.turnId !== undefined
+      ) {
         return context.json(
           await handleUpdateEnvironmentDirectoryToolCall(deps, {
             currentEnvironment: environment,
@@ -92,7 +103,10 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         );
       }
 
-      if (payload.tool === BB_UPDATE_PLAN_TOOL.name) {
+      if (
+        payload.tool === BB_UPDATE_PLAN_TOOL.name &&
+        payload.turnId !== undefined
+      ) {
         return context.json(
           handleUpdatePlanToolCall(deps, {
             threadId: thread.id,
@@ -122,6 +136,10 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
               ctx: {
                 threadId: thread.id,
                 projectId: thread.projectId,
+                ...(payload.turnId !== undefined
+                  ? { turnId: payload.turnId }
+                  : {}),
+                callId: payload.callId,
                 signal,
               },
             });

@@ -1073,6 +1073,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Add tools, skills, and instructions to every agent session. With this, a plugin can:",
         bullets: [
           "Give agents native tools that work like bb's built-in ones",
+          "Feature-detect bb.agents.experimental_toolContextCapabilities?.()?.callerIdentity; execute receives optional daemon turnId and callId, never identity from tool arguments or the latest turn. Caller identity does not prove the turn is active; refuse missing identity when required",
           "Choose per thread which tools and skills are available",
           "Add instructions to the system prompt when a session starts",
         ],
