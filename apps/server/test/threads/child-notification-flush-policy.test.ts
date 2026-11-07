@@ -4,6 +4,7 @@ import {
   listEvents,
   listQueuedThreadMessages,
   updateThread,
+  updateQueuedThreadMessage,
 } from "@bb/db";
 import {
   turnRequestEventDataSchema,
@@ -32,6 +33,7 @@ import {
   sendNextQueuedMessageIfPresent,
 } from "../../src/services/threads/queued-messages.js";
 import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
+import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import type { TestAppHarness } from "../helpers/test-app.js";
 
 function systemRequests(harness: TestAppHarness, threadId: string) {
@@ -257,6 +259,7 @@ describe("child notification flush policy", () => {
           parentNotifications: "off",
         });
       }
+      const debug = vi.spyOn(harness.deps.logger, "debug");
       if (change === "off-auto") {
         await sendNextQueuedMessageIfPresent(harness.deps, {
           threadId: parent.id,
@@ -270,6 +273,20 @@ describe("child notification flush policy", () => {
         });
       }
       expect(listQueuedThreadMessages(harness.db, parent.id)).toEqual([]);
+      if (change === "auto")
+        expect(debug).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reason: "missing-render-snapshots",
+            dropped: false,
+          }),
+          "Queued child notice uses legacy policy",
+        );
+      if (change === "needs-attention")
+        expect(debug).not.toHaveBeenCalledWith(
+          expect.objectContaining({ reason: "missing-render-snapshots" }),
+          expect.any(String),
+        );
+      debug.mockRestore();
       if (change === "auto" || change === "unrelated") {
         expect(systemRequests(harness, parent.id)).toHaveLength(1);
         expect(systemRequests(harness, parent.id)[0]?.input).toEqual(input);
@@ -287,6 +304,10 @@ describe("child notification flush policy", () => {
     "all-off",
     "auto",
     "two-survivors",
+    "long-output",
+    "edited-content",
+    "requeue",
+    "requeue-all",
     "failure-context",
     "interruption",
   ] as const)("re-renders queued snapshots after %s", async (change) => {
@@ -303,11 +324,18 @@ describe("child notification flush policy", () => {
           : change === "interruption"
             ? "interrupted"
             : "completed";
+      const output =
+        change === "long-output" ? `  ${"x".repeat(6000)}  ` : "Original reply";
+      const marker = "\n\n[... output truncated ...]";
+      const capturedOutput =
+        change === "long-output"
+          ? `${"x".repeat(4000 - marker.length)}${marker}`
+          : output;
       const retained: ChildThreadTurnNotificationBatchItem[] = [
         {
           childThread: child,
           turnStatus: status,
-          terminalOutput: status === "completed" ? "Original reply" : null,
+          terminalOutput: status === "completed" ? capturedOutput : null,
           activeWorkflowCount: 0,
           ...(change === "failure-context"
             ? {
@@ -345,7 +373,7 @@ describe("child notification flush policy", () => {
           item: {
             type: "agentMessage",
             id: "old-reply",
-            text: "Original reply",
+            text: output,
           },
         },
       });
@@ -376,6 +404,23 @@ describe("child notification flush policy", () => {
         );
       });
       const row = listQueuedThreadMessages(harness.db, parent.id)[0]!;
+      const edited = [
+        {
+          type: "text" as const,
+          text: "  Edited notice\n\nUnicode: ё 🚀\n ",
+          mentions: [],
+        },
+      ];
+      if (change === "edited-content") {
+        expect(
+          updateQueuedThreadMessage(harness.db, harness.deps.hub, {
+            id: row.id,
+            threadId: parent.id,
+            expectedUpdatedAt: row.updatedAt,
+            content: edited,
+          }).kind,
+        ).toBe("updated");
+      }
       seedEvent(harness.deps, {
         threadId: child.id,
         providerThreadId: "child-provider",
@@ -400,13 +445,22 @@ describe("child notification flush policy", () => {
         });
       } else if (change === "deleted")
         deleteThread(harness.db, harness.deps.hub, sibling.id);
-      else if (change !== "auto")
+      else if (
+        change !== "auto" &&
+        change !== "edited-content" &&
+        change !== "requeue-all"
+      )
         updateThread(harness.db, harness.deps.hub, sibling.id, {
           parentNotifications: change === "stuck" ? "stuck" : "off",
         });
       if (change === "all-off")
         updateThread(harness.db, harness.deps.hub, child.id, {
           parentNotifications: "off",
+        });
+      if (change === "requeue" || change === "requeue-all")
+        applyLoggedThreadLifecycleEvent(harness.deps, {
+          threadId: parent.id,
+          event: { type: "run.started" },
         });
       if (change === "two-survivors")
         await sendNextQueuedMessageIfPresent(harness.deps, {
@@ -419,15 +473,61 @@ describe("child notification flush policy", () => {
           queuedMessageId: row.id,
           threadId: parent.id,
         });
+      if (change === "requeue" || change === "requeue-all") {
+        expect(systemRequests(harness, parent.id)).toEqual([]);
+        const [requeued] = listQueuedThreadMessages(harness.db, parent.id);
+        expect(requeued!.id).not.toBe(row.id);
+        expect(JSON.parse(requeued!.waitingOn!)).toEqual({
+          kind: "turn-starting",
+        });
+        expect(
+          JSON.parse(requeued!.systemNotice!).childOutcomeSnapshots,
+        ).toHaveLength(change === "requeue-all" ? 2 : 1);
+        expect(JSON.parse(requeued!.content)).toEqual(
+          buildChildThreadTurnStatusBatchInput({
+            items: change === "requeue-all" ? [...retained, dropped] : retained,
+          }),
+        );
+        updateThread(harness.db, harness.deps.hub, child.id, {
+          parentNotifications: "off",
+        });
+        updateThread(harness.db, harness.deps.hub, sibling.id, {
+          parentNotifications: "off",
+        });
+        applyLoggedThreadLifecycleEvent(harness.deps, {
+          threadId: parent.id,
+          event: { type: "run.succeeded" },
+        });
+        await sendQueuedMessage(harness.deps, {
+          claimPolicy: { kind: "explicit-send" },
+          mode: "auto",
+          queuedMessageId: requeued!.id,
+          threadId: parent.id,
+        });
+      }
       expect(listQueuedThreadMessages(harness.db, parent.id)).toEqual([]);
       const requests = systemRequests(harness, parent.id);
-      if (change === "all-off") expect(requests).toEqual([]);
+      if (
+        change === "all-off" ||
+        change === "requeue" ||
+        change === "requeue-all"
+      )
+        expect(requests).toEqual([]);
       else {
-        const items = change === "auto" ? [...retained, dropped] : retained;
+        const items =
+          change === "auto" || change === "edited-content"
+            ? [...retained, dropped]
+            : retained;
         expect(requests).toHaveLength(1);
         expect(requests[0]?.input).toEqual(
-          buildChildThreadTurnStatusBatchInput({ items }),
+          change === "edited-content"
+            ? edited
+            : buildChildThreadTurnStatusBatchInput({ items }),
         );
+        if (change === "edited-content")
+          expect(JSON.stringify(requests[0]?.input)).toBe(
+            JSON.stringify(edited),
+          );
         expect(requests[0]?.systemMessageKind).toBe(
           items.length > 1
             ? "child-outcome-batch"
