@@ -1,5 +1,9 @@
 import { sql } from "drizzle-orm";
-import { listEvents, listQueuedThreadMessages } from "@bb/db";
+import {
+  getLatestThreadSequence,
+  listEvents,
+  listQueuedThreadMessages,
+} from "@bb/db";
 import { threadScope, turnScope, turnRequestEventDataSchema } from "@bb/domain";
 import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
 import type { ThreadEvent } from "@bb/domain";
@@ -13,8 +17,8 @@ import {
   seedThreadRuntimeState,
   seedTurnStarted,
 } from "../helpers/seed.js";
-import { admitChildNotice } from "../../src/services/threads/child-notice-policy.js";
-import { reconcileChildThreadNoticesAtBoot } from "../../src/services/threads/child-notice-reconcile.js";
+import { settleDanglingBackgroundTasks } from "../../src/services/threads/background-task-reconciliation.js";
+import { reconcileChildThreadNotices } from "../../src/services/threads/child-notice-reconcile.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
@@ -319,7 +323,7 @@ describe("H1 row 3: turn-scoped, episode-aware text", () => {
       await post(harness, f, [turnStarted(f, "t2")]);
       await post(harness, f, [turnCompleted(f, "t2")]);
       await tick(5_000);
-      expect(noticeCount(harness, f.parent.id)).toBe(1);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
     });
   });
 
@@ -429,15 +433,15 @@ describe("H1 row 5: boot reconcile", () => {
       const f = setup(harness, "idle");
       vi.useFakeTimers();
       seedLostCompletion(harness, f, "LOST result");
-      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await reconcileChildThreadNotices(harness.deps);
       await tick(3_000);
       await vi.waitFor(() =>
         expect(notices(harness, f.parent.id)).toHaveLength(1),
       );
       expect(noticeText(harness, f.parent.id)[0]).toContain("LOST result");
-      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await reconcileChildThreadNotices(harness.deps);
       await tick(3_000);
-      expect(noticeCount(harness, f.parent.id)).toBe(1);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
     });
   });
 
@@ -464,7 +468,7 @@ describe("H1 row 5: boot reconcile", () => {
           },
         },
       });
-      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await reconcileChildThreadNotices(harness.deps);
       await tick(3_000);
       const requests = listEvents(harness.db, { threadId: f.parent.id }).filter(
         (row) =>
@@ -484,70 +488,109 @@ describe("H1 row 5: boot reconcile", () => {
       harness.db.run(
         sql`UPDATE threads SET archived_at = ${Date.now()} WHERE id = ${f.parent.id}`,
       );
-      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await reconcileChildThreadNotices(harness.deps);
       await tick(3_000);
       expect(noticeCount(harness, f.parent.id)).toBe(0);
     });
   });
 });
 
-describe("H1 row 6: per-child notice cap", () => {
-  async function finishTurn(harness: TestAppHarness, f: Family, n: number) {
-    const turnId = `loop-${n}`;
-    seedTurnStarted(harness.deps, {
-      environmentId: f.environment.id,
-      threadId: f.child.id,
-      turnId,
-      providerThreadId: PROVIDER,
-    });
-    say(harness, f, turnId, `m-${n}`, `result ${n}`, 100 + n * 10);
-    await post(harness, f, [turnCompleted(f, turnId)]);
-    await tick(3_000);
-  }
-  const capNotices = (harness: TestAppHarness, f: Family) =>
-    [
-      ...noticeText(harness, f.parent.id),
-      ...listQueuedThreadMessages(harness.db, f.parent.id).map(
-        (row) => row.content,
-      ),
-    ].filter((t) => t.includes("Update cap reached"));
-
-  it("sends six completions, then one cap notice, then nothing", async () => {
+describe("H1 review regressions", () => {
+  it("F1 releases exactly once after daemon restart settles dangling work", async () => {
     await withTestHarness(async (harness) => {
       const f = setup(harness);
       vi.useFakeTimers();
-      for (let n = 1; n <= 9; n += 1) await finishTurn(harness, f, n);
-      expect(noticeCount(harness, f.parent.id)).toBe(7);
-      expect(capNotices(harness, f)).toHaveLength(1);
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "HELD final result", 2);
+      await post(harness, f, [bgTask(f, "dangling", "local_bash", false)]);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3000);
+      await reconcileChildThreadNotices(harness.deps);
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
+      settleDanglingBackgroundTasks(harness.deps, { hostId: f.session.hostId });
+      await tick(35000);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
+      await reconcileChildThreadNotices(harness.deps);
+      await tick(3000);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
     });
   });
-
-  it("starts counting again after the parent receives a message that is not a system notice", async () => {
+  it("F1 bounds a hold even when background work never settles", async () => {
     await withTestHarness(async (harness) => {
       const f = setup(harness);
-      const admit = () =>
-        admitChildNotice(harness.db, {
-          childThreadId: f.child.id,
-          now: Date.now(),
-          parentThreadId: f.parent.id,
-        });
-      const first = Array.from({ length: 8 }, admit);
-      expect(first).toEqual([
-        ...Array<string>(6).fill("send"),
-        "cap-notice",
-        "drop",
-      ]);
-      seedStoredEvent(harness.deps, {
-        threadId: f.parent.id,
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
         environmentId: f.environment.id,
-        providerThreadId: "parent-provider-thread",
-        sequence: 5_000,
-        type: "client/turn/requested",
-        scope: threadScope(),
-        createdAt: Date.now() + 1_000,
-        data: { initiator: "user" },
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
       });
-      expect(admit()).toBe("send");
+      say(harness, f, "t1", "m1", "HELD result", 2);
+      await post(harness, f, [bgTask(f, "stuck", "local_bash", false)]);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3000);
+      harness.db.run(
+        sql`UPDATE events SET created_at = ${Date.now() - 60 * 60 * 1000} WHERE thread_id = ${f.child.id} AND type = 'turn/completed'`,
+      );
+      await reconcileChildThreadNotices(harness.deps);
+      await tick(3000);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
+      expect(noticeText(harness, f.parent.id)[0]).toContain(
+        "background work still reported running",
+      );
+    });
+  });
+  it("F4 delivers all results in a nine-round parent-driven loop", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      for (let n = 1; n <= 9; n++) {
+        const turnId = `loop-${n}`;
+        await post(harness, f, [turnStarted(f, turnId)]);
+        say(
+          harness,
+          f,
+          turnId,
+          `m-${n}`,
+          `result ${n}`,
+          getLatestThreadSequence(harness.db, { threadId: f.child.id }) + 1,
+        );
+        await post(harness, f, [turnCompleted(f, turnId)]);
+        await tick(3000);
+      }
+      expect(noticeCount(harness, f.parent.id)).toBe(9);
+      const text = [
+        ...noticeText(harness, f.parent.id),
+        ...listQueuedThreadMessages(harness.db, f.parent.id).map(
+          (r) => r.content,
+        ),
+      ].join("\n");
+      expect(text).toContain("result 9");
+      expect(text).not.toContain("Update cap reached");
+    });
+  });
+  it("F5 reports a textless completion after a failed notice", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      await post(harness, f, [
+        { ...turnCompleted(f, "t1"), status: "failed" } as ThreadEvent,
+      ]);
+      await tick(3000);
+      await post(harness, f, [turnStarted(f, "t2"), turnCompleted(f, "t2")]);
+      await tick(3000);
+      expect(noticeCount(harness, f.parent.id)).toBe(2);
     });
   });
 });

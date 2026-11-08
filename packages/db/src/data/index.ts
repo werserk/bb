@@ -380,8 +380,7 @@ export {
 } from "./events.js";
 export {
   getLatestRootTurnCompletion,
-  hasBackgroundWorkSettledAfterSequence,
-  hasNonSystemTurnRequestedSince,
+  getBackgroundWorkSettledAtAfterSequence,
   hasRootTurnStartedAfterSequence,
   listChildNoticeRefs,
   listIdleNotifiableChildThreadIds,

@@ -159,6 +159,22 @@ describe("child thread notifications", () => {
     expect(message).not.toContain("Deploy script failed on preflight.");
   });
 
+  it("F6 truncates each raw result once and bounds a large batch", () => {
+    const items = Array.from({ length: 30 }, (_, n) => ({
+      activeWorkflowCount: 0,
+      childThread: testThread({ id: `leaf_${n}`, title: `leaf${n}` }),
+      terminalOutput: "x".repeat(10000),
+      turnStatus: "completed" as const,
+    }));
+    const pair = renderBatchMessage({ items: items.slice(0, 2) });
+    const omitted = [...pair.matchAll(/(\d+) characters omitted/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(omitted).toHaveLength(2);
+    expect(omitted.every((n) => n > 7000)).toBe(true);
+    expect(renderBatchMessage({ items }).length).toBeLessThan(9500);
+  });
+
   it("keeps a batch of long results inside one total bound", () => {
     const long = (mark: string) =>
       `${mark}-head ${"x".repeat(5_000)} ${mark}-tail`;

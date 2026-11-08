@@ -1,23 +1,15 @@
-import { getLastThreadOutput, getRootAgentOutput } from "./thread-data.js";
+import { getRootAgentOutput } from "./thread-data.js";
 import {
   getLatestRootTurnCompletion,
-  hasBackgroundWorkSettledAfterSequence,
-  hasNonSystemTurnRequestedSince,
+  getBackgroundWorkSettledAtAfterSequence,
   hasRootTurnStartedAfterSequence,
   listActiveBackgroundTaskCountsByThreadIds,
   listChildNoticeRefs,
   type DbConnection,
 } from "@bb/db";
 
-/**
- * When the native child notice is sent, held or dropped. Pure reads of the
- * event log plus one in-memory cap table; nothing here writes.
- */
-
-/** How far back "the child's episode" and "already delivered" look. */
 export const CHILD_NOTICE_EPISODE_LOOKBACK_MS = 6 * 60 * 60 * 1000;
-const CHILD_NOTICE_CAP = 6;
-const CHILD_NOTICE_CAP_WINDOW_MS = 30 * 60 * 1000;
+export const CHILD_NOTICE_MAX_HOLD_MS = 60 * 60 * 1000;
 const EARLIER_IN_EPISODE_LABEL = "(Earlier in this episode:)";
 
 interface ChildTurnArgs {
@@ -45,11 +37,6 @@ export function getChildBackgroundCounts(
   };
 }
 
-/**
- * True when a "completed" notice for this turn would be a false "done": a
- * background command or agent still runs, or one settled after the turn ended
- * and the provider has not started the resume turn that reads its result.
- */
 export function isChildNoticeHeld(
   db: DbConnection,
   args: ChildTurnArgs,
@@ -65,7 +52,7 @@ export function isChildNoticeHeld(
     sequence: completion.sequence,
   };
   return (
-    hasBackgroundWorkSettledAfterSequence(db, lookup) &&
+    getBackgroundWorkSettledAtAfterSequence(db, lookup) !== null &&
     !hasRootTurnStartedAfterSequence(db, lookup)
   );
 }
@@ -79,12 +66,6 @@ interface ResolveChildNoticeTextArgs extends ChildTurnArgs {
   parentThreadId: string;
 }
 
-/**
- * The text a completed notice carries. The turn's own final root message wins.
- * A turn with none reports the newest root message since the last notice the
- * parent got ("earlier in this episode"); with nothing new after a notice that
- * was already delivered, the turn is silent noise and sends nothing.
- */
 export function resolveChildNoticeText(
   db: DbConnection,
   args: ResolveChildNoticeTextArgs,
@@ -101,7 +82,11 @@ export function resolveChildNoticeText(
     turnId: args.turnId,
   });
   if (own) return { kind: "text", output: own };
-  const lastNoticeAt = Math.max(since, ...refs.map((ref) => ref.createdAt));
+  const completed = refs.filter((ref) => ref.status === "completed");
+  const lastNoticeAt = Math.max(
+    since,
+    ...completed.map((ref) => ref.createdAt),
+  );
   const episode = getRootAgentOutput(db, {
     threadId: args.childThreadId,
     sinceCreatedAt: lastNoticeAt,
@@ -112,62 +97,7 @@ export function resolveChildNoticeText(
       output: `${EARLIER_IN_EPISODE_LABEL}\n\n${episode}`,
     };
   }
-  return refs.length > 0 ? { kind: "skip" } : { kind: "text", output: null };
+  return completed.length > 0
+    ? { kind: "skip" }
+    : { kind: "text", output: null };
 }
-
-/** Text for a notice built without a turn id (legacy callers). */
-export function resolveUnscopedChildNoticeText(
-  db: DbConnection,
-  childThreadId: string,
-): string | null {
-  return getLastThreadOutput(db, childThreadId)?.trim() || null;
-}
-
-interface CapState {
-  count: number;
-  notified: boolean;
-  startedAt: number;
-}
-
-const capStates = new Map<string, CapState>();
-
-export type ChildNoticeAdmission = "send" | "cap-notice" | "drop";
-
-interface AdmitChildNoticeArgs {
-  childThreadId: string;
-  now: number;
-  parentThreadId: string;
-}
-
-/**
- * Per (parent, child) loop cap: at most CHILD_NOTICE_CAP completed notices per
- * window while the parent writes nothing of its own. The first one over the cap
- * becomes a single "cap reached" notice; the rest are dropped. A message from
- * anyone but the system to the parent resets the count. In memory by design:
- * a restart only re-opens the window.
- */
-export function admitChildNotice(
-  db: DbConnection,
-  args: AdmitChildNoticeArgs,
-): ChildNoticeAdmission {
-  const key = `${args.parentThreadId}\u0000${args.childThreadId}`;
-  let state = capStates.get(key);
-  if (
-    !state ||
-    args.now - state.startedAt > CHILD_NOTICE_CAP_WINDOW_MS ||
-    hasNonSystemTurnRequestedSince(db, {
-      threadId: args.parentThreadId,
-      sinceMs: state.startedAt,
-    })
-  ) {
-    state = { count: 0, notified: false, startedAt: args.now };
-    capStates.set(key, state);
-  }
-  state.count += 1;
-  if (state.count <= CHILD_NOTICE_CAP) return "send";
-  if (state.notified) return "drop";
-  state.notified = true;
-  return "cap-notice";
-}
-
-export const CHILD_NOTICE_CAP_SUMMARY = `Update cap reached: it finished ${CHILD_NOTICE_CAP} times in a row without a message from you. Further completions are held until you or the owner write to it.`;

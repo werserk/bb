@@ -1,7 +1,7 @@
 import {
   getLatestRootTurnCompletion,
   getThread,
-  hasBackgroundWorkSettledAfterSequence,
+  getBackgroundWorkSettledAtAfterSequence,
   hasRootTurnStartedAfterSequence,
   listChildNoticeRefs,
   listIdleNotifiableChildThreadIds,
@@ -9,80 +9,103 @@ import {
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import {
   CHILD_NOTICE_EPISODE_LOOKBACK_MS,
+  CHILD_NOTICE_MAX_HOLD_MS,
   getChildBackgroundCounts,
 } from "./child-notice-policy.js";
 import { queueChildThreadTurnNotificationBestEffort } from "./child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "./thread-parent.js";
 
-/**
- * A notice lives in memory for 2 s and a settle grace for 30 s, so a restart
- * loses them. At boot, a notifiable child that finished a root turn inside the
- * lookback and whose parent has neither been sent nor queued a notice for it
- * gets one through the normal path. A notice written before notices named
- * their turn counts when it is newer than the turn, so the first boot after
- * the upgrade does not repeat what the parent already got.
- */
-export async function reconcileChildThreadNoticesAtBoot(
+const SETTLE_GRACE_MS = 30_000;
+const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function armChildNoticeSettleGrace(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  childThreadId: string,
+): void {
+  clearTimeout(settleTimers.get(childThreadId));
+  const timer = setTimeout(() => {
+    settleTimers.delete(childThreadId);
+    void releaseChildNoticeIfOwed(deps, childThreadId);
+  }, SETTLE_GRACE_MS);
+  timer.unref?.();
+  settleTimers.set(childThreadId, timer);
+}
+
+export async function reconcileChildThreadNotices(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): Promise<void> {
-  const since = Date.now() - CHILD_NOTICE_EPISODE_LOOKBACK_MS;
-  for (const childThreadId of listIdleNotifiableChildThreadIds(deps.db, {
-    sinceMs: since,
+  for (const id of listIdleNotifiableChildThreadIds(deps.db, {
+    sinceMs: Date.now() - CHILD_NOTICE_EPISODE_LOOKBACK_MS,
   })) {
-    try {
-      await reconcileChildThreadNotice(deps, childThreadId, since);
-    } catch (error) {
-      deps.logger.error(
-        { err: error, childThreadId },
-        "Failed to reconcile a child thread notice at boot",
-      );
-    }
+    await releaseChildNoticeIfOwed(deps, id);
   }
 }
 
-async function reconcileChildThreadNotice(
+export async function releaseChildNoticeIfOwed(
   deps: LoggedPendingInteractionWorkSessionDeps,
   childThreadId: string,
-  since: number,
 ): Promise<void> {
-  const child = getThread(deps.db, childThreadId);
-  const parent = child?.parentThreadId
-    ? getThread(deps.db, child.parentThreadId)
-    : null;
-  if (
-    !child ||
-    !isParentNotifiableChildThread(child, "completed") ||
-    !parent ||
-    parent.archivedAt !== null ||
-    parent.deletedAt !== null
-  ) {
-    return;
+  try {
+    const child = getThread(deps.db, childThreadId);
+    const parent = child?.parentThreadId
+      ? getThread(deps.db, child.parentThreadId)
+      : null;
+    if (
+      !child ||
+      child.status !== "idle" ||
+      !isParentNotifiableChildThread(child, "completed") ||
+      !parent ||
+      parent.archivedAt !== null ||
+      parent.deletedAt !== null
+    )
+      return;
+    const completion = getLatestRootTurnCompletion(deps.db, {
+      threadId: childThreadId,
+    });
+    if (completion?.status !== "completed") return;
+    const lookup = { threadId: childThreadId, sequence: completion.sequence };
+    if (hasRootTurnStartedAfterSequence(deps.db, lookup)) return;
+    if (
+      listChildNoticeRefs(deps.db, {
+        childThreadId,
+        parentThreadId: parent.id,
+        sinceCreatedAt: completion.createdAt,
+      }).some((ref) => ref.turnId === completion.turnId || ref.turnId === null)
+    )
+      return;
+    const counts = getChildBackgroundCounts(deps.db, childThreadId);
+    const running = counts.commands + counts.agents > 0;
+    const expired =
+      Date.now() - completion.createdAt >= CHILD_NOTICE_MAX_HOLD_MS;
+    if (running && !expired) return;
+    const settledAt = getBackgroundWorkSettledAtAfterSequence(deps.db, lookup);
+    if (
+      !running &&
+      settledAt !== null &&
+      Date.now() - settledAt < SETTLE_GRACE_MS
+    ) {
+      armChildNoticeSettleGrace(deps, childThreadId);
+      return;
+    }
+    await queueChildThreadTurnNotificationBestEffort(deps, {
+      afterBackgroundSettle: running
+        ? "expired"
+        : settledAt !== null
+          ? "settled"
+          : undefined,
+      childThread: {
+        id: child.id,
+        projectId: child.projectId,
+        title: child.title,
+      },
+      parentThreadId: parent.id,
+      turnId: completion.turnId,
+      turnStatus: "completed",
+    });
+  } catch (error) {
+    deps.logger.error(
+      { err: error, childThreadId },
+      "Failed to release a child thread notice",
+    );
   }
-  const completion = getLatestRootTurnCompletion(deps.db, {
-    threadId: childThreadId,
-  });
-  if (completion?.status !== "completed" || completion.createdAt < since)
-    return;
-  const counts = getChildBackgroundCounts(deps.db, childThreadId);
-  if (counts.commands + counts.agents > 0) return;
-  const delivered = listChildNoticeRefs(deps.db, {
-    childThreadId,
-    parentThreadId: parent.id,
-    sinceCreatedAt: completion.createdAt,
-  }).some((ref) => ref.turnId === completion.turnId || ref.turnId === null);
-  if (delivered) return;
-  const lookup = { threadId: childThreadId, sequence: completion.sequence };
-  await queueChildThreadTurnNotificationBestEffort(deps, {
-    afterBackgroundSettle:
-      hasBackgroundWorkSettledAfterSequence(deps.db, lookup) &&
-      !hasRootTurnStartedAfterSequence(deps.db, lookup),
-    childThread: {
-      id: child.id,
-      projectId: child.projectId,
-      title: child.title,
-    },
-    parentThreadId: parent.id,
-    turnId: completion.turnId,
-    turnStatus: "completed",
-  });
 }

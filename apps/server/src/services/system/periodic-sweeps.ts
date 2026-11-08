@@ -1,4 +1,4 @@
-import { reconcileChildThreadNoticesAtBoot } from "../threads/child-notice-reconcile.js";
+import { reconcileChildThreadNotices } from "../threads/child-notice-reconcile.js";
 import {
   runThreadPruningSweep,
   THREAD_PRUNING_SWEEP_LIMITS,
@@ -528,6 +528,7 @@ export function createThreadEventPruningJob(
 }
 
 const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
+  { cadenceMs: 30_000, category: "durable-intent-retry", name: "child-thread-notices", run: reconcileChildThreadNotices },
   {
     cadenceMs: 0,
     category: "durable-intent-retry",
@@ -670,7 +671,7 @@ export async function runStartupRecoverySweep(
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);
-  await reconcileChildThreadNoticesAtBoot(deps);
+  await reconcileChildThreadNotices(deps);
 }
 
 export async function runPeriodicSweeps(

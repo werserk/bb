@@ -44,7 +44,7 @@ import {
   isActivePruneTriggerThreadEventType,
   maybePruneActiveThreadEventHistory,
 } from "../services/system/event-pruning.js";
-import { armChildNoticeSettleGrace } from "../services/threads/child-notice-settle.js";
+import { armChildNoticeSettleGrace } from "../services/threads/child-notice-reconcile.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../services/threads/child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "../services/threads/thread-parent.js";
 import {

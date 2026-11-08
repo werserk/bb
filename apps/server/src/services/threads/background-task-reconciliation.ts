@@ -15,13 +15,14 @@ import {
 } from "@bb/domain";
 import type { ThreadEventBackgroundTaskItem } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
+import { armChildNoticeSettleGrace } from "./child-notice-reconcile.js";
 import { appendThreadEventsInTransaction } from "./thread-events.js";
 
 interface SettleDanglingBackgroundTasksArgs {
   hostId: string;
 }
 
-type SettleDanglingBackgroundTasksDeps = Pick<AppDeps, "db" | "hub" | "logger">;
+type SettleDanglingBackgroundTasksDeps = import("../../types.js").LoggedPendingInteractionWorkSessionDeps;
 type SettleDanglingBackgroundTasksTransactionDeps = {
   db: DbTransaction;
   hub: DbNotifier;
@@ -70,6 +71,7 @@ export function settleDanglingBackgroundTasks(
   );
 
   for (const threadId of settledThreadIds) {
+    armChildNoticeSettleGrace(deps, threadId);
     deps.hub.notifyThread(threadId, ["events-appended"], {
       timelineSequence: getLatestThreadSequence(deps.db, {
         threadId: threadId,

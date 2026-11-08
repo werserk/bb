@@ -6,11 +6,6 @@ import {
 } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 
-/**
- * Read-only lookups behind the native child notice: which root turn a child
- * finished last, whether work is owed a resume, and which child turns a parent
- * was already told about. They never write.
- */
 
 interface ChildThreadArgs {
   threadId: string;
@@ -23,7 +18,6 @@ export interface RootTurnCompletionRow {
   turnId: string;
 }
 
-/** The child's newest root `turn/completed` (a turn with a root `turn/started`). */
 export function getLatestRootTurnCompletion(
   db: DbQueryConnection,
   args: ChildThreadArgs,
@@ -56,32 +50,25 @@ export function hasRootTurnStartedAfterSequence(
   );
 }
 
-/** A background command or agent (not a workflow) settled after `sequence`. */
-export function hasBackgroundWorkSettledAfterSequence(
+export function getBackgroundWorkSettledAtAfterSequence(
   db: DbQueryConnection,
   args: ChildThreadArgs & { sequence: number },
-): boolean {
-  return (
-    db.all<{ n: number }>(sql`
-      SELECT 1 AS n FROM events
-      WHERE thread_id = ${args.threadId} AND type = 'item/backgroundTask/completed'
-        AND item_kind = 'backgroundTask' AND sequence > ${args.sequence}
-        AND json_extract(data, '$.item.taskType') IN (
-          ${LOCAL_BASH_TASK_TYPE}, ${LOCAL_AGENT_TASK_TYPE}, ${LOCAL_SUBAGENT_TASK_TYPE})
-      LIMIT 1`).length > 0
-  );
+): number | null {
+  return db.all<{ at: number }>(sql`
+    SELECT max(created_at) AS at FROM events
+    WHERE thread_id = ${args.threadId} AND type = 'item/backgroundTask/completed'
+      AND item_kind = 'backgroundTask' AND sequence > ${args.sequence}
+      AND json_extract(data, '$.item.taskType') IN (
+        ${LOCAL_BASH_TASK_TYPE}, ${LOCAL_AGENT_TASK_TYPE}, ${LOCAL_SUBAGENT_TASK_TYPE})
+  `)[0]?.at ?? null;
 }
 
 export interface ChildNoticeRef {
   createdAt: number;
-  /** Null for a notice written before notices named the child turn. */
-  turnId: string | null;
+  status: string;
+    turnId: string | null;
 }
 
-/**
- * Notices a parent got, or has queued, about one child since `sinceCreatedAt`:
- * sent `client/turn/requested` system turns and pending queued rows alike.
- */
 export function listChildNoticeRefs(
   db: DbQueryConnection,
   args: {
@@ -91,14 +78,14 @@ export function listChildNoticeRefs(
   },
 ): ChildNoticeRef[] {
   return db.all<ChildNoticeRef>(sql`
-    SELECT json_extract(o.value, '$.turnId') AS turnId, e.created_at AS createdAt
+    SELECT json_extract(o.value, '$.turnId') AS turnId, json_extract(o.value, '$.status') AS status, e.created_at AS createdAt
     FROM events e,
       json_each(COALESCE(json_extract(e.data, '$.systemMessageSubject.outcomes'), '[]')) o
     WHERE e.thread_id = ${args.parentThreadId} AND e.type = 'client/turn/requested'
       AND e.created_at >= ${args.sinceCreatedAt}
       AND json_extract(o.value, '$.threadId') = ${args.childThreadId}
     UNION ALL
-    SELECT json_extract(o.value, '$.turnId') AS turnId, q.created_at AS createdAt
+    SELECT json_extract(o.value, '$.turnId') AS turnId, json_extract(o.value, '$.turnStatus') AS status, q.created_at AS createdAt
     FROM queued_thread_messages q,
       json_each(COALESCE(json_extract(q.system_notice, '$.childOutcomeSnapshots'), '[]')) o
     WHERE q.thread_id = ${args.parentThreadId} AND q.system_notice IS NOT NULL
@@ -106,7 +93,6 @@ export function listChildNoticeRefs(
       AND json_extract(o.value, '$.childThread.id') = ${args.childThreadId}`);
 }
 
-/** Idle, notifiable child threads whose state changed since `sinceMs`. */
 export function listIdleNotifiableChildThreadIds(
   db: DbQueryConnection,
   args: { sinceMs: number },
@@ -121,17 +107,3 @@ export function listIdleNotifiableChildThreadIds(
     .map((row) => row.id);
 }
 
-/** The parent got a turn from someone other than the system since `sinceMs`. */
-export function hasNonSystemTurnRequestedSince(
-  db: DbQueryConnection,
-  args: ChildThreadArgs & { sinceMs: number },
-): boolean {
-  return (
-    db.all<{ n: number }>(sql`
-      SELECT 1 AS n FROM events
-      WHERE thread_id = ${args.threadId} AND type = 'client/turn/requested'
-        AND created_at >= ${args.sinceMs}
-        AND json_extract(data, '$.initiator') <> 'system'
-      LIMIT 1`).length > 0
-  );
-}

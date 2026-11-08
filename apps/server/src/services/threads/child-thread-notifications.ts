@@ -23,14 +23,11 @@ import {
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
 import {
-  admitChildNotice,
-  CHILD_NOTICE_CAP_SUMMARY,
   getChildBackgroundCounts,
   isChildNoticeHeld,
   resolveChildNoticeText,
   type ChildNoticeText,
 } from "./child-notice-policy.js";
-import { getLastThreadOutput } from "./thread-data.js";
 import { isParentNotifiableChildThread } from "./thread-parent.js";
 
 export type ChildThreadNotificationSource = ParentSystemThreadMentionSource;
@@ -68,7 +65,7 @@ interface BuildChildThreadNeedsAttentionInputArgs {
 
 interface QueueChildThreadTurnNotificationArgs {
   /** Set when background work settled with no follow-up turn: skips the hold. */
-  afterBackgroundSettle?: boolean;
+  afterBackgroundSettle?: "settled" | "expired";
   childThread: ChildThreadNotificationSource;
   parentThreadId: string;
   /** The child root turn that ended; scopes the text and the hold. */
@@ -92,7 +89,6 @@ const CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT = 4_000;
 const CHILD_THREAD_OUTPUT_HEAD_CHAR_LIMIT = 1_200;
 /** Result text shared by all completed children of one batched notice. */
 const CHILD_THREAD_BATCH_OUTPUT_TOTAL_CHAR_LIMIT = 6_000;
-const CHILD_THREAD_BATCH_OUTPUT_MIN_CHAR_LIMIT = 400;
 const CHILD_THREAD_INSPECTION_GUIDANCE =
   "Review the thread before deciding next steps.";
 const CHILD_THREAD_NEEDS_ATTENTION_FALLBACK_SUMMARY =
@@ -253,10 +249,13 @@ function buildChildThreadBatchStatusLineSegments(
     line.item.activeWorkflowCount,
   );
   if (line.item.turnStatus === "completed") {
-    const output = truncateChildThreadOutput(
-      formatChildThreadCompletionOutputExcerpt(line.item.terminalOutput),
-      args.outputLimit,
-    );
+    const output =
+      args.outputLimit < 100
+        ? "Read the child thread for its result."
+        : truncateChildThreadOutput(
+            line.item.terminalOutput?.trim() || "No final output was recorded.",
+            args.outputLimit,
+          );
     return [
       { kind: "mention", mention: line.mention },
       { kind: "text", text: ` completed${workflowClause}:\n\n${output}` },
@@ -278,27 +277,14 @@ function getChildThreadCompletionText(
   if (args.turnStatus !== "completed") {
     return { kind: "text", output: null };
   }
-  const text: ChildNoticeText = args.turnId
+  return args.turnId
     ? resolveChildNoticeText(deps.db, {
         childThreadId: args.childThread.id,
         now: Date.now(),
         parentThreadId: args.parentThreadId,
         turnId: args.turnId,
       })
-    : {
-        kind: "text",
-        output:
-          getLastThreadOutput(deps.db, args.childThread.id)?.trim() || null,
-      };
-  return text.kind === "text" && text.output
-    ? {
-        kind: "text",
-        output: truncateChildThreadOutput(
-          text.output.trim(),
-          CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
-        ),
-      }
-    : text;
+    : { kind: "text", output: null };
 }
 
 function buildChildThreadTurnStatusBatchSegments(
@@ -315,10 +301,7 @@ function buildChildThreadTurnStatusBatchSegments(
   ).length;
   const outputLimit = Math.min(
     CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
-    Math.max(
-      CHILD_THREAD_BATCH_OUTPUT_MIN_CHAR_LIMIT,
-      Math.floor(CHILD_THREAD_BATCH_OUTPUT_TOTAL_CHAR_LIMIT / completed),
-    ),
+    Math.floor(CHILD_THREAD_BATCH_OUTPUT_TOTAL_CHAR_LIMIT / completed),
   );
   const lineBreak = completed > 0 ? "\n\n- " : "\n- ";
   const segments: ParentSystemInputSegment[] = [];
@@ -474,24 +457,7 @@ async function flushChildThreadTurnNotificationBatch(
         )
       );
     });
-    const capped: ChildThreadTurnNotificationBatchItem[] = [];
-    const sendable = items.filter((item) => {
-      if (item.turnStatus !== "completed") return true;
-      const admission = admitChildNotice(deps.db, {
-        childThreadId: item.childThread.id,
-        now: Date.now(),
-        parentThreadId,
-      });
-      if (admission === "cap-notice") capped.push(item);
-      return admission === "send";
-    });
-    for (const item of capped) {
-      await queueChildThreadNeedsAttentionNotificationBestEffort(deps, {
-        blockerSummary: CHILD_NOTICE_CAP_SUMMARY,
-        childThread: item.childThread,
-        parentThreadId,
-      });
-    }
+    const sendable = items;
     if (sendable.length === 0) return;
     await queueParentSystemMessage(deps, {
       input: buildChildThreadTurnStatusBatchInput({
@@ -555,7 +521,12 @@ function queueChildThreadTurnNotificationBatchItem(
       .workflows,
     childThread: args.childThread,
     terminalOutput: args.afterBackgroundSettle
-      ? [output, CHILD_THREAD_SETTLED_WITHOUT_TURN_NOTE]
+      ? [
+          output,
+          args.afterBackgroundSettle === "expired"
+            ? "Warning: background work still reported running after 1 h; inspect the child before treating this as a final result."
+            : CHILD_THREAD_SETTLED_WITHOUT_TURN_NOTE,
+        ]
           .filter(Boolean)
           .join("\n\n")
       : output,
