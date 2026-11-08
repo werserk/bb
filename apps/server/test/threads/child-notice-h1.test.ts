@@ -13,6 +13,7 @@ import {
   seedThreadRuntimeState,
   seedTurnStarted,
 } from "../helpers/seed.js";
+import { admitChildNotice } from "../../src/services/threads/child-notice-policy.js";
 import { reconcileChildThreadNoticesAtBoot } from "../../src/services/threads/child-notice-reconcile.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
@@ -46,7 +47,10 @@ type Family = ReturnType<typeof setup>;
 function notices(harness: TestAppHarness, parentId: string) {
   return listEvents(harness.db, { threadId: parentId })
     .filter((row) => row.type === "client/turn/requested")
-    .map((row) => turnRequestEventDataSchema.parse(JSON.parse(row.data)))
+    .flatMap((row) => {
+      const parsed = turnRequestEventDataSchema.safeParse(JSON.parse(row.data));
+      return parsed.success ? [parsed.data] : [];
+    })
     .filter((data) => data.initiator === "system");
 }
 /** Notices sent plus notices still queued behind a busy parent. */
@@ -442,7 +446,7 @@ describe("H1 row 5: boot reconcile", () => {
       const f = setup(harness, "idle");
       vi.useFakeTimers();
       seedLostCompletion(harness, f, "OLD result");
-      await tick(1_000);
+      await tick(5_000);
       seedStoredEvent(harness.deps, {
         threadId: f.parent.id,
         environmentId: f.environment.id,
@@ -483,6 +487,66 @@ describe("H1 row 5: boot reconcile", () => {
       await reconcileChildThreadNoticesAtBoot(harness.deps);
       await tick(3_000);
       expect(noticeCount(harness, f.parent.id)).toBe(0);
+    });
+  });
+});
+
+describe("H1 row 6: per-child notice cap", () => {
+  async function finishTurn(harness: TestAppHarness, f: Family, n: number) {
+    const turnId = `loop-${n}`;
+    seedTurnStarted(harness.deps, {
+      environmentId: f.environment.id,
+      threadId: f.child.id,
+      turnId,
+      providerThreadId: PROVIDER,
+    });
+    say(harness, f, turnId, `m-${n}`, `result ${n}`, 100 + n * 10);
+    await post(harness, f, [turnCompleted(f, turnId)]);
+    await tick(3_000);
+  }
+  const capNotices = (harness: TestAppHarness, f: Family) =>
+    [
+      ...noticeText(harness, f.parent.id),
+      ...listQueuedThreadMessages(harness.db, f.parent.id).map(
+        (row) => row.content,
+      ),
+    ].filter((t) => t.includes("Update cap reached"));
+
+  it("sends six completions, then one cap notice, then nothing", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      for (let n = 1; n <= 9; n += 1) await finishTurn(harness, f, n);
+      expect(noticeCount(harness, f.parent.id)).toBe(7);
+      expect(capNotices(harness, f)).toHaveLength(1);
+    });
+  });
+
+  it("starts counting again after the parent receives a message that is not a system notice", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      const admit = () =>
+        admitChildNotice(harness.db, {
+          childThreadId: f.child.id,
+          now: Date.now(),
+          parentThreadId: f.parent.id,
+        });
+      const first = Array.from({ length: 8 }, admit);
+      expect(first).toEqual([
+        ...Array<string>(6).fill("send"),
+        "cap-notice",
+        "drop",
+      ]);
+      seedStoredEvent(harness.deps, {
+        threadId: f.parent.id,
+        environmentId: f.environment.id,
+        providerThreadId: "parent-provider-thread",
+        sequence: 5_000,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: { initiator: "user" },
+      });
+      expect(admit()).toBe("send");
     });
   });
 });

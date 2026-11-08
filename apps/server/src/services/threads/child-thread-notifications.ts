@@ -23,6 +23,8 @@ import {
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
 import {
+  admitChildNotice,
+  CHILD_NOTICE_CAP_SUMMARY,
   getChildBackgroundCounts,
   isChildNoticeHeld,
   resolveChildNoticeText,
@@ -443,14 +445,32 @@ async function flushChildThreadTurnNotificationBatch(
         )
       );
     });
-    if (items.length === 0) return;
+    const capped: ChildThreadTurnNotificationBatchItem[] = [];
+    const sendable = items.filter((item) => {
+      if (item.turnStatus !== "completed") return true;
+      const admission = admitChildNotice(deps.db, {
+        childThreadId: item.childThread.id,
+        now: Date.now(),
+        parentThreadId,
+      });
+      if (admission === "cap-notice") capped.push(item);
+      return admission === "send";
+    });
+    for (const item of capped) {
+      await queueChildThreadNeedsAttentionNotificationBestEffort(deps, {
+        blockerSummary: CHILD_NOTICE_CAP_SUMMARY,
+        childThread: item.childThread,
+        parentThreadId,
+      });
+    }
+    if (sendable.length === 0) return;
     await queueParentSystemMessage(deps, {
       input: buildChildThreadTurnStatusBatchInput({
-        items,
+        items: sendable,
       }),
       parentThreadId,
-      ...childThreadTurnStatusBatchTaxonomy(items),
-      childOutcomeSnapshots: items.map((item) => ({
+      ...childThreadTurnStatusBatchTaxonomy(sendable),
+      childOutcomeSnapshots: sendable.map((item) => ({
         ...item,
         childThread: {
           id: item.childThread.id,

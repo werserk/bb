@@ -2,6 +2,7 @@ import { getLastThreadOutput, getRootAgentOutput } from "./thread-data.js";
 import {
   getLatestRootTurnCompletion,
   hasBackgroundWorkSettledAfterSequence,
+  hasNonSystemTurnRequestedSince,
   hasRootTurnStartedAfterSequence,
   listActiveBackgroundTaskCountsByThreadIds,
   listChildNoticeRefs,
@@ -15,6 +16,8 @@ import {
 
 /** How far back "the child's episode" and "already delivered" look. */
 export const CHILD_NOTICE_EPISODE_LOOKBACK_MS = 6 * 60 * 60 * 1000;
+const CHILD_NOTICE_CAP = 6;
+const CHILD_NOTICE_CAP_WINDOW_MS = 30 * 60 * 1000;
 const EARLIER_IN_EPISODE_LABEL = "(Earlier in this episode:)";
 
 interface ChildTurnArgs {
@@ -119,3 +122,52 @@ export function resolveUnscopedChildNoticeText(
 ): string | null {
   return getLastThreadOutput(db, childThreadId)?.trim() || null;
 }
+
+interface CapState {
+  count: number;
+  notified: boolean;
+  startedAt: number;
+}
+
+const capStates = new Map<string, CapState>();
+
+export type ChildNoticeAdmission = "send" | "cap-notice" | "drop";
+
+interface AdmitChildNoticeArgs {
+  childThreadId: string;
+  now: number;
+  parentThreadId: string;
+}
+
+/**
+ * Per (parent, child) loop cap: at most CHILD_NOTICE_CAP completed notices per
+ * window while the parent writes nothing of its own. The first one over the cap
+ * becomes a single "cap reached" notice; the rest are dropped. A message from
+ * anyone but the system to the parent resets the count. In memory by design:
+ * a restart only re-opens the window.
+ */
+export function admitChildNotice(
+  db: DbConnection,
+  args: AdmitChildNoticeArgs,
+): ChildNoticeAdmission {
+  const key = `${args.parentThreadId}\u0000${args.childThreadId}`;
+  let state = capStates.get(key);
+  if (
+    !state ||
+    args.now - state.startedAt > CHILD_NOTICE_CAP_WINDOW_MS ||
+    hasNonSystemTurnRequestedSince(db, {
+      threadId: args.parentThreadId,
+      sinceMs: state.startedAt,
+    })
+  ) {
+    state = { count: 0, notified: false, startedAt: args.now };
+    capStates.set(key, state);
+  }
+  state.count += 1;
+  if (state.count <= CHILD_NOTICE_CAP) return "send";
+  if (state.notified) return "drop";
+  state.notified = true;
+  return "cap-notice";
+}
+
+export const CHILD_NOTICE_CAP_SUMMARY = `Update cap reached: it finished ${CHILD_NOTICE_CAP} times in a row without a message from you. Further completions are held until you or the owner write to it.`;

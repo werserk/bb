@@ -120,3 +120,18 @@ export function listIdleNotifiableChildThreadIds(
         AND updated_at >= ${args.sinceMs}`)
     .map((row) => row.id);
 }
+
+/** The parent got a turn from someone other than the system since `sinceMs`. */
+export function hasNonSystemTurnRequestedSince(
+  db: DbQueryConnection,
+  args: ChildThreadArgs & { sinceMs: number },
+): boolean {
+  return (
+    db.all<{ n: number }>(sql`
+      SELECT 1 AS n FROM events
+      WHERE thread_id = ${args.threadId} AND type = 'client/turn/requested'
+        AND created_at >= ${args.sinceMs}
+        AND json_extract(data, '$.initiator') <> 'system'
+      LIMIT 1`).length > 0
+  );
+}

@@ -381,6 +381,7 @@ export {
 export {
   getLatestRootTurnCompletion,
   hasBackgroundWorkSettledAfterSequence,
+  hasNonSystemTurnRequestedSince,
   hasRootTurnStartedAfterSequence,
   listChildNoticeRefs,
   listIdleNotifiableChildThreadIds,
