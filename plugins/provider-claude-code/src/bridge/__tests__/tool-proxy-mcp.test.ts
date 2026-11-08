@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -38,13 +39,26 @@ async function connect(server: ReturnType<typeof buildBridgeMcpServer>) {
 
 describe("buildBridgeMcpServer", () => {
   it("always loads the plan tool while leaving other tools deferrable", async () => {
+    const coreSource = readFileSync(
+      new URL(
+        "../../../../../apps/server/src/services/threads/thread-plan-tool.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const name = coreSource.match(
+      /export const BB_UPDATE_PLAN_TOOL[^=]*=\s*\{\s*name:\s*"([^"]+)"/,
+    )?.[1];
+    if (name === undefined) {
+      throw new Error("Cannot read BB_UPDATE_PLAN_TOOL.name from core");
+    }
     const server = buildBridgeMcpServer(
-      ["bb_update_plan", "bb_workflow_result"].map((name) => ({
+      [name, "bb_workflow_result"].map((name) => ({
         name,
         description: name,
         inputSchema: { type: "object" },
       })),
-      async () => ({ content: "unused" }),
+      async () => ({ content: "Plan updated" }),
     );
     const client = await connect(server);
 
@@ -54,6 +68,16 @@ describe("buildBridgeMcpServer", () => {
         "anthropic/alwaysLoad": true,
       });
       expect(listed.tools[1]?._meta).toBeUndefined();
+      const result = await client.callTool({
+        name,
+        arguments: { plan: [{ step: "First", status: "completed" }] },
+      });
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: "Plan updated (1/1 steps completed). Ensure you keep using the plan to track your progress and mark it complete when you finish.",
+        },
+      ]);
     } finally {
       await client.close();
     }
