@@ -604,6 +604,18 @@ export function ThreadScreen({
     />
   ) : null;
 
+  const plan =
+    thread.archivedAt === null &&
+    resolveEnvironmentGoneStatus(environment) === null ? (
+      <ThreadPlanCard
+        key={thread.id}
+        pendingTodos={timeline.pendingTodos}
+        rows={timelineRows}
+        waitingForOwner={hasPendingInteraction}
+        placement={presentation.kind === "page" ? "stacked" : "floating"}
+      />
+    ) : null;
+
   const chat = (() => {
     switch (presentation.kind) {
       case "page":
@@ -624,7 +636,10 @@ export function ThreadScreen({
               footer={promptArea}
               scrollOverlay={
                 <>
-                  <ThreadContextCard />
+                  <div className="pointer-events-none flex min-h-0 max-h-full max-w-full shrink-0 flex-col items-end gap-3 [&>[data-thread-context-card]]:min-h-0 [&>[data-thread-context-card]]:shrink">
+                    {plan}
+                    <ThreadContextCard />
+                  </div>
                   <div className="pointer-events-auto my-auto">
                     <ThreadTableOfContents
                       contextBoundarySeq={timeline.contextBoundarySeq}
@@ -669,20 +684,12 @@ export function ThreadScreen({
   })();
   return (
     <div
-      className="@container/thread-chat flex min-h-0 min-w-0 flex-1 flex-col"
+      className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
       data-thread-chat=""
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 @min-[880px]/thread-chat:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
-        {thread.archivedAt === null &&
-          resolveEnvironmentGoneStatus(environment) === null && (
-            <ThreadPlanCard
-              key={thread.id}
-              pendingTodos={timeline.pendingTodos}
-              rows={timelineRows}
-              waitingForOwner={hasPendingInteraction}
-            />
-          )}
+        {presentation.kind !== "page" && plan}
       </div>
     </div>
   );

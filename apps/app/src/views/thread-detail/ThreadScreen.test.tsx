@@ -214,6 +214,13 @@ it.each<ThreadScreenPresentation>([
   };
   const { container } = renderScreen(presentation, { timeline });
   expect(container.querySelectorAll("[data-thread-plan]")).toHaveLength(1);
+  if (presentation.kind === "page") {
+    expect(
+      container
+        .querySelector("[data-thread-plan]")
+        ?.closest("[data-scroll-overlay]"),
+    ).toBeTruthy();
+  }
   expect(screen.getByText("Inspect output")).toBeTruthy();
   expect(mocks.promptAreaProps.at(-1) ?? {}).not.toHaveProperty("pendingTodos");
 });

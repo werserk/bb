@@ -1,5 +1,5 @@
 import { threadPresentationText as t } from "@bb/thread-view";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type {
   ThreadTimelinePendingTodoItem,
   ThreadTimelinePendingTodoItemStatus,
@@ -7,7 +7,6 @@ import type {
 } from "@bb/domain";
 import {
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-  PROMPT_STACK_CARD_ROW_HEIGHT,
   PromptStackCard,
 } from "@/components/promptbox/banner/PromptStackCard";
 import {
@@ -18,12 +17,6 @@ import {
 } from "@bb/shared-ui/activity-row-styles";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
-import {
-  PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-  PromptStackHoverChevron,
-  useDisclosureFocusHandoff,
-  AnimatedDisclosureBody,
-} from "@bb/shared-ui/prompt-stack-disclosure";
 
 const STATUS_ACTIVITY_STATE: Record<
   ThreadTimelinePendingTodoItemStatus,
@@ -106,63 +99,82 @@ function TodoBody({
   items,
   failedLabel,
   stale,
+  regionLabel,
 }: {
+  regionLabel: string;
   items: readonly ThreadTimelinePendingTodoItem[];
   failedLabel: string;
   stale: boolean;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const activeIndex = items.findIndex((item) => item.status === "in_progress");
+  useEffect(() => {
+    const viewport = listRef.current;
+    const first = viewport?.querySelector("li");
+    if (viewport && first)
+      viewport.scrollTop =
+        Math.max(0, activeIndex - 1) * first.getBoundingClientRect().height;
+  }, [activeIndex]);
   return (
-    <ul className="max-h-40 @min-[880px]/thread-chat:max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
-      {items.map((item) => {
-        const activityState = STATUS_ACTIVITY_STATE[item.status];
-        const isActive = activityState === "active";
-        const muted =
-          stale && item.status !== "completed" && item.status !== "failed";
-        return (
-          <li
-            key={item.id}
-            className={activityRowClass(
-              activityState,
-              cn(
-                "flex min-w-0 items-start gap-2 text-xs",
-                isActive && TODO_ACTIVE_ROW_CLASS,
-                muted &&
-                  "!text-muted-foreground [&_span]:!text-muted-foreground [&_[data-icon-root]]:!text-muted-foreground",
-              ),
-            )}
-          >
-            <TodoStatusIcon status={item.status} failedLabel={failedLabel} />
-            <div className="min-w-0 flex-1">
-              <span
-                className={activityTextClass(
-                  activityState,
-                  "min-w-0 break-words",
+    <div
+      ref={listRef}
+      className="max-h-36 overflow-y-auto overscroll-contain snap-y snap-mandatory outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-ring"
+      role="region"
+      aria-label={regionLabel}
+      tabIndex={0}
+    >
+      <ul className="m-0 list-none p-0">
+        {items.map((item) => {
+          const activityState = STATUS_ACTIVITY_STATE[item.status];
+          const isActive = activityState === "active";
+          const muted =
+            stale && item.status !== "completed" && item.status !== "failed";
+          return (
+            <li
+              key={item.id}
+              className={activityRowClass(
+                activityState,
+                cn(
+                  "flex h-9 min-w-0 snap-start items-center gap-2 overflow-hidden px-2.5 py-0 text-xs",
+                  isActive && TODO_ACTIVE_ROW_CLASS,
+                  muted &&
+                    "!text-muted-foreground [&_span]:!text-muted-foreground [&_[data-icon-root]]:!text-muted-foreground",
+                ),
+              )}
+            >
+              <TodoStatusIcon status={item.status} failedLabel={failedLabel} />
+              <div className="min-w-0 flex-1">
+                <span
+                  className={activityTextClass(
+                    activityState,
+                    "block min-w-0 truncate leading-4",
+                  )}
+                  title={item.text}
+                >
+                  {item.text}
+                </span>
+                {item.note && (
+                  <span
+                    className="block truncate text-2xs leading-3.5 text-muted-foreground"
+                    title={item.note}
+                  >
+                    {item.note}
+                  </span>
                 )}
-                title={item.text}
-              >
-                {item.text}
-              </span>
+              </div>
               {item.actor && (
                 <span
-                  className="ml-2 inline-block max-w-24 truncate rounded border px-1 text-muted-foreground align-bottom"
+                  className="max-w-16 shrink-0 truncate rounded border px-1 text-2xs text-muted-foreground"
                   title={item.actor}
                 >
                   {item.actor}
                 </span>
               )}
-              {item.note && (
-                <span
-                  className="mt-1 block break-words text-muted-foreground"
-                  title={item.note}
-                >
-                  {item.note}
-                </span>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -175,7 +187,7 @@ export function ThreadTodoCard({
 }: ThreadTodoCardProps) {
   const bodyId = useId();
   const toggleId = useId();
-  const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
@@ -248,84 +260,101 @@ export function ThreadTodoCard({
     <PromptStackCard
       ariaLabel={labels[state]}
       className={cn(
-        "overflow-hidden rounded-xl",
+        "max-w-full overflow-hidden shadow-lg",
+        isExpanded
+          ? "w-76 rounded-xl @min-[880px]/thread-chat:w-80"
+          : "w-auto rounded-full",
         state === "waiting" && "border-warning text-warning",
         muted &&
           "text-muted-foreground [&_li]:!text-muted-foreground [&_li_span]:!text-muted-foreground [&_li_[data-icon-root]]:!text-muted-foreground",
       )}
-      style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && isExpanded) {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle();
+          triggerRef.current?.focus();
+        }
+      }}
     >
-      <div className="flex items-center">
-        <button
-          type="button"
-          id={toggleId}
-          aria-expanded={isExpanded}
-          aria-controls={bodyId}
-          aria-label={`${title}: ${progressLabel}`}
-          ref={focus.triggerRef}
-          onClick={focus.onTriggerClick}
-          className={cn(
-            TODO_HEADER_BUTTON_CLASS,
-            state === "waiting" && "!text-warning",
-            muted && "!text-muted-foreground",
-            PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-          )}
+      <button
+        type="button"
+        id={toggleId}
+        aria-expanded={isExpanded}
+        aria-controls={isExpanded ? bodyId : undefined}
+        aria-label={`${title}: ${progressLabel} · ${metadata}${stale ? ` · ${staleLabel}` : ""}`}
+        ref={triggerRef}
+        onClick={onToggle}
+        className={cn(
+          TODO_HEADER_BUTTON_CLASS,
+          "h-8 py-0 focus-visible:outline-offset-[-2px]",
+          isExpanded && "border-b",
+          state === "waiting" && "!text-warning",
+          muted && "!text-muted-foreground",
+        )}
+      >
+        <Icon
+          name={
+            state === "finished"
+              ? "Check"
+              : state === "waiting" || stale
+                ? "CircleAlert"
+                : "ListTodo"
+          }
+          className="size-3.5 shrink-0"
+          aria-hidden="true"
+        />
+        <span
+          className="shrink-0"
+          title={`${metadata}${stale ? ` · ${staleLabel}` : ""}`}
         >
+          {labels[state]}
+        </span>
+        {isExpanded && (
+          <span
+            className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-surface-recessed"
+            aria-hidden="true"
+          >
+            <span
+              className="block h-full bg-success"
+              style={{ width: `${(summary.count / items.length) * 100}%` }}
+            />
+          </span>
+        )}
+        <span className="shrink-0 tabular-nums">
+          {summary.count}/{items.length}
+        </span>
+        <span
+          className={
+            isExpanded
+              ? "ml-auto min-w-0 truncate text-2xs text-muted-foreground"
+              : "sr-only"
+          }
+          data-plan-age=""
+        >
+          <time dateTime={new Date(pendingTodos?.updatedAt ?? 0).toISOString()}>
+            {metadata}
+          </time>
+          {stale && <span className="sr-only">{staleLabel}</span>}
+        </span>
+        {isExpanded && (
           <Icon
-            name={
-              state === "finished"
-                ? "Check"
-                : state === "waiting"
-                  ? "CircleAlert"
-                  : "ListTodo"
-            }
-            className="size-3.5 shrink-0"
+            name="ChevronUp"
+            className="size-3 shrink-0"
             aria-hidden="true"
           />
-          <span
-            className={activityTextClass(
-              "active",
-              "min-w-0 flex-1 truncate text-left",
-            )}
-          >
-            {title}
-          </span>
-          <PromptStackHoverChevron isExpanded={isExpanded} />
-        </button>
-      </div>
-      <div className="px-3 pb-2 text-xs text-muted-foreground" data-plan-age="">
-        <time
-          dateTime={new Date(pendingTodos?.updatedAt ?? 0).toISOString()}
-          title={new Date(pendingTodos?.updatedAt ?? 0).toLocaleString(locale)}
-        >
-          {metadata}
-        </time>
-        {stale && (
-          <p
-            className="mt-1 leading-relaxed"
-            title={new Date(pendingTodos?.staleSince ?? 0).toLocaleString(
-              locale,
-            )}
-          >
-            {staleLabel}
-          </p>
         )}
-      </div>
-      <AnimatedDisclosureBody
-        id={bodyId}
-        labelledBy={toggleId}
-        isExpanded={isExpanded}
-        collapsedBorder="none"
-        collapseLabel={ru ? "Свернуть план" : "Collapse plan"}
-        collapseRef={focus.collapseRef}
-        onCollapse={focus.onCollapseClick}
-      >
-        <TodoBody
-          items={items}
-          failedLabel={t("plan.failed", locale)}
-          stale={stale}
-        />
-      </AnimatedDisclosureBody>
+      </button>
+      {isExpanded && (
+        <div id={bodyId}>
+          <TodoBody
+            items={items}
+            failedLabel={t("plan.failed", locale)}
+            stale={stale}
+            regionLabel={ru ? "Шаги плана" : "Plan steps"}
+          />
+        </div>
+      )}
     </PromptStackCard>
   );
 }

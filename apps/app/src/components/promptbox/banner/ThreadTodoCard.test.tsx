@@ -24,6 +24,7 @@ it("always shows relative age, even collapsed, and advances with time", () => {
       locale="en-US"
     />,
   );
+  expect(screen.getByRole("button", { name: /Updated 12/ })).toBeTruthy();
   expect(screen.getByText(/Updated 12/).getAttribute("datetime")).toBe(
     "2026-11-08T11:48:00.000Z",
   );

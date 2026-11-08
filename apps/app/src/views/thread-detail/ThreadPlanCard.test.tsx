@@ -105,3 +105,16 @@ it("shows waiting and localized stale metadata with unique disclosure ids", () =
     .filter(Boolean);
   expect(new Set(ids).size).toBe(ids.length);
 });
+
+it("collapses with Escape and returns focus to a recoverable plan button", () => {
+  render(
+    <ThreadPlanCard pendingTodos={plan} rows={rows} waitingForOwner={false} />,
+  );
+  const region = screen.getByRole("region", { name: "Plan steps" });
+  region.focus();
+  fireEvent.keyDown(region, { key: "Escape" });
+  const button = screen.getByRole("button", { expanded: false });
+  expect(document.activeElement).toBe(button);
+  fireEvent.click(button);
+  expect(screen.getByRole("region", { name: "Plan steps" })).toBeTruthy();
+});
