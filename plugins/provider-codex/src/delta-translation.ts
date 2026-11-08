@@ -1322,9 +1322,14 @@ export function translateCodexEventToDeltas(
         },
       ];
     case "error": {
-      const errorInfo = toProviderErrorInfo(
+      const resolvedErrorInfo = toProviderErrorInfo(
         resolveCodexErrorInfo(state, handledEvent.params),
       );
+      const unrecognized = handledEvent.params.error.unrecognizedCodexErrorInfo;
+      const errorInfo =
+        resolvedErrorInfo?.providerCode === "other" && unrecognized
+          ? { ...resolvedErrorInfo, providerCode: unrecognized }
+          : resolvedErrorInfo;
       return [
         {
           kind: "provider.error",

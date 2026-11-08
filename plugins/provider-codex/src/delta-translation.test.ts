@@ -1736,19 +1736,21 @@ describe("codex error and warning translation", () => {
         type: "provider/error",
         scope: turnScope(harness.turnId("turn-1")),
         detail: error.message,
+        errorInfo: {
+          category: "unknown",
+          providerCode: "modelNotFound",
+          httpStatusCode: null,
+        },
       }),
     ]);
     expect(
       harness.translate({
         jsonrpc: "2.0",
-        method: "thread/readState/changed",
-        params: { threadId: "t1", readState: { revision: "r1" } },
+        method: "error",
+        params: { error: { codexErrorInfo: "modelNotFound" }, threadId: "t1" },
       }),
     ).toEqual([
-      expect.objectContaining({
-        type: "provider/unhandled",
-        rawType: "thread/readState/changed",
-      }),
+      expect.objectContaining({ type: "provider/unhandled", rawType: "error" }),
     ]);
     expect(
       harness.translate({
