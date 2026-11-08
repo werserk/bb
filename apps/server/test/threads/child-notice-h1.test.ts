@@ -19,10 +19,17 @@ import {
 } from "../helpers/seed.js";
 import { settleDanglingBackgroundTasks } from "../../src/services/threads/background-task-reconciliation.js";
 import { reconcileChildThreadNotices } from "../../src/services/threads/child-notice-reconcile.js";
+import { runPeriodicSweeps } from "../../src/services/system/periodic-sweeps.js";
+import * as threadGuards from "../../src/services/threads/thread-context-mutation-guard.js";
+import * as parentMessages from "../../src/services/threads/parent-system-messages.js";
+import { queueChildThreadTurnNotificationBestEffort } from "../../src/services/threads/child-thread-notifications.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 function setup(harness: TestAppHarness, status: "active" | "idle" = "active") {
   const {
@@ -535,13 +542,13 @@ describe("H1 review regressions", () => {
       await post(harness, f, [turnCompleted(f, "t1")]);
       await tick(3000);
       harness.db.run(
-        sql`UPDATE events SET created_at = ${Date.now() - 60 * 60 * 1000} WHERE thread_id = ${f.child.id} AND type = 'turn/completed'`,
+        sql`UPDATE events SET created_at = ${Date.now() - 3 * 60 * 60 * 1000} WHERE thread_id = ${f.child.id} AND type = 'turn/completed'`,
       );
       await reconcileChildThreadNotices(harness.deps);
       await tick(3000);
       await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
       expect(noticeText(harness, f.parent.id)[0]).toContain(
-        "background work still reported running",
+        "background work still reported running after 3 h",
       );
     });
   });
@@ -591,6 +598,140 @@ describe("H1 review regressions", () => {
       await post(harness, f, [turnStarted(f, "t2"), turnCompleted(f, "t2")]);
       await tick(3000);
       expect(noticeCount(harness, f.parent.id)).toBe(2);
+    });
+  });
+});
+
+describe("H1 re-review regressions", () => {
+  it.each(["failed", "interrupted"] as const)(
+    "N1 a turnless %s notice does not consume a held result",
+    async (status) => {
+      await withTestHarness(async (harness) => {
+        const f = setup(harness);
+        vi.useFakeTimers();
+        seedTurnStarted(harness.deps, {
+          environmentId: f.environment.id,
+          threadId: f.child.id,
+          turnId: "t1",
+          providerThreadId: PROVIDER,
+        });
+        say(harness, f, "t1", "m1", "N1 held result", 2);
+        await post(harness, f, [
+          bgTask(f, "n1-bg", "local_bash", false),
+          turnCompleted(f, "t1"),
+        ]);
+        await tick(3000);
+        await queueChildThreadTurnNotificationBestEffort(harness.deps, {
+          childThread: f.child,
+          parentThreadId: f.parent.id,
+          turnStatus: status,
+        });
+        await tick(3000);
+        await vi.waitFor(() =>
+          expect(noticeCount(harness, f.parent.id)).toBe(1),
+        );
+        settleDanglingBackgroundTasks(harness.deps, {
+          hostId: f.session.hostId,
+        });
+        await tick(35000);
+        await vi.waitFor(() =>
+          expect(noticeCount(harness, f.parent.id)).toBe(2),
+        );
+        expect(
+          [
+            ...noticeText(harness, f.parent.id),
+            ...listQueuedThreadMessages(harness.db, f.parent.id).map(
+              (r) => r.content,
+            ),
+          ].join("\n"),
+        ).toContain("N1 held result");
+      });
+    },
+  );
+
+  it("N2 a sweep during an in-flight flush sends the result only once", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness, "idle");
+      vi.useFakeTimers();
+      seedLostCompletion(harness, f, "N2 single result");
+      let entered = 0;
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const original = threadGuards.withThreadSendGuard;
+      vi.spyOn(threadGuards, "withThreadSendGuard").mockImplementation(
+        async (id, work) => {
+          if (id === f.parent.id) {
+            entered++;
+            await blocked;
+          }
+          return original(id, work);
+        },
+      );
+      try {
+        await reconcileChildThreadNotices(harness.deps);
+        await tick(3000);
+        await vi.waitFor(() => expect(entered).toBeGreaterThan(0));
+        expect(noticeCount(harness, f.parent.id)).toBe(0);
+        await reconcileChildThreadNotices(harness.deps);
+        await tick(3000);
+        await reconcileChildThreadNotices(harness.deps);
+        await tick(3000);
+      } finally {
+        release();
+      }
+      await tick(3000);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
+      await reconcileChildThreadNotices(harness.deps);
+      await tick(3000);
+      expect(noticeCount(harness, f.parent.id)).toBe(1);
+    });
+  });
+
+  it("N3 holds a still-running 110-minute gate without an interim notice", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      const send = vi.spyOn(parentMessages, "queueParentSystemMessage");
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "N3 interim text", 2);
+      await post(harness, f, [
+        bgTask(f, "n3-bg", "local_bash", false),
+        turnCompleted(f, "t1"),
+      ]);
+      harness.db.run(
+        sql`UPDATE events SET created_at = ${Date.now() - 110 * 60 * 1000} WHERE thread_id = ${f.child.id} AND type = 'turn/completed'`,
+      );
+      await reconcileChildThreadNotices(harness.deps);
+      await tick(3000);
+      expect(send).not.toHaveBeenCalled();
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
+    });
+  });
+
+  it("N4 the registered periodic sweep releases an otherwise lost notice", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness, "idle");
+      vi.useFakeTimers();
+      seedLostCompletion(harness, f, "N4 periodic recovery");
+      const sweep = runPeriodicSweeps({
+        ...harness.deps,
+        pluginSchedules: harness.pluginService,
+        plugins: harness.pluginService,
+      });
+      await tick(3000);
+      await sweep;
+      await tick(3000);
+      await vi.waitFor(() => expect(noticeCount(harness, f.parent.id)).toBe(1));
+      expect(noticeText(harness, f.parent.id)[0]).toContain(
+        "N4 periodic recovery",
+      );
     });
   });
 });

@@ -70,7 +70,11 @@ export async function releaseChildNoticeIfOwed(
         childThreadId,
         parentThreadId: parent.id,
         sinceCreatedAt: completion.createdAt,
-      }).some((ref) => ref.turnId === completion.turnId || ref.turnId === null)
+      }).some(
+        (ref) =>
+          ref.turnId === completion.turnId ||
+          (ref.turnId === null && ref.status === "completed"),
+      )
     )
       return;
     const counts = getChildBackgroundCounts(deps.db, childThreadId);

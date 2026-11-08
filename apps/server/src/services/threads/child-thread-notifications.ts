@@ -24,6 +24,7 @@ import {
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
 import {
+  CHILD_NOTICE_MAX_HOLD_MS,
   getChildBackgroundCounts,
   isChildNoticeHeld,
   resolveChildNoticeText,
@@ -106,6 +107,7 @@ const childThreadTurnNotificationBatches = new Map<
   string,
   ChildThreadTurnNotificationBatch
 >();
+const inFlightBatchItems = new Set<ChildThreadTurnNotificationBatchItem>();
 
 function childThreadTurnStatusLabel(
   item: ChildThreadTurnNotificationBatchItem,
@@ -464,6 +466,7 @@ async function flushChildThreadTurnNotificationBatch(
     });
     const sendable = items;
     if (sendable.length === 0) return;
+    for (const item of sendable) inFlightBatchItems.add(item);
     await queueParentSystemMessage(deps, {
       input: buildChildThreadTurnStatusBatchInput({
         items: sendable,
@@ -491,6 +494,8 @@ async function flushChildThreadTurnNotificationBatch(
       },
       "Failed to queue batched parent turn notifications",
     );
+  } finally {
+    for (const item of batch.items) inFlightBatchItems.delete(item);
   }
 }
 
@@ -507,6 +512,15 @@ function queueChildThreadTurnNotificationBatchItem(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: QueueChildThreadTurnNotificationArgs,
 ): void {
+  if (
+    args.turnId &&
+    [...inFlightBatchItems].some(
+      (item) =>
+        item.childThread.id === args.childThread.id &&
+        item.turnId === args.turnId,
+    )
+  )
+    return;
   if (
     args.turnStatus === "completed" &&
     args.turnId &&
@@ -529,7 +543,7 @@ function queueChildThreadTurnNotificationBatchItem(
       ? [
           output,
           args.afterBackgroundSettle === "expired"
-            ? "Warning: background work still reported running after 1 h; inspect the child before treating this as a final result."
+            ? `Warning: background work still reported running after ${CHILD_NOTICE_MAX_HOLD_MS / 3_600_000} h; inspect the child before treating this as a final result.`
             : CHILD_THREAD_SETTLED_WITHOUT_TURN_NOTE,
         ]
           .filter(Boolean)

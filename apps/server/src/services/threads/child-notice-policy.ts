@@ -9,7 +9,7 @@ import {
 } from "@bb/db";
 
 export const CHILD_NOTICE_EPISODE_LOOKBACK_MS = 6 * 60 * 60 * 1000;
-export const CHILD_NOTICE_MAX_HOLD_MS = 60 * 60 * 1000;
+export const CHILD_NOTICE_MAX_HOLD_MS = 3 * 60 * 60 * 1000;
 const EARLIER_IN_EPISODE_LABEL = "(Earlier in this episode:)";
 
 interface ChildTurnArgs {
