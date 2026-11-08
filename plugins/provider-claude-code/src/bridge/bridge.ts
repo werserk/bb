@@ -62,6 +62,7 @@ import {
   type SdkSessionOptions,
 } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
+import { buildPlanTurnCheck } from "./plan-turn-check.js";
 import { claudeConfigDirectory, forkClaudeSession } from "./session-fork.js";
 import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
 import {
@@ -190,7 +191,7 @@ interface BridgeEventNotification {
   params: Record<string, unknown>;
 }
 
-interface ThreadIdRef {
+export interface ThreadIdRef {
   current: string;
 }
 
@@ -1349,9 +1350,10 @@ function trackSdkAssistantPermissionEscalation(
   }
 }
 
-function buildSessionTrackingHooks(
+export function buildSessionTrackingHooks(
   threadIdRef: ThreadIdRef,
 ): NonNullable<SdkSessionOptions["hooks"]> {
+  const planTurnCheck = buildPlanTurnCheck();
   const trackPermissionRequest: HookCallback = async (input, toolUseId) => {
     if (
       input.hook_event_name !== "PermissionRequest" ||
@@ -1482,9 +1484,10 @@ function buildSessionTrackingHooks(
   return {
     PermissionDenied: [{ hooks: [clearToolUse] }],
     PermissionRequest: [{ hooks: [trackPermissionRequest] }],
-    PostToolUse: [{ hooks: [clearToolUse] }],
+    PostToolUse: [{ hooks: [clearToolUse, planTurnCheck.recordPlan] }],
     PostToolUseFailure: [{ hooks: [clearToolUse] }],
     PreToolUse: [{ hooks: [trackPreToolUse] }],
+    Stop: [{ hooks: [planTurnCheck.checkPlan] }],
     SubagentStart: [{ hooks: [trackSubagentStart] }],
     SubagentStop: [{ hooks: [clearSubagent] }],
   };
