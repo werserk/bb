@@ -2,16 +2,19 @@ import { useMemo, useState } from "react";
 import type { ThreadTimelinePendingTodos } from "@bb/domain";
 import type { TimelineRow } from "@bb/server-contract";
 import { ThreadTodoCard } from "@/components/promptbox/banner/ThreadTodoCard";
+import { cn } from "@bb/shared-ui/lib/utils";
 import { latestPlanTurn, threadPlanState } from "./thread-plan-state";
 
 export function ThreadPlanCard({
   pendingTodos,
   rows,
   waitingForOwner,
+  placement = "floating",
 }: {
   pendingTodos: ThreadTimelinePendingTodos | null;
   rows: readonly TimelineRow[];
   waitingForOwner: boolean;
+  placement?: "floating" | "stacked";
 }) {
   const latestTurn = useMemo(() => latestPlanTurn(rows), [rows]);
   const state = pendingTodos
@@ -32,7 +35,12 @@ export function ThreadPlanCard({
   if (!pendingTodos?.items.length || !state) return null;
   return (
     <div
-      className="order-first ml-auto w-full min-w-0 max-w-sm shrink-0 p-3 @min-[880px]/thread-chat:order-last @min-[880px]/thread-chat:w-80 @min-[880px]/thread-chat:overflow-y-auto"
+      className={cn(
+        "pointer-events-none flex shrink-0 justify-end [&>section]:pointer-events-auto",
+        placement === "floating"
+          ? "absolute right-3 top-3 z-10 max-w-[calc(100%-1.5rem)]"
+          : "max-w-full",
+      )}
       data-thread-plan=""
     >
       <ThreadTodoCard
