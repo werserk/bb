@@ -1,5 +1,5 @@
 import { threadPresentationText as t } from "@bb/thread-view";
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import type {
   ThreadTimelinePendingTodoItem,
   ThreadTimelinePendingTodoItemStatus,
@@ -105,15 +105,19 @@ function TodoStatusIcon({
 function TodoBody({
   items,
   failedLabel,
+  stale,
 }: {
   items: readonly ThreadTimelinePendingTodoItem[];
   failedLabel: string;
+  stale: boolean;
 }) {
   return (
     <ul className="max-h-40 @min-[880px]/thread-chat:max-h-96 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
       {items.map((item) => {
         const activityState = STATUS_ACTIVITY_STATE[item.status];
         const isActive = activityState === "active";
+        const muted =
+          stale && item.status !== "completed" && item.status !== "failed";
         return (
           <li
             key={item.id}
@@ -122,6 +126,8 @@ function TodoBody({
               cn(
                 "flex min-w-0 items-start gap-2 text-xs",
                 isActive && TODO_ACTIVE_ROW_CLASS,
+                muted &&
+                  "!text-muted-foreground [&_span]:!text-muted-foreground [&_svg]:!text-muted-foreground",
               ),
             )}
           >
@@ -170,6 +176,11 @@ export function ThreadTodoCard({
   const bodyId = useId();
   const toggleId = useId();
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const items = pendingTodos?.items ?? [];
   if (items.length === 0) {
     return null;
@@ -200,7 +211,39 @@ export function ThreadTodoCard({
     ? `Выполнено: ${summary.count}/${items.length}`
     : summary.aria;
   const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}${!isExpanded ? ` · ${summary.count}/${items.length}` : ""}`;
-  const metadata = `${ru ? "обновлено в" : "updated at"} ${time}`;
+  const elapsedMinutes = Math.max(
+    0,
+    Math.floor((now - (pendingTodos?.updatedAt ?? now)) / 60_000),
+  );
+  const age =
+    elapsedMinutes === 0
+      ? ru
+        ? "только что"
+        : "just now"
+      : new Intl.RelativeTimeFormat(locale, {
+          style: "short",
+          numeric: "always",
+        }).format(
+          -Math.floor(
+            elapsedMinutes >= 1440
+              ? elapsedMinutes / 1440
+              : elapsedMinutes >= 60
+                ? elapsedMinutes / 60
+                : elapsedMinutes,
+          ),
+          elapsedMinutes >= 1440
+            ? "day"
+            : elapsedMinutes >= 60
+              ? "hour"
+              : "minute",
+        );
+  const metadata = `${ru ? "Обновлено" : "Updated"} ${age}`;
+  const stale =
+    pendingTodos?.staleSince !== undefined &&
+    items.some((item) => item.status !== "completed");
+  const staleLabel = ru
+    ? "Не обновлён после завершения более позднего хода"
+    : "Not updated since a later turn ended";
   return (
     <PromptStackCard
       ariaLabel={labels[state]}
@@ -250,6 +293,24 @@ export function ThreadTodoCard({
           <PromptStackHoverChevron isExpanded={isExpanded} />
         </button>
       </div>
+      <div className="px-3 pb-2 text-xs text-muted-foreground" data-plan-age="">
+        <time
+          dateTime={new Date(pendingTodos?.updatedAt ?? 0).toISOString()}
+          title={new Date(pendingTodos?.updatedAt ?? 0).toLocaleString(locale)}
+        >
+          {metadata}
+        </time>
+        {stale && (
+          <p
+            className="mt-1 leading-relaxed"
+            title={new Date(pendingTodos?.staleSince ?? 0).toLocaleString(
+              locale,
+            )}
+          >
+            {staleLabel}
+          </p>
+        )}
+      </div>
       <AnimatedDisclosureBody
         id={bodyId}
         labelledBy={toggleId}
@@ -259,10 +320,11 @@ export function ThreadTodoCard({
         collapseRef={focus.collapseRef}
         onCollapse={focus.onCollapseClick}
       >
-        {muted && (
-          <p className="px-3 pt-2 text-xs text-muted-foreground">{metadata}</p>
-        )}
-        <TodoBody items={items} failedLabel={t("plan.failed", locale)} />
+        <TodoBody
+          items={items}
+          failedLabel={t("plan.failed", locale)}
+          stale={stale}
+        />
       </AnimatedDisclosureBody>
     </PromptStackCard>
   );

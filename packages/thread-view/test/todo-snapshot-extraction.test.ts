@@ -232,3 +232,145 @@ describe("extractThreadTimelinePendingTodos", () => {
     expect(extractThreadTimelinePendingTodos(ACTIVE, events)).not.toBeNull();
   });
 });
+
+function lifecycle(
+  seq: number,
+  turnId: string,
+  type: "turn/started" | "turn/completed",
+  status: "completed" | "failed" | "interrupted" = "completed",
+): ThreadEventWithMeta {
+  return {
+    event:
+      type === "turn/started"
+        ? {
+            type,
+            threadId: "thread-1",
+            providerThreadId: "provider-thread-1",
+            scope: turnScope(turnId),
+          }
+        : {
+            type,
+            threadId: "thread-1",
+            providerThreadId: "provider-thread-1",
+            scope: turnScope(turnId),
+            status,
+          },
+    meta: { id: `event-${seq}`, seq, createdAt: seq * 100 },
+  };
+}
+const openPlan = () =>
+  planStepsEvent({
+    seq: 10,
+    steps: [{ step: "Waiting for the owner", status: "pending" }],
+  });
+
+describe("plan staleness from normalized turn events", () => {
+  it.each(["completed", "failed", "interrupted"] as const)(
+    "marks an open plan after a later empty turn ends as %s",
+    (status) => {
+      const events = [
+        lifecycle(1, "turn-1", "turn/started"),
+        openPlan(),
+        lifecycle(11, "turn-1", "turn/completed"),
+        lifecycle(20, "turn-2", "turn/started"),
+        lifecycle(21, "turn-2", "turn/completed", status),
+      ];
+      const snapshot = extractThreadTimelinePendingTodos("idle", events);
+      expect(snapshot).toHaveProperty("staleSince", 2100);
+      expect(
+        threadTimelinePendingTodosSchema.parse(
+          JSON.parse(JSON.stringify(snapshot)),
+        ),
+      ).toEqual(snapshot);
+    },
+  );
+  it("never marks a plan updated in the turn that just ended stale, even after earlier missed turns", () => {
+    const updated = openPlan();
+    updated.event.scope = turnScope("turn-2");
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        lifecycle(1, "turn-1", "turn/started"),
+        lifecycle(2, "turn-1", "turn/completed"),
+        lifecycle(3, "turn-2", "turn/started"),
+        updated,
+        lifecycle(11, "turn-2", "turn/completed"),
+      ]),
+    ).not.toHaveProperty("staleSince");
+  });
+  it("waits for a later turn to end and ignores late completions from older turns", () => {
+    expect(
+      extractThreadTimelinePendingTodos("active", [
+        lifecycle(1, "old", "turn/started"),
+        openPlan(),
+        lifecycle(11, "old", "turn/completed"),
+        lifecycle(20, "later", "turn/started"),
+      ]),
+    ).not.toHaveProperty("staleSince");
+  });
+  it("keeps the first stale time through duplicates, unordered events, and later completions", () => {
+    const ended = lifecycle(21, "later", "turn/completed");
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        lifecycle(31, "later", "turn/completed"),
+        ended,
+        openPlan(),
+        lifecycle(20, "later", "turn/started"),
+        ended,
+      ]),
+    ).toHaveProperty("staleSince", 2100);
+  });
+  it("ignores duplicate starts of the posting turn and nested provider work", () => {
+    const nested = lifecycle(20, "nested", "turn/started");
+    if (nested.event.type === "turn/started")
+      nested.event.parentToolCallId = "parent";
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        lifecycle(1, "turn-1", "turn/started"),
+        openPlan(),
+        lifecycle(12, "turn-1", "turn/started"),
+        lifecycle(13, "turn-1", "turn/completed"),
+        nested,
+        lifecycle(21, "nested", "turn/completed"),
+      ]),
+    ).not.toHaveProperty("staleSince");
+  });
+  it("uses a normalized thread interruption to end a later root turn", () => {
+    const interrupted: ThreadEventWithMeta = {
+      event: {
+        type: "system/thread/interrupted",
+        threadId: "thread-1",
+        scope: { kind: "thread" },
+        reason: "manual-stop",
+      },
+      meta: { id: "stop", seq: 21, createdAt: 2100 },
+    };
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        openPlan(),
+        lifecycle(20, "later", "turn/started"),
+        interrupted,
+      ]),
+    ).toHaveProperty("staleSince", 2100);
+    expect(
+      extractThreadTimelinePendingTodos("idle", [
+        lifecycle(1, "turn-1", "turn/started"),
+        openPlan(),
+        interrupted,
+      ]),
+    ).not.toHaveProperty("staleSince");
+  });
+  it("does not mark completed or explicitly cleared plans stale", () => {
+    for (const steps of [
+      [],
+      [{ step: "Done", status: "completed" as const }],
+    ]) {
+      expect(
+        extractThreadTimelinePendingTodos("idle", [
+          planStepsEvent({ seq: 10, steps }),
+          lifecycle(20, "later", "turn/started"),
+          lifecycle(21, "later", "turn/completed"),
+        ]),
+      ).not.toHaveProperty("staleSince");
+    }
+  });
+});

@@ -1,3 +1,4 @@
+export { listPlanStalenessEventRows } from "./plan-staleness.js";
 export {
   createProject,
   ensurePersonalProject,

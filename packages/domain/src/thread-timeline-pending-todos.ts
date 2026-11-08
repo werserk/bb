@@ -25,6 +25,7 @@ export type ThreadTimelinePendingTodoItem = z.infer<
 export const threadTimelinePendingTodosSchema = z.object({
   sourceSeq: z.number().int().nonnegative(),
   updatedAt: z.number(),
+  staleSince: z.number().optional(),
   items: z.array(threadTimelinePendingTodoItemSchema),
 });
 export type ThreadTimelinePendingTodos = z.infer<
