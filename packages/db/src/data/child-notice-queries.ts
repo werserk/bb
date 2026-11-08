@@ -105,3 +105,18 @@ export function listChildNoticeRefs(
       AND q.created_at >= ${args.sinceCreatedAt}
       AND json_extract(o.value, '$.childThread.id') = ${args.childThreadId}`);
 }
+
+/** Idle, notifiable child threads whose state changed since `sinceMs`. */
+export function listIdleNotifiableChildThreadIds(
+  db: DbQueryConnection,
+  args: { sinceMs: number },
+): string[] {
+  return db
+    .all<{ id: string }>(sql`
+      SELECT id FROM threads
+      WHERE parent_thread_id IS NOT NULL AND origin_kind IS NULL
+        AND deleted_at IS NULL AND archived_at IS NULL
+        AND status = 'idle' AND parent_notifications <> 'off'
+        AND updated_at >= ${args.sinceMs}`)
+    .map((row) => row.id);
+}

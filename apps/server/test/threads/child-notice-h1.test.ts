@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { listEvents, listQueuedThreadMessages } from "@bb/db";
 import { threadScope, turnScope, turnRequestEventDataSchema } from "@bb/domain";
 import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
@@ -12,12 +13,13 @@ import {
   seedThreadRuntimeState,
   seedTurnStarted,
 } from "../helpers/seed.js";
+import { reconcileChildThreadNoticesAtBoot } from "../../src/services/threads/child-notice-reconcile.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 afterEach(() => vi.useRealTimers());
 
-function setup(harness: TestAppHarness) {
+function setup(harness: TestAppHarness, status: "active" | "idle" = "active") {
   const {
     project,
     environment,
@@ -34,7 +36,7 @@ function setup(harness: TestAppHarness) {
     environmentId: environment.id,
     parentThreadId: parent.id,
     parentNotifications: "auto",
-    status: "active",
+    status,
     title: "Leaf",
   });
   return { parent, child, environment, session, project };
@@ -389,6 +391,98 @@ describe("H1 row 4: head and tail truncation", () => {
         expect(notices(harness, f.parent.id)).toHaveLength(1),
       );
       expect(noticeText(harness, f.parent.id)[0]).not.toContain("omitted");
+    });
+  });
+});
+
+/** A finished child turn whose notice was lost: events exist, no notice does. */
+function seedLostCompletion(
+  harness: TestAppHarness,
+  f: Family,
+  text: string | null,
+) {
+  seedTurnStarted(harness.deps, {
+    environmentId: f.environment.id,
+    threadId: f.child.id,
+    turnId: "t1",
+    providerThreadId: PROVIDER,
+  });
+  if (text) say(harness, f, "t1", "m1", text, 2);
+  seedEvent(harness.deps, {
+    threadId: f.child.id,
+    environmentId: f.environment.id,
+    providerThreadId: PROVIDER,
+    sequence: 10,
+    type: "turn/completed",
+    scope: turnScope("t1"),
+    data: { status: "completed" },
+  });
+}
+
+describe("H1 row 5: boot reconcile", () => {
+  it("sends the notice a restart lost, once, even if reconcile runs twice", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness, "idle");
+      vi.useFakeTimers();
+      seedLostCompletion(harness, f, "LOST result");
+      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await tick(3_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      expect(noticeText(harness, f.parent.id)[0]).toContain("LOST result");
+      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await tick(3_000);
+      expect(noticeCount(harness, f.parent.id)).toBe(1);
+    });
+  });
+
+  it("does not repeat a notice written before notices named their turn", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness, "idle");
+      vi.useFakeTimers();
+      seedLostCompletion(harness, f, "OLD result");
+      await tick(1_000);
+      seedStoredEvent(harness.deps, {
+        threadId: f.parent.id,
+        environmentId: f.environment.id,
+        providerThreadId: "parent-provider-thread",
+        sequence: 50,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: {
+          systemMessageKind: "child-completed",
+          systemMessageSubject: {
+            kind: "thread",
+            threadId: f.child.id,
+            threadName: "Leaf",
+            outcomes: [{ threadId: f.child.id, status: "completed" }],
+          },
+        },
+      });
+      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await tick(3_000);
+      const requests = listEvents(harness.db, { threadId: f.parent.id }).filter(
+        (row) =>
+          row.type === "client/turn/requested" &&
+          row.data.includes("systemMessageKind"),
+      );
+      expect(requests).toHaveLength(1);
+      expect(listQueuedThreadMessages(harness.db, f.parent.id)).toEqual([]);
+    });
+  });
+
+  it("sends nothing for an archived parent", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness, "idle");
+      vi.useFakeTimers();
+      seedLostCompletion(harness, f, "orphan");
+      harness.db.run(
+        sql`UPDATE threads SET archived_at = ${Date.now()} WHERE id = ${f.parent.id}`,
+      );
+      await reconcileChildThreadNoticesAtBoot(harness.deps);
+      await tick(3_000);
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
     });
   });
 });

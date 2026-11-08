@@ -383,6 +383,7 @@ export {
   hasBackgroundWorkSettledAfterSequence,
   hasRootTurnStartedAfterSequence,
   listChildNoticeRefs,
+  listIdleNotifiableChildThreadIds,
 } from "./child-notice-queries.js";
 export type {
   ChildNoticeRef,

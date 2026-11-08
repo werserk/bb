@@ -1,3 +1,4 @@
+import { reconcileChildThreadNoticesAtBoot } from "../threads/child-notice-reconcile.js";
 import {
   runThreadPruningSweep,
   THREAD_PRUNING_SWEEP_LIMITS,
@@ -669,6 +670,7 @@ export async function runStartupRecoverySweep(
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);
+  await reconcileChildThreadNoticesAtBoot(deps);
 }
 
 export async function runPeriodicSweeps(
