@@ -489,7 +489,7 @@ export interface FakePluginBehaviorDrivers {
     input: unknown,
     ctx?: Partial<PluginAgentToolContext>,
   ): Promise<PluginAgentToolResult>;
-  /** Evaluate `bb.agents.configure` with production validation/fail-closed
+  /** Evaluate `bb.agents.configure` with validation but no server fallback
    * semantics. With no callback, every registered tool/declared test skill is
    * selected. The callback receives a copy of `context` whose `pluginMetadata`
    * is a validated, deep-frozen clone; invalid metadata rejects instead of

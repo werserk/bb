@@ -157,7 +157,7 @@ export async function resolveThreadRuntimeCommandConfig(
     workspacePath,
   });
   markTurnTraceSpan("runtimeConfig.workspaceRead");
-  const pluginSkillRoots = getPluginSkillRootContributions();
+  const pluginSkillRoots = getPluginSkillRootContributions(args.thread.id);
   const skillIdsByPlugin = await discoverPluginSkillIds(deps.logger, {
     pluginSkillRoots,
     skillTreeRegistry: deps.skillTreeRegistry,
@@ -220,6 +220,7 @@ export async function resolveThreadRuntimeCommandConfig(
   markTurnTraceSpan("runtimeConfig.env");
   const injectedSkillSources = (
     await resolveSkillCatalog(deps, {
+      pluginSkillRoots,
       projectSkillSources: workspaceAgentContext.projectSkillSources,
       sharedSkillSources: workspaceAgentContext.sharedSkills.runtimeSources,
       pluginSkillSelections: conditionalConfiguration.selectedSkillIdsByPlugin,

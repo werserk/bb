@@ -39,8 +39,10 @@ export function setPluginAgentContributions(
   contributions = next;
 }
 
-export function getPluginSkillRootContributions(): PluginSkillRootContribution[] {
-  return contributions?.listSkillRootContributions() ?? [];
+export function getPluginSkillRootContributions(
+  threadId?: string,
+): PluginSkillRootContribution[] {
+  return contributions?.listSkillRootContributions(threadId) ?? [];
 }
 
 export function listPluginAgentTools(): PluginAgentToolContribution[] {

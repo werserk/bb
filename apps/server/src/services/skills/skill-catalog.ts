@@ -1,3 +1,4 @@
+import type { PluginSkillRootContribution } from "../plugins/plugin-service.js";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { getPluginSkillRootContributions } from "../plugins/plugin-agent-contributions.js";
 import { generatedSkillsRootPath } from "../plugins/plugin-commands-skill.js";
@@ -9,6 +10,7 @@ import {
 } from "./injected-skills.js";
 
 interface ResolveSkillCatalogSourcesArgs {
+  pluginSkillRoots?: readonly PluginSkillRootContribution[];
   pluginSkillSelections?: ReadonlyMap<string, ReadonlySet<string>>;
   projectSkillSources?: readonly ProjectInjectedSkillSource[];
   sharedSkillSources?: readonly SharedInjectedSkillSource[];
@@ -24,7 +26,8 @@ export async function resolveSkillCatalog(
       generatedSkillsRootPath(deps.config.dataDir),
     ],
     dataDir: deps.config.dataDir,
-    pluginSkillRoots: getPluginSkillRootContributions(),
+    pluginSkillRoots:
+      args.pluginSkillRoots ?? getPluginSkillRootContributions(),
     ...(args.pluginSkillSelections !== undefined
       ? { pluginSkillSelections: args.pluginSkillSelections }
       : {}),
