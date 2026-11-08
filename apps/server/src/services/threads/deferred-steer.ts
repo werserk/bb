@@ -53,18 +53,52 @@ export function readDeferredSteerRequest(
   return request;
 }
 
-export function recoverBusySteerInTransaction(args: {
+function immutableOwnerInput(request: TurnRequestEventData) {
+  return {
+    source: request.source,
+    initiator: request.initiator,
+    senderThreadId: request.senderThreadId,
+    serviceTurn: request.serviceTurn,
+    input: request.input,
+    inputGroups: request.inputGroups ?? [request.input],
+    provenance: request.dispatchProvenance,
+    model: request.execution.model,
+    reasoningLevel: request.execution.reasoningLevel,
+    permissionMode: request.execution.permissionMode,
+    serviceTier: request.execution.serviceTier,
+  };
+}
+
+export function recoverRefusedOwnerInputInTransaction(args: {
   db: DbTransaction;
   thread: Thread;
   requestId: ClientTurnRequestId;
   message: string;
+  reason: "turn_not_steerable" | "competing_turn";
 }): boolean {
   const row = getStoredTurnRequestEventByRequestId(args.db, {
     threadId: args.thread.id,
     requestId: args.requestId,
   });
   if (row === null) return false;
-  const request = parseStoredTurnRequestEvent(row);
+  let request = parseStoredTurnRequestEvent(row);
+  let sourceRequestId = args.requestId;
+  if (args.reason === "competing_turn") {
+    if (request.deferredFromRequestId === undefined) return false;
+    const source = getStoredTurnRequestEventByRequestId(args.db, {
+      threadId: args.thread.id,
+      requestId: request.deferredFromRequestId,
+    });
+    if (source === null) return false;
+    const original = parseStoredTurnRequestEvent(source);
+    if (
+      JSON.stringify(immutableOwnerInput(request)) !==
+      JSON.stringify(immutableOwnerInput(original))
+    )
+      return false;
+    sourceRequestId = request.deferredFromRequestId;
+    request = original;
+  }
   if (!eligibleOwnerRequest(request)) return false;
   const queued = createQueuedThreadMessageInTransaction(args.db, {
     threadId: args.thread.id,
@@ -86,7 +120,7 @@ export function recoverBusySteerInTransaction(args: {
           ? { kind: "thread-busy" }
           : null,
     sendAt: null,
-    payload: { kind: "deferredSteer", sourceRequestId: args.requestId },
+    payload: { kind: "deferredSteer", sourceRequestId },
     systemNotice: null,
   });
   appendThreadEventInTransaction(args.db, {
@@ -96,7 +130,7 @@ export function recoverBusySteerInTransaction(args: {
     scope: threadScope(),
     data: {
       requestId: args.requestId,
-      reason: "turn_not_steerable",
+      reason: args.reason,
       message: args.message,
       deferredToQueuedMessageId: queued.id,
     },

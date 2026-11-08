@@ -1926,6 +1926,60 @@ describe("buildThreadTimelineFromEvents", () => {
     ).toHaveLength(0);
   });
 
+  it("hides both refused copies when deferred input returns to custody", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const source = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "Deferred input",
+    });
+    const firstRejected = event.clientTurnRejected({
+      requestId: source.data.requestId,
+      reason: "turn_not_steerable",
+      deferredToQueuedMessageId: "qmsg-first",
+    });
+    const attempt = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Deferred input",
+    });
+    attempt.data.deferredFromRequestId = source.data.requestId;
+    const competing = event.clientTurnRejected({
+      requestId: attempt.data.requestId,
+      reason: "competing_turn",
+      deferredToQueuedMessageId: "qmsg-restored",
+    });
+    const final = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Deferred input",
+    });
+    final.data.deferredFromRequestId = source.data.requestId;
+    const started = event.turnStarted({ turnId: "turn-final" });
+    const accepted = event.inputAccepted({
+      turnId: "turn-final",
+      clientRequestId: final.data.requestId,
+    });
+    const rows = buildTimelineRows(
+      fromRows([
+        source,
+        firstRejected,
+        attempt,
+        competing,
+        final,
+        started,
+        accepted,
+      ]),
+      "active",
+    );
+    expect(
+      rows.filter((row) => row.kind === "conversation" && row.role === "user"),
+    ).toHaveLength(1);
+    expect(
+      rows.find((row) => row.kind === "conversation" && row.role === "user"),
+    ).toMatchObject({
+      text: "Deferred input",
+      turnRequest: { status: "accepted" },
+    });
+  });
+
   it("uses deferred custody context to hide a source request across a page boundary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const request = event.clientTurnRequested({

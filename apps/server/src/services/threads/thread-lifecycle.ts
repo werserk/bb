@@ -1,4 +1,4 @@
-import { recoverBusySteerInTransaction } from "./deferred-steer.js";
+import { recoverRefusedOwnerInputInTransaction } from "./deferred-steer.js";
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import {
@@ -820,15 +820,23 @@ function settleThreadCommandFailure(
   if (hasTerminalClientTurnRequestEvent(args.deps, args.command)) {
     return emptyCommandResultSideEffects();
   }
-  if (
+  const recoveryReason =
     args.command.type === "turn.submit" &&
     args.command.target.mode !== "start" &&
-    args.report.errorCode === "turn_not_steerable" &&
-    recoverBusySteerInTransaction({
+    args.report.errorCode === "turn_not_steerable"
+      ? "turn_not_steerable"
+      : args.report.errorCode === COMPETING_TURN_ERROR_CODE
+        ? "competing_turn"
+        : null;
+  if (
+    args.command.type === "turn.submit" &&
+    recoveryReason !== null &&
+    recoverRefusedOwnerInputInTransaction({
       db: args.deps.db,
       thread,
       requestId: args.command.requestId,
       message: args.report.errorMessage,
+      reason: recoveryReason,
     })
   ) {
     return {
@@ -839,6 +847,7 @@ function settleThreadCommandFailure(
               "events-appended",
               "queue-changed",
             ]);
+            if (recoveryReason === "competing_turn") return;
             const { runQueuedMessageDispatch } =
               await import("./queued-message-dispatch.js");
             await runQueuedMessageDispatch(deps, {

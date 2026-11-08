@@ -125,6 +125,17 @@ retry detection excludes it, and request-suffix edits cancel both referenced kin
 Manual stop still pauses automatic delivery. Periodic idle recovery supplies the
 wake if post-commit work was interrupted.
 
+A deferred dispatch that the daemon refuses with `competing_turn` before input
+acceptance returns to durable queue custody in the same settlement transaction.
+Only a server-linked deferred request whose owner provenance, ordered input/groups
+and execution match its original eligible source qualifies. It keeps that source
+reference, records the rejection's new queue link, and waits for the current turn
+without an immediate retry. Accepted/rejected request fences also cover this
+transfer. Ordinary competing starts retain their existing failure behavior. This
+does not repair review lifecycle-ID mismatches; when such a mismatch leaves a
+stale active turn, the queued input remains visible until stop or completion
+allows it to drain.
+
 Only explicit review/compact refusals of proven owner inputs qualify. Ordinary
 review turn-ID mismatches, automatic compaction, permission-changing provider
 branches, non-owner inputs and legacy in-flight requests without provenance are

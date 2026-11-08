@@ -67,6 +67,7 @@ const inputGroups: PromptInput[][] = [
 function fixture(
   harness: TestAppHarness,
   refuse: () => HostRpcHandlerResult | Promise<HostRpcHandlerResult>,
+  afterFirst?: () => HostRpcHandlerResult,
 ) {
   const { host, session } = seedHostSession(harness.deps);
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
@@ -109,7 +110,9 @@ function fixture(
         return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
       if (command.type === "turn.submit") {
         commands.push(command);
-        return commands.length === 1 ? refuse() : { ok: true, result: {} };
+        return commands.length === 1
+          ? refuse()
+          : (afterFirst?.() ?? { ok: true, result: {} });
       }
       return { ok: true, result: {} };
     },
@@ -184,6 +187,7 @@ function replay(
   command: TurnSubmitCommand,
   hostId: string,
   rollback = false,
+  errorCode = "turn_not_steerable",
 ) {
   return harness.db.transaction(
     (tx) => {
@@ -196,8 +200,8 @@ function replay(
           ok: false,
           executionId: "busy-execution",
           completedAt: Date.now(),
-          errorCode: "turn_not_steerable",
-          errorMessage: "cannot steer a compact turn",
+          errorCode,
+          errorMessage: "refused before input acceptance",
         },
       });
       if (rollback) throw new Error("crash before commit");
@@ -657,3 +661,192 @@ it("retains an uploaded attachment through deferred custody and dispatch", async
     expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
   });
 });
+
+it.each([false, true])(
+  "retains deferred custody after a competing-turn drain refusal (hooks=%s)",
+  async (hooks) => {
+    await withTestHarness(async (harness) => {
+      let firstDrain = true;
+      const { thread, environment, host, commands } = fixture(
+        harness,
+        () => refusal("review"),
+        () => {
+          if (!firstDrain) return { ok: true, result: {} };
+          firstDrain = false;
+          seedTurnStarted(harness.deps, {
+            threadId: thread.id,
+            environmentId: environment.id,
+            providerThreadId,
+            turnId: "review-outer-turn",
+          });
+          return {
+            ok: false,
+            errorCode: "competing_turn",
+            errorMessage: "Refusing to start a competing turn",
+          };
+        },
+      );
+      await send(harness, thread.id);
+      await expect
+        .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+        .toBe(1);
+      const source = requests(harness, thread.id).at(-1)!;
+      const historyCount = listStoredThreadPromptHistoryRows(harness.db, {
+        threadId: thread.id,
+        limit: 100,
+      }).length;
+      if (hooks) {
+        const handlers: PluginHookRegistration<"message.dispatch">[] = [
+          { pluginId: "observer", handler: () => ({ action: "proceed" }) },
+        ];
+        const registry: { [K in PluginHookName]: PluginHookRegistration<K>[] } =
+          { "message.dispatch": handlers };
+        setPluginHookProvider({
+          listHooks: (hook) => registry[hook],
+          invokeHook: (_pluginId, _label, run) => invokePluginInline(run),
+          decisionTimeoutMs: 10000,
+        });
+      }
+      complete(harness, thread.id, environment.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      await expect.poll(() => commands.length).toBe(2);
+      await expect
+        .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+        .toBe(1);
+      const row = toThreadQueuedMessage(
+        listQueuedThreadMessages(harness.db, thread.id)[0]!,
+      );
+      expect(row).toMatchObject({
+        payload: { kind: "deferredSteer", sourceRequestId: source.requestId },
+        content: source.input,
+      });
+      expect(requests(harness, thread.id).at(-1)!.deferredFromRequestId).toBe(
+        source.requestId,
+      );
+      expect(
+        listEvents(harness.db, { threadId: thread.id })
+          .filter((e) => e.type === "client/turn/rejected")
+          .map((e) => JSON.parse(e.data)),
+      ).toContainEqual(
+        expect.objectContaining({
+          requestId: commands[1]!.requestId,
+          reason: "competing_turn",
+          deferredToQueuedMessageId: row.id,
+        }),
+      );
+      expect(
+        replay(harness, commands[1]!, host.id, false, "competing_turn")
+          .postCommitActions,
+      ).toEqual([]);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "idle-recovery",
+        now: Date.now() + 120000,
+      });
+      expect(commands).toHaveLength(2);
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence:
+          getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "turn/completed",
+        scope: turnScope("review-outer-turn"),
+        data: { providerThreadId, status: "completed" },
+      });
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        threadId: thread.id,
+        event: { type: "run.succeeded" },
+      });
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      await expect.poll(() => commands.length).toBe(3);
+      expect(commands[2]).toMatchObject({
+        input: source.input,
+        inputGroups: source.inputGroups,
+        options: {
+          model: source.execution.model,
+          permissionMode: source.execution.permissionMode,
+        },
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      expect(
+        listStoredThreadPromptHistoryRows(harness.db, {
+          threadId: thread.id,
+          limit: 100,
+        }),
+      ).toHaveLength(historyCount);
+    });
+  },
+);
+
+it.each(["input", "groups", "execution", "provenance"])(
+  "does not restore a competing deferred request with changed %s",
+  async (field) => {
+    await withTestHarness(async (harness) => {
+      const { thread, environment, host, commands } = fixture(harness, () =>
+        refusal(),
+      );
+      await send(harness, thread.id);
+      await expect
+        .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+        .toBe(1);
+      const source = requests(harness, thread.id).at(-1)!;
+      const changed = turnRequestEventDataSchema.parse({
+        ...source,
+        requestId: "creq_2345678955",
+        target: { kind: "new-turn" },
+        deferredFromRequestId: source.requestId,
+        ...(field === "input"
+          ? { input: [{ type: "text", text: "changed", mentions: [] }] }
+          : {}),
+        ...(field === "groups"
+          ? { inputGroups: [...(source.inputGroups ?? [])].reverse() }
+          : {}),
+        ...(field === "execution"
+          ? { execution: { ...source.execution, permissionMode: "full" } }
+          : {}),
+        ...(field === "provenance"
+          ? {
+              dispatchProvenance: {
+                origin: "plugin",
+                originPluginId: "other",
+                requestedBy: null,
+              },
+            }
+          : {}),
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence:
+          getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: changed,
+      });
+      replay(
+        harness,
+        {
+          ...commands[0]!,
+          requestId: changed.requestId,
+          target: { mode: "start" },
+        },
+        host.id,
+        false,
+        "competing_turn",
+      );
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+      const rejected = listEvents(harness.db, { threadId: thread.id })
+        .filter((e) => e.type === "client/turn/rejected")
+        .map((e) => JSON.parse(e.data))
+        .find((e) => e.requestId === changed.requestId);
+      expect(rejected).toMatchObject({ reason: "competing_turn" });
+      expect(rejected.deferredToQueuedMessageId).toBeUndefined();
+    });
+  },
+);
