@@ -95,6 +95,7 @@ import {
   listStoredTimelineThreadWindowEventRows,
   listTimelineRootWindowTurnIds,
   listTodoSnapshotEventRowsForThread,
+  listPlanStalenessEventRows,
   listStoredDelegatingItemRowsByItemIds,
   listStoredTurnInputAcceptedRowsByClientRequestIds,
   listStoredTurnRejectedRowsByClientRequestIds,
@@ -936,8 +937,15 @@ function ensureLatestTimelineOpenBackgroundTaskStateRows(
 function listLatestTimelineHeadStateRows(
   db: DbConnection,
   threadId: string,
+  epochSequenceStart: number,
+  maxSeq: number,
 ): StoredEventRow[] {
+  const planRows = listTodoSnapshotEventRowsForThread(db, { threadId });
+  const plan = planRows[0];
   return mergeStoredEventRowsById([
+    ...(plan && plan.sequence >= epochSequenceStart && plan.sequence <= maxSeq
+      ? listPlanStalenessEventRows(db, plan, maxSeq)
+      : []),
     ...listLatestThreadStateEventRowsByThreadIds(db, {
       threadIds: [threadId],
       kind: LEGACY_CODEX_GOAL_EXTENSION_KIND,
@@ -954,7 +962,7 @@ function listLatestTimelineHeadStateRows(
       threadIds: [threadId],
       kind: THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
     }),
-    ...listTodoSnapshotEventRowsForThread(db, { threadId }),
+    ...planRows,
   ]);
 }
 
@@ -1194,7 +1202,12 @@ function selectStandardTimelineEventRows(
       headStateRows:
         page.kind === "latest"
           ? measureThreadTimelineStage(profile, "group-context-query", () =>
-              listLatestTimelineHeadStateRows(db, thread.id).filter(
+              listLatestTimelineHeadStateRows(
+                db,
+                thread.id,
+                epochSequenceStart,
+                maxSeq,
+              ).filter(
                 (row) =>
                   row.sequence <= maxSeq &&
                   !visibleSequences.has(row.sequence) &&

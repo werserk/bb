@@ -97,7 +97,7 @@ it("shows waiting and localized stale metadata with unique disclosure ids", () =
       />
     </>,
   );
-  expect(screen.getByText(/обновлено в/)).toBeTruthy();
+  expect(screen.getByText(/Обновлено/)).toBeTruthy();
   expect(screen.queryByText(/из прошлой задачи/)).toBeNull();
   const ids = screen
     .getAllByRole("button", { expanded: true })

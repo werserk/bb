@@ -1,10 +1,50 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { ThreadTodoCard } from "./ThreadTodoCard";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+it("always shows relative age, even collapsed, and advances with time", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-08T12:00:00Z"));
+  const { rerender } = render(
+    <ThreadTodoCard
+      pendingTodos={{
+        sourceSeq: 1,
+        updatedAt: Date.now() - 12 * 60_000,
+        items: [{ id: "a", text: "Review", status: "pending" }],
+      }}
+      isExpanded={false}
+      onToggle={() => {}}
+      locale="en-US"
+    />,
+  );
+  expect(screen.getByText(/Updated 12/).getAttribute("datetime")).toBe(
+    "2026-11-08T11:48:00.000Z",
+  );
+  act(() => {
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(screen.getByText(/Updated 13/)).toBeTruthy();
+  rerender(
+    <ThreadTodoCard
+      pendingTodos={{
+        sourceSeq: 2,
+        updatedAt: Date.now(),
+        items: [{ id: "a", text: "Review", status: "pending" }],
+      }}
+      isExpanded={false}
+      onToggle={() => {}}
+      locale="en-US"
+    />,
+  );
+  expect(screen.getByText(/Updated just now/)).toBeTruthy();
+});
 
 it("shows a completed plan with its step note and helper until cleared", () => {
   const { rerender } = render(
@@ -70,6 +110,7 @@ it.each([
       pendingTodos={{
         sourceSeq: 1,
         updatedAt: 1,
+        staleSince: 2,
         items: [
           { id: "ok", text: "Build", status: "completed" },
           {
@@ -94,4 +135,32 @@ it.each([
         : /1 of 2 items complete/,
     }),
   ).toBeTruthy();
+});
+
+it("shows stale evidence while collapsed and removes it after a fresh update", () => {
+  const plan = {
+    sourceSeq: 1,
+    updatedAt: 1,
+    staleSince: 2,
+    items: [{ id: "a", text: "Waiting", status: "pending" as const }],
+  };
+  const { rerender } = render(
+    <ThreadTodoCard
+      pendingTodos={plan}
+      isExpanded={false}
+      onToggle={() => {}}
+      locale="en-US"
+    />,
+  );
+  expect(screen.getByText("Not updated since a later turn ended")).toBeTruthy();
+  expect(screen.queryByText("Stale")).toBeNull();
+  rerender(
+    <ThreadTodoCard
+      pendingTodos={{ ...plan, staleSince: undefined }}
+      isExpanded={false}
+      onToggle={() => {}}
+      locale="en-US"
+    />,
+  );
+  expect(screen.queryByText("Not updated since a later turn ended")).toBeNull();
 });

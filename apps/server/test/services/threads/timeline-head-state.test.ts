@@ -217,6 +217,14 @@ function seedThreadWithEarlyHeadState(
   insertEvents(db, noopNotifier, events);
 }
 
+function endEmptyTurn(db: DbConnection, thread: Thread, turnId: string): void {
+  db.$client
+    .prepare(
+      "UPDATE events SET type = 'turn/completed', item_id = NULL, item_kind = NULL, data = ? WHERE thread_id = ? AND turn_id = ? AND item_kind = 'agentMessage'",
+    )
+    .run(JSON.stringify({ status: "completed" }), thread.id, turnId);
+}
+
 const baseOptions = {
   includeClearedContextHistory: false,
   includeDiagnosticOperations: false,
@@ -264,6 +272,7 @@ describe("timeline head state under a budgeted window", () => {
       const { db, thread } = setup();
       try {
         seedThreadWithEarlyHeadState(db, thread, 100, 1, false);
+        endEmptyTurn(db, thread, "turn-2");
         insertEvents(db, noopNotifier, [
           {
             threadId: thread.id,
@@ -295,6 +304,13 @@ describe("timeline head state under a budgeted window", () => {
           ).response.pendingTodos?.items,
         ).toHaveLength(2);
         expect(
+          buildThreadTimelineWithProfile(
+            db,
+            { ...thread, status },
+            { ...options, includeClearedContextHistory: true },
+          ).response.pendingTodos,
+        ).toHaveProperty("staleSince");
+        expect(
           buildThreadTimelineWithProfile(db, { ...thread, status }, options)
             .response.pendingTodos,
         ).toBeNull();
@@ -325,6 +341,10 @@ describe("timeline head state under a budgeted window", () => {
             options,
           ).response.pendingTodos?.items.map((item) => item.text),
         ).toEqual(["Fresh task"]);
+        expect(
+          buildThreadTimelineWithProfile(db, { ...thread, status }, options)
+            .response.pendingTodos,
+        ).not.toHaveProperty("staleSince");
       } finally {
         db.$client.close();
       }
@@ -362,6 +382,31 @@ describe("timeline head state under a budgeted window", () => {
 
     expect(unbudgeted.activeWorkflows).toHaveLength(1);
     expect(budgeted.activeWorkflows).toHaveLength(1);
+  });
+
+  it("preserves stale evidence for empty later turns outside the visible page", () => {
+    const { db, thread } = setup();
+    try {
+      seedThreadWithEarlyHeadState(db, thread, 100, 1, false);
+      endEmptyTurn(db, thread, "turn-2");
+      const options = {
+        ...baseOptions,
+        completedTurnDisplay: "collapse" as const,
+        eventBudget: 8,
+        page: { kind: "latest" as const, segmentLimit: 2 },
+      };
+      const full = buildThreadTimelineWithProfile(db, thread, {
+        ...options,
+        eventBudget: 1_000_000,
+        page: { kind: "latest", segmentLimit: 1000 },
+      }).response;
+      const page = buildThreadTimelineWithProfile(db, thread, options);
+      expect(full.pendingTodos).toHaveProperty("staleSince");
+      expect(page.response.pendingTodos).toEqual(full.pendingTodos);
+      expect(page.profile.eventRowCount).toBeLessThan(20);
+    } finally {
+      db.$client.close();
+    }
   });
 
   it("keeps historical plan state without loading intervening conversation markers", () => {

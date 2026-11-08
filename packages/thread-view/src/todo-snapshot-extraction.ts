@@ -7,6 +7,7 @@ import type {
   ThreadTimelinePendingTodos,
 } from "@bb/domain";
 import { sliceUtf16Head } from "@bb/text-utils";
+import { getThreadEventScopeTurnId } from "@bb/domain";
 import type { ThreadEventWithMeta } from "./build-event-projection.js";
 import { getOrderedThreadEvents } from "./group-event-projection-turns.js";
 
@@ -21,6 +22,7 @@ function trimAndTruncate(value: string): string {
 interface SnapshotCandidate {
   seq: number;
   createdAt: number;
+  turnId: string | null;
   items: ThreadTimelinePendingTodoItem[];
 }
 
@@ -64,12 +66,48 @@ function extractPlanStepsCandidate(
       status: PLAN_STEP_TODO_STATUSES[step.status ?? "pending"],
     });
   }
-  return { seq: meta.seq, createdAt: meta.createdAt, items };
+  return {
+    seq: meta.seq,
+    createdAt: meta.createdAt,
+    turnId: getThreadEventScopeTurnId(event.scope) ?? null,
+    items,
+  };
+}
+
+function staleSince(
+  plan: SnapshotCandidate,
+  events: readonly ThreadEventWithMeta[],
+): number | undefined {
+  if (!plan.items.some((item) => item.status !== "completed")) return undefined;
+  const seen = new Set<string>();
+  const later = new Set<string>();
+  for (const { event, meta } of getOrderedThreadEvents(events)) {
+    const turnId = getThreadEventScopeTurnId(event.scope) ?? null;
+    if (event.type === "turn/started" && turnId !== null && !seen.has(turnId)) {
+      seen.add(turnId);
+      if (
+        !event.parentToolCallId &&
+        meta.seq > plan.seq &&
+        turnId !== plan.turnId
+      )
+        later.add(turnId);
+    }
+    if (meta.seq <= plan.seq) continue;
+    if (
+      (event.type === "turn/completed" &&
+        turnId !== null &&
+        later.has(turnId)) ||
+      (event.type === "system/thread/interrupted" && later.size > 0)
+    )
+      return meta.createdAt;
+  }
+  return undefined;
 }
 
 export function extractThreadTimelinePendingTodos(
   _threadStatus: Thread["status"],
   events: readonly ThreadEventWithMeta[],
+  turnEvents: readonly ThreadEventWithMeta[] = events,
 ): ThreadTimelinePendingTodos | null {
   let best: SnapshotCandidate | null = null;
   for (const { event, meta } of getOrderedThreadEvents(events)) {
@@ -80,9 +118,11 @@ export function extractThreadTimelinePendingTodos(
     }
   }
   if (best === null) return null;
+  const staleAt = staleSince(best, turnEvents);
   return {
     sourceSeq: best.seq,
     updatedAt: best.createdAt,
+    ...(staleAt === undefined ? {} : { staleSince: staleAt }),
     items: best.items,
   };
 }

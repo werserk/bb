@@ -1290,6 +1290,7 @@ export function buildThreadTimelineFromEvents(
       : extractThreadTimelinePendingTodos(
           args.options.threadStatus,
           stateEvents,
+          classificationEvents,
         ),
     rows: hideService
       ? service.filterRows(
