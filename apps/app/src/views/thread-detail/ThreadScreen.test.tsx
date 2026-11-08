@@ -304,7 +304,9 @@ it("collapses and reopens a completed older-turn plan through ThreadScreen", () 
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText(/updated at/)).toBeTruthy();
+  expect(screen.getByText(/^Updated /).getAttribute("datetime")).toBe(
+    "1970-01-01T00:00:00.100Z",
+  );
   expect(screen.queryByText(/from an earlier task/)).toBeNull();
   expect(screen.getByText("Checked result")).toBeTruthy();
 });
