@@ -40,6 +40,8 @@ export type SystemThreadInterruptedReason = z.infer<
 
 export const childThreadOutcomeSchema = z.object({
   threadId: z.string(),
+  /** The child root turn this outcome reports; absent on older notices. */
+  turnId: z.string().optional(),
   status: z.enum(["completed", "failed", "interrupted"]),
   interruption: z
     .object({

@@ -378,6 +378,12 @@ export {
   MissingStoredTurnStartedError,
 } from "./events.js";
 export {
+  getLatestRootTurnCompletion,
+  hasBackgroundWorkSettledAfterSequence,
+  hasRootTurnStartedAfterSequence,
+} from "./child-notice-queries.js";
+export type { RootTurnCompletionRow } from "./child-notice-queries.js";
+export {
   getDatabaseDataVersion,
   getThreadEventRewriteGeneration,
 } from "./event-rewrite-generation.js";

@@ -5,7 +5,7 @@ import type {
   ChildThreadOutcome,
   QueuedMessageSystemNotice,
 } from "@bb/domain";
-import { getThread, listActiveBackgroundTaskCountsByThreadIds } from "@bb/db";
+import { getThread } from "@bb/db";
 import { renderTemplate } from "@bb/templates";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import {
@@ -22,6 +22,10 @@ import {
   childOutcomeSystemMessageKind,
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
+import {
+  getChildBackgroundCounts,
+  isChildNoticeHeld,
+} from "./child-notice-policy.js";
 import { getLastThreadOutput } from "./thread-data.js";
 import { isParentNotifiableChildThread } from "./thread-parent.js";
 
@@ -59,8 +63,12 @@ interface BuildChildThreadNeedsAttentionInputArgs {
 }
 
 interface QueueChildThreadTurnNotificationArgs {
+  /** Set when background work settled with no follow-up turn: skips the hold. */
+  afterBackgroundSettle?: boolean;
   childThread: ChildThreadNotificationSource;
   parentThreadId: string;
+  /** The child root turn that ended; scopes the text and the hold. */
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
   failureContext?: string;
   interruption?: ChildThreadOutcome["interruption"];
@@ -86,6 +94,10 @@ const CHILD_THREAD_RUNNING_WORKFLOW_GUIDANCE =
   "A workflow it started is still running, so this output is not its final result. The thread will report again when the workflow finishes.";
 const CHILD_THREAD_BATCH_RUNNING_WORKFLOW_GUIDANCE =
   "Threads with a workflow still running have not finished; they will report again when their workflow does.";
+const CHILD_THREAD_SETTLED_WITHOUT_TURN_NOTE =
+  "(Its background work finished without a follow-up turn.)";
+/** Batch items released by a settle or boot reconcile: never held again at flush. */
+const releasedBatchItems = new WeakSet<ChildThreadTurnNotificationBatchItem>();
 const childThreadTurnNotificationBatches = new Map<
   string,
   ChildThreadTurnNotificationBatch
@@ -251,16 +263,6 @@ function getChildThreadCompletionOutput(
     : null;
 }
 
-function getChildThreadActiveWorkflowCount(
-  deps: LoggedPendingInteractionWorkSessionDeps,
-  args: QueueChildThreadTurnNotificationArgs,
-): number {
-  const [activity] = listActiveBackgroundTaskCountsByThreadIds(deps.db, {
-    threadIds: [args.childThread.id],
-  });
-  return activity?.activeWorkflowCount ?? 0;
-}
-
 function buildChildThreadTurnStatusBatchSegments(
   args: RenderChildThreadTurnStatusBatchTextArgs,
 ): ParentSystemInputSegment[] {
@@ -312,6 +314,7 @@ export function childThreadTurnStatusBatchTaxonomy(
   const outcomes: ChildThreadOutcome[] = items.map((item) => ({
     threadId: item.childThread.id,
     status: item.turnStatus,
+    ...(item.turnId ? { turnId: item.turnId } : {}),
     ...(item.interruption ? { interruption: item.interruption } : {}),
   }));
   const single = items.length === 1 ? items[0] : undefined;
@@ -405,7 +408,16 @@ async function flushChildThreadTurnNotificationBatch(
       return (
         child !== null &&
         child.parentThreadId === parentThreadId &&
-        isParentNotifiableChildThread(child, item.turnStatus)
+        isParentNotifiableChildThread(child, item.turnStatus) &&
+        !(
+          item.turnStatus === "completed" &&
+          item.turnId &&
+          !releasedBatchItems.has(item) &&
+          isChildNoticeHeld(deps.db, {
+            childThreadId: item.childThread.id,
+            turnId: item.turnId,
+          })
+        )
       );
     });
     if (items.length === 0) return;
@@ -452,14 +464,33 @@ function queueChildThreadTurnNotificationBatchItem(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: QueueChildThreadTurnNotificationArgs,
 ): void {
+  if (
+    args.turnStatus === "completed" &&
+    args.turnId &&
+    !args.afterBackgroundSettle &&
+    isChildNoticeHeld(deps.db, {
+      childThreadId: args.childThread.id,
+      turnId: args.turnId,
+    })
+  ) {
+    return;
+  }
+  const output = getChildThreadCompletionOutput(deps, args);
   const item: ChildThreadTurnNotificationBatchItem = {
-    activeWorkflowCount: getChildThreadActiveWorkflowCount(deps, args),
+    activeWorkflowCount: getChildBackgroundCounts(deps.db, args.childThread.id)
+      .workflows,
     childThread: args.childThread,
-    terminalOutput: getChildThreadCompletionOutput(deps, args),
+    terminalOutput: args.afterBackgroundSettle
+      ? [output, CHILD_THREAD_SETTLED_WITHOUT_TURN_NOTE]
+          .filter(Boolean)
+          .join("\n\n")
+      : output,
     turnStatus: args.turnStatus,
+    ...(args.turnId ? { turnId: args.turnId } : {}),
     ...(args.failureContext ? { failureContext: args.failureContext } : {}),
     ...(args.interruption ? { interruption: args.interruption } : {}),
   };
+  if (args.afterBackgroundSettle) releasedBatchItems.add(item);
   const existingBatch = childThreadTurnNotificationBatches.get(
     args.parentThreadId,
   );

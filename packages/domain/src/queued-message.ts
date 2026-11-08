@@ -200,6 +200,7 @@ const queuedChildOutcomeRenderSnapshotSchema = z.object({
   activeWorkflowCount: z.number().int().nonnegative(),
   terminalOutput: z.string().nullable(),
   turnStatus: childThreadOutcomeSchema.shape.status,
+  turnId: childThreadOutcomeSchema.shape.turnId,
   failureContext: z.string().optional(),
   interruption: childThreadOutcomeSchema.shape.interruption,
 });
