@@ -544,6 +544,7 @@ describe("H1 row 6: per-child notice cap", () => {
         sequence: 5_000,
         type: "client/turn/requested",
         scope: threadScope(),
+        createdAt: Date.now() + 1_000,
         data: { initiator: "user" },
       });
       expect(admit()).toBe("send");

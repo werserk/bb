@@ -90,6 +90,9 @@ const CHILD_THREAD_OUTCOME_BATCH_UPDATES_SLOT =
 const CHILD_THREAD_MENTION_SLOT = "__BB_CHILD_THREAD_MENTION__";
 const CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT = 4_000;
 const CHILD_THREAD_OUTPUT_HEAD_CHAR_LIMIT = 1_200;
+/** Result text shared by all completed children of one batched notice. */
+const CHILD_THREAD_BATCH_OUTPUT_TOTAL_CHAR_LIMIT = 6_000;
+const CHILD_THREAD_BATCH_OUTPUT_MIN_CHAR_LIMIT = 400;
 const CHILD_THREAD_INSPECTION_GUIDANCE =
   "Review the thread before deciding next steps.";
 const CHILD_THREAD_NEEDS_ATTENTION_FALLBACK_SUMMARY =
@@ -243,12 +246,22 @@ function buildSingleChildThreadTurnStatusSegments(
 }
 
 function buildChildThreadBatchStatusLineSegments(
-  args: FormatChildThreadTurnStatusLineArgs,
+  args: FormatChildThreadTurnStatusLineArgs & { outputLimit: number },
 ): ParentSystemInputSegment[] {
   const { line } = args;
   const workflowClause = formatChildThreadRunningWorkflowClause(
     line.item.activeWorkflowCount,
   );
+  if (line.item.turnStatus === "completed") {
+    const output = truncateChildThreadOutput(
+      formatChildThreadCompletionOutputExcerpt(line.item.terminalOutput),
+      args.outputLimit,
+    );
+    return [
+      { kind: "mention", mention: line.mention },
+      { kind: "text", text: ` completed${workflowClause}:\n\n${output}` },
+    ];
+  }
   return [
     { kind: "mention", mention: line.mention },
     {
@@ -297,11 +310,27 @@ function buildChildThreadTurnStatusBatchSegments(
     });
   }
 
+  const completed = args.lines.filter(
+    (line) => line.item.turnStatus === "completed",
+  ).length;
+  const outputLimit = Math.min(
+    CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
+    Math.max(
+      CHILD_THREAD_BATCH_OUTPUT_MIN_CHAR_LIMIT,
+      Math.floor(CHILD_THREAD_BATCH_OUTPUT_TOTAL_CHAR_LIMIT / completed),
+    ),
+  );
+  const lineBreak = completed > 0 ? "\n\n- " : "\n- ";
   const segments: ParentSystemInputSegment[] = [];
   segments.push({ kind: "text", text: "Child thread updates:" });
   args.lines.forEach((line, index) => {
-    segments.push({ kind: "text", text: index === 0 ? "\n\n- " : "\n- " });
-    segments.push(...buildChildThreadBatchStatusLineSegments({ line }));
+    segments.push({
+      kind: "text",
+      text: index === 0 ? "\n\n- " : lineBreak,
+    });
+    segments.push(
+      ...buildChildThreadBatchStatusLineSegments({ line, outputLimit }),
+    );
   });
   if (args.lines.some((line) => line.item.activeWorkflowCount > 0)) {
     segments.push({
