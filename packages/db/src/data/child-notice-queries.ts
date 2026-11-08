@@ -6,7 +6,6 @@ import {
 } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 
-
 interface ChildThreadArgs {
   threadId: string;
 }
@@ -66,7 +65,7 @@ export function getBackgroundWorkSettledAtAfterSequence(
 export interface ChildNoticeRef {
   createdAt: number;
   status: string;
-    turnId: string | null;
+  turnId: string | null;
 }
 
 export function listChildNoticeRefs(
@@ -106,4 +105,3 @@ export function listIdleNotifiableChildThreadIds(
         AND updated_at >= ${args.sinceMs}`)
     .map((row) => row.id);
 }
-

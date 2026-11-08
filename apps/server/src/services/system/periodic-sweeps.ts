@@ -528,7 +528,6 @@ export function createThreadEventPruningJob(
 }
 
 const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
-  { cadenceMs: 30_000, category: "durable-intent-retry", name: "child-thread-notices", run: reconcileChildThreadNotices },
   {
     cadenceMs: 0,
     category: "durable-intent-retry",
@@ -593,6 +592,12 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
     name: "due-scheduled-queue-dispatch",
     run: (deps, now) =>
       runQueuedMessageDispatch(deps, { kind: "time-reached", now }),
+  },
+  {
+    cadenceMs: 30_000,
+    category: "durable-intent-retry",
+    name: "child-thread-notices",
+    run: reconcileChildThreadNotices,
   },
   {
     cadenceMs: 0,
