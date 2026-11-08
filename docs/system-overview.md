@@ -68,6 +68,9 @@ that fallback at debug level for outcome notices. Needs-attention notices use
 their subject directly without a missing-snapshots log. The SQL schema and daemon
 protocol are unchanged.
 
+The server caches plugin agent selections and skill roots per thread; see the
+[`configure` contract](../packages/plugin-sdk/src/backend-contract.ts).
+
 ### Transport contracts
 
 Two contract packages define the boundaries between components:

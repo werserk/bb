@@ -1710,7 +1710,12 @@ export interface PluginAgents {
    * callback is synchronous and runs at `thread.start` / `turn.submit`; it
    * never rebuilds registrations. Exactly one callback may be registered per
    * factory execution. A throw, malformed result, duplicate id, unknown id,
-   * or more than 256 tool/skill ids fails closed for this plugin only.
+   * or more than 256 tool/skill ids reuses this thread/plugin's last successful
+   * selection, as does an unavailable/reloading plugin; without one it fails
+   * closed. The server keeps an in-memory LRU of 128 threads, never persisted.
+   * Fallbacks warn with reasons; successful reductions are respected and warn
+   * with thread/plugin ids and removed tools. Calls still require authorization.
+   * Disabled, removed, held and safe-mode-suppressed plugins cannot fallback.
    *
    * Tools take effect when the provider session is next started or resumed;
    * an already-running session is not hot-mutated. Instructions follow the

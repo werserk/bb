@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type DbConnection } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
@@ -35,6 +35,10 @@ import {
   type TestAppHarness,
 } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import {
+  discoverPluginSkillIds,
+  SkillTreeRegistry,
+} from "../../../src/services/skills/injected-skills.js";
 
 const logger = testLogger as unknown as Logger;
 
@@ -89,7 +93,209 @@ describe("bb.agents.registerTool", () => {
 
   afterEach(async () => {
     await service.stop();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     await rm(workDir, { recursive: true, force: true });
+  });
+
+  async function installSelectionPlugin() {
+    await service.installPath(
+      await writePlugin(workDir, {
+        name: "bb-plugin-selection",
+        serverSource: `
+        export default function plugin(bb: any) {
+          for (const name of ["alpha_tool", "beta_tool"]) {
+            bb.agents.registerTool({ name, description: name,
+              parameters: { type: "object" }, execute: () => "authorized by plugin" });
+          }
+          bb.onDispose(async () => {
+            const reload = globalThis.__bbSelectionReload;
+            if (reload) { reload.started = true; await reload.gate; }
+          });
+          bb.agents.configure(({ thread }: any) => {
+            if (globalThis.__bbSelectionReload?.started) throw new Error("plugin reloading");
+            if (thread.title === "throw") throw new Error("configure exploded");
+            if (thread.title === "invalid") return { tools: ["unknown"], skills: [] };
+            return { tools: thread.title === "small" ? ["alpha_tool"] : [
+              { name: "alpha_tool", parameters: { type: "object", required: ["answer"] } }, "beta_tool"
+            ], skills: thread.title === "small" ? [] : ["selection-skill"], instructions: "Selected instructions" };
+          });
+        }
+      `,
+      }),
+    );
+    const skillDir = join(
+      workDir,
+      "bb-plugin-selection",
+      "skills",
+      "selection-skill",
+    );
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: selection-skill\ndescription: Selection fixture.\n---\n# Selection\n",
+    );
+  }
+
+  function resolveSelection(title = "good", threadId = "thread-selection") {
+    return service.resolveAgentConfiguration({
+      context: {
+        thread: {
+          id: threadId,
+          title,
+          parentThreadId: null,
+          sourceThreadId: null,
+        },
+        project: {
+          id: "project-selection",
+          kind: "standard",
+          name: "Selection",
+          gitRemoteUrl: null,
+        },
+        environment: {
+          id: "env-selection",
+          name: "Selection",
+          path: workDir,
+          branchName: null,
+          workspaceProvisionType: null,
+        },
+        host: { id: "host-selection", name: "Selection" },
+        provider: {
+          id: "claude-code",
+          model: "claude-sonnet-5-5",
+          capabilities: { supportsNativeUserQuestion: false },
+        },
+        origin: { kind: null, pluginId: null },
+      },
+      skillIdsByPlugin: new Map([["selection", ["selection-skill"]]]),
+    });
+  }
+
+  it.each(["throw", "invalid"])(
+    "keeps the last good selection after configure %s",
+    async (failure) => {
+      await installSelectionPlugin();
+      const good = await resolveSelection();
+      expect(good.tools.map(({ tool }) => tool.name)).toEqual([
+        "alpha_tool",
+        "beta_tool",
+      ]);
+      const warn = vi.spyOn(logger, "warn");
+      expect(await resolveSelection(failure)).toEqual(good);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "thread-selection",
+          pluginId: "selection",
+          reason: expect.any(String),
+        }),
+        expect.stringContaining("last good"),
+      );
+    },
+  );
+
+  it("keeps the last good selection while the plugin reloads", async () => {
+    await installSelectionPlugin();
+    const good = await resolveSelection();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const control = { started: false, gate };
+    vi.stubGlobal("__bbSelectionReload", control);
+    const reload = service.reload("selection");
+    try {
+      await vi.waitFor(() => expect(control.started).toBe(true));
+      const warn = vi.spyOn(logger, "warn");
+      expect(await resolveSelection()).toEqual(good);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "thread-selection",
+          pluginId: "selection",
+          reason: expect.stringContaining("reloading"),
+        }),
+        expect.stringContaining("last good"),
+      );
+    } finally {
+      release();
+      await reload;
+    }
+  });
+
+  it("fails closed without a previous selection for this thread", async () => {
+    await installSelectionPlugin();
+    await resolveSelection();
+    expect((await resolveSelection("throw", "other-thread")).tools).toEqual([]);
+  });
+
+  it("keeps unloaded plugin tools and skills scoped to the cached thread", async () => {
+    await installSelectionPlugin();
+    const good = await resolveSelection();
+    const roots = service.listSkillRootContributions();
+    await service.stop();
+    expect(service.findAgentTool("alpha_tool")).toBeUndefined();
+    expect(service.listSkillRootContributions("thread-selection")).toEqual(
+      roots,
+    );
+    expect(service.listSkillRootContributions("other-thread")).toEqual([]);
+    expect(service.listSkillRootContributions()).toEqual([]);
+    expect(await resolveSelection()).toEqual(good);
+    expect((await resolveSelection("throw", "other-thread")).tools).toEqual([]);
+    const discover = () =>
+      discoverPluginSkillIds(logger, {
+        pluginSkillRoots:
+          service.listSkillRootContributions("thread-selection"),
+        skillTreeRegistry: new SkillTreeRegistry(),
+      });
+    expect((await discover()).get("selection")).toEqual(["selection-skill"]);
+    await rm(roots[0]!.rootPath, { recursive: true });
+    expect((await discover()).get("selection")).toEqual([]);
+    expect(await resolveSelection()).toEqual(good);
+  });
+
+  it.each(["disabled", "removed", "safe mode"])(
+    "does not restore a %s plugin",
+    async (action) => {
+      await installSelectionPlugin();
+      await resolveSelection();
+      if (action === "disabled") await service.setEnabled("selection", false);
+      if (action === "removed") await service.remove("selection");
+      if (action === "safe mode") await service.setSafeMode(true);
+      const selection = await resolveSelection();
+      expect(selection.tools).toEqual([]);
+      expect(selection.selectedSkillIdsByPlugin.get("selection")?.size).toBe(0);
+      expect(service.listSkillRootContributions("thread-selection")).toEqual(
+        [],
+      );
+    },
+  );
+
+  it("evicts the least recently resolved thread selection", async () => {
+    await installSelectionPlugin();
+    await resolveSelection("good", "oldest");
+    for (let index = 0; index < 127; index++)
+      await resolveSelection("good", String(index));
+    await resolveSelection("good", "0");
+    await resolveSelection("good", "newest");
+    expect((await resolveSelection("throw", "0")).tools).toHaveLength(2);
+    expect((await resolveSelection("throw", "oldest")).tools).toEqual([]);
+  });
+
+  it("respects and logs a successful smaller selection, then keeps that selection on failure", async () => {
+    await installSelectionPlugin();
+    await resolveSelection();
+    const warn = vi.spyOn(logger, "warn");
+    const small = await resolveSelection("small");
+    expect(small.tools.map(({ tool }) => tool.name)).toEqual(["alpha_tool"]);
+    expect(small.selectedSkillIdsByPlugin.get("selection")?.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-selection",
+        pluginId: "selection",
+        removedTools: ["beta_tool"],
+      }),
+      expect.stringContaining("shrank"),
+    );
+    expect(await resolveSelection("throw")).toEqual(small);
   });
 
   it("rejects duplicate tool names within one factory execution", async () => {

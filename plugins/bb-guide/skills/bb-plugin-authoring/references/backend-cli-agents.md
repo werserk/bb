@@ -249,7 +249,12 @@ JSON-schema object with root `type: "object"`, at most 128 KiB serialized, and
 should only narrow what the registered schema accepts, since execution-side
 validation still runs the registered parameters. Unknown or duplicate ids,
 malformed output, an invalid override, more than 256 ids in either array, or a
-throwing callback fail closed for that plugin only.
+throwing callback reuse the last successful selection for that thread and plugin;
+an unavailable/reloading plugin does too. Without a cached success, that plugin
+fails closed. This memory-only cache uses a 128-thread LRU, never persistence.
+Fallbacks warn with reasons; successful reductions replace the cache and warn with
+removed tool names and thread/plugin ids. Calls retain plugin authorization.
+Cached skill roots are thread-scoped. Disabled/removed/held/safe-mode plugins cannot fallback.
 
 Instruction ordering is standard BB instructions, selected tools' static
 snippets, `contributeInstructions` output, `configure` dynamic instructions,

@@ -427,7 +427,7 @@ export interface PluginService {
     argv: string[],
     ctx: PluginCliContext,
   ): Promise<PluginCliExecutionResult>;
-  listSkillRootContributions(): PluginSkillRootContribution[];
+  listSkillRootContributions(threadId?: string): PluginSkillRootContribution[];
   listAgentTools(): PluginAgentToolContribution[];
   resolveAgentConfiguration(args: {
     context: Omit<PluginAgentConfigurationContext, "pluginMetadata">;
@@ -594,6 +594,22 @@ function normalizeMentionSearchItems(
 
 export function createPluginService(deps: PluginServiceDeps): PluginService {
   const logger = deps.logger;
+  type AgentSelection = {
+    tools: PluginAgentToolContribution[];
+    skillIds: string[];
+    instructions: string | null;
+    skillRootPaths: string[];
+  };
+  const agentSelections = new Map<string, Map<string, AgentSelection>>();
+  function canKeepAgentSelection(pluginId: string): boolean {
+    const row = getInstalledPlugin(deps.db, pluginId);
+    return (
+      row !== undefined &&
+      row.enabled &&
+      !isSuppressedBySafeMode(row) &&
+      getStatus(row).status !== "disabled"
+    );
+  }
   const installHandlerTimeoutMs = deps.installHandlerTimeoutMs ?? 30_000;
 
   async function runInstallHandlers(id: string): Promise<void> {
@@ -2263,8 +2279,8 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       return fail(`bb ${registration.name} failed: ${outcome.error}`);
     },
 
-    listSkillRootContributions() {
-      return [...loaded.entries()]
+    listSkillRootContributions(threadId) {
+      const roots = [...loaded.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .flatMap(([pluginId, plugin]) =>
           plugin.manifest.skillsRootPaths.map((rootPath) => ({
@@ -2272,6 +2288,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
             rootPath,
           })),
         );
+      for (const [pluginId, selection] of agentSelections.get(threadId ?? "") ??
+        []) {
+        if (loaded.has(pluginId) || !canKeepAgentSelection(pluginId)) continue;
+        for (const rootPath of selection.skillRootPaths)
+          roots.push({ pluginId, rootPath });
+      }
+      return roots;
     },
 
     listAgentTools() {
@@ -2281,16 +2304,59 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async resolveAgentConfiguration({ context, skillIdsByPlugin }) {
+      const threadId = context.thread.id;
+      const selections =
+        agentSelections.get(threadId) ?? new Map<string, AgentSelection>();
+      agentSelections.delete(threadId);
+      agentSelections.set(threadId, selections);
+      if (agentSelections.size > 128)
+        agentSelections.delete(agentSelections.keys().next().value!);
       const allTools = collectAgentTools();
+      const toolOwners = new Map(
+        allTools.map(({ record, pluginId }) => [record.name, pluginId]),
+      );
       const tools: PluginAgentToolContribution[] = [];
       const selectedSkillIdsByPlugin = new Map<string, ReadonlySet<string>>();
+      for (const pluginId of skillIdsByPlugin.keys()) {
+        if (!loaded.has(pluginId))
+          selectedSkillIdsByPlugin.set(pluginId, new Set());
+      }
       const dynamicInstructions: Array<{ pluginId: string; text: string }> = [];
-      const plugins = [...loaded.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([pluginId, plugin]) => ({
+      const appendSelection = (pluginId: string, selection: AgentSelection) => {
+        tools.push(...selection.tools);
+        selectedSkillIdsByPlugin.set(pluginId, new Set(selection.skillIds));
+        if (selection.instructions !== null)
+          dynamicInstructions.push({ pluginId, text: selection.instructions });
+      };
+      const keepSelection = (pluginId: string, reason: string) => {
+        const previous = selections.get(pluginId);
+        if (previous === undefined) {
+          selectedSkillIdsByPlugin.set(pluginId, new Set());
+          return;
+        }
+        logger.warn(
+          { threadId, pluginId, reason },
+          "Using last good plugin agent selection",
+        );
+        appendSelection(pluginId, {
+          ...previous,
+          tools: previous.tools.filter(
+            ({ tool }) =>
+              toolOwners.get(tool.name) === pluginId ||
+              (!loaded.has(pluginId) && !toolOwners.has(tool.name)),
+          ),
+        });
+      };
+      const plugins = [...new Set([...loaded.keys(), ...selections.keys()])]
+        .sort((a, b) => a.localeCompare(b))
+        .filter(
+          (pluginId) => loaded.has(pluginId) || canKeepAgentSelection(pluginId),
+        )
+        .map((pluginId) => ({
           pluginId,
-          plugin,
-          provider: plugin.handle.agentConfigurationProvider,
+          plugin: loaded.get(pluginId),
+          provider:
+            loaded.get(pluginId)?.handle.agentConfigurationProvider ?? null,
         }));
       const configuringPluginIds = plugins
         .filter(({ provider }) => provider !== null)
@@ -2311,10 +2377,15 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
 
       for (const { pluginId, plugin, provider } of plugins) {
+        if (plugin === undefined) {
+          keepSelection(pluginId, "plugin not loaded or reloading");
+          continue;
+        }
         const pluginTools = allTools.filter(
           (entry) => entry.pluginId === pluginId,
         );
         if (provider === null) {
+          selections.delete(pluginId);
           tools.push(
             ...pluginTools.map(({ record }) =>
               toToolContribution(pluginId, record),
@@ -2341,14 +2412,32 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           }),
         );
         if (!outcome.ok) {
-          selectedSkillIdsByPlugin.set(pluginId, new Set());
+          keepSelection(pluginId, outcome.error);
           continue;
         }
 
+        const previous = selections.get(pluginId);
+        const removedTools =
+          previous?.tools
+            .map(({ tool }) => tool.name)
+            .filter((name) => !outcome.value.toolIds.includes(name)) ?? [];
+        const removedSkills =
+          previous?.skillIds.filter(
+            (id) => !outcome.value.skillIds.includes(id),
+          ) ?? [];
+        if (removedTools.length > 0 || removedSkills.length > 0) {
+          logger.warn(
+            { threadId, pluginId, removedTools, removedSkills },
+            "Plugin agent selection shrank",
+          );
+        }
         const selectedTools = new Set(outcome.value.toolIds);
         const parameterOverrides = outcome.value.toolParameterOverrides;
-        tools.push(
-          ...pluginTools
+        const selection: AgentSelection = {
+          skillIds: outcome.value.skillIds,
+          instructions: outcome.value.instructions,
+          skillRootPaths: plugin.manifest.skillsRootPaths,
+          tools: pluginTools
             .filter(({ record }) => selectedTools.has(record.name))
             .map(({ record }) =>
               toToolContribution(
@@ -2357,14 +2446,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
                 parameterOverrides.get(record.name) ?? record.inputSchema,
               ),
             ),
-        );
-        selectedSkillIdsByPlugin.set(pluginId, new Set(outcome.value.skillIds));
-        if (outcome.value.instructions !== null) {
-          dynamicInstructions.push({
-            pluginId,
-            text: outcome.value.instructions,
-          });
-        }
+        };
+        selections.set(pluginId, selection);
+        appendSelection(pluginId, selection);
       }
 
       return { tools, selectedSkillIdsByPlugin, dynamicInstructions };
