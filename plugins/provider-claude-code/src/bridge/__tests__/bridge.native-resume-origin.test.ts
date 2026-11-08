@@ -79,6 +79,27 @@ function promptInput(text: string): PromptInput[] {
   return [{ type: "text", text, mentions: [] }];
 }
 
+let nextMessageNumber = 0;
+
+function nextAssistantText(text: string): SDKMessage {
+  nextMessageNumber += 1;
+  return assistantText(`msg_${nextMessageNumber}`, text);
+}
+
+function taskNotification(text: string): SDKMessage {
+  nextMessageNumber += 1;
+  return asSdkMessage({
+    type: "user",
+    session_id: SESSION_ID,
+    uuid: `task-notification-${nextMessageNumber}`,
+    parent_tool_use_id: null,
+    message: {
+      role: "user",
+      content: `<task-notification>${text}</task-notification>`,
+    },
+  });
+}
+
 function createScriptedQuery(call: ScriptedCall) {
   const queue: SDKMessage[] = [];
   let closed = false;
@@ -94,10 +115,11 @@ function createScriptedQuery(call: ScriptedCall) {
   };
   void (async () => {
     for await (const input of call.prompt) {
-      push(
-        assistantText("msg_head", `started ${String(input.message.content)}`),
-      );
-      push(successResult());
+      const text = String(input.message.content);
+      push(nextAssistantText(`working on ${text}`));
+      if (!text.startsWith("steer")) {
+        push(successResult());
+      }
     }
     closed = true;
     wake();
@@ -138,7 +160,21 @@ function createScriptedQuery(call: ScriptedCall) {
   };
 }
 
-it("maps a tool call in a turn the SDK resumes on its own to that live turn", async () => {
+async function withResumedTurn(
+  run: (fixture: {
+    clientTurnId: string;
+    resumedTurnId: string;
+    events: ThreadEvent[];
+    startedTurnIds(): string[];
+    openTurnIds(): string[];
+    resume(): Promise<string | undefined>;
+    finishTurn(): Promise<void>;
+    steer(expectedTurnId: string, clientRequestId: string): Promise<void>;
+    callTool(): Promise<string>;
+    bbTurnId(origin: string): string | undefined;
+    openAssembledTurnId(): string | undefined;
+  }) => Promise<void>,
+): Promise<void> {
   const workspaceDir = mkdtempSync(join(tmpdir(), "bb-native-resume-"));
   const calls: ScriptedCall[] = [];
   let pushToToolQuery: (message: SDKMessage) => void = () => {};
@@ -154,7 +190,9 @@ it("maps a tool call in a turn the SDK resumes on its own to that live turn", as
   const collector = createBridgeDeltaEventCollector("claude-code");
   const events: ThreadEvent[] = [];
   const client = new Client({ name: "native-resume", version: "1" });
+  let clientConnected = false;
   let drained = 0;
+  let requestId = 2;
   const settle = async (): Promise<void> => {
     for (let round = 0; round < 12; round += 1) {
       await bridge.flushWork();
@@ -166,7 +204,13 @@ it("maps a tool call in a turn the SDK resumes on its own to that live turn", as
       drained = bridge.messages.length;
     }
   };
-  const openTurnIds = () => {
+  const startedTurnIds = (): string[] =>
+    events.flatMap((event) =>
+      event.type === "turn/started" && event.scope.kind === "turn"
+        ? [event.scope.turnId]
+        : [],
+    );
+  const openTurnIds = (): string[] => {
     const completed = new Set(
       events.flatMap((event) =>
         event.type === "turn/completed" && event.scope.kind === "turn"
@@ -176,10 +220,17 @@ it("maps a tool call in a turn the SDK resumes on its own to that live turn", as
     );
     return startedTurnIds().filter((turnId) => !completed.has(turnId));
   };
-  const startedTurnIds = (): string[] =>
-    events.flatMap((event) =>
-      event.type === "turn/started" && event.scope.kind === "turn"
-        ? [event.scope.turnId]
+  const resume = async (): Promise<string | undefined> => {
+    const before = startedTurnIds().length;
+    pushToToolQuery(taskNotification("gate finished"));
+    pushToToolQuery(nextAssistantText("the gate finished; reporting"));
+    await settle();
+    return startedTurnIds()[before];
+  };
+  const toolCallOrigins = (): string[] =>
+    bridge.messages.flatMap((message) =>
+      message.method === "item/tool/call"
+        ? [(message.params as { turnId: string }).turnId]
         : [],
     );
 
@@ -212,52 +263,168 @@ it("maps a tool call in a turn the SDK resumes on its own to that live turn", as
     expect(clientTurnId).toBeDefined();
     expect(openTurnIds()).toEqual([]);
 
-    pushToToolQuery(
-      asSdkMessage({
-        type: "user",
-        session_id: SESSION_ID,
-        uuid: "task-notification",
-        parent_tool_use_id: null,
-        message: {
-          role: "user",
-          content: "<task-notification>gate finished</task-notification>",
-        },
-      }),
-    );
-    pushToToolQuery(
-      assistantText("msg_resume", "the gate finished; reporting"),
-    );
-    await settle();
-    const resumedTurnId = startedTurnIds()[1];
+    const resumedTurnId = await resume();
     expect(resumedTurnId).toBeDefined();
     expect(resumedTurnId).not.toBe(clientTurnId);
     expect(openTurnIds()).toEqual([resumedTurnId]);
 
-    const server = calls[0]?.options.mcpServers?.["bb-bridge"];
-    expect(server).toBeDefined();
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    await server!.instance.connect(serverTransport);
-    await client.connect(clientTransport);
-    void client
-      .callTool({ name: "wprojects_outcome", arguments: {} })
-      .catch(() => undefined);
-    await vi.waitFor(() =>
-      expect(
-        bridge.messages.some((message) => message.method === "item/tool/call"),
-      ).toBe(true),
-    );
-    const toolCall = bridge.messages.find(
-      (message) => message.method === "item/tool/call",
-    );
-    const origin = (toolCall?.params as { turnId: string }).turnId;
-
-    expect(collector.assembler.getBbTurnId(THREAD_ID, origin)).toBe(
-      resumedTurnId,
-    );
+    await run({
+      clientTurnId: clientTurnId!,
+      resumedTurnId: resumedTurnId!,
+      events,
+      startedTurnIds,
+      openTurnIds,
+      resume,
+      finishTurn: async () => {
+        pushToToolQuery(successResult());
+        await settle();
+      },
+      steer: async (expectedTurnId, clientRequestId) => {
+        requestId += 1;
+        bridge.sendRequest(requestId, "turn/steer", {
+          threadId: THREAD_ID,
+          providerThreadId,
+          expectedTurnId,
+          input: promptInput("steer: also check the log"),
+          clientRequestId,
+          options: OPTIONS,
+        });
+        expect((await bridge.waitForResponse(requestId)).error).toBeUndefined();
+        await settle();
+      },
+      callTool: async () => {
+        if (!clientConnected) {
+          const server = calls[0]?.options.mcpServers?.["bb-bridge"];
+          expect(server).toBeDefined();
+          const [clientTransport, serverTransport] =
+            InMemoryTransport.createLinkedPair();
+          await server!.instance.connect(serverTransport);
+          await client.connect(clientTransport);
+          clientConnected = true;
+        }
+        const before = toolCallOrigins().length;
+        void client
+          .callTool({ name: "wprojects_outcome", arguments: {} })
+          .catch(() => undefined);
+        await vi.waitFor(() =>
+          expect(toolCallOrigins().length).toBe(before + 1),
+        );
+        return toolCallOrigins()[before]!;
+      },
+      bbTurnId: (origin) => collector.assembler.getBbTurnId(THREAD_ID, origin),
+      openAssembledTurnId: () => collector.assembler.getOpenTurnId(THREAD_ID),
+    });
   } finally {
     await client.close().catch(() => undefined);
     bridge.restore();
     rmSync(workspaceDir, { recursive: true, force: true });
   }
+}
+
+it("maps a tool call in a turn the SDK resumes on its own to that live turn", async () => {
+  await withResumedTurn(async ({ resumedTurnId, callTool, bbTurnId }) => {
+    expect(bbTurnId(await callTool())).toBe(resumedTurnId);
+  });
+}, 60_000);
+
+it("ends the resumed turn and gives a second resume its own origin", async () => {
+  await withResumedTurn(
+    async ({
+      resumedTurnId,
+      events,
+      openTurnIds,
+      resume,
+      finishTurn,
+      callTool,
+      bbTurnId,
+      openAssembledTurnId,
+    }) => {
+      const firstOrigin = await callTool();
+      await finishTurn();
+
+      expect(openTurnIds()).toEqual([]);
+      expect(openAssembledTurnId()).toBeUndefined();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn/completed",
+          scope: { kind: "turn", turnId: resumedTurnId },
+          status: "completed",
+        }),
+      );
+
+      const secondResumedTurnId = await resume();
+      expect(secondResumedTurnId).toBeDefined();
+      expect(secondResumedTurnId).not.toBe(resumedTurnId);
+      expect(openTurnIds()).toEqual([secondResumedTurnId]);
+      const secondOrigin = await callTool();
+      expect(secondOrigin).not.toBe(firstOrigin);
+      expect(bbTurnId(secondOrigin)).toBe(secondResumedTurnId);
+      expect(bbTurnId(firstOrigin)).toBe(resumedTurnId);
+    },
+  );
+}, 60_000);
+
+it("keeps the resumed turn and its origin when a steer arrives in it", async () => {
+  await withResumedTurn(
+    async ({
+      resumedTurnId,
+      events,
+      startedTurnIds,
+      openTurnIds,
+      steer,
+      callTool,
+      bbTurnId,
+    }) => {
+      const originBefore = await callTool();
+      const turnsBefore = startedTurnIds().length;
+      await steer(resumedTurnId, "creq_23456789ag");
+
+      expect(startedTurnIds()).toHaveLength(turnsBefore);
+      expect(openTurnIds()).toEqual([resumedTurnId]);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn/input/accepted",
+          scope: { kind: "turn", turnId: resumedTurnId },
+          clientRequestId: "creq_23456789ag",
+        }),
+      );
+      const originAfter = await callTool();
+      expect(originAfter).toBe(originBefore);
+      expect(bbTurnId(originAfter)).toBe(resumedTurnId);
+    },
+  );
+}, 60_000);
+
+it("opens a new turn with a new origin for a steer that arrives just after the resumed turn ended", async () => {
+  await withResumedTurn(
+    async ({
+      resumedTurnId,
+      events,
+      openTurnIds,
+      finishTurn,
+      steer,
+      callTool,
+      bbTurnId,
+    }) => {
+      const resumedOrigin = await callTool();
+      await finishTurn();
+      expect(openTurnIds()).toEqual([]);
+
+      await steer(resumedTurnId, "creq_23456789ah");
+
+      const [steeredTurnId] = openTurnIds();
+      expect(steeredTurnId).toBeDefined();
+      expect(steeredTurnId).not.toBe(resumedTurnId);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn/input/accepted",
+          scope: { kind: "turn", turnId: steeredTurnId },
+          clientRequestId: "creq_23456789ah",
+        }),
+      );
+      const steeredOrigin = await callTool();
+      expect(steeredOrigin).not.toBe(resumedOrigin);
+      expect(bbTurnId(steeredOrigin)).toBe(steeredTurnId);
+    },
+  );
 }, 60_000);
