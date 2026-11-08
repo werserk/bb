@@ -567,7 +567,7 @@ void codexErrorInfoSchemaMatchesGenerated;
 const codexTurnErrorSchema = z
   .object({
     message: z.string(),
-    codexErrorInfo: codexErrorInfoSchema.nullish(),
+    codexErrorInfo: codexErrorInfoSchema.nullish().catch("other"),
     additionalDetails: z.string().nullish(),
   })
   .passthrough();
