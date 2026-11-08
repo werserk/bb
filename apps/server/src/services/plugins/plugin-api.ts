@@ -1435,6 +1435,10 @@ export function createPluginApi(options: {
       assertLive();
       return { serviceTurns: { version: 1 } };
     },
+    experimental_childNoticeCapabilities() {
+      assertLive();
+      return { childNotices: { version: 1 } };
+    },
     async experimental_sendService(args) {
       assertLive();
       const baseUrl = getLoopbackBaseUrl();

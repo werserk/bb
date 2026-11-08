@@ -2115,6 +2115,13 @@ export interface PluginThreadAttentionPolicy {
 
 export interface PluginExperimentalThreads {
   experimental_serviceTurnCapabilities(): { serviceTurns: { version: 1 } };
+  /**
+   * Present when this server sends a native parent notice for a child thread
+   * spawned with `parentNotifications: "auto"` (held while background work
+   * runs, turn-scoped text, capped per child). Method presence alone is not
+   * the capability; read `childNotices.version`.
+   */
+  experimental_childNoticeCapabilities(): { childNotices: { version: 1 } };
   experimental_sendService(args: {
     threadId: string;
     input: import("@bb/domain").PromptInput[];

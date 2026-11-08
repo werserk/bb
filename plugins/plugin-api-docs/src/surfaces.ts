@@ -1564,6 +1564,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "BbPluginApi",
           "PluginServerApi",
           "bb.experimental_threads.experimental_serviceTurnCapabilities",
+          "bb.experimental_threads.experimental_childNoticeCapabilities",
           "bb.experimental_threads.experimental_sendService",
           "PluginBbSdk.hosts.get",
           "PluginBbSdk.hosts.experimental_discoverRepos",
