@@ -6,6 +6,7 @@ import type {
   QueuedMessageSystemNotice,
 } from "@bb/domain";
 import { getThread } from "@bb/db";
+import { getLastThreadOutput } from "./thread-data.js";
 import { renderTemplate } from "@bb/templates";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import {
@@ -284,7 +285,11 @@ function getChildThreadCompletionText(
         parentThreadId: args.parentThreadId,
         turnId: args.turnId,
       })
-    : { kind: "text", output: null };
+    : {
+        kind: "text",
+        output:
+          getLastThreadOutput(deps.db, args.childThread.id)?.trim() || null,
+      };
 }
 
 function buildChildThreadTurnStatusBatchSegments(
