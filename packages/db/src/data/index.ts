@@ -372,6 +372,7 @@ export {
   listOpenBackgroundTaskItemRowsForHost,
   listOpenBackgroundTaskItemRowsForThread,
   listThreadEventSuffixBackgroundSettlementRows,
+  getRootAgentMessageEventRow,
   listThreadIdsStoppedSinceLastTurnStart,
   listThreadIdsWithLatestHostDaemonRestartInterruption,
   listThreadTurnInterruptionEventStates,
@@ -381,8 +382,12 @@ export {
   getLatestRootTurnCompletion,
   hasBackgroundWorkSettledAfterSequence,
   hasRootTurnStartedAfterSequence,
+  listChildNoticeRefs,
 } from "./child-notice-queries.js";
-export type { RootTurnCompletionRow } from "./child-notice-queries.js";
+export type {
+  ChildNoticeRef,
+  RootTurnCompletionRow,
+} from "./child-notice-queries.js";
 export {
   getDatabaseDataVersion,
   getThreadEventRewriteGeneration,

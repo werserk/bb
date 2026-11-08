@@ -2,6 +2,7 @@ import {
   canHydrateRetainedEventOutputRowsWithinDataByteLimit,
   findStoredEventRow as findStoredEventRowRecord,
   getLatestThreadOutputEventRow,
+  getRootAgentMessageEventRow,
   getLatestThreadSystemErrorEventRow,
   hydrateRetainedEventOutputRows,
   listLatestTurnFinalAgentMessageEventRows,
@@ -186,6 +187,27 @@ export function getLastThreadOutput(
   }
 
   return null;
+}
+
+interface GetRootAgentOutputArgs {
+  sinceCreatedAt?: number;
+  threadId: string;
+  turnId?: string;
+}
+
+/** The newest non-empty root agent message, optionally of one turn or newer than a time. */
+export function getRootAgentOutput(
+  db: DbConnection,
+  args: GetRootAgentOutputArgs,
+): string | null {
+  const row = getRootAgentMessageEventRow(db, args);
+  if (!row) return null;
+  const eventRow = parseStoredEventRow(row);
+  return eventRow.type === "item/completed" &&
+    eventRow.data.item.type === "agentMessage" &&
+    eventRow.data.item.text.length > 0
+    ? eventRow.data.item.text
+    : null;
 }
 
 interface ListLatestTurnFinalAgentRepliesArgs {

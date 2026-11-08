@@ -71,3 +71,37 @@ export function hasBackgroundWorkSettledAfterSequence(
       LIMIT 1`).length > 0
   );
 }
+
+export interface ChildNoticeRef {
+  createdAt: number;
+  /** Null for a notice written before notices named the child turn. */
+  turnId: string | null;
+}
+
+/**
+ * Notices a parent got, or has queued, about one child since `sinceCreatedAt`:
+ * sent `client/turn/requested` system turns and pending queued rows alike.
+ */
+export function listChildNoticeRefs(
+  db: DbQueryConnection,
+  args: {
+    childThreadId: string;
+    parentThreadId: string;
+    sinceCreatedAt: number;
+  },
+): ChildNoticeRef[] {
+  return db.all<ChildNoticeRef>(sql`
+    SELECT json_extract(o.value, '$.turnId') AS turnId, e.created_at AS createdAt
+    FROM events e,
+      json_each(COALESCE(json_extract(e.data, '$.systemMessageSubject.outcomes'), '[]')) o
+    WHERE e.thread_id = ${args.parentThreadId} AND e.type = 'client/turn/requested'
+      AND e.created_at >= ${args.sinceCreatedAt}
+      AND json_extract(o.value, '$.threadId') = ${args.childThreadId}
+    UNION ALL
+    SELECT json_extract(o.value, '$.turnId') AS turnId, q.created_at AS createdAt
+    FROM queued_thread_messages q,
+      json_each(COALESCE(json_extract(q.system_notice, '$.childOutcomeSnapshots'), '[]')) o
+    WHERE q.thread_id = ${args.parentThreadId} AND q.system_notice IS NOT NULL
+      AND q.created_at >= ${args.sinceCreatedAt}
+      AND json_extract(o.value, '$.childThread.id') = ${args.childThreadId}`);
+}

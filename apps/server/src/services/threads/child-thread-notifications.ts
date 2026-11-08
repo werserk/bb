@@ -25,6 +25,8 @@ import {
 import {
   getChildBackgroundCounts,
   isChildNoticeHeld,
+  resolveChildNoticeText,
+  type ChildNoticeText,
 } from "./child-notice-policy.js";
 import { getLastThreadOutput } from "./thread-data.js";
 import { isParentNotifiableChildThread } from "./thread-parent.js";
@@ -247,20 +249,34 @@ function buildChildThreadBatchStatusLineSegments(
   ];
 }
 
-function getChildThreadCompletionOutput(
+function getChildThreadCompletionText(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: QueueChildThreadTurnNotificationArgs,
-): string | null {
+): ChildNoticeText {
   if (args.turnStatus !== "completed") {
-    return null;
+    return { kind: "text", output: null };
   }
-  const output = getLastThreadOutput(deps.db, args.childThread.id)?.trim();
-  return output
-    ? truncateChildThreadOutput(
-        output,
-        CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
-      )
-    : null;
+  const text: ChildNoticeText = args.turnId
+    ? resolveChildNoticeText(deps.db, {
+        childThreadId: args.childThread.id,
+        now: Date.now(),
+        parentThreadId: args.parentThreadId,
+        turnId: args.turnId,
+      })
+    : {
+        kind: "text",
+        output:
+          getLastThreadOutput(deps.db, args.childThread.id)?.trim() || null,
+      };
+  return text.kind === "text" && text.output
+    ? {
+        kind: "text",
+        output: truncateChildThreadOutput(
+          text.output.trim(),
+          CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT,
+        ),
+      }
+    : text;
 }
 
 function buildChildThreadTurnStatusBatchSegments(
@@ -475,7 +491,9 @@ function queueChildThreadTurnNotificationBatchItem(
   ) {
     return;
   }
-  const output = getChildThreadCompletionOutput(deps, args);
+  const text = getChildThreadCompletionText(deps, args);
+  if (text.kind === "skip") return;
+  const output = text.output;
   const item: ChildThreadTurnNotificationBatchItem = {
     activeWorkflowCount: getChildBackgroundCounts(deps.db, args.childThread.id)
       .workflows,

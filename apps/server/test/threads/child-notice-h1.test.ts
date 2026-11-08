@@ -1,4 +1,4 @@
-import { listEvents } from "@bb/db";
+import { listEvents, listQueuedThreadMessages } from "@bb/db";
 import { threadScope, turnScope, turnRequestEventDataSchema } from "@bb/domain";
 import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
 import type { ThreadEvent } from "@bb/domain";
@@ -6,6 +6,7 @@ import { setImmediate } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   seedEvent,
+  seedStoredEvent,
   seedThread,
   seedThreadFixture,
   seedThreadRuntimeState,
@@ -45,6 +46,15 @@ function notices(harness: TestAppHarness, parentId: string) {
     .filter((row) => row.type === "client/turn/requested")
     .map((row) => turnRequestEventDataSchema.parse(JSON.parse(row.data)))
     .filter((data) => data.initiator === "system");
+}
+/** Notices sent plus notices still queued behind a busy parent. */
+function noticeCount(harness: TestAppHarness, parentId: string): number {
+  return (
+    notices(harness, parentId).length +
+    listQueuedThreadMessages(harness.db, parentId).filter(
+      (row) => row.systemNotice !== null,
+    ).length
+  );
 }
 function noticeText(harness: TestAppHarness, parentId: string): string[] {
   return notices(harness, parentId).map((n) =>
@@ -159,11 +169,11 @@ describe("H1 row 1: hold while background work runs", () => {
       await post(harness, f, [bgTask(f, "task-1", "local_bash", false)]);
       await post(harness, f, [turnCompleted(f, "t1")]);
       await tick(3_000);
-      expect(notices(harness, f.parent.id)).toHaveLength(0);
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
 
       await post(harness, f, [bgTask(f, "task-1", "local_bash", true)]);
       await tick(29_000);
-      expect(notices(harness, f.parent.id)).toHaveLength(0);
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
       await tick(5_000);
       await vi.waitFor(() =>
         expect(notices(harness, f.parent.id)).toHaveLength(1),
@@ -219,7 +229,7 @@ describe("H1 row 1: hold while background work runs", () => {
       await post(harness, f, [bgTask(f, "agent-1", "local_agent", false)]);
       await post(harness, f, [turnCompleted(f, "t1")]);
       await tick(3_000);
-      expect(notices(harness, f.parent.id)).toHaveLength(0);
+      expect(noticeCount(harness, f.parent.id)).toBe(0);
     });
   });
 
@@ -243,6 +253,95 @@ describe("H1 row 1: hold while background work runs", () => {
       expect(noticeText(harness, f.parent.id)[0]).toContain(
         "1 workflow still running",
       );
+    });
+  });
+});
+
+describe("H1 row 3: turn-scoped, episode-aware text", () => {
+  it("reports the turn's own final message, not a later sub-agent message", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "ROOT final result", 2);
+      seedStoredEvent(harness.deps, {
+        threadId: f.child.id,
+        environmentId: f.environment.id,
+        providerThreadId: PROVIDER,
+        sequence: 3,
+        type: "item/completed",
+        scope: turnScope("t1"),
+        itemId: "sub-1",
+        itemKind: "agentMessage",
+        parentToolCallId: "tool-1",
+        data: {
+          item: { type: "agentMessage", id: "sub-1", text: "SUBAGENT chatter" },
+        },
+      });
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      const [text] = noticeText(harness, f.parent.id);
+      expect(text).toContain("ROOT final result");
+      expect(text).not.toContain("SUBAGENT chatter");
+    });
+  });
+
+  it("sends nothing for a silent turn after a delivered result", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "FINAL line", 2);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      await post(harness, f, [turnStarted(f, "t2")]);
+      await post(harness, f, [turnCompleted(f, "t2")]);
+      await tick(5_000);
+      expect(noticeCount(harness, f.parent.id)).toBe(1);
+    });
+  });
+
+  it("labels the held head text when the resume turn is textless", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "HEAD result before the wait", 2);
+      await post(harness, f, [bgTask(f, "task-1", "local_bash", false)]);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3_000);
+      await post(harness, f, [bgTask(f, "task-1", "local_bash", true)]);
+      await tick(2_000);
+      await post(harness, f, [turnStarted(f, "t2")]);
+      await post(harness, f, [turnCompleted(f, "t2")]);
+      await tick(5_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      const [text] = noticeText(harness, f.parent.id);
+      expect(text).toContain("Earlier in this episode");
+      expect(text).toContain("HEAD result before the wait");
     });
   });
 });
