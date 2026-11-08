@@ -326,11 +326,7 @@ describe("child notification flush policy", () => {
             : "completed";
       const output =
         change === "long-output" ? `  ${"x".repeat(6000)}  ` : "Original reply";
-      const marker = "\n\n[... output truncated ...]";
-      const capturedOutput =
-        change === "long-output"
-          ? `${"x".repeat(4000 - marker.length)}${marker}`
-          : output;
+      const capturedOutput = output.trim();
       const retained: ChildThreadTurnNotificationBatchItem[] = [
         {
           childThread: child,

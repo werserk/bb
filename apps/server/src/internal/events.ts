@@ -44,6 +44,7 @@ import {
   isActivePruneTriggerThreadEventType,
   maybePruneActiveThreadEventHistory,
 } from "../services/system/event-pruning.js";
+import { armChildNoticeSettleGrace } from "../services/threads/child-notice-reconcile.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../services/threads/child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "../services/threads/thread-parent.js";
 import {
@@ -239,6 +240,7 @@ interface AddParentTurnNotificationFollowUpArgs {
   failedParentNotificationThreadIds: Set<string>;
   followUps: EventEffectFollowUp[] | ParentTurnNotificationFollowUp[];
   thread: NonNullable<ReturnType<typeof getThread>>;
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
   interruption?: ChildThreadOutcome["interruption"];
 }
@@ -249,8 +251,14 @@ interface ParentTurnNotificationFollowUp {
   projectId: string;
   parentThreadId: string;
   title: string | null;
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
   interruption?: ChildThreadOutcome["interruption"];
+}
+
+interface BackgroundSettledFollowUp {
+  kind: "background-settled";
+  threadId: string;
 }
 
 interface QueuedMessageDispatchFollowUp {
@@ -270,6 +278,7 @@ interface EnvironmentDirectoryContinuationFollowUp {
 
 type EventEffectFollowUp =
   | EnvironmentDirectoryContinuationFollowUp
+  | BackgroundSettledFollowUp
   | ParentTurnNotificationFollowUp
   | QueuedMessageDispatchFollowUp;
 
@@ -405,6 +414,7 @@ function addParentTurnNotificationFollowUp(
     projectId: args.thread.projectId,
     parentThreadId: args.thread.parentThreadId,
     title: args.thread.title,
+    ...(args.turnId ? { turnId: args.turnId } : {}),
     turnStatus: args.turnStatus,
     ...(args.interruption ? { interruption: args.interruption } : {}),
   });
@@ -486,6 +496,14 @@ async function applyEventEffects(
         continue;
       }
 
+      if (event.type === "item/backgroundTask/completed") {
+        followUps.push({
+          kind: "background-settled",
+          threadId: entry.threadId,
+        });
+        continue;
+      }
+
       if (event.type === "turn/completed") {
         const turnId = requireThreadEventScopeTurnId({
           type: event.type,
@@ -546,6 +564,7 @@ async function applyEventEffects(
               failedParentNotificationThreadIds,
               followUps: continuation ? deferredParentNotifications : followUps,
               thread: turnCompleted.thread,
+              turnId,
               turnStatus: event.status,
               ...(interruption ? { interruption } : {}),
             });
@@ -627,11 +646,15 @@ async function executeEventFollowUpBestEffort(
             title: followUp.title,
           },
           parentThreadId: followUp.parentThreadId,
+          ...(followUp.turnId ? { turnId: followUp.turnId } : {}),
           turnStatus: followUp.turnStatus,
           ...(followUp.interruption
             ? { interruption: followUp.interruption }
             : {}),
         });
+        return;
+      case "background-settled":
+        armChildNoticeSettleGrace(deps, followUp.threadId);
         return;
       case "queued-message-dispatch":
         await runQueuedMessageDispatch(deps, followUp.wake);

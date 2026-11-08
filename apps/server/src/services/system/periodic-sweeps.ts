@@ -1,3 +1,4 @@
+import { reconcileChildThreadNotices } from "../threads/child-notice-reconcile.js";
 import {
   runThreadPruningSweep,
   THREAD_PRUNING_SWEEP_LIMITS,
@@ -593,6 +594,12 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
       runQueuedMessageDispatch(deps, { kind: "time-reached", now }),
   },
   {
+    cadenceMs: 30_000,
+    category: "durable-intent-retry",
+    name: "child-thread-notices",
+    run: reconcileChildThreadNotices,
+  },
+  {
     cadenceMs: 0,
     category: "durable-intent-retry",
     name: "failed-queue-message-retry",
@@ -669,6 +676,7 @@ export async function runStartupRecoverySweep(
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);
+  await reconcileChildThreadNotices(deps);
 }
 
 export async function runPeriodicSweeps(

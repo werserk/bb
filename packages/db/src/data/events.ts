@@ -3669,6 +3669,42 @@ export function listLatestTurnFinalAgentMessageEventRows(
     .all();
 }
 
+interface GetRootTurnFinalAgentMessageEventRowArgs {
+  /** Only messages created after this time; omit for the whole turn. */
+  sinceCreatedAt?: number;
+  threadId: string;
+  /** The turn whose final root message is wanted; omit for the newest turn. */
+  turnId?: string;
+}
+
+/**
+ * The newest non-empty root-level agent message (never a sub-agent's), scoped
+ * to one turn when `turnId` is given and to messages newer than
+ * `sinceCreatedAt` when that is given.
+ */
+export function getRootAgentMessageEventRow(
+  db: DbConnection,
+  args: GetRootTurnFinalAgentMessageEventRowArgs,
+): StoredEventRow | null {
+  return (
+    db
+      .select(storedEventRowFields)
+      .from(events)
+      .where(
+        sql`${events.threadId} = ${args.threadId}
+        AND ${events.type} = 'item/completed'
+        AND ${events.itemKind} = 'agentMessage'
+        AND ${events.parentToolCallId} IS NULL
+        AND COALESCE(json_extract(${events.data}, '$.item.text'), '') <> ''
+        ${args.turnId === undefined ? sql`` : sql`AND ${events.turnId} = ${args.turnId}`}
+        ${args.sinceCreatedAt === undefined ? sql`` : sql`AND ${events.createdAt} > ${args.sinceCreatedAt}`}`,
+      )
+      .orderBy(desc(events.sequence))
+      .limit(1)
+      .get() ?? null
+  );
+}
+
 export function getLatestThreadSystemErrorEventRow(
   db: DbConnection,
   args: GetLatestThreadSystemErrorEventRowArgs,

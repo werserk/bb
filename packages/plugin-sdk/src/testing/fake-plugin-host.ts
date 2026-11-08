@@ -1064,6 +1064,9 @@ function createFakePluginHostInternal(
     experimental_serviceTurnCapabilities() {
       return { serviceTurns: { version: 1 } };
     },
+    experimental_childNoticeCapabilities() {
+      return { childNotices: { version: 1 } };
+    },
     async experimental_sendService(args) {
       return sdk.threads.send({
         ...args,

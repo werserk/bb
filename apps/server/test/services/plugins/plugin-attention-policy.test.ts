@@ -87,3 +87,25 @@ describe("bb.experimental_threads.setAttentionPolicy (server)", () => {
     });
   });
 });
+
+describe("bb.experimental_threads.experimental_childNoticeCapabilities (server)", () => {
+  it("reports the native child notice capability to plugins", async () => {
+    await withPluginHarness(async (harness, workDir) => {
+      const rootDir = await writePlugin(
+        workDir,
+        "bb-plugin-notice-capability",
+        `export default function plugin(bb: any) {
+          const caps = bb.experimental_threads.experimental_childNoticeCapabilities();
+          if (caps?.childNotices?.version === 1) {
+            bb.experimental_threads.setAttentionPolicy("thr_notice_cap", { backgroundTurns: "silent" });
+          }
+        }`,
+      );
+      const entry = await harness.pluginService.installPath(rootDir);
+      expect(entry.status).toBe("running");
+      expect(getThreadAttentionPolicy("thr_notice_cap")).toEqual({
+        backgroundTurns: "silent",
+      });
+    });
+  });
+});
