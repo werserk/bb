@@ -127,7 +127,7 @@ function TodoBody({
                 "flex min-w-0 items-start gap-2 text-xs",
                 isActive && TODO_ACTIVE_ROW_CLASS,
                 muted &&
-                  "!text-muted-foreground [&_span]:!text-muted-foreground [&_svg]:!text-muted-foreground",
+                  "!text-muted-foreground [&_span]:!text-muted-foreground [&_[data-icon-root]]:!text-muted-foreground",
               ),
             )}
           >
@@ -251,7 +251,7 @@ export function ThreadTodoCard({
         "overflow-hidden rounded-xl",
         state === "waiting" && "border-warning text-warning",
         muted &&
-          "text-muted-foreground [&_li]:!text-muted-foreground [&_li_span]:!text-muted-foreground [&_li_svg]:!text-muted-foreground",
+          "text-muted-foreground [&_li]:!text-muted-foreground [&_li_span]:!text-muted-foreground [&_li_[data-icon-root]]:!text-muted-foreground",
       )}
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
