@@ -564,13 +564,33 @@ const codexErrorInfoSchemaMatchesGenerated: GeneratedCodexErrorInfo extends Code
   : false = true;
 void codexErrorInfoSchemaMatchesGenerated;
 
-const codexTurnErrorSchema = z
-  .object({
-    message: z.string(),
-    codexErrorInfo: codexErrorInfoSchema.nullish(),
-    additionalDetails: z.string().nullish(),
-  })
-  .passthrough();
+function keepUnrecognizedCodexErrorInfo(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  const info: unknown = Reflect.get(value, "codexErrorInfo");
+  if (info == null || codexErrorInfoSchema.safeParse(info).success) {
+    return value;
+  }
+  return {
+    ...value,
+    codexErrorInfo: "other",
+    unrecognizedCodexErrorInfo:
+      typeof info === "string" ? info : JSON.stringify(info).slice(0, 200),
+  };
+}
+
+const codexTurnErrorSchema = z.preprocess(
+  keepUnrecognizedCodexErrorInfo,
+  z
+    .object({
+      message: z.string(),
+      codexErrorInfo: codexErrorInfoSchema.nullish(),
+      unrecognizedCodexErrorInfo: z.string().optional(),
+      additionalDetails: z.string().nullish(),
+    })
+    .passthrough(),
+);
 
 export const codexTurnSchema = z
   .object({

@@ -2150,7 +2150,8 @@ async function handleTurnSteer(
       !isDeepStrictEqual(session.turnPermissionSettings, permissionSettings)
     ) {
       if (!session.openCodexTurnIds.has(params.expectedTurnId)) {
-        throw new Error("The turn to steer is no longer active");
+        rejectStaleSteer(id, "The turn to steer is no longer active");
+        return;
       }
       const failure = await interruptCodexTurn(
         session,
@@ -2190,8 +2191,22 @@ async function handleTurnSteer(
     ]);
     sendResult(id, { threadId: params.threadId });
   } catch (error) {
+    if (
+      error instanceof CodexAppServerRpcError &&
+      error.code === -32600 &&
+      error.message === "no active turn to steer"
+    ) {
+      rejectStaleSteer(id, error.message);
+      return;
+    }
     rejectWithCodexError(id, error);
   }
+}
+
+function rejectStaleSteer(id: string | number, message: string): void {
+  sendError(id, BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN, message, {
+    recovery: { kind: "staleTurn", message, retryable: false },
+  });
 }
 
 async function handleThreadStop(

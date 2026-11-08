@@ -1709,6 +1709,78 @@ describe("codex error and warning translation", () => {
     },
   );
 
+  it("closes a turn that fails with an error code this bridge does not know", () => {
+    const harness = createHarness();
+    const error = {
+      message:
+        "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+      codexErrorInfo: "modelNotFound",
+      additionalDetails: null,
+      misalignment: null,
+    };
+    harness.translate(
+      codexEvent("turn/started", {
+        threadId: "t1",
+        turn: codexTurn({ id: "turn-1", status: "inProgress", error: null }),
+      }),
+    );
+
+    expect(
+      harness.translate({
+        jsonrpc: "2.0",
+        method: "error",
+        params: { error, willRetry: false, threadId: "t1", turnId: "turn-1" },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: "provider/error",
+        scope: turnScope(harness.turnId("turn-1")),
+        detail: error.message,
+        errorInfo: {
+          category: "unknown",
+          providerCode: "modelNotFound",
+          httpStatusCode: null,
+        },
+      }),
+    ]);
+    expect(
+      harness.translate({
+        jsonrpc: "2.0",
+        method: "error",
+        params: { error: { codexErrorInfo: "modelNotFound" }, threadId: "t1" },
+      }),
+    ).toEqual([
+      expect.objectContaining({ type: "provider/unhandled", rawType: "error" }),
+    ]);
+    expect(
+      harness.translate({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: {
+          threadId: "t1",
+          turn: {
+            id: "turn-1",
+            rootTurnId: "turn-1",
+            items: [],
+            itemsView: "notLoaded",
+            status: "failed",
+            error,
+            startedAt: 1794090563,
+            completedAt: 1794090566,
+            durationMs: 2289,
+          },
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope(harness.turnId("turn-1")),
+        status: "failed",
+        error: { message: error.message },
+      }),
+    ]);
+  });
+
   it("maps deprecationNotice to a thread-scoped warning", () => {
     const harness = createHarness();
     const events = harness.translate(

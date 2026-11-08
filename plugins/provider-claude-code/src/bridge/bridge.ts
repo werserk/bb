@@ -251,6 +251,8 @@ interface ClaudeSessionRestart {
 interface ThreadSession {
   commandListGeneration: number;
   toolOrigin: { turnId?: string; retired?: boolean };
+  toolOriginTurnEnded: boolean;
+  resumedTurnCount: number;
   contextUsageCollector: ClaudeContextUsageCollector;
   session: SdkSession;
   attachment: ThreadAttachment;
@@ -898,9 +900,12 @@ function emitForSession(
   method: string,
   params: Record<string, unknown>,
 ): void {
-  const deltas = threadSession.translator.translate(
-    { jsonrpc: "2.0", method, params },
-    { threadId },
+  const deltas = stampResumedTurnOrigin(
+    threadSession,
+    threadSession.translator.translate(
+      { jsonrpc: "2.0", method, params },
+      { threadId },
+    ),
   );
   sendThreadDeltas(threadId, deltas);
   for (const delta of deltas) {
@@ -925,6 +930,35 @@ function emitForSession(
       threadSession.recoveryHintRaisedThisTurn = null;
     }
   }
+}
+
+function stampResumedTurnOrigin(
+  threadSession: ThreadSession,
+  deltas: ThreadDelta[],
+): ThreadDelta[] {
+  if (threadSession.toolOrigin.turnId === undefined) {
+    return deltas;
+  }
+  return deltas.map((delta) => {
+    if (delta.kind === "turn.boundary") {
+      threadSession.toolOriginTurnEnded ||=
+        delta.providerTurnId === undefined ||
+        delta.providerTurnId === threadSession.toolOrigin.turnId;
+      return delta;
+    }
+    if (
+      delta.kind !== "turn.open" ||
+      delta.providerTurnId !== undefined ||
+      delta.parentRef !== undefined ||
+      !threadSession.toolOriginTurnEnded
+    ) {
+      return delta;
+    }
+    threadSession.toolOriginTurnEnded = false;
+    threadSession.resumedTurnCount += 1;
+    threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}-r${threadSession.resumedTurnCount}`;
+    return { ...delta, providerTurnId: threadSession.toolOrigin.turnId };
+  });
 }
 
 function emitTerminalAccountErrorHint(
@@ -1195,6 +1229,8 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const threadSession: ThreadSession = {
     commandListGeneration: 0,
     toolOrigin,
+    toolOriginTurnEnded: false,
+    resumedTurnCount: 0,
     contextUsageCollector: new ClaudeContextUsageCollector(),
     session,
     attachment,
