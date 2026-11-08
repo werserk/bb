@@ -601,6 +601,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     skillRootPaths: string[];
   };
   const agentSelections = new Map<string, Map<string, AgentSelection>>();
+  function clearAgentSelections(pluginId: string): void {
+    for (const [threadId, selections] of agentSelections) {
+      selections.delete(pluginId);
+      if (selections.size === 0) agentSelections.delete(threadId);
+    }
+  }
   function canKeepAgentSelection(pluginId: string): boolean {
     const row = getInstalledPlugin(deps.db, pluginId);
     return (
@@ -1754,6 +1760,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         const row = getInstalledPlugin(deps.db, id);
         const providerIds = row ? pluginProviderIds(row) : new Set<string>();
         await withLifecycleLock(id, () => disposeOne(id));
+        clearAgentSelections(id);
         statuses.delete(id);
         handlerStats.delete(id);
         agentToolProblems.delete(id);
@@ -1841,6 +1848,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
                 setStatus(pluginId, "disabled");
               }
             });
+            clearAgentSelections(pluginId);
             deps.onPluginUnregistered?.(pluginId);
           }
           return true;
@@ -2307,10 +2315,6 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       const threadId = context.thread.id;
       const selections =
         agentSelections.get(threadId) ?? new Map<string, AgentSelection>();
-      agentSelections.delete(threadId);
-      agentSelections.set(threadId, selections);
-      if (agentSelections.size > 128)
-        agentSelections.delete(agentSelections.keys().next().value!);
       const allTools = collectAgentTools();
       const toolOwners = new Map(
         allTools.map(({ record, pluginId }) => [record.name, pluginId]),
@@ -2448,6 +2452,10 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
             ),
         };
         selections.set(pluginId, selection);
+        agentSelections.delete(threadId);
+        agentSelections.set(threadId, selections);
+        if (agentSelections.size > 128)
+          agentSelections.delete(agentSelections.keys().next().value!);
         appendSelection(pluginId, selection);
       }
 

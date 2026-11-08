@@ -255,6 +255,9 @@ fails closed. This memory-only cache uses a 128-thread LRU, never persistence.
 Fallbacks warn with reasons; successful reductions replace the cache and warn with
 removed tool names and thread/plugin ids. Calls retain plugin authorization.
 Cached skill roots are thread-scoped. Disabled/removed/held/safe-mode plugins cannot fallback.
+Disabling or removing a plugin clears its cache; reloads and upgrades retain it.
+If upgraded configure fails, the previous version's listing and instructions are
+reused until configure succeeds. Calls use the current registered schema validation.
 
 Instruction ordering is standard BB instructions, selected tools' static
 snippets, `contributeInstructions` output, `configure` dynamic instructions,

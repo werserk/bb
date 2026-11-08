@@ -88,6 +88,7 @@ describe("bb.agents.registerTool", () => {
       dataDir: join(workDir, "data"),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
+      bundledPlugins: [],
     });
   });
 
@@ -135,6 +136,7 @@ describe("bb.agents.registerTool", () => {
       join(skillDir, "SKILL.md"),
       "---\nname: selection-skill\ndescription: Selection fixture.\n---\n# Selection\n",
     );
+    return join(workDir, "bb-plugin-selection");
   }
 
   function resolveSelection(title = "good", threadId = "thread-selection") {
@@ -296,6 +298,137 @@ describe("bb.agents.registerTool", () => {
       expect.stringContaining("shrank"),
     );
     expect(await resolveSelection("throw")).toEqual(small);
+  });
+
+  it.each(["disable", "remove"])(
+    "clears every thread's selection on %s before the plugin returns",
+    async (action) => {
+      const root = await installSelectionPlugin();
+      await resolveSelection();
+      await resolveSelection("small", "other-thread");
+      if (action === "disable") {
+        await service.setEnabled("selection", false);
+        await service.setEnabled("selection", true);
+      } else {
+        await service.remove("selection");
+        await service.installPath(root);
+      }
+      for (const threadId of ["thread-selection", "other-thread"]) {
+        const selection = await resolveSelection("throw", threadId);
+        expect(selection.tools).toEqual([]);
+        expect(selection.dynamicInstructions).toEqual([]);
+        expect(selection.selectedSkillIdsByPlugin.get("selection")?.size).toBe(
+          0,
+        );
+      }
+    },
+  );
+
+  it("does not displace cached selections for threads without a configuring plugin", async () => {
+    await installSelectionPlugin();
+    const good = await resolveSelection();
+    await service.stop();
+    for (let index = 0; index < 128; index++)
+      await resolveSelection("good", String(index));
+    expect(await resolveSelection("throw")).toEqual(good);
+  });
+
+  it("does not refresh LRU entries while no plugin can configure", async () => {
+    await installSelectionPlugin();
+    for (let index = 0; index < 128; index++)
+      await resolveSelection("good", String(index));
+    await service.stop();
+    expect((await resolveSelection("good", "0")).tools).toHaveLength(2);
+    await service.reload("selection");
+    await resolveSelection("good", "newest");
+    expect((await resolveSelection("throw", "0")).tools).toEqual([]);
+    expect((await resolveSelection("throw", "1")).tools).toHaveLength(2);
+  });
+
+  it("withholds a held plugin's cached tools, skills and instructions", async () => {
+    await installSelectionPlugin();
+    await resolveSelection();
+    const installed = service.list().find(({ id }) => id === "selection")!;
+    await service.stop();
+    await service.start({
+      hold: {
+        sources: [installed.source],
+        detail: "Held for selection test",
+        isActive: async () => true,
+      },
+    });
+    expect(service.list().find(({ id }) => id === "selection")).toMatchObject({
+      enabled: true,
+      status: "disabled",
+    });
+    expect(service.findAgentTool("alpha_tool")).toBeUndefined();
+    const selection = await resolveSelection();
+    expect(selection.tools).toEqual([]);
+    expect(selection.dynamicInstructions).toEqual([]);
+    expect(selection.selectedSkillIdsByPlugin.get("selection")?.size).toBe(0);
+    expect(service.listSkillRootContributions("thread-selection")).toEqual([]);
+  });
+
+  it("replays the previous version's selection after reload but validates calls against the current schema", async () => {
+    const root = await installSelectionPlugin();
+    const good = await resolveSelection();
+    await writeFile(
+      join(root, "server.ts"),
+      `
+      import { z } from "zod";
+      export default function plugin(bb: any) {
+        for (const name of ["alpha_tool", "beta_tool"]) {
+          bb.agents.registerTool({ name, description: "Upgraded " + name,
+            parameters: z.object({ current: z.string() }).strict(),
+            execute: ({ current }: any) => "upgraded:" + current });
+        }
+        bb.agents.configure(({ thread }: any) => {
+          if (thread.title !== "recovered") throw new Error("upgraded configure failed");
+          return { tools: ["alpha_tool"], skills: [], instructions: "Upgraded instructions" };
+        });
+      }
+    `,
+    );
+    expect((await service.reload("selection")).ok).toBe(true);
+    expect(await resolveSelection()).toEqual(good);
+    const tool = service.findAgentTool("alpha_tool")!;
+    const ctx = {
+      threadId: "thread-selection",
+      projectId: "project-selection",
+      signal: new AbortController().signal,
+    };
+    const rejected = await service.invokeAgentTool({
+      ...tool,
+      input: { answer: 1 },
+      ctx,
+    });
+    expect(rejected).toMatchObject({
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: expect.stringContaining("Invalid arguments"),
+        },
+      ],
+    });
+    expect(
+      await service.invokeAgentTool({
+        ...tool,
+        input: { current: "value" },
+        ctx,
+      }),
+    ).toMatchObject({
+      success: true,
+      contentItems: [{ type: "inputText", text: "upgraded:value" }],
+    });
+    const recovered = await resolveSelection("recovered");
+    expect(recovered.tools.map(({ tool }) => tool.name)).toEqual([
+      "alpha_tool",
+    ]);
+    expect(recovered.dynamicInstructions).toEqual([
+      { pluginId: "selection", text: "Upgraded instructions" },
+    ]);
+    expect(await resolveSelection()).toEqual(recovered);
   });
 
   it("rejects duplicate tool names within one factory execution", async () => {

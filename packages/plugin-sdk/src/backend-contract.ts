@@ -1716,6 +1716,10 @@ export interface PluginAgents {
    * Fallbacks warn with reasons; successful reductions are respected and warn
    * with thread/plugin ids and removed tools. Calls still require authorization.
    * Disabled, removed, held and safe-mode-suppressed plugins cannot fallback.
+   * Disabling or removing a plugin clears its cached selections; reloads and
+   * upgrades retain them. After an upgrade whose configure fails, the previous
+   * version's listing and instructions are reused until configure succeeds.
+   * Calls still use the current registered tool's schema validation.
    *
    * Tools take effect when the provider session is next started or resumed;
    * an already-running session is not hot-mutated. Instructions follow the
