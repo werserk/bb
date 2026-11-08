@@ -345,3 +345,50 @@ describe("H1 row 3: turn-scoped, episode-aware text", () => {
     });
   });
 });
+
+describe("H1 row 4: head and tail truncation", () => {
+  it("keeps both ends of a result over the limit and states how much was omitted", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      const long = `KEY-HEAD ${"x".repeat(6_000)} KEY-TAIL`;
+      say(harness, f, "t1", "m1", long, 2);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      const [text] = noticeText(harness, f.parent.id);
+      expect(text).toContain("KEY-HEAD");
+      expect(text).toContain("KEY-TAIL");
+      expect(text).toMatch(/\[\.\.\. \d+ characters omitted/);
+      expect(text!.length).toBeLessThan(4_400);
+    });
+  });
+
+  it("leaves a result under the limit untouched", async () => {
+    await withTestHarness(async (harness) => {
+      const f = setup(harness);
+      vi.useFakeTimers();
+      seedTurnStarted(harness.deps, {
+        environmentId: f.environment.id,
+        threadId: f.child.id,
+        turnId: "t1",
+        providerThreadId: PROVIDER,
+      });
+      say(harness, f, "t1", "m1", "short result", 2);
+      await post(harness, f, [turnCompleted(f, "t1")]);
+      await tick(3_000);
+      await vi.waitFor(() =>
+        expect(notices(harness, f.parent.id)).toHaveLength(1),
+      );
+      expect(noticeText(harness, f.parent.id)[0]).not.toContain("omitted");
+    });
+  });
+});

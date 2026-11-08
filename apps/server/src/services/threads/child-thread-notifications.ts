@@ -87,7 +87,7 @@ const CHILD_THREAD_OUTCOME_BATCH_UPDATES_SLOT =
   "__BB_CHILD_THREAD_OUTCOME_BATCH_UPDATES__";
 const CHILD_THREAD_MENTION_SLOT = "__BB_CHILD_THREAD_MENTION__";
 const CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT = 4_000;
-const CHILD_THREAD_OUTPUT_TRUNCATION_MARKER = "\n\n[... output truncated ...]";
+const CHILD_THREAD_OUTPUT_HEAD_CHAR_LIMIT = 1_200;
 const CHILD_THREAD_INSPECTION_GUIDANCE =
   "Review the thread before deciding next steps.";
 const CHILD_THREAD_NEEDS_ATTENTION_FALLBACK_SUMMARY =
@@ -142,19 +142,26 @@ function childThreadInterruptionCauseText(
   }
 }
 
-function truncateChildThreadOutput(text: string, limit: number): string {
+function childThreadOutputOmissionMarker(omitted: number): string {
+  return `\n\n[... ${omitted} characters omitted; read the child thread for the full text ...]\n\n`;
+}
+
+/** Keeps the head and the tail: a result's verdict usually sits at the end. */
+export function truncateChildThreadOutput(text: string, limit: number): string {
   if (text.length <= limit) {
     return text;
   }
 
-  const retainedLength = Math.max(
-    0,
-    limit - CHILD_THREAD_OUTPUT_TRUNCATION_MARKER.length,
-  );
-  if (retainedLength === 0) {
-    return CHILD_THREAD_OUTPUT_TRUNCATION_MARKER.trimStart();
+  const budget = limit - childThreadOutputOmissionMarker(text.length).length;
+  if (budget <= 0) {
+    return childThreadOutputOmissionMarker(text.length).trim();
   }
-  return `${text.slice(0, retainedLength).trimEnd()}${CHILD_THREAD_OUTPUT_TRUNCATION_MARKER}`;
+  const head = Math.min(
+    CHILD_THREAD_OUTPUT_HEAD_CHAR_LIMIT,
+    Math.floor(budget / 3),
+  );
+  const tail = budget - head;
+  return `${text.slice(0, head).trimEnd()}${childThreadOutputOmissionMarker(text.length - head - tail)}${text.slice(text.length - tail).trimStart()}`;
 }
 
 function formatChildThreadCompletionOutputExcerpt(

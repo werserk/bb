@@ -16,6 +16,7 @@ import {
   type ChildThreadTurnNotificationBatchItem,
   buildChildThreadTurnStatusBatchInput,
   queueChildThreadTurnNotificationBestEffort,
+  truncateChildThreadOutput,
 } from "../../src/services/threads/child-thread-notifications.js";
 import {
   flushChildThreadNotifications,
@@ -326,10 +327,9 @@ describe("child notification flush policy", () => {
             : "completed";
       const output =
         change === "long-output" ? `  ${"x".repeat(6000)}  ` : "Original reply";
-      const marker = "\n\n[... output truncated ...]";
       const capturedOutput =
         change === "long-output"
-          ? `${"x".repeat(4000 - marker.length)}${marker}`
+          ? truncateChildThreadOutput(output.trim(), 4_000)
           : output;
       const retained: ChildThreadTurnNotificationBatchItem[] = [
         {
