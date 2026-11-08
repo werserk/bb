@@ -8,6 +8,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
 
@@ -38,6 +39,9 @@ export function buildBridgeMcpServer(
       name: def.name,
       description: def.description,
       inputSchema: normalizeInputSchema(def.inputSchema),
+      ...(def.name === "bb_update_plan"
+        ? { _meta: { "anthropic/alwaysLoad": true } }
+        : {}),
     })),
   }));
   instance.server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -53,12 +57,31 @@ export function buildBridgeMcpServer(
         isError: true,
       };
     }
-    const result = await forwardToolCall(
-      def.name,
-      request.params.arguments ?? {},
-    );
+    const args = request.params.arguments ?? {};
+    const result = await forwardToolCall(def.name, args);
+    let content = experimental_buildBridgeToolCallContent(result);
+    if (def.name === "bb_update_plan" && !result.isError) {
+      const plan = z
+        .array(
+          z.object({
+            status: z.enum(["pending", "in_progress", "completed"]),
+          }),
+        )
+        .safeParse(args.plan);
+      if (plan.success) {
+        const completed = plan.data.filter(
+          (step) => step.status === "completed",
+        ).length;
+        content = [
+          {
+            type: "text",
+            text: `Plan updated (${completed}/${plan.data.length} steps completed). Ensure you keep using the plan to track your progress and mark it complete when you finish.`,
+          },
+        ];
+      }
+    }
     return {
-      content: experimental_buildBridgeToolCallContent(result),
+      content,
       ...(result.isError ? { isError: true } : {}),
     };
   });
