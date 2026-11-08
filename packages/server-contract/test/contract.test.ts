@@ -51,7 +51,7 @@ const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   {
     reason:
-      "Service descriptors and human inspection options are additive; older persisted rows have none. Plan reasons and actors are optional native provider facts.",
+      "Service descriptors and human inspection options are additive; older persisted rows have none. Plan reasons and actors are optional native provider facts. Plan staleness is absent until a later root turn provides stale evidence.",
     fields: [
       "sendMessageRequestSchema.serviceTurn",
       "sendMessageRequestSchema.serviceTurn.automaticRedelivery",
@@ -62,6 +62,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadTimelineQuerySchema.includeService",
       "threadTimelineResponseSchema.pendingTodos.items.actor",
       "threadTimelineResponseSchema.pendingTodos.items.note",
+      "threadTimelineResponseSchema.pendingTodos.staleSince",
       "threadTimelineResponseSchema.rows.steps.actor",
       "threadTimelineResponseSchema.rows.steps.note",
       "threadTimelineResponseSchema.serviceTurn",
@@ -71,7 +72,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Older parent notices have no per-child outcomes. New notices omit interruption details for completed, failed, or unclassified turns; a recorded host-connection-loss cause is optional even when the interruption reason is known.",
+      "Older parent notices have no per-child outcomes or captured child root turn id. New notices omit interruption details for completed, failed, or unclassified turns; a recorded host-connection-loss cause is optional even when the interruption reason is known.",
     fields: [
       "threadTimelineResponseSchema.rows.systemMessageSubject.outcomes",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes",
@@ -79,6 +80,8 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes.interruption",
       "threadTimelineResponseSchema.rows.systemMessageSubject.outcomes.interruption.cause",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes.interruption.cause",
+      "threadTimelineResponseSchema.rows.systemMessageSubject.outcomes.turnId",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes.turnId",
     ],
   },
   {
