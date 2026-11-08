@@ -1388,6 +1388,10 @@
     },
     "bb-plugin-provider-claude-code#test": {
       "env": ["VITEST_MAX_WORKERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/server/src/services/threads/thread-plan-tool.ts"
+      ],
       "dependsOn": [
         "//#ensure-native-modules",
         "@get-bb/plugin-sdk#build",
