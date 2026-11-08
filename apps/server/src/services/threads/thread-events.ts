@@ -77,6 +77,8 @@ export interface TurnRequestRetryMarker {
 }
 
 interface ClientTurnRequestedEventArgs {
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
+  deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
   /**
    * Set only when a `turn.failed` retry row is dispatching, marking this turn
@@ -205,6 +207,12 @@ function buildClientTurnRequestedEventData(
   return {
     ...buildClientTurnBaseEventData(args),
     requestId,
+    ...(args.dispatchProvenance !== undefined
+      ? { dispatchProvenance: args.dispatchProvenance }
+      : {}),
+    ...(args.deferredFromRequestId !== undefined
+      ? { deferredFromRequestId: args.deferredFromRequestId }
+      : {}),
     ...(args.serviceTurn ? { serviceTurn: args.serviceTurn } : {}),
     ...(args.retryOf !== undefined
       ? {

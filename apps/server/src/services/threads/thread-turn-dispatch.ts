@@ -1,5 +1,7 @@
 import type {
   PromptInput,
+  TurnRequestEventData,
+  ClientTurnRequestId,
   ServiceTurnDescriptor,
   ResolvedThreadExecutionOptions,
   SystemMessageKind,
@@ -27,6 +29,8 @@ export interface ReadyThreadEnvironment extends EnvironmentRow {
 }
 
 interface DispatchTurnDuringReprovisionArgs {
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
+  deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
   beforeRequestAppendInTransaction?: (args: { tx: DbTransaction }) => void;
   deps: LoggedPendingInteractionWorkSessionDeps;
@@ -72,6 +76,8 @@ export async function dispatchTurnDuringReprovision(
     args.environment.status !== "destroyed"
   ) {
     requestThreadTargetReprovision(args.deps, {
+      dispatchProvenance: args.dispatchProvenance,
+      deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: args.serviceTurn,
       beforeRequestAppendInTransaction: ({ tx }) => {
         args.beforeRequestAppendInTransaction?.({ tx });

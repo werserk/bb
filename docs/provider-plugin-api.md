@@ -279,7 +279,7 @@ Recovery is typed, never text-matched:
 ```ts
 // provider/recovery
 { kind: "sessionArchived" | "authRequired" | "restartRecommended"
-       | "staleTurn" | "rateLimited",
+       | "staleTurn" | "turnBusy" | "rateLimited",
   message: string, retryable: boolean }
 ```
 

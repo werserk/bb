@@ -2194,9 +2194,30 @@ async function handleTurnSteer(
     if (
       error instanceof CodexAppServerRpcError &&
       error.code === -32600 &&
+      error.steerRefusal === undefined &&
       error.message === "no active turn to steer"
     ) {
       rejectStaleSteer(id, error.message);
+      return;
+    }
+    if (
+      error instanceof CodexAppServerRpcError &&
+      error.code === -32600 &&
+      (error.steerRefusal === "review" ||
+        error.steerRefusal === "compact" ||
+        (error.steerRefusal === undefined &&
+          [
+            "cannot steer a review turn",
+            "cannot steer a compact turn",
+          ].includes(error.message)))
+    ) {
+      sendError(id, BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR, error.message, {
+        recovery: {
+          kind: "turnBusy",
+          message: error.message,
+          retryable: false,
+        },
+      });
       return;
     }
     rejectWithCodexError(id, error);

@@ -1,3 +1,4 @@
+import { parseStoredQueuedMessagePayload as toQueuedMessagePayload } from "@bb/db";
 import {
   promptInputSchema,
   queuedMessageWaitingOnSchema,
@@ -6,7 +7,6 @@ import {
 import type {
   PermissionMode,
   PromptInput,
-  QueuedMessagePayload,
   QueuedMessagePayloadKind,
   QueuedMessageState,
   QueuedMessageWaitingOn,
@@ -125,36 +125,6 @@ export function storedQueuedThreadMessageRequestedBy(
   return {
     initiator: row.requestedByInitiator,
     senderThreadId: row.requestedByThreadId,
-  };
-}
-
-/**
- * Assemble the row's retry columns into the payload union. A `retry` row that
- * is missing either column is a write-side bug, not a shape a reader should
- * paper over, so it fails loudly rather than degrading to `inline`.
- */
-function toQueuedMessagePayload(
-  row: StoredQueuedThreadMessageRow,
-): QueuedMessagePayload {
-  if (row.payloadKind === "inline") {
-    return { kind: "inline" };
-  }
-  if (
-    row.retryOfTurnRequestId === null ||
-    row.retryAttempt === null ||
-    row.retryReason === null
-  ) {
-    throw new ApiError(
-      500,
-      "internal_error",
-      `Stored queued message ${row.id} for thread ${row.threadId} is a retry with no original request`,
-    );
-  }
-  return {
-    kind: "retry",
-    retryOfTurnRequestId: row.retryOfTurnRequestId,
-    attempt: row.retryAttempt,
-    reason: row.retryReason,
   };
 }
 

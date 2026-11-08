@@ -123,3 +123,61 @@ it("keeps other steer failures as bridge errors", async () => {
     message: "steer exploded",
   });
 });
+
+it.each(["review", "compact"])(
+  "reports a refused %s steer as busy without marking it stale",
+  async (kind) => {
+    const steered = await steerAfterStart({
+      script: {
+        steerError: { code: -32600, message: `cannot steer a ${kind} turn` },
+      },
+      expectedTurnId: "turn-fx-1",
+      options: FULL_ACCESS_SESSION_OPTIONS,
+    });
+    expect(steered.error).toMatchObject({
+      data: { recovery: { kind: "turnBusy", retryable: false } },
+    });
+  },
+);
+
+it.each([
+  {
+    data: {
+      codexErrorInfo: { activeTurnNotSteerable: { turnKind: "review" } },
+    },
+    busy: true,
+  },
+  {
+    data: {
+      codexErrorInfo: { activeTurnNotSteerable: { turnKind: "compact" } },
+    },
+    busy: true,
+  },
+  {
+    data: { codexErrorInfo: { activeTurnNotSteerable: { turnKind: "other" } } },
+    busy: false,
+  },
+  { data: { codexErrorInfo: { activeTurnNotSteerable: null } }, busy: false },
+])(
+  "uses structured non-steerable data without conflicting string fallback: %j",
+  async ({ data, busy }) => {
+    const steered = await steerAfterStart({
+      script: {
+        steerError: {
+          code: -32600,
+          message: busy
+            ? "Provider turn refuses input"
+            : "cannot steer a review turn",
+          data,
+        },
+      },
+      expectedTurnId: "turn-fx-1",
+      options: FULL_ACCESS_SESSION_OPTIONS,
+    });
+    if (busy)
+      expect(steered.error).toMatchObject({
+        data: { recovery: { kind: "turnBusy" } },
+      });
+    else expect(steered.error).not.toHaveProperty("data.recovery");
+  },
+);

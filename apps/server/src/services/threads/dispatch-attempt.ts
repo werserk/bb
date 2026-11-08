@@ -653,6 +653,14 @@ async function runDispatchAttempt(
       payload: resolvedPayload,
       thread,
       trigger: args.trigger,
+      dispatchProvenance: {
+        origin: args.origin,
+        originPluginId: args.originPluginId,
+        requestedBy: args.startedOnBehalfOf,
+      },
+      ...(args.queuePayload.kind === "deferredSteer"
+        ? { deferredFromRequestId: args.queuePayload.sourceRequestId }
+        : {}),
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
         if (getThread(tx, thread.id)?.status !== thread.status) {

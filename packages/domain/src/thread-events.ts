@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { threadCreateOriginSchema } from "./thread-create-origin.js";
+import { startedOnBehalfOfSchema } from "./started-on-behalf-of.js";
 import { serviceTurnDescriptorSchema } from "./service-turn.js";
 import {
   approvalPendingInteractionResolutionSchema,
@@ -64,6 +66,14 @@ export const turnRequestEventDataSchema = z.object({
   serviceTurn: serviceTurnDescriptorSchema.optional(),
   direction: z.literal("outbound"),
   requestId: clientTurnRequestIdSchema,
+  dispatchProvenance: z
+    .object({
+      origin: threadCreateOriginSchema.nullable(),
+      originPluginId: z.string().nullable(),
+      requestedBy: startedOnBehalfOfSchema.nullable(),
+    })
+    .optional(),
+  deferredFromRequestId: clientTurnRequestIdSchema.optional(),
   // Retry provenance, written only when a `turn.failed` gate's retry row
   // dispatches. Both fields are present together or not at all: absence means
   // "this is an original dispatch", which is the overwhelmingly common case.
@@ -114,6 +124,7 @@ export function refineTurnRequestRetryMarker(
 
 export const turnRequestRejectedEventDataSchema = z.object({
   requestId: clientTurnRequestIdSchema,
+  deferredToQueuedMessageId: z.string().min(1).optional(),
   reason: z.string().min(1),
   message: z.string().min(1),
 });

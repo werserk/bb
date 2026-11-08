@@ -370,6 +370,12 @@ async function steerSubmittedTurn(
     if (result.status === "steered") {
       return;
     }
+    if (result.status === "busy") {
+      throw new ExpectedCommandDispatchError(
+        "turn_not_steerable",
+        "The active provider turn cannot accept a steer",
+      );
+    }
     activeTurnId = result.activeTurnId;
     if (attempt === TURN_SUBMIT_STEER_ATTEMPTS - 1) {
       break;

@@ -4303,7 +4303,6 @@ replacement. Settle the shared process-local instance lifecycle across SDK
 bundle versions and whether `bundledNpmCli` belongs on the public surface before
 removing the prefix.
 
-
 ## Hidden service turns v1
 
 `bb.experimental_threads.experimental_serviceTurnCapabilities()` returns the server-owned `{serviceTurns:{version:1}}` capability (also `GET /api/v1/capabilities/service-turns`). `experimental_sendService` accepts typed reason, input, target and optional managed sender. It authenticates the calling plugin with its revocable caller credential, restricts both threads to its managed namespace and the same project, and always starts or queues a separate turn. Public unauthenticated descriptor injection is refused. Missing capability must retain pending work; method presence is not a capability.
@@ -4325,3 +4324,15 @@ Returns `{ callerIdentity: true, exactTurnOrigin: false, perCallTurnOrigin: true
 Claude tool calls carry an immutable query-run origin token mapped to a bb turn by the daemon; Codex supplies its native turn ID, mapped when known (L3: an unmapped Codex ID still passes through raw for compatibility); Pi/ACP legacy bridges can use arrival-time fallback. `exactTurnOrigin` stays false until every shipped provider path supplies an exact origin.
 
 Per call, `turnOrigin: "provider"` certifies that the daemon mapped the supplied provider origin to a bb turn. `"arrival"` marks active-turn fallback or an unmapped raw provider ID. The field is omitted without `turnId` and on older daemons; consumers requiring exact origin must check `ctx.turnOrigin === "provider"`, rather than the global `exactTurnOrigin`. Tool arguments never supply either identity or provenance. The optional daemon/server wire field deliberately preserves protocol 258 compatibility: new servers accept old payloads without defaulting provenance; old servers ignore the added field, covered by contract and transport tests.
+
+## Deferred steer contract unions
+
+Fork capability `core-codex-busy-steer` adds `turnBusy` to the existing public
+`providerRecoveryKindValues` export and `deferredSteer` to native queue payloads.
+Turn request events optionally carry `dispatchProvenance` and
+`deferredFromRequestId`; successful custody rejections optionally carry
+`deferredToQueuedMessageId`. No new plugin method is introduced. Exhaustive union
+consumers must handle the additive members. Docs: `provider-bridge-protocol.md`
+and `system-overview.md` (Deferred owner steers). Audit requires upstream recovery
+semantics, queue-reader compatibility, preservation of owner authority and the
+core upgrade/rollback rehearsal before treating this downstream contract as stable.

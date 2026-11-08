@@ -217,7 +217,15 @@ interface SteerTurnStaleResult {
   activeTurnId: string | null;
 }
 
-export type SteerTurnResult = SteerTurnAppliedResult | SteerTurnStaleResult;
+interface SteerTurnBusyResult {
+  status: "busy";
+  activeTurnId: string | null;
+}
+
+export type SteerTurnResult =
+  | SteerTurnAppliedResult
+  | SteerTurnStaleResult
+  | SteerTurnBusyResult;
 
 export interface StopThreadArgs {
   threadId: string;

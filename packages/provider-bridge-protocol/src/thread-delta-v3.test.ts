@@ -276,6 +276,7 @@ describe("provider/recovery notification", () => {
       "authRequired",
       "restartRecommended",
       "staleTurn",
+      "turnBusy",
       "rateLimited",
     ]) {
       expect(

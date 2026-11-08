@@ -552,6 +552,61 @@ describe("timeline CLI rendering snapshots", () => {
     `);
   });
 
+  it("hides deferred custody rejection and shows its later acceptance once", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const initial = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "DEFERRED_OWNER_INPUT",
+    });
+    const events = [
+      event.turnStarted(),
+      initial,
+      event.clientTurnRejected({
+        requestId: initial.data.requestId,
+        reason: "turn_not_steerable",
+        deferredToQueuedMessageId: "qmsg-deferred",
+      }),
+    ];
+    expect(renderActiveTimeline(events).text).not.toContain(
+      "DEFERRED_OWNER_INPUT",
+    );
+    const next = event.clientTurnRequested({ text: "DEFERRED_OWNER_INPUT" });
+    const accepted = renderIdleTimeline([
+      ...events,
+      event.turnCompleted(),
+      next,
+      event.turnStarted({ turnId: "turn-2" }),
+      event.inputAccepted({
+        clientRequestId: next.data.requestId,
+        turnId: "turn-2",
+      }),
+      event.turnCompleted({ turnId: "turn-2" }),
+    ]);
+    expect(accepted.text.match(/DEFERRED_OWNER_INPUT/g)).toHaveLength(1);
+    expect(accepted.text).not.toContain("steer failed");
+    expect(accepted.text).not.toContain("steer pending");
+  });
+
+  it("keeps an unrelated system error after a deferred custody rejection", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const request = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "Deferred input",
+    });
+    const timeline = renderActiveTimeline([
+      event.turnStarted(),
+      request,
+      event.clientTurnRejected({
+        requestId: request.data.requestId,
+        reason: "turn_not_steerable",
+        deferredToQueuedMessageId: "qmsg-deferred",
+      }),
+      event.systemError({ message: "UNRELATED_HOST_FAILURE" }),
+    ]);
+    expect(timeline.text).toContain("UNRELATED_HOST_FAILURE");
+    expect(timeline.text).not.toContain("Deferred input");
+  });
+
   it("shows a rejected steer as failed instead of pending", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const request = event.clientTurnRequested({

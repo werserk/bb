@@ -30,8 +30,12 @@ function respond(id, result) {
   send({ jsonrpc: "2.0", id, result });
 }
 
-function respondError(id, code, message) {
-  send({ jsonrpc: "2.0", id, error: { code, message } });
+function respondError(id, code, message, data) {
+  send({
+    jsonrpc: "2.0",
+    id,
+    error: { code, message, ...(data === undefined ? {} : { data }) },
+  });
 }
 
 const ZERO_WORK_PROMPT_TEXT = "/clear";
@@ -683,7 +687,12 @@ async function handleRequest(message) {
     }
     case "turn/steer":
       if (script?.steerError) {
-        respondError(id, script.steerError.code, script.steerError.message);
+        respondError(
+          id,
+          script.steerError.code,
+          script.steerError.message,
+          script.steerError.data,
+        );
         return;
       }
       respond(id, {});

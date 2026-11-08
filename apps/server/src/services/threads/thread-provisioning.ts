@@ -10,6 +10,8 @@ import {
   type EnvironmentProviderSelection,
   type ServiceTurnDescriptor,
   type PromptInput,
+  type TurnRequestEventData,
+  type ClientTurnRequestId,
   type ResolvedThreadExecutionOptions,
   type SystemMessageKind,
   type SystemMessageSubject,
@@ -69,6 +71,8 @@ interface RequestThreadProvisionArgs {
 }
 
 interface RequestThreadTargetReprovisionArgs {
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
+  deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
   beforeRequestAppendInTransaction?: (args: { tx: DbTransaction }) => void;
   environment: EnvironmentRow;
@@ -443,6 +447,8 @@ function appendReprovisionTurnRequest(
             threadId: args.thread.id,
             environmentId: args.environment.id,
             type: "client/turn/requested",
+            dispatchProvenance: args.dispatchProvenance,
+            deferredFromRequestId: args.deferredFromRequestId,
             serviceTurn: args.serviceTurn,
             input: args.input,
             ...(args.inputGroups !== undefined
@@ -459,16 +465,17 @@ function appendReprovisionTurnRequest(
             requestId,
           },
         );
-      recordAcceptedPromptHistoryEntry(
-        { db: tx },
-        {
-          thread: args.thread,
-          input: args.input,
-          initiator: args.initiator,
-          target: { kind: "new-turn" },
-          requestSequence: request.sequence,
-        },
-      );
+      if (args.deferredFromRequestId === undefined)
+        recordAcceptedPromptHistoryEntry(
+          { db: tx },
+          {
+            thread: args.thread,
+            input: args.input,
+            initiator: args.initiator,
+            target: { kind: "new-turn" },
+            requestSequence: request.sequence,
+          },
+        );
       return request;
     },
     { behavior: "immediate" },

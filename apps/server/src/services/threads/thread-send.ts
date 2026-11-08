@@ -12,6 +12,7 @@ import type {
   Thread,
   ThreadTurnInitiator,
   TurnRequestTarget,
+  TurnRequestEventData,
 } from "@bb/domain";
 import {
   flattenPromptInputGroups,
@@ -97,6 +98,8 @@ type SendThreadMessagePayload = SendMessageRequest & {
 };
 
 interface SendThreadMessageArgs {
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
+  deferredFromRequestId?: ClientTurnRequestId;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
   /**
    * Present only when this send re-submits a failed turn. Marks the turn event
@@ -153,6 +156,8 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
+  deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
   /** Retry provenance; absent for an original dispatch. */
   retryOf?: TurnRequestRetryMarker;
@@ -409,6 +414,8 @@ export function captureUserMessageSentTelemetry(
 }
 
 function appendAndQueueSendThreadMessageInTransaction({
+  dispatchProvenance,
+  deferredFromRequestId,
   serviceTurn,
   retryOf,
   beforeAppendInTransaction,
@@ -436,6 +443,10 @@ function appendAndQueueSendThreadMessageInTransaction({
             threadId: thread.id,
             environmentId,
             type: "client/turn/requested",
+            ...(dispatchProvenance !== undefined ? { dispatchProvenance } : {}),
+            ...(deferredFromRequestId !== undefined
+              ? { deferredFromRequestId }
+              : {}),
             ...(serviceTurn ? { serviceTurn } : {}),
             ...(retryOf !== undefined ? { retryOf } : {}),
             input,
@@ -449,16 +460,17 @@ function appendAndQueueSendThreadMessageInTransaction({
             requestId,
           },
         );
-      recordAcceptedPromptHistoryEntry(
-        { db: tx },
-        {
-          thread,
-          input,
-          initiator,
-          target,
-          requestSequence: appended.sequence,
-        },
-      );
+      if (deferredFromRequestId === undefined)
+        recordAcceptedPromptHistoryEntry(
+          { db: tx },
+          {
+            thread,
+            input,
+            initiator,
+            target,
+            requestSequence: appended.sequence,
+          },
+        );
       const queueResult = queueInTransaction({
         requestEventSequence: appended.sequence,
         tx,
@@ -527,14 +539,15 @@ async function sendThreadMessageWithoutContextClear(
             senderThreadId,
           })
         : payload.input;
-  ({ input, inputGroups } = await appendPluginMentionContext({
-    input,
-    ...(inputGroups !== undefined ? { inputGroups } : {}),
-  }));
-  const deferredFirstTurnContext = resolveDeferredFirstTurnContext(
-    deps.db,
-    thread.id,
-  );
+  if (args.deferredFromRequestId === undefined)
+    ({ input, inputGroups } = await appendPluginMentionContext({
+      input,
+      ...(inputGroups !== undefined ? { inputGroups } : {}),
+    }));
+  const deferredFirstTurnContext =
+    args.deferredFromRequestId !== undefined
+      ? null
+      : resolveDeferredFirstTurnContext(deps.db, thread.id);
   ({ input, inputGroups } = prependDeferredFirstTurnContext(
     { input, ...(inputGroups !== undefined ? { inputGroups } : {}) },
     deferredFirstTurnContext,
@@ -589,7 +602,11 @@ async function sendThreadMessageWithoutContextClear(
   // A retry's model is provenance — the failed attempt's tuple, replayed —
   // not a fresh model choice, so it must not rewrite the thread's sticky
   // override the way an explicit user send's model does.
-  if (senderThreadId === null && args.retryOf === undefined) {
+  if (
+    senderThreadId === null &&
+    args.retryOf === undefined &&
+    args.deferredFromRequestId === undefined
+  ) {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
       modelSource:
@@ -618,6 +635,8 @@ async function sendThreadMessageWithoutContextClear(
 
   if (
     await dispatchTurnDuringReprovision({
+      dispatchProvenance: args.dispatchProvenance,
+      deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: payload.serviceTurn,
       beforeRequestAppendInTransaction: beforeAppendInTransaction,
       deps,
@@ -695,6 +714,8 @@ async function sendThreadMessageWithoutContextClear(
         }
       : await prepareReadyThreadTurnCommand(deps, commandArgs);
     const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+      dispatchProvenance: args.dispatchProvenance,
+      deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: payload.serviceTurn,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
@@ -793,6 +814,8 @@ async function sendThreadMessageWithoutContextClear(
     requestId,
   });
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+    dispatchProvenance: args.dispatchProvenance,
+    deferredFromRequestId: args.deferredFromRequestId,
     serviceTurn: payload.serviceTurn,
     ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
     beforeAppendInTransaction,

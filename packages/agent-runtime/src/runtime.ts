@@ -539,6 +539,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         handleRecoveryHint({ hint, proc: args.proc, source: "rejection" });
         throw error;
       case "staleTurn":
+      case "turnBusy":
         throw error;
     }
   }
@@ -2188,6 +2189,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               });
             }
           } catch (error) {
+            if (
+              error instanceof JsonRpcResponseError &&
+              error.recovery?.kind === "turnBusy"
+            ) {
+              return {
+                status: "busy",
+                activeTurnId: turnState.getActiveTurnId(threadId),
+              };
+            }
             if (
               error instanceof JsonRpcResponseError &&
               error.recovery?.kind === "staleTurn"

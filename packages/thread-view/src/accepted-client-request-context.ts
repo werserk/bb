@@ -104,3 +104,17 @@ export function buildAcceptedClientRequestById({
   });
   return acceptedById;
 }
+
+export function buildDeferredClientRequestIds(
+  context: AcceptedClientRequestContext,
+  events: readonly ThreadEventWithMetaLike[],
+): Set<ClientTurnRequestId> {
+  return new Set(
+    [...events, ...context.rejectedClientRequestEvents].flatMap(({ event }) =>
+      event.type === "client/turn/rejected" &&
+      event.deferredToQueuedMessageId !== undefined
+        ? [event.requestId]
+        : [],
+    ),
+  );
+}

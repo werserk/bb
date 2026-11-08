@@ -213,4 +213,79 @@ describe("createAgentRuntime input accepted events", () => {
 
     await runtime.shutdown();
   });
+  it("retains the active turn for repeated turnBusy steer refusals", async () => {
+    const events: ThreadEvent[] = [];
+    const record = createScriptedEchoRequestRecord();
+    const runtime = createScriptedEchoRuntime({
+      runtime: {
+        workspacePath: tmpDir,
+        env: record.env,
+        onEvent: (event) => events.push(event),
+      },
+      launch: {
+        scripted: {
+          failMethods: [
+            {
+              method: "turn/steer",
+              message: "cannot steer a compact turn",
+              code: BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR,
+              recovery: { kind: "turnBusy", retryable: false },
+            },
+          ],
+        },
+      },
+    });
+
+    await runtime.startThread({
+      environmentId: "env-1",
+      threadId: "t1",
+      projectId: "p1",
+      providerId: "acp-cursor",
+      options: fullRuntimeOptions,
+    });
+    await runtime.runTurn({
+      clientRequestId: "creq_222222222x",
+      threadId: "t1",
+      input: [promptTextInput({ text: "delay:500 active turn" })],
+      options: fullRuntimeOptions,
+    });
+    const { turnId } = await waitForThreadTurnStarted({
+      events,
+      providerId: "acp-cursor",
+      runtime,
+      threadId: "t1",
+    });
+
+    await expect(
+      runtime.steerTurn({
+        clientRequestId: "creq_222222222y",
+        threadId: "t1",
+        expectedTurnId: turnId,
+        input: [promptTextInput({ text: "late steer" })],
+        options: fullRuntimeOptions,
+      }),
+    ).resolves.toEqual({ status: "busy", activeTurnId: turnId });
+    expect(runtime.getActiveTurnId("t1")).toBe(turnId);
+    const steersSentSoFar = record
+      .read()
+      .filter((request) => request.method === "turn/steer").length;
+    expect(steersSentSoFar).toBe(1);
+
+    await expect(
+      runtime.steerTurn({
+        clientRequestId: "creq_222222222z",
+        threadId: "t1",
+        expectedTurnId: turnId,
+        input: [promptTextInput({ text: "still late" })],
+        options: fullRuntimeOptions,
+      }),
+    ).resolves.toEqual({ status: "busy", activeTurnId: turnId });
+    expect(
+      record.read().filter((request) => request.method === "turn/steer"),
+    ).toHaveLength(2);
+    expect(inputAcceptedEvents(events, "creq_222222222y")).toHaveLength(0);
+    expect(inputAcceptedEvents(events, "creq_222222222z")).toHaveLength(0);
+
+    await runtime.shutdown();
+  });
 });

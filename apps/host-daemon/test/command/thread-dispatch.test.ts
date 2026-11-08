@@ -1948,6 +1948,64 @@ describe("thread command dispatch", () => {
       },
     ]);
   });
+  it("retains a busy turn without fallback when the provider cannot steer it", async () => {
+    const harness = createHarness();
+    await harness.manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/env-1",
+    });
+    harness.threadControls.setActiveTurn("thread-1", "turn-1");
+
+    harness.runtime.steerTurn = vi.fn<typeof harness.runtime.steerTurn>(
+      async () => ({ status: "busy", activeTurnId: "turn-1" }),
+    );
+    await expect(
+      dispatchCommand(
+        {
+          bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+          type: "turn.submit",
+          environmentId: "env-1",
+          threadId: "thread-1",
+          requestId: nextClientRequestId(),
+          input: [textPromptInput("adjust course")],
+          options: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            providerOptions: {},
+            permissionMode: "full",
+            permissionScope: "full",
+            approvalReviewer: null,
+            permissionEscalation: null,
+          },
+          resumeContext: {
+            bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            workspaceContext: {
+              workspacePath: "/tmp/env-1",
+            },
+            projectId: "project-1",
+            providerId: "fake",
+            providerThreadId: "provider-1",
+            instructions: "Be a helpful coding agent.",
+            dynamicTools: [],
+            contributedEnv: [],
+            injectedSkillSources: [],
+            instructionMode: "append",
+          },
+          target: { mode: "auto", expectedTurnId: "turn-1" },
+        },
+        harness.dispatchOptions(),
+      ),
+    ).rejects.toMatchObject({ code: "turn_not_steerable" });
+
+    expect(harness.runtime.steerTurn).toHaveBeenCalledTimes(1);
+    expect(harness.runtimeState.ranTurnText).toBeUndefined();
+    expect(harness.manager.listActiveThreads()).toEqual([
+      {
+        threadId: "thread-1",
+      },
+    ]);
+  });
 
   it("re-steers the newer active turn when auto turn.submit sees a stale target", async () => {
     const harness = createHarness();

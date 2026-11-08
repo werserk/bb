@@ -1,3 +1,4 @@
+import { recoverBusySteerInTransaction } from "./deferred-steer.js";
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import {
@@ -818,6 +819,36 @@ function settleThreadCommandFailure(
   }
   if (hasTerminalClientTurnRequestEvent(args.deps, args.command)) {
     return emptyCommandResultSideEffects();
+  }
+  if (
+    args.command.type === "turn.submit" &&
+    args.command.target.mode !== "start" &&
+    args.report.errorCode === "turn_not_steerable" &&
+    recoverBusySteerInTransaction({
+      db: args.deps.db,
+      thread,
+      requestId: args.command.requestId,
+      message: args.report.errorMessage,
+    })
+  ) {
+    return {
+      postCommitActions: [
+        {
+          run: async (deps) => {
+            deps.hub.notifyThread(thread.id, [
+              "events-appended",
+              "queue-changed",
+            ]);
+            const { runQueuedMessageDispatch } =
+              await import("./queued-message-dispatch.js");
+            await runQueuedMessageDispatch(deps, {
+              kind: "thread-ready",
+              threadId: thread.id,
+            });
+          },
+        },
+      ],
+    };
   }
   if (args.command.type === "turn.submit") {
     appendThreadEventInTransaction(args.deps.db, {

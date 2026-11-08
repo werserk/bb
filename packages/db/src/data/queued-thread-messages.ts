@@ -1,3 +1,5 @@
+import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
+export { parseStoredQueuedMessagePayload } from "./queued-message-payload.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
 import {
   and,
@@ -367,8 +369,7 @@ export interface QueuedThreadMessageEditHoldArgs {
   threadId: string;
 }
 
-export interface HoldQueuedThreadMessageForEditArgs
-  extends QueuedThreadMessageEditHoldArgs {
+export interface HoldQueuedThreadMessageForEditArgs extends QueuedThreadMessageEditHoldArgs {
   heldUntil: number;
 }
 
@@ -503,7 +504,10 @@ function queuedMessageGroupingEnvelopeMatches(
 ): boolean {
   return (
     firstQueuedMessage !== null &&
-    JSON.stringify(queuedMessage.serviceTurn) === JSON.stringify(firstQueuedMessage.serviceTurn) &&
+    firstQueuedMessage.payloadKind !== "deferredSteer" &&
+    queuedMessage.payloadKind !== "deferredSteer" &&
+    JSON.stringify(queuedMessage.serviceTurn) ===
+      JSON.stringify(firstQueuedMessage.serviceTurn) &&
     queuedMessage.senderThreadId === firstQueuedMessage.senderThreadId &&
     queuedMessage.model === firstQueuedMessage.model &&
     queuedMessage.reasoningLevel === firstQueuedMessage.reasoningLevel &&
@@ -668,10 +672,7 @@ function resolveQueuedThreadMessageNeighbor(
     return false;
   }
 
-  const neighbor = getQueuedThreadMessage(
-    db,
-    args.neighborQueuedMessageId,
-  );
+  const neighbor = getQueuedThreadMessage(db, args.neighborQueuedMessageId);
   if (
     !neighbor ||
     neighbor.threadId !== args.threadId ||
@@ -843,14 +844,7 @@ export function createQueuedThreadMessageInTransaction(
       sendAt: input.sendAt,
       systemNotice:
         input.systemNotice === null ? null : JSON.stringify(input.systemNotice),
-      payloadKind: input.payload.kind,
-      retryOfTurnRequestId:
-        input.payload.kind === "retry"
-          ? input.payload.retryOfTurnRequestId
-          : null,
-      retryAttempt:
-        input.payload.kind === "retry" ? input.payload.attempt : null,
-      retryReason: input.payload.kind === "retry" ? input.payload.reason : null,
+      ...encodeQueuedMessagePayload(input.payload),
       groupWithNext: false,
       claimedAt: null,
       claimToken: null,
@@ -1012,7 +1006,7 @@ export function deleteQueuedRetriesForThreadEventSuffixInTransaction(
     .where(
       and(
         eq(queuedThreadMessages.threadId, args.threadId),
-        eq(queuedThreadMessages.payloadKind, "retry"),
+        inArray(queuedThreadMessages.payloadKind, ["retry", "deferredSteer"]),
         exists(
           db
             .select({ sequence: events.sequence })
@@ -1152,10 +1146,7 @@ export function listIdleThreadsWithQueuedMessages(
           notExists(manuallyStoppedQueuePauseQuery(db, threads.id)),
           notOrdinaryTurnEndQueuedThreadMessage(),
         ),
-        or(
-          isNull(threads.environmentId),
-          ne(environments.status, "destroyed"),
-        ),
+        or(isNull(threads.environmentId), ne(environments.status, "destroyed")),
         // Only rows an idle thread actually unblocks. A thread whose only
         // queued row is waiting on a clock or a plugin is not a drain
         // candidate, and listing it would re-run the whole send pipeline
@@ -1306,7 +1297,10 @@ export function claimNextQueuedThreadMessageGroup(
       const drainableGroups = partitionQueuedMessageGroups(
         queuedMessages,
       ).filter((rows) => rows.some(isIdleDrainableQueuedMessage));
-      drainableGroups.sort((a, b) => Number(a[0]?.serviceTurn != null) - Number(b[0]?.serviceTurn != null));
+      drainableGroups.sort(
+        (a, b) =>
+          Number(a[0]?.serviceTurn != null) - Number(b[0]?.serviceTurn != null),
+      );
       const editHeldIndex = drainableGroups.findIndex((rows) =>
         isQueuedThreadMessageGroupEditHeld(rows, now),
       );
@@ -1350,10 +1344,7 @@ export function reorderQueuedThreadMessage({
   try {
     result = db.transaction(
       (tx): ReorderQueuedThreadMessageResult => {
-        const movedQueuedMessage = getQueuedThreadMessage(
-          tx,
-          queuedMessageId,
-        );
+        const movedQueuedMessage = getQueuedThreadMessage(tx, queuedMessageId);
         if (!movedQueuedMessage || movedQueuedMessage.threadId !== threadId) {
           return { kind: "not_found" };
         }
@@ -1631,7 +1622,12 @@ export function releaseStaleQueuedMessageClaims(
             eq(queuedThreadMessages.state, "claimed"),
             lt(queuedThreadMessages.claimedAt, args.claimedBefore),
             ...(protectedClaimTokens.length > 0
-              ? [notInArray(queuedThreadMessages.claimToken, protectedClaimTokens)]
+              ? [
+                  notInArray(
+                    queuedThreadMessages.claimToken,
+                    protectedClaimTokens,
+                  ),
+                ]
               : []),
           ),
         )
@@ -1839,7 +1835,9 @@ export function listQueuedThreadMessageCountsByThreadIds(
           and(
             inArray(queuedThreadMessages.threadId, [...threadIds]),
             liveQueuedThreadMessage(),
-            args.includeService === false ? isNull(queuedThreadMessages.serviceTurn) : undefined,
+            args.includeService === false
+              ? isNull(queuedThreadMessages.serviceTurn)
+              : undefined,
           ),
         )
         .groupBy(queuedThreadMessages.threadId)
@@ -2019,7 +2017,10 @@ export function listRetryableFailedQueuedThreadMessages(
         ),
       ),
     )
-    .orderBy(asc(queuedThreadMessages.nextAttemptAt), asc(queuedThreadMessages.id))
+    .orderBy(
+      asc(queuedThreadMessages.nextAttemptAt),
+      asc(queuedThreadMessages.id),
+    )
     .all();
 }
 
@@ -2229,6 +2230,7 @@ export function hasQueuedRetryOfTurnRequest(
       .where(
         and(
           eq(queuedThreadMessages.threadId, args.threadId),
+          eq(queuedThreadMessages.payloadKind, "retry"),
           eq(
             queuedThreadMessages.retryOfTurnRequestId,
             args.retryOfTurnRequestId,

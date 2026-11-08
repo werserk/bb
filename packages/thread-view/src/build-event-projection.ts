@@ -38,6 +38,7 @@ export type { ThreadEventWithMeta } from "./group-event-projection-turns.js";
 import { shouldSuppressLowValueToolCall } from "./tool-call-suppression.js";
 import {
   buildAcceptedClientRequestById,
+  buildDeferredClientRequestIds,
   EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
   type AcceptedClientRequest,
   type AcceptedClientRequestContext,
@@ -579,12 +580,21 @@ function buildFlatProjectionData(
   });
   const clientRequestById = buildClientTurnRequestById(orderedEvents);
   const rejectedClientRequestIds = buildRejectedClientRequestIds(orderedEvents);
+  const deferredClientRequestIds = buildDeferredClientRequestIds(
+    args.acceptedClientRequestContext,
+    orderedEvents,
+  );
   const selectedStartedTurnIds = buildSelectedStartedTurnIds(orderedEvents);
   const acceptedRootClientTurnIds = buildAcceptedRootClientTurnIds(
     orderedEvents,
     clientRequestById,
   );
   for (const { event: decoded, meta } of orderedEvents) {
+    if (
+      decoded.type === "client/turn/requested" &&
+      deferredClientRequestIds.has(decoded.requestId)
+    )
+      continue;
     const eventType = decoded.type;
     const eventTurnId = getEventTurnId(decoded);
     const eventProviderThreadId = getEventProviderThreadId(decoded);
@@ -714,6 +724,7 @@ function buildFlatProjectionData(
     }
 
     if (decoded.type === "client/turn/rejected") {
+      if (decoded.deferredToQueuedMessageId !== undefined) continue;
       const clientRequest = clientRequestById.get(decoded.requestId);
       if (clientRequest) {
         for (const rejectedMessage of parseRejectedUsersFromClientRequest({

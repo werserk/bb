@@ -559,3 +559,6 @@ export type {
   DiffViewedFileRecord,
   DiffViewedFileScope,
 } from "./diff-viewed-files.js";
+
+export { parseStoredQueuedMessagePayload } from "./queued-message-payload.js";
+export { getStoredTurnRequestEventByRequestId } from "./events.js";

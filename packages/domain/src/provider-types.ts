@@ -148,6 +148,7 @@ export const providerRecoveryKindValues = [
   "authRequired",
   "restartRecommended",
   "staleTurn",
+  "turnBusy",
   "rateLimited",
 ] as const;
 export const providerRecoveryKindSchema = z.enum(providerRecoveryKindValues);

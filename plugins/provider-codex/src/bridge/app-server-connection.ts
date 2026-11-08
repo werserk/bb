@@ -5,7 +5,7 @@ import {
   experimental_recordProviderChildIo,
   experimental_spawnPortableProcess,
 } from "@get-bb/plugin-sdk/provider-bridge";
-import type { z } from "zod";
+import { z } from "zod";
 
 const STDERR_TAIL_MAX_CHUNKS = 40;
 const CLOSE_AFTER_EXIT_GRACE_MS = 1_000;
@@ -67,13 +67,35 @@ export class CodexAppServerExitedError extends Error {
   }
 }
 
+function parseSteerRefusal(
+  data: unknown,
+): "review" | "compact" | "invalid" | undefined {
+  if (data === undefined) return undefined;
+  const envelope = z
+    .object({ codexErrorInfo: z.unknown().optional() })
+    .safeParse(data);
+  if (envelope.success && envelope.data.codexErrorInfo === undefined)
+    return undefined;
+  const info = z
+    .object({
+      activeTurnNotSteerable: z.object({
+        turnKind: z.enum(["review", "compact"]),
+      }),
+    })
+    .safeParse(envelope.success ? envelope.data.codexErrorInfo : null);
+  return info.success ? info.data.activeTurnNotSteerable.turnKind : "invalid";
+}
+
 export class CodexAppServerRpcError extends Error {
+  readonly steerRefusal: ReturnType<typeof parseSteerRefusal>;
   constructor(
     message: string,
     readonly code: number | undefined,
+    data?: unknown,
   ) {
     super(message);
     this.name = "CodexAppServerRpcError";
+    this.steerRefusal = parseSteerRefusal(data);
   }
 }
 
@@ -87,7 +109,7 @@ interface ParsedChildMessage {
   id?: string | number;
   method?: string;
   result?: unknown;
-  error?: { code?: number; message?: string };
+  error?: { code?: number; message?: string; data?: unknown };
   params?: unknown;
 }
 
@@ -282,6 +304,7 @@ export function createCodexAppServerConnection(
               message.error.message ??
                 `codex app-server returned error code ${message.error.code ?? "unknown"}`,
               message.error.code,
+              message.error.data,
             ),
           );
         } else {

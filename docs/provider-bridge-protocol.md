@@ -293,7 +293,7 @@ The current grammar (`grammarVersions: [3, 3]`) includes:
   option the provider later changes itself is not forced back.
 - **`provider/recovery`** is a bridge → runtime _notification_ beside
   `session/replaced`, not a delta: `{ threadId?, kind: sessionArchived |
-authRequired | restartRecommended | staleTurn | rateLimited, message,
+authRequired | restartRecommended | staleTurn | turnBusy | rateLimited, message,
 retryable }`. The runtime acts on the kind and never matches error text.
   See "Recovery hints" below for the actions and the carrier.
 
@@ -365,6 +365,7 @@ only and never consults the provider id:
 | `authRequired`       | Reject the request with a typed `auth_required` error (no text match anywhere downstream) and forward the hint so the host can re-check provider health.                                                                                                                                                                                |
 | `restartRecommended` | Stop the bridge process the thread runs on and resume the thread on a fresh one — right away when the thread is idle, otherwise before its next turn. The restart waits while another thread on the same process is mid-turn or holds open background work, and never re-resumes a sibling the host already resumed on the replacement. |
 | `staleTurn`          | Drop the steer: the turn it targeted is gone, and the runtime reports the steer as stale instead of failing it.                                                                                                                                                                                                                         |
+| `turnBusy`           | Reject a steer as busy while retaining the active turn. The daemon reports `turn_not_steerable`; the server owns any eligible deferred delivery. No runtime retry or new turn is started.                                                                                                                                               |
 | `rateLimited`        | With `retryable: true` on a rejected request: retry on a short bounded ladder and surface the last failure. With `retryable: false` (a turn that already failed): forward only; the runtime never re-runs a user's turn on its own.                                                                                                     |
 
 The action follows the hint whichever attempt it arrives on: a rung of the
@@ -655,3 +656,11 @@ public dependencies, so `packages/provider-parity` replays their committed
 cells instead. Its self-suite applies the recorded conformance checks to the
 same replay used for event and timeline parity, so each cell launches its
 bridge only once.
+
+For Codex busy steers, structured
+`error.data.codexErrorInfo.activeTurnNotSteerable.turnKind` (`review` or `compact`)
+is authoritative. The bridge accepts exact legacy error strings only when
+structured information is absent. Conflicting or malformed information remains a
+generic error; it cannot become `staleTurn`. This is additive to the public SDK's
+`providerRecoveryKindValues`, and its server custody meaning requires daemon
+protocol 259 with exact-version compatibility.

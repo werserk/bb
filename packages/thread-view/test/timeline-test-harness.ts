@@ -123,6 +123,7 @@ interface ProviderUserMessageArgs extends ProviderTurnEventOptions {
 }
 
 interface ClientTurnRejectedArgs extends EventFactoryRowOptions {
+  deferredToQueuedMessageId?: string;
   message?: string;
   reason?: string;
   requestId: ClientTurnRequestId;
@@ -725,6 +726,9 @@ export function createTimelineEventFactory(
         type: "client/turn/rejected",
         data: {
           requestId: args.requestId,
+          ...(args.deferredToQueuedMessageId !== undefined
+            ? { deferredToQueuedMessageId: args.deferredToQueuedMessageId }
+            : {}),
           reason: args.reason ?? "command_failed",
           message: args.message ?? "The command failed",
         },

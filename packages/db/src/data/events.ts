@@ -4364,6 +4364,31 @@ export function listThreadIdsWithLatestHostDaemonRestartInterruption(
     .map((row) => row.threadId);
 }
 
+export function getStoredTurnRequestEventByRequestId(
+  db: DbQueryConnection,
+  args: { threadId: string; requestId: ClientTurnRequestId },
+): StoredTurnRequestEventRow | null {
+  return (
+    db
+      .select({
+        data: events.data,
+        sequence: events.sequence,
+        threadId: events.threadId,
+        type: events.type,
+      })
+      .from(events)
+      .where(
+        and(
+          eq(events.threadId, args.threadId),
+          eq(events.type, "client/turn/requested"),
+          sql`json_extract(${events.data}, '$.requestId') = ${args.requestId}`,
+        ),
+      )
+      .limit(1)
+      .get() ?? null
+  );
+}
+
 export function getLastStoredTurnRequestEvent(
   db: DbQueryConnection,
   threadId: string,

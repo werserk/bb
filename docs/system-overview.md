@@ -106,3 +106,28 @@ reasoning text. After an owner steer, active owner thinking remains visible
 alongside the timer. In-flight reasoning whose item started in the hidden
 service range stays hidden across an owner steer, including after acceptance.
 Completed service history stays hidden; owner replies after a steer stay visible.
+
+### Deferred owner steers
+
+A provider `turnBusy` rejection keeps the active turn alive. The host reports
+`turn_not_steerable` under daemon protocol 259; it does not start another run.
+Server settlement fences accepted/rejected request IDs, then atomically transfers
+an eligible owner request into a native `deferredSteer` queue row and records the
+rejection's `deferredToQueuedMessageId`. This linkage hides the failed-copy
+presentation while the native queue owns delivery.
+
+`services/threads/deferred-steer.ts` resolves the immutable source request for both
+queue drains, including reprovision. The source stores admitted provenance,
+groups, visibility and execution; drains preserve owner authority and avoid
+re-expansion, sticky override changes and duplicate prompt history. The queue row
+uses the existing source-request column with a separate payload discriminator;
+retry detection excludes it, and request-suffix edits cancel both referenced kinds.
+Manual stop still pauses automatic delivery. Periodic idle recovery supplies the
+wake if post-commit work was interrupted.
+
+Only explicit review/compact refusals of proven owner inputs qualify. Ordinary
+review turn-ID mismatches, automatic compaction, permission-changing provider
+branches, non-owner inputs and legacy in-flight requests without provenance are
+outside this recovery. Persisted JSON and public union types change without a SQL
+migration. A .68 downgrade with deferred rows is prohibited; release must prove
+remaining-history compatibility or require the stopped pre-upgrade snapshot.

@@ -1,3 +1,4 @@
+import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
   getLatestThreadSequence,
   claimNextQueuedThreadMessageGroup,
@@ -199,14 +200,6 @@ export function createAutomaticQueuedMessageGroupEligibility(
           return false;
       }
     });
-}
-
-async function requireReadyQueuedMessageEnvironment(
-  deps: LoggedPendingInteractionWorkSessionDeps,
-  thread: Thread,
-) {
-  const environment = await requireThreadCommandEnvironment(deps, { thread });
-  return requireReadyThreadEnvironment(environment);
 }
 
 export interface CreateQueuedMessageForThreadArgs {
@@ -504,26 +497,42 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
     return null;
   }
 
-  const environment = await requireReadyQueuedMessageEnvironment(deps, thread);
+  const targetEnvironment = await requireThreadCommandEnvironment(deps, {
+    thread,
+  });
+  if (
+    args.queuedMessages[0]?.payloadKind === "deferredSteer" &&
+    (targetEnvironment.status !== "ready" || !targetEnvironment.path)
+  ) {
+    return null;
+  }
+  const environment = requireReadyThreadEnvironment(targetEnvironment);
   const queuedMessages = args.queuedMessages.map(toThreadQueuedMessage);
-  const queuedMessage = queuedMessages[0]!;
+  const deferred = resolveDeferredSteerQueuedMessage(
+    deps.db,
+    queuedMessages[0]!,
+  );
+  const queuedMessage = deferred?.message ?? queuedMessages[0]!;
 
   const senderThreadId = args.queuedMessages[0]!.senderThreadId;
-  let inputGroups = args.queuedMessages.map((claimedQueuedMessage) =>
-    formatQueuedMessageInputForSender({
-      input: toThreadQueuedMessage(claimedQueuedMessage).content,
-      senderThreadId: claimedQueuedMessage.senderThreadId,
-    }),
-  );
+  let inputGroups =
+    deferred?.inputGroups ??
+    args.queuedMessages.map((claimedQueuedMessage) =>
+      formatQueuedMessageInputForSender({
+        input: toThreadQueuedMessage(claimedQueuedMessage).content,
+        senderThreadId: claimedQueuedMessage.senderThreadId,
+      }),
+    );
   let input = flattenPromptInputGroups(inputGroups);
-  ({ input, inputGroups } = await appendPluginMentionContext({
-    input,
-    inputGroups,
-  }));
-  const deferredFirstTurnContext = resolveDeferredFirstTurnContext(
-    deps.db,
-    thread.id,
-  );
+  if (deferred === null)
+    ({ input, inputGroups } = await appendPluginMentionContext({
+      input,
+      inputGroups,
+    }));
+  const deferredFirstTurnContext =
+    deferred !== null
+      ? null
+      : resolveDeferredFirstTurnContext(deps.db, thread.id);
   ({ input, inputGroups } = prependDeferredFirstTurnContext(
     { input, inputGroups },
     deferredFirstTurnContext,
@@ -538,7 +547,7 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   // A retry row's model is provenance — the failed attempt's tuple, replayed —
   // not a model the user picked for this row, so it must not become the
   // thread's sticky override the way a composed queued message's choice does.
-  if (initiator === "user" && queuedMessage.payload.kind !== "retry") {
+  if (initiator === "user" && queuedMessage.payload.kind === "inline") {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
       modelSource: "explicit",
@@ -591,6 +600,16 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
         environmentId: thread.environmentId,
         execution,
         initiator,
+        dispatchProvenance: deferred?.dispatchProvenance ?? {
+          origin: args.queuedMessages[0]!.origin,
+          originPluginId: args.queuedMessages[0]!.originPluginId,
+          requestedBy: storedQueuedThreadMessageRequestedBy(
+            args.queuedMessages[0]!,
+          ),
+        },
+        ...(deferred !== null
+          ? { deferredFromRequestId: deferred.sourceRequestId }
+          : {}),
         input,
         ...(inputGroups.length > 1 ? { inputGroups } : {}),
         requestMethod: "turn/start",
@@ -600,16 +619,17 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
         threadId: thread.id,
         type: "client/turn/requested",
       });
-      recordAcceptedPromptHistoryEntry(
-        { db: tx },
-        {
-          thread,
-          input,
-          initiator,
-          target: { kind: "new-turn" },
-          requestSequence: request.sequence,
-        },
-      );
+      if (deferred === null)
+        recordAcceptedPromptHistoryEntry(
+          { db: tx },
+          {
+            thread,
+            input,
+            initiator,
+            target: { kind: "new-turn" },
+            requestSequence: request.sequence,
+          },
+        );
       const command = addRequestIdToTurnSubmitCommandPayload({
         requestId: request.requestId,
         preparedCommand,
@@ -811,10 +831,14 @@ async function sendClaimedQueuedMessageForThread(
   }
 
   const queuedMessages = args.queuedMessages.map(toThreadQueuedMessage);
-  const queuedMessage = queuedMessages[0]!;
-  const inputGroups = queuedMessages.map(
-    (queuedMessage) => queuedMessage.content,
+  const deferred = resolveDeferredSteerQueuedMessage(
+    deps.db,
+    queuedMessages[0]!,
   );
+  const queuedMessage = deferred?.message ?? queuedMessages[0]!;
+  const inputGroups =
+    deferred?.inputGroups ??
+    queuedMessages.map((queuedMessage) => queuedMessage.content);
   const input = flattenPromptInputGroups(inputGroups);
   const lead = args.queuedMessages[0]!;
   const outcome = await attemptDispatch(deps, {

@@ -57,6 +57,7 @@ import {
 import {
   buildAcceptedClientRequestById,
   buildRejectedClientRequestById,
+  buildDeferredClientRequestIds,
   type AcceptedClientRequestContext,
 } from "./accepted-client-request-context.js";
 import {
@@ -892,6 +893,10 @@ export function buildPendingSteerMessagesFromEvents(
     acceptedClientRequestContext,
     orderedEvents,
   );
+  const deferredClientRequestIds = buildDeferredClientRequestIds(
+    acceptedClientRequestContext,
+    orderedEvents,
+  );
   const inWindowRejectedClientRequestIds = new Set(
     orderedEvents.flatMap(({ event }) =>
       event.type === "client/turn/rejected" ? [event.requestId] : [],
@@ -922,7 +927,8 @@ export function buildPendingSteerMessagesFromEvents(
     }
     if (event.type === "client/turn/rejected") {
       unresolvedSteerRequestIds.delete(event.requestId);
-      explicitRejectionNeedsCompanionError = true;
+      explicitRejectionNeedsCompanionError =
+        event.deferredToQueuedMessageId === undefined;
       continue;
     }
     if (
@@ -947,7 +953,8 @@ export function buildPendingSteerMessagesFromEvents(
   for (const { event, meta } of orderedEvents) {
     if (
       event.type === "client/turn/requested" &&
-      inWindowRejectedClientRequestIds.has(event.requestId)
+      (inWindowRejectedClientRequestIds.has(event.requestId) ||
+        deferredClientRequestIds.has(event.requestId))
     ) {
       continue;
     }

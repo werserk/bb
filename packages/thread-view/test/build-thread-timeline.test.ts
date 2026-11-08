@@ -1926,6 +1926,30 @@ describe("buildThreadTimelineFromEvents", () => {
     ).toHaveLength(0);
   });
 
+  it("uses deferred custody context to hide a source request across a page boundary", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const request = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "Deferred input",
+    });
+    const rejectedClientRequestEvents = fromRows([
+      event.clientTurnRejected({
+        requestId: request.data.requestId,
+        reason: "turn_not_steerable",
+        deferredToQueuedMessageId: "qmsg-deferred",
+      }),
+    ]);
+    const rows = buildTimelineRows(
+      fromRows([event.turnStarted(), request]),
+      "active",
+      null,
+      { acceptedClientRequestEvents: [], rejectedClientRequestEvents },
+    );
+    expect(
+      rows.filter((row) => row.kind === "conversation" && row.role === "user"),
+    ).toEqual([]);
+  });
+
   it("uses rejected context to render a failed steer across a page boundary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const steerRequest = event.clientTurnRequested({
