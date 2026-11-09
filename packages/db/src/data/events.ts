@@ -80,6 +80,7 @@ import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
 
 const STORED_EVENT_SEQUENCE_LOOKUP_CHUNK_SIZE = 250;
 const CLIENT_TURN_REQUEST_KEY_BATCH_SIZE = 995;
+const PLAN_INTERACTION_LIFECYCLE_CANDIDATE_LIMIT = 128;
 const ITEM_EVENT_TYPES = threadEventTypeValues.filter((type) =>
   type.startsWith("item/"),
 );
@@ -4706,9 +4707,45 @@ export function listPlanHistoryEventRows(db: DbConnection, args: {threadId: stri
   )).orderBy(desc(events.sequence)).limit(args.limit).all();
 }
 
-export function getPlanInteractionCreationRow(db: DbConnection, threadId: string, interactionId: string): StoredEventRow | null {
-  return db.select(storedEventRowFields).from(events).where(and(
-    eq(events.threadId, threadId), eq(events.type, "system/interaction/lifecycle"),
-    sql`json_extract(${events.data}, '$.interaction.id') = ${interactionId}`,
-  )).orderBy(events.sequence).limit(1).get() ?? null;
+export function getPlanInteractionCreationRow(
+  db: DbConnection,
+  threadId: string,
+  interactionId: string,
+  args: { turnId: string | null; boundary: number },
+): StoredEventRow | null {
+  if (args.turnId === null) return null;
+  const candidates = db.$with("plan_interaction_candidates").as(
+    db
+      .select({
+        id: sql<string>`${events.id}`.as("anchor_event_id"),
+        data: sql<string>`${events.data}`.as("anchor_event_data"),
+      })
+      .from(sql`${events} INDEXED BY events_thread_turn_type_item_sequence_idx`)
+      .where(
+        and(
+          eq(events.threadId, threadId),
+          eq(events.turnId, args.turnId),
+          eq(events.type, "system/interaction/lifecycle"),
+          isNull(events.itemId),
+          gte(events.sequence, args.boundary),
+        ),
+      )
+      .orderBy(events.sequence)
+      .limit(PLAN_INTERACTION_LIFECYCLE_CANDIDATE_LIMIT + 1),
+  );
+  const matches = db
+    .with(candidates)
+    .select(storedEventRowFields)
+    .from(candidates)
+    .innerJoin(events, eq(events.id, candidates.id))
+    .where(
+      and(
+        sql`(SELECT count(*) FROM ${candidates}) <= ${PLAN_INTERACTION_LIFECYCLE_CANDIDATE_LIMIT}`,
+        sql`json_extract(${candidates.data}, '$.interaction.id') = ${interactionId}`,
+        sql`json_extract(${candidates.data}, '$.interaction.status') = ${"pending"}`,
+        sql`json_extract(${candidates.data}, '$.interaction.payload.kind') = ${"user_question"}`,
+      ),
+    )
+    .all();
+  return matches.length === 1 ? matches[0]! : null;
 }

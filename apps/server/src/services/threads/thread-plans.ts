@@ -46,6 +46,7 @@ export function readThreadPlan(
           deps.db,
           thread.id,
           interaction.id,
+          { turnId: interaction.turnId, boundary },
         );
         const plan =
           creation && creation.sequence >= boundary

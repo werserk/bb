@@ -142,9 +142,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-it.each([false, true])(
-  "Escape retains disclosure focus through native editor handoff (unbound=%s)",
-  async (unbound) => {
+it.each(["anchored", "unbound", "overflow"] as const)(
+  "Escape retains disclosure focus through native editor handoff (%s)",
+  async (scenario) => {
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
       width: 480,
       height: 900,
@@ -163,21 +163,23 @@ it.each([false, true])(
         disconnect() {}
       },
     );
+    const unbound = scenario !== "anchored";
     plan.unboundInteractionIds = unbound ? [question.id] : [];
-    plan.current = unbound
-      ? null
-      : {
-          sourceSeq: 1,
-          updatedAt: 1,
-          items: [
-            {
-              id: "step",
-              text: "Native question",
-              status: "needs_input",
-              interactionIds: [question.id],
-            },
-          ],
-        };
+    plan.current =
+      scenario === "unbound"
+        ? null
+        : {
+            sourceSeq: 1,
+            updatedAt: 1,
+            items: [
+              {
+                id: "step",
+                text: "Native question",
+                status: unbound ? "in_progress" : "needs_input",
+                interactionIds: unbound ? [] : [question.id],
+              },
+            ],
+          };
     const view = render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
@@ -201,7 +203,9 @@ it.each([false, true])(
     });
     fireEvent.click(toggle);
     const editor = within(root).getByRole("textbox");
-    const draft = `Handoff draft ${unbound ? "unbound" : "anchored"}`;
+    if (scenario === "overflow")
+      expect(within(root).getByRole("button", { name: "Plan" })).toBeDefined();
+    const draft = `Handoff draft ${scenario}`;
     fireEvent.change(editor, { target: { value: draft } });
     editor.focus();
     fireEvent.keyDown(editor, { key: "Escape" });
