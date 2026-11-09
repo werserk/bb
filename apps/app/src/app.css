@@ -495,6 +495,33 @@
     background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
   }
 
+  [data-sidebar="content"] {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 25%, transparent)
+      transparent;
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    [data-sidebar="content"] {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+    border-radius: 4px;
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  }
+
   @media (hover: none) and (pointer: coarse) {
     .thread-scrollbar,
     [data-sidebar="content"] {
@@ -731,39 +758,13 @@
     transform: scaleX(1);
   }
 }
-
 @layer utilities {
-  [data-sidebar="content"] {
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 25%, transparent)
-      transparent;
-  }
-
-  @supports selector(::-webkit-scrollbar) {
-    [data-sidebar="content"] {
-      scrollbar-width: auto;
-      scrollbar-color: auto;
+  @media not ((max-width: 767px) and (pointer: coarse)) {
+    [data-sidebar-header-slot],
+    [data-sidebar="footer"] {
+      --text-sm: 0.875rem;
+      --text-sm--line-height: 1.25rem;
     }
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 25%, transparent);
-    border-radius: 4px;
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
-  }
-
-  [data-sidebar-header-slot],
-  [data-sidebar="footer"] {
-    --text-sm: 0.875rem;
-    --text-sm--line-height: 1.25rem;
   }
 
   [data-sidebar="footer"] [data-sidebar="menu-button"] {

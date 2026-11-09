@@ -6,11 +6,8 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import { useProviderCliInstallRunner } from "@/components/provider-cli/provider-cli-install";
 import { providerCliJobKey } from "@/components/provider-cli/provider-cli-install-store";
 import { SidebarMenuItem } from "@/components/ui/sidebar.js";
-import { useSystemProviders } from "@/hooks/queries/system-queries";
 import { useUpdateInventory } from "@/hooks/useUpdateInventory";
 import { useMachineAttention } from "@/hooks/useMachineAttention";
-import { ProviderIconMark } from "@/components/settings/ProviderIconMark";
-import { getProviderIconInfo } from "@/lib/provider-icon";
 import { getSettingsRoutePath } from "@/lib/route-paths";
 
 interface SidebarUpdatesBadgeProps {
@@ -36,7 +33,6 @@ interface StaleProvider {
 
 export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
   const inventory = useUpdateInventory();
-  const providers = useSystemProviders().data;
   const { runningJobKey } = useProviderCliInstallRunner();
 
   const machineAttention = useMachineAttention(
@@ -138,7 +134,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
               onClick={onNavigate}
               aria-label={providerLabel}
               data-testid="sidebar-updates-badge-providers"
-              className={cn(CHIP_CLASS, "min-w-0 shrink")}
+              className={CHIP_CLASS}
             >
               <Icon
                 name={providerUpdateRunning ? "Loading" : "Download"}
@@ -147,40 +143,6 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
                   providerUpdateRunning && "animate-spin",
                 )}
               />
-              <span className="sr-only">
-                {staleProviders.map((stale) => {
-                  const providerId = stale.provider;
-                  const provider = providers?.find(
-                    (candidate) => candidate.id === providerId,
-                  );
-                  const iconInfo = getProviderIconInfo(
-                    "agent",
-                    providerId,
-                    provider ?? null,
-                  );
-                  if (iconInfo === undefined) {
-                    return null;
-                  }
-                  return (
-                    <span
-                      key={stale.provider}
-                      data-provider-icon={providerId}
-                      aria-hidden
-                      className="flex size-3 shrink-0 items-center justify-center"
-                    >
-                      {provider === undefined ? (
-                        <iconInfo.icon className="size-3" />
-                      ) : (
-                        <ProviderIconMark
-                          provider={provider}
-                          icon={iconInfo.icon}
-                          className="size-3"
-                        />
-                      )}
-                    </span>
-                  );
-                })}
-              </span>
             </Link>
           </TooltipTrigger>
           <TooltipContent side="top">{providerLabel}</TooltipContent>

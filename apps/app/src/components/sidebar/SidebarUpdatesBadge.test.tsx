@@ -1,12 +1,6 @@
 // @vitest-environment jsdom
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import type { Host } from "@bb/domain";
@@ -370,7 +364,7 @@ describe("SidebarUpdatesBadge", () => {
     expect(screen.queryByTestId("sidebar-updates-badge-providers")).toBeNull();
   });
 
-  it("renders one mark per provider in a stable order when the same CLI is stale on several machines", async () => {
+  it("keeps one compact icon and deduplicates provider names across machines", async () => {
     renderBadge({
       appUpdateAvailable: true,
       machines: [
@@ -392,23 +386,12 @@ describe("SidebarUpdatesBadge", () => {
     expect(providerChip.getAttribute("aria-label")).toBe(
       "Claude Code and Codex updates available",
     );
-    await waitFor(() =>
-      expect(
-        providerChip.querySelectorAll(
-          "[data-provider-icon] [data-provider-logo]",
-        ).length,
-      ).toBe(2),
+    expect(
+      providerChip.querySelectorAll('[data-icon="Download"]'),
+    ).toHaveLength(1);
+    expect(providerChip.querySelectorAll("[data-provider-icon]")).toHaveLength(
+      0,
     );
-    expect(
-      [...providerChip.querySelectorAll("[data-provider-icon]")].map((node) =>
-        node.getAttribute("data-provider-icon"),
-      ),
-    ).toEqual(["claude-code", "codex"]);
-    expect(
-      [...providerChip.querySelectorAll("[data-provider-icon]")].every((node) =>
-        node.classList.contains("flex"),
-      ),
-    ).toBe(true);
     expect(screen.getByTestId("sidebar-updates-badge-bb")).toBeTruthy();
   });
 });
