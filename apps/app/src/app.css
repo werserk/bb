@@ -535,7 +535,6 @@
   }
 
   [data-vaul-drawer-direction] [data-sidebar="content"] {
-    scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
 
@@ -547,6 +546,10 @@
   }
 
   @media (hover: hover) and (pointer: fine) {
+    [data-vaul-drawer-direction] [data-sidebar="content"] {
+      scrollbar-width: thin;
+    }
+
     [data-vaul-drawer-direction] [data-sidebar="content"]:hover {
       scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
         transparent;
