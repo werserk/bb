@@ -12,7 +12,8 @@ Owner-approved core apply unit, based on `7f3b96b7b65e3c39da16f8f9a3cee6c656a370
 | Public reads                               | server-contract/public-api, server/routes/threads/interactions, sdk/areas/threads, cli/commands/thread/plans                      |
 | Batch coverage, revision and native events | app/lib/thread-plan-cache; hooks/queries/thread-plans                                                                             |
 | Native and plugin presentation             | ThreadPlanCard → ThreadPlanSteps → ThreadTodoCard; thread-plan-state                                                              |
-| Mounted overlay focus                      | thread-plan-focus registry; ThreadPlanSteps native focus prop and SDK experimental_focusThreadPlan                                |
+| Mounted plan focus                         | thread-plan-focus registry → useThreadPlanFocus; native/SDK focus props and experimental_focusThreadPlan                          |
+| Available form height                      | thread-plan-layout observes external pane/scrollport height and real container width, with viewport fallback                      |
 | Native question custody                    | plan-editor-ownership; UserQuestionInteractionContent; QuestionForm and existing question-form-draft; native interaction mutation |
 | API discovery                              | API audit, Plugin Guide surfaces, CLI thread-inspection guide and command index                                                   |
 
@@ -31,6 +32,12 @@ This source/schema proof does not replace the parent's installed exact-pair upgr
 Use Turbo's normal typecheck/build targets for app, server, CLI, domain, DB, thread-view and Plugin SDK. The app's normal compound test script forwards command arguments only to its second Vitest process; `test:focused` provides a scoped Turbo target for source tests. It uses the same shared-worker Vitest configuration. Tests protect identity, history/clear boundaries, off-window lifecycle anchors, complete batches and native event invalidation, container disclosure and native draft handoff. Parent integration owns product screenshots, final independent review and installed lifecycle gates.
 
 The focus controller accepts only mounted visible native overlays for the requested thread, preferring a focused pane. It checks pending native IDs before changing local disclosure state. A monotonic request token permits repeated focus and local Skip reopening while preserving the existing native draft. Panel focus props use the same internal focus request model; absent/hidden overlays return false for the public method. No navigation, resolve or browser event is sent by focus.
+
+The component's optional positive `focusSerial` is consumed once per changed value, including counter wrap. With `focusInteractionId` it waits for both the plan and native payload; without an ID it needs only the plan, then targets its current failed step or disclosure. Legacy ID-only requests remain supported. Hidden/stale/foreign requests are refused. Data refresh and container resize cannot reopen or refocus a consumed request, and a hidden component cannot redirect its request into another overlay.
+
+Escape flushes the disclosure collapse and native editor custody handoff before focusing the disclosure. The native fallback form mounts with textarea autofocus during handoff; focusing before that commit allowed the fallback to steal focus. Regression tests include the real AppCommandProvider, question host, fallback banner, native draft and composer command handler for both anchored and unbound questions.
+
+Form height comes from the external owning chat pane or scrollport, never the plan's content height. Panel/embedded roots retain their own width measurement for the 640px cutoff. ResizeObserver tracks the width source and external height owner; viewport resize also updates the bounded fallback when no observer or pane exists. Long question bodies retain bounded scrolling. Installed panel geometry and Escape acceptance remain parent gates.
 
 ## React Compiler store boundary
 

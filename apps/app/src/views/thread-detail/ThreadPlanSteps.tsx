@@ -1,11 +1,10 @@
 import {
-  createThreadPlanFocusRequest,
-  focusThreadPlan,
-  registerThreadPlanFocusTarget,
-  isThreadPlanVisible,
   focusPlanElement,
   type ThreadPlanFocusRequest,
 } from "./thread-plan-focus";
+import { useThreadPlanLayout } from "./thread-plan-layout";
+import { useThreadPlanFocus } from "./useThreadPlanFocus";
+import { flushSync } from "react-dom";
 import {
   ThreadTodoCard,
   ThreadPlanQuestion,
@@ -42,10 +41,12 @@ function NativeWaitingRow({
     previousNarrow.current = narrow;
   }, [narrow]);
   useEffect(() => {
-    if (props.focusInteractionId === interaction.id) setExpanded(true);
-  }, [props.focusInteractionId, interaction.id]);
-  useEffect(() => {
-    if (focusRequest?.interactionId === interaction.id) setExpanded(true);
+    if (
+      focusRequest?.interactionId !== interaction.id ||
+      !focusRequest.consumeReveal()
+    )
+      return;
+    setExpanded(true);
   }, [focusRequest, interaction.id]);
   return (
     <section
@@ -54,7 +55,7 @@ function NativeWaitingRow({
         if (event.key === "Escape" && expanded) {
           event.preventDefault();
           event.stopPropagation();
-          setExpanded(false);
+          flushSync(() => setExpanded(false));
           focusPlanElement(trigger.current);
         }
       }}
@@ -69,7 +70,7 @@ function NativeWaitingRow({
         Needs you
       </button>
       {expanded && (
-        <div className="max-h-[60dvh] overflow-y-auto overscroll-contain">
+        <div className="max-h-[var(--thread-plan-max-height,60dvh)] overflow-y-auto overscroll-contain">
           <ThreadPlanQuestion
             interaction={interaction}
             threadId={props.threadId}
@@ -84,7 +85,8 @@ function NativeWaitingRow({
 }
 export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
   const result = useThreadPlans({ threadIds: [props.threadId] });
-  const interactions = useThreadPendingInteractions(props.threadId).data ?? [];
+  const pending = useThreadPendingInteractions(props.threadId);
+  const interactions = pending.data ?? [];
   const thread = useThread(props.threadId).data;
   const environment = useEnvironment(thread?.environmentId).data;
   const view = result.plans[props.threadId];
@@ -93,35 +95,16 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
     (() => void sdk.threads.open({ threadId: props.threadId, file: null }));
   const root = useRef<HTMLDivElement>(null);
   const focused = useOptionalPaneContext()?.isFocused ?? true;
-  const [focusRequest, setFocusRequest] = useState<ThreadPlanFocusRequest>();
-  const current = useRef({ view, interactions, focused });
-  current.current = { view, interactions, focused };
-  const [narrow, setNarrow] = useState<boolean | null>(null);
-  useEffect(() => {
-    const container =
-      props.placement === "overlay"
-        ? (root.current?.closest("[data-thread-chat]") ??
-          root.current?.closest("[data-thread-window]") ??
-          root.current?.parentElement)
-        : root.current;
-    if (!container) return;
-    if (typeof ResizeObserver === "undefined") {
-      setNarrow(container.getBoundingClientRect().width <= 640);
-      return;
-    }
-    const resize = () => {
-      const rect = container.getBoundingClientRect();
-      setNarrow(rect.width <= 640);
-      root.current?.style.setProperty(
-        "--thread-plan-max-height",
-        `${Math.max(96, Math.floor(rect.height * 0.6))}px`,
-      );
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [props.placement]);
+  const narrow = useThreadPlanLayout(root, props.placement);
+  const focusRequest = useThreadPlanFocus({
+    props,
+    root,
+    view,
+    interactions: pending.data,
+    interactionsLoading: pending.isFetching === true,
+    focused,
+    ready: result.status === "ready" && narrow !== null,
+  });
   const executing =
     thread?.runtime?.displayStatus === "active" &&
     !thread.serviceTurn &&
@@ -131,52 +114,6 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
     (environment &&
       (environment.hostLifecycle !== "active" ||
         environment.status === "destroyed"));
-  useEffect(() => {
-    if (props.placement !== "overlay") return;
-    return registerThreadPlanFocusTarget({
-      threadId: props.threadId,
-      isFocused: () => current.current.focused,
-      request: ({ interactionId }) => {
-        const { view, interactions } = current.current;
-        if (!isThreadPlanVisible(root.current) || !view) return false;
-        if (interactionId) {
-          const pending = interactions.find(
-            (item) =>
-              item.id === interactionId &&
-              item.threadId === props.threadId &&
-              item.status === "pending" &&
-              item.payload.kind === "user_question",
-          );
-          const displayed =
-            view.unboundInteractionIds.includes(interactionId) ||
-            [view.current, ...view.previousPlans].some((snapshot) =>
-              snapshot?.items.some((step) =>
-                step.interactionIds.includes(interactionId),
-              ),
-            );
-          if (!pending || !displayed) return false;
-        } else if (!view.current) return false;
-        setFocusRequest(createThreadPlanFocusRequest(interactionId));
-        return true;
-      },
-    });
-  }, [props.threadId, props.placement]);
-  useEffect(() => {
-    if (!props.focusInteractionId) return;
-    if (props.placement === "overlay")
-      focusThreadPlan({
-        threadId: props.threadId,
-        interactionId: props.focusInteractionId,
-      });
-    else
-      setFocusRequest(createThreadPlanFocusRequest(props.focusInteractionId));
-  }, [
-    props.focusInteractionId,
-    props.threadId,
-    props.placement,
-    view?.revision,
-    narrow,
-  ]);
   return (
     <div
       hidden={Boolean(hidden)}
@@ -203,7 +140,7 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
       )}
       {!hidden && narrow !== null && view?.current && (
         <ThreadTodoCard
-          key={view.current.planId ?? view.current.sourceSeq}
+          key={view.current.planId ?? "current"}
           {...props}
           focusRequest={focusRequest}
           snapshot={view.current}

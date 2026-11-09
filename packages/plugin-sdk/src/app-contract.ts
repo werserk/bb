@@ -6165,6 +6165,7 @@ export interface ThreadPlanStepsProps {
   threadId: string;
   placement: "overlay" | "panel";
   focusInteractionId?: string;
+  focusSerial?: number;
   onOpenThread?: () => void;
 }
 

@@ -2,6 +2,8 @@ import type { FocusThreadPlanArgs } from "@get-bb/plugin-sdk";
 export interface ThreadPlanFocusRequest {
   sequence: number;
   interactionId?: string;
+  consumeReveal(): boolean;
+  consumeFocus(): boolean;
 }
 interface ThreadPlanFocusTarget {
   threadId: string;
@@ -13,7 +15,22 @@ let sequence = 0;
 export function createThreadPlanFocusRequest(
   interactionId?: string,
 ): ThreadPlanFocusRequest {
-  return { sequence: ++sequence, ...(interactionId ? { interactionId } : {}) };
+  let revealed = false;
+  let focused = false;
+  return {
+    sequence: ++sequence,
+    ...(interactionId ? { interactionId } : {}),
+    consumeReveal() {
+      if (revealed) return false;
+      revealed = true;
+      return true;
+    },
+    consumeFocus() {
+      if (focused) return false;
+      focused = true;
+      return true;
+    },
+  };
 }
 export function registerThreadPlanFocusTarget(target: ThreadPlanFocusTarget) {
   targets.add(target);

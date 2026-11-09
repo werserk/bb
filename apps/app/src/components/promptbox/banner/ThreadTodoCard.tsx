@@ -4,6 +4,7 @@ import {
 } from "@/views/thread-detail/thread-plan-focus";
 import { ThreadQuestionFormHost } from "@/components/thread/user-questions/ThreadQuestionFormHost";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   PlanSnapshotView,
   PlanStepView,
@@ -48,7 +49,8 @@ export function ThreadPlanQuestion({
     if (requested) setSkipped(false);
   }, [requested, focusRequest]);
   useEffect(() => {
-    if (!requested || skipped || !ownsEditor) return;
+    if (!requested || skipped || !ownsEditor || !focusRequest.consumeFocus())
+      return;
     const fields = root.current?.querySelectorAll<HTMLElement>(
       'textarea,input,select,[role="radio"],[role="checkbox"]',
     );
@@ -211,16 +213,6 @@ export function ThreadTodoCard({
     previous.current = { narrow, quiet, waiting };
   }, [narrow, quiet, waiting]);
   useEffect(() => {
-    if (
-      !props.focusInteractionId ||
-      !snapshot.items.some((item) =>
-        item.interactionIds.includes(props.focusInteractionId!),
-      )
-    )
-      return;
-    setExpanded(true);
-  }, [props.focusInteractionId]);
-  useEffect(() => {
     if (!focusRequest) return;
     if (
       focusRequest.interactionId &&
@@ -229,19 +221,22 @@ export function ThreadTodoCard({
       )
     )
       return;
-    if (
-      focusRequest.interactionId ||
-      snapshot.items.some((step) => step.status === "failed")
-    )
-      setExpanded(true);
-  }, [focusRequest, snapshot.items]);
+    if (!focusRequest.consumeReveal()) return;
+    if (focusRequest.interactionId || failed) setExpanded(true);
+  }, [focusRequest, snapshot.items, failed]);
   useEffect(() => {
-    if (!focusRequest || focusRequest.interactionId) return;
+    if (
+      !focusRequest ||
+      focusRequest.interactionId ||
+      (failed && !expanded) ||
+      !focusRequest.consumeFocus()
+    )
+      return;
     const failedRow = list.current?.querySelector<HTMLElement>(
       '[data-plan-step-status="failed"]',
     );
     focusPlanElement(failedRow ?? trigger.current);
-  }, [focusRequest, expanded]);
+  }, [focusRequest, expanded, failed]);
   const activeId = snapshot.items.find(
     (item) => item.status === "needs_input" || item.status === "in_progress",
   )?.id;
@@ -280,8 +275,8 @@ export function ThreadTodoCard({
         if (event.key === "Escape" && expanded) {
           event.preventDefault();
           event.stopPropagation();
-          setExpanded(false);
-          trigger.current?.focus();
+          flushSync(() => setExpanded(false));
+          focusPlanElement(trigger.current);
         }
       }}
     >

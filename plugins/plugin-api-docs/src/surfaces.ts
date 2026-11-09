@@ -56,6 +56,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Core limits batches to 40 IDs and two flights, rejects stale revisions and refreshes on native events",
           "Optional experimental_focusThreadPlan reveals and focuses an already-mounted visible overlay; false or missing keeps native Open fallback",
           "experimental_ThreadPlanSteps shares question drafts and editor ownership with native chat; Skip only folds locally",
+          "Pass a changed positive focusSerial to reveal once: focusInteractionId selects a pending question; no ID selects the failed step or disclosure. Repeat/wrap retains drafts; refresh and resize never replay consumed requests. ID-only callers remain supported",
           "Read current and up to three previous identified plans within a bounded 32-event history; failures and native IDs are preserved",
           "Check both optional capabilities together; keep native Open/input recovery on older runtimes",
         ],

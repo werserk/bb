@@ -19,13 +19,20 @@ const facts = vi.hoisted(() => ({
   interactions: [] as PendingInteraction[],
   stop: vi.fn(),
   resolve: vi.fn(),
+  pendingReady: true,
+  pendingFetching: false,
+  resize: () => {},
+  width: 480,
 }));
 vi.mock("@/hooks/queries/thread-plans", () => ({
   useThreadPlans: () => ({ status: "ready", plans: { focus: facts.view } }),
 }));
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useThread: () => ({ data: { status: "idle" } }),
-  useThreadPendingInteractions: () => ({ data: facts.interactions }),
+  useThreadPendingInteractions: () => ({
+    data: facts.pendingReady ? facts.interactions : undefined,
+    isFetching: facts.pendingFetching,
+  }),
 }));
 vi.mock("@/hooks/queries/environment-queries", () => ({
   useEnvironment: () => ({ data: null }),
@@ -47,6 +54,9 @@ vi.mock("@/components/thread/user-questions/ThreadQuestionFormHost", () => ({
 const host = globalThis as typeof globalThis & { __bbPluginRuntime?: unknown };
 const originalRuntime = host.__bbPluginRuntime;
 beforeEach(() => {
+  facts.pendingReady = true;
+  facts.pendingFetching = false;
+  facts.width = 480;
   host.__bbPluginRuntime = {
     pluginSdkApp: { experimental_focusThreadPlan: focusThreadPlan },
   };
@@ -101,25 +111,274 @@ beforeEach(() => {
       },
     },
   ];
-  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
-    width: 480,
-    height: 900,
-    top: 0,
-    left: 0,
-    bottom: 900,
-    right: 480,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-  });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({
+      width: facts.width,
+      height: 900,
+      top: 0,
+      left: 0,
+      bottom: 900,
+      right: 480,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  );
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(callback: () => void) {
+        facts.resize = callback;
+      }
       observe() {}
       disconnect() {}
     },
   );
 });
+it.each(["overlay", "panel"] as const)(
+  "%s consumes serial requests once, supports repeat and wrap without losing the native draft",
+  (placement) => {
+    const element = (focusSerial: number) => (
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={focusSerial}
+        focusInteractionId="input"
+      />
+    );
+    const view = render(element(2));
+    const field = screen.getByRole("textbox");
+    fireEvent.change(field, { target: { value: "Serial draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    view.rerender(element(3));
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Serial draft",
+    );
+    expect(screen.getByRole("textbox")).not.toBe(field);
+    const retained = screen.getByRole("textbox");
+    view.rerender(element(1));
+    expect(screen.getByRole("textbox")).toBe(retained);
+    expect(document.activeElement).toBe(retained);
+    facts.width = 900;
+    act(() => facts.resize());
+    facts.width = 480;
+    act(() => facts.resize());
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Plan · Needs you" }));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+    facts.view = structuredClone(facts.view);
+    facts.view!.revision++;
+    view.rerender(element(1));
+    act(() => facts.resize());
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Plan · Needs you" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  },
+);
+it.each(["overlay", "panel"] as const)(
+  "%s waits for view and native input data, and refuses stale, foreign or hidden prop targets",
+  (placement) => {
+    const saved = facts.view;
+    facts.view = null;
+    facts.pendingReady = false;
+    const element = (id: string, serial: number, hidden = false) => (
+      <div hidden={hidden}>
+        <ThreadPlanSteps
+          threadId="focus"
+          placement={placement}
+          focusSerial={serial}
+          focusInteractionId={id}
+        />
+      </div>
+    );
+    const view = render(element("input", 1));
+    facts.view = saved;
+    view.rerender(element("input", 1));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    facts.pendingReady = true;
+    view.rerender(element("input", 1));
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+    facts.interactions[0]!.threadId = "foreign";
+    view.rerender(element("input", 2));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    facts.interactions[0]!.threadId = "focus";
+    facts.interactions[0]!.status = "resolved";
+    view.rerender(element("input", 3));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    facts.interactions[0]!.status = "pending";
+    view.rerender(element("input", 4, true));
+    view.rerender(element("input", 4));
+    expect(screen.queryByRole("textbox")).toBeNull();
+  },
+);
+it.each(["overlay", "panel"] as const)(
+  "%s rejects nonpositive serials and focuses a quiet disclosure without waiting for question payloads",
+  (placement) => {
+    facts.view!.current!.items[0]!.status = "completed";
+    facts.view!.current!.items[0]!.interactionIds = [];
+    facts.pendingReady = false;
+    const view = render(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={0}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /Plan finished/ });
+    expect(document.activeElement).not.toBe(toggle);
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={1}
+      />,
+    );
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    toggle.blur();
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={0}
+      />,
+    );
+    expect(document.activeElement).not.toBe(toggle);
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={1}
+      />,
+    );
+    expect(document.activeElement).toBe(toggle);
+  },
+);
+it("waits for an in-flight native payload refresh before refusing a prop request", () => {
+  const interactions = facts.interactions;
+  facts.interactions = [];
+  facts.pendingFetching = true;
+  const view = render(
+    <ThreadPlanSteps
+      threadId="focus"
+      placement="panel"
+      focusSerial={1}
+      focusInteractionId="input"
+    />,
+  );
+  facts.interactions = interactions;
+  facts.pendingFetching = false;
+  view.rerender(
+    <ThreadPlanSteps
+      threadId="focus"
+      placement="panel"
+      focusSerial={1}
+      focusInteractionId="input"
+    />,
+  );
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+});
+it("a hidden component serial cannot redirect focus to a different visible overlay", () => {
+  const view = render(
+    <>
+      <ThreadPlanSteps threadId="focus" placement="overlay" />
+      <div hidden>
+        <ThreadPlanSteps
+          threadId="focus"
+          placement="overlay"
+          focusInteractionId="input"
+          focusSerial={1}
+        />
+      </div>
+    </>,
+  );
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(
+    view.container.querySelectorAll('[aria-expanded="true"]'),
+  ).toHaveLength(0);
+});
+it.each(["replacement", "empty clear"])(
+  "a consumed request cannot reopen a plan after %s",
+  (change) => {
+    if (change === "empty clear") delete facts.view!.current!.planId;
+    facts.view!.current!.items[0]!.status = "failed";
+    facts.view!.current!.items[0]!.interactionIds = [];
+    const view = render(
+      <ThreadPlanSteps threadId="focus" placement="panel" focusSerial={1} />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Failed: Choose"), {
+      key: "Escape",
+    });
+    if (change === "empty clear") {
+      const current = facts.view!.current;
+      facts.view = { ...facts.view!, current: null };
+      view.rerender(
+        <ThreadPlanSteps threadId="focus" placement="panel" focusSerial={1} />,
+      );
+      facts.view = { ...facts.view!, current };
+    }
+    facts.view = structuredClone(facts.view);
+    if (change === "replacement") facts.view!.current!.planId = "replacement";
+    facts.view!.current!.sourceSeq++;
+    facts.view!.revision++;
+    view.rerender(
+      <ThreadPlanSteps threadId="focus" placement="panel" focusSerial={1} />,
+    );
+    expect(screen.queryByLabelText("Failed: Choose")).toBeNull();
+  },
+);
+it.each(["overlay", "panel"] as const)(
+  "%s serial without an ID reveals failure once and legacy ID-only requests still work",
+  (placement) => {
+    facts.view!.current!.items[0]!.status = "failed";
+    facts.view!.current!.items[0]!.interactionIds = [];
+    const view = render(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={1}
+      />,
+    );
+    expect(document.activeElement).toBe(
+      screen.getByLabelText("Failed: Choose"),
+    );
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    facts.view = structuredClone(facts.view);
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={1}
+      />,
+    );
+    expect(screen.queryByLabelText("Failed: Choose")).toBeNull();
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusSerial={2}
+      />,
+    );
+    expect(document.activeElement).toBe(
+      screen.getByLabelText("Failed: Choose"),
+    );
+    facts.view!.current!.items[0]!.status = "needs_input";
+    facts.view!.current!.items[0]!.interactionIds = ["input"];
+    view.rerender(
+      <ThreadPlanSteps
+        threadId="focus"
+        placement={placement}
+        focusInteractionId="input"
+      />,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  },
+);
 afterEach(() => {
   host.__bbPluginRuntime = originalRuntime;
   cleanup();
