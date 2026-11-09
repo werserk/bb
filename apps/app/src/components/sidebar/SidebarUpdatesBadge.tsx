@@ -18,8 +18,8 @@ interface SidebarUpdatesBadgeProps {
 }
 
 const CHIP_CLASS = cn(
-  "flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-sidebar-border px-2",
-  "text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
+  "flex size-(--bb-sidebar-row-height) shrink-0 items-center justify-center rounded-full border border-sidebar-border/60 max-md:pointer-coarse:size-(--bb-sidebar-row-height-coarse)",
+  "text-sm font-normal text-muted-foreground transition-colors hover:bg-sidebar-accent",
 );
 
 function joinNames(names: string[]): string {
@@ -94,7 +94,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
       : `${pluginUpdateCount} plugin updates available`;
 
   return (
-    <SidebarMenuItem className="flex min-w-0 items-center gap-1">
+    <SidebarMenuItem className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
       {machineAttention.label !== null ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -148,7 +148,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
                   providerUpdateRunning && "animate-spin",
                 )}
               />
-              <span className="flex min-w-0 items-center gap-1 overflow-hidden">
+              <span className="sr-only">
                 {staleProviders.map((stale) => {
                   const providerId = stale.provider;
                   const provider = providers?.find(
@@ -198,7 +198,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
               className={CHIP_CLASS}
             >
               <Icon name="Plug02" className="size-3 text-muted-foreground" />
-              {pluginUpdateCount}
+              <span className="sr-only">{pluginUpdateCount}</span>
             </Link>
           </TooltipTrigger>
           <TooltipContent side="top">{pluginLabel}</TooltipContent>

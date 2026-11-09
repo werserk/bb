@@ -292,7 +292,7 @@ export function PluginSidebarFooterItems({
           />
         ) : null,
       )}
-      <SidebarMenuItem className="min-w-8 flex-1 max-md:pointer-coarse:min-w-9">
+      <SidebarMenuItem className="min-w-0 flex-1 basis-8 max-md:pointer-coarse:basis-11">
         <SidebarMenu ref={menuRef} className="flex-row items-center gap-1">
           {visible.map((item) => {
             const builtin =

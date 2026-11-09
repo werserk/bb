@@ -255,10 +255,10 @@ export function AppSidebar({
   const footer = (
     <SidebarFooter
       className={cn(
-        "w-full justify-center pl-(--bb-frame-footer-inset) pointer-fine:pl-[calc(var(--bb-frame-footer-inset)_+_(2rem_-_var(--bb-title-bar-control-size))/2)] pointer-fine:[&_[data-sidebar=menu-button]]:size-(--bb-title-bar-control-size) [&_[data-sidebar=menu-button]]:ring-inset pointer-fine:[&_[data-sidebar=menu]]:gap-0.5",
+        "w-full min-w-0 shrink-0 justify-center border-t border-sidebar-border p-2 [&_[data-sidebar=menu-button]]:ring-inset",
         isFramed
           ? cn(
-              "h-(--bb-app-chrome-row-height) py-0",
+              "min-h-(--bb-app-chrome-row-height)",
               placement === "rail" && "-mb-px",
             )
           : "pb-(--bb-frame-footer-inset)",
@@ -266,7 +266,7 @@ export function AppSidebar({
     >
       <SidebarMenu
         className={cn(
-          "flex-row items-center gap-1",
+          "flex-row flex-wrap items-center gap-2",
           isFooterCustomizing && "hidden",
         )}
       >
