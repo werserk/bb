@@ -15,6 +15,7 @@ import { appQueryClient } from "./lib/app-query-client";
 import { applyAppFrameGeometry, getBbDesktopInfo } from "./lib/bb-desktop";
 import { applyCachedAppThemeCss } from "./lib/themes";
 import { installStaleChunkRecovery } from "./lib/stale-chunk-recovery";
+import { installSynchronizedSpinners } from "./lib/synchronized-spinners";
 import { moveStylesheetPropertiesToRegistry } from "./lib/stylesheet-property-registry";
 import { registerCoreModal } from "./lib/modal-host";
 import { LazyLocalFileViewerModal } from "./components/plugin/local-file-viewer/LazyLocalFileViewerModal";
@@ -22,6 +23,7 @@ import "./app.css";
 
 installStaleChunkRecovery();
 installForeignDomMutationGuard();
+installSynchronizedSpinners();
 
 Error.stackTraceLimit = 50;
 
