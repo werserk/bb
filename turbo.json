@@ -68,6 +68,10 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
+    "@bb/app#test:compiled": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "outputs": []
+    },
     "@bb/app#test:focused": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "outputs": []

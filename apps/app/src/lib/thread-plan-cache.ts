@@ -1,12 +1,24 @@
 import type { ThreadPlanView, ThreadPlansReadResponse } from "@bb/domain";
+interface ThreadPlanCacheSnapshot {
+  plans: Readonly<Record<string, ThreadPlanView>>;
+  errors: Readonly<Record<string, string>>;
+  loadedThreadIds: readonly string[];
+  subscribedThreadIds: readonly string[];
+}
 export class ThreadPlanCache {
-  plans: Record<string, ThreadPlanView> = {};
-  errors: Record<string, string> = {};
+  private plans: Record<string, ThreadPlanView> = {};
+  private errors: Record<string, string> = {};
   private dirty = new Map<string, number>();
   private queue = new Set<string>();
   private flight = new Set<string>();
   private active = 0;
-  private revision = 0;
+  private subscribedThreadIds: readonly string[] = [];
+  private value: ThreadPlanCacheSnapshot = {
+    plans: {},
+    errors: {},
+    loadedThreadIds: [],
+    subscribedThreadIds: [],
+  };
   private listeners = new Set<() => void>();
   private waiters = new Set<() => void>();
   constructor(
@@ -18,9 +30,23 @@ export class ThreadPlanCache {
       this.listeners.delete(fn);
     };
   };
-  snapshot = () => this.revision;
+  snapshot = (): ThreadPlanCacheSnapshot => this.value;
+  setSubscribedThreadIds(ids: readonly string[]) {
+    if (
+      ids.length === this.subscribedThreadIds.length &&
+      ids.every((id, index) => id === this.subscribedThreadIds[index])
+    )
+      return;
+    this.subscribedThreadIds = [...ids];
+    this.emit();
+  }
   private emit() {
-    this.revision++;
+    this.value = {
+      plans: this.plans,
+      errors: { ...this.errors },
+      loadedThreadIds: this.loaded(Object.keys(this.plans)),
+      subscribedThreadIds: this.subscribedThreadIds,
+    };
     for (const fn of this.listeners) fn();
   }
   loaded(ids: readonly string[]) {

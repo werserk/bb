@@ -34,6 +34,7 @@ function retain(ids: readonly string[]) {
       wsManager.subscribe({ kind: "thread-detail", threadId: id });
     consumers.set(id, (consumers.get(id) ?? 0) + 1);
   }
+  threadPlanCache.setSubscribedThreadIds([...consumers.keys()]);
   if (fresh.length) void threadPlanCache.refresh(fresh);
   else threadPlanCache.ensure(ids);
 }
@@ -46,6 +47,7 @@ function release(ids: readonly string[]) {
       wsManager.unsubscribe({ kind: "thread-detail", threadId: id });
     }
   }
+  threadPlanCache.setSubscribedThreadIds([...consumers.keys()]);
   if (!consumers.size) {
     detach?.();
     detach = null;
@@ -56,7 +58,7 @@ export function useThreadPlans({
 }: {
   threadIds: readonly string[];
 }): ThreadPlansResult {
-  useSyncExternalStore(
+  const snapshot = useSyncExternalStore(
     threadPlanCache.subscribe,
     threadPlanCache.snapshot,
     threadPlanCache.snapshot,
@@ -77,10 +79,14 @@ export function useThreadPlans({
     [],
   );
   const ids: string[] = JSON.parse(key);
-  const loaded = threadPlanCache.loaded(ids).filter((id) => consumers.has(id));
+  const loaded = ids.filter(
+    (id) =>
+      snapshot.loadedThreadIds.includes(id) &&
+      snapshot.subscribedThreadIds.includes(id),
+  );
   const errors = Object.fromEntries(
     ids.flatMap((id) =>
-      threadPlanCache.errors[id] ? [[id, threadPlanCache.errors[id]!]] : [],
+      snapshot.errors[id] ? [[id, snapshot.errors[id]!]] : [],
     ),
   );
   return {
@@ -91,7 +97,7 @@ export function useThreadPlans({
         : "loading",
     requestedThreadIds: ids,
     loadedThreadIds: loaded,
-    plans: threadPlanCache.plans,
+    plans: snapshot.plans,
     errors,
     refresh: (ids) => threadPlanCache.refresh(ids ?? JSON.parse(key)),
   };

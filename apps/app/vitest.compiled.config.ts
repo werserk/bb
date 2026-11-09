@@ -1,12 +1,15 @@
 import path from "path";
-import { defineConfig } from "vitest/config";
+import {
+  defineWorkspaceTestConfig,
+  sharedWorkerProjects,
+} from "../../vitest.shared.js";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { forkablePluginPaths } from "./vite-forkable-plugin-paths.js";
 import { sharedUiEnvSeam } from "./vite-shared-ui-seam.js";
 import { cachedReactCompiler } from "./vite-react-compiler.js";
 
-export default defineConfig({
+export default defineWorkspaceTestConfig({
   plugins: [
     forkablePluginPaths(path.resolve(__dirname, "./src")),
     sharedUiEnvSeam(),
@@ -22,10 +25,17 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["src/test/setup.ts"],
     testTimeout: 15_000,
-    include: [
-      "src/components/modal/*.test.tsx",
-      "src/HashNavigationScroll.modal.test.tsx",
-      "src/lib/app-route-history.test.tsx",
-    ],
+    projects: sharedWorkerProjects({
+      pkgDir: __dirname,
+      aliases: { "@": path.resolve(__dirname, "./src") },
+      name: "@bb/app:compiled",
+      include: [
+        "src/components/modal/*.test.tsx",
+        "src/HashNavigationScroll.modal.test.tsx",
+        "src/lib/app-route-history.test.tsx",
+        "src/hooks/queries/thread-plans.test.tsx",
+        "src/components/thread/pending-interactions/plan-editor-ownership.test.tsx",
+      ],
+    }),
   },
 });
