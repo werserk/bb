@@ -535,6 +535,7 @@
   }
 
   [data-vaul-drawer-direction] [data-sidebar="content"] {
+    scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
 
