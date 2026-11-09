@@ -1,10 +1,19 @@
-import { usePlanEditorOwner } from "@/components/thread/pending-interactions/plan-editor-ownership";
-import { useEffect, useId, useRef, useState } from "react";
-import type {
-  PlanSnapshotView,
-  PlanStepView,
-  PendingInteraction,
-} from "@bb/domain";
+import {
+  createThreadPlanFocusRequest,
+  focusThreadPlan,
+  registerThreadPlanFocusTarget,
+  isThreadPlanVisible,
+  focusPlanElement,
+  type ThreadPlanFocusRequest,
+} from "./thread-plan-focus";
+import {
+  ThreadTodoCard,
+  ThreadPlanQuestion,
+} from "@/components/promptbox/banner/ThreadTodoCard";
+import { sdk } from "@/lib/sdk";
+import { useEnvironment } from "@/hooks/queries/environment-queries";
+import { useEffect, useRef, useState } from "react";
+import type { PendingInteraction } from "@bb/domain";
 import type { ThreadPlanStepsProps } from "@get-bb/plugin-sdk";
 import { useThreadPlans } from "@/hooks/queries/thread-plans";
 import {
@@ -12,266 +21,62 @@ import {
   useThreadPendingInteractions,
 } from "@/hooks/queries/thread-queries";
 import { useOptionalPaneContext } from "./PaneContext";
-import { UserQuestionAnswerForm } from "@/components/thread/user-questions/UserQuestionInteractionContent";
-import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
 
-function Question({
+function NativeWaitingRow({
   interaction,
-  threadId,
-  placement,
-  focused,
-}: {
-  interaction: PendingInteraction;
-  threadId: string;
-  placement: "overlay" | "panel";
-  focused: boolean;
-}) {
-  const [skipped, setSkipped] = useState(false);
-  const priority = placement === "overlay" ? (focused ? 30 : 10) : 20;
-  const ownsEditor = usePlanEditorOwner(
-    `${threadId}:${interaction.id}`,
-    priority,
-    interaction.payload.kind === "user_question",
-  );
-  if (interaction.payload.kind !== "user_question") return null;
-  return (
-    <div
-      className="m-2 rounded-md border border-warning bg-warning/5 p-3"
-      data-plan-interaction={interaction.id}
-    >
-      {!ownsEditor ? (
-        <span className="text-muted-foreground">Answer in the active view</span>
-      ) : skipped ? (
-        <button type="button" onClick={() => setSkipped(false)}>
-          Needs you · Answer
-        </button>
-      ) : (
-        <UserQuestionAnswerForm
-          threadId={threadId}
-          interactionId={interaction.id}
-          isResolving={interaction.status === "resolving"}
-          questions={interaction.payload.questions}
-          plan={{ priority, onSkip: () => setSkipped(true) }}
-        />
-      )}
-    </div>
-  );
-}
-function Step({ step, executing }: { step: PlanStepView; executing: boolean }) {
-  const state = step.status;
-  return (
-    <div
-      className="flex h-8 min-w-0 items-center gap-2 px-3 text-xs"
-      data-plan-step={step.id}
-      data-plan-step-status={state}
-      aria-label={`${state === "needs_input" ? "Waiting for you" : state === "in_progress" ? "In progress" : state === "completed" ? "Done" : state === "failed" ? "Failed" : "Next"}: ${step.text}`}
-    >
-      <Icon
-        name={
-          state === "completed"
-            ? "Check"
-            : state === "failed"
-              ? "CircleX"
-              : state === "needs_input"
-                ? "Circle"
-                : state === "in_progress"
-                  ? "Spinner"
-                  : "Circle"
-        }
-        aria-hidden
-        className={cn(
-          "size-3.5 shrink-0",
-          state === "completed"
-            ? "text-success"
-            : state === "failed"
-              ? "text-destructive-text"
-              : state === "needs_input"
-                ? "fill-warning text-warning"
-                : state === "in_progress"
-                  ? "text-info"
-                  : "text-muted-foreground",
-          state === "in_progress" && executing && "motion-safe:animate-spin",
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate",
-            state === "completed" && "text-muted-foreground line-through",
-          )}
-          title={step.text}
-        >
-          {step.text}
-        </div>
-        {(step.note || state === "needs_input" || state === "failed") && (
-          <div
-            className={cn(
-              "truncate text-2xs",
-              state === "needs_input"
-                ? "text-warning"
-                : state === "failed"
-                  ? "text-destructive-text"
-                  : "text-muted-foreground",
-            )}
-            title={step.note}
-          >
-            {state === "needs_input"
-              ? "Needs you"
-              : state === "failed"
-                ? "Failed"
-                : ""}
-            {step.note &&
-              `${state === "needs_input" || state === "failed" ? " · " : ""}${step.note}`}
-          </div>
-        )}
-      </div>
-      {step.actor && (
-        <span
-          className="max-w-20 truncate rounded border px-1 text-2xs text-muted-foreground"
-          title={step.actor}
-        >
-          {step.actor}
-        </span>
-      )}
-    </div>
-  );
-}
-function Snapshot({
-  snapshot,
-  earlier,
   narrow,
-  executing,
-  interactions,
+  focusRequest,
   ...props
 }: ThreadPlanStepsProps & {
-  snapshot: PlanSnapshotView;
-  earlier: boolean;
+  interaction: PendingInteraction;
   narrow: boolean;
-  executing: boolean;
-  interactions: readonly PendingInteraction[];
+  focusRequest?: ThreadPlanFocusRequest;
 }) {
-  const focused = useOptionalPaneContext()?.isFocused ?? true;
-  const waiting = snapshot.items.some((item) => item.interactionIds.length > 0);
-  const failed = snapshot.items.some((item) => item.status === "failed");
-  const finished =
-    snapshot.items.length > 0 &&
-    snapshot.items.every((item) => item.status === "completed");
-  const quiet =
-    !waiting && (earlier || finished || snapshot.staleSince !== undefined);
-  const [expanded, setExpanded] = useState(!narrow && !quiet);
-  const previous = useRef({ narrow, quiet, waiting });
+  const [expanded, setExpanded] = useState(!narrow);
+  const previousNarrow = useRef(narrow);
   const trigger = useRef<HTMLButtonElement>(null);
-  const list = useRef<HTMLDivElement>(null);
-  const bodyId = useId();
+  const focused = useOptionalPaneContext()?.isFocused ?? true;
   useEffect(() => {
-    const before = previous.current;
-    if ((narrow && !before.narrow) || (quiet && !before.quiet))
-      setExpanded(false);
-    else if (waiting && !before.waiting && !narrow) setExpanded(true);
-    previous.current = { narrow, quiet, waiting };
-  }, [narrow, quiet, waiting]);
+    if (narrow && !previousNarrow.current) setExpanded(false);
+    previousNarrow.current = narrow;
+  }, [narrow]);
   useEffect(() => {
-    if (
-      !props.focusInteractionId ||
-      !snapshot.items.some((item) =>
-        item.interactionIds.includes(props.focusInteractionId!),
-      )
-    )
-      return;
-    setExpanded(true);
-  }, [props.focusInteractionId, snapshot.items]);
-  const activeId = snapshot.items.find(
-    (item) => item.status === "needs_input" || item.status === "in_progress",
-  )?.id;
+    if (props.focusInteractionId === interaction.id) setExpanded(true);
+  }, [props.focusInteractionId, interaction.id]);
   useEffect(() => {
-    if (!expanded || !list.current) return;
-    const row = [
-      ...list.current.querySelectorAll<HTMLElement>("[data-plan-step]"),
-    ].find((el) => el.dataset.planStep === activeId);
-    if (row)
-      list.current.scrollTop = Math.max(
-        0,
-        row.offsetTop - list.current.offsetTop - 32,
-      );
-  }, [activeId, expanded]);
-  const title = waiting
-    ? "Plan · Needs you"
-    : earlier
-      ? "Plan from an earlier task"
-      : finished
-        ? "Plan finished"
-        : snapshot.staleSince !== undefined
-          ? "Earlier plan"
-          : failed
-            ? "Plan · Failed"
-            : "Plan";
+    if (focusRequest?.interactionId === interaction.id) setExpanded(true);
+  }, [focusRequest, interaction.id]);
   return (
     <section
-      className={cn(
-        "min-w-0 overflow-hidden rounded-xl border bg-background shadow-lg",
-        quiet && "text-muted-foreground",
-        waiting && "border-warning",
-        !quiet && !waiting && failed && "border-destructive-text",
-      )}
-      data-plan-snapshot={snapshot.sourceSeq}
+      className="rounded-xl border border-warning bg-background text-xs"
       onKeyDown={(event) => {
         if (event.key === "Escape" && expanded) {
           event.preventDefault();
           event.stopPropagation();
           setExpanded(false);
-          trigger.current?.focus();
+          focusPlanElement(trigger.current);
         }
       }}
     >
       <button
         ref={trigger}
         type="button"
-        className="flex h-8 w-full items-center gap-2 px-3 text-left text-xs"
         aria-expanded={expanded}
-        aria-controls={bodyId}
+        className="h-8 w-full px-3 text-left text-warning"
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className="min-w-0 flex-1 truncate">
-          {title}
-          {quiet &&
-            ` · ${new Date(snapshot.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}
-        </span>
-        <Icon
-          name={expanded ? "ChevronUp" : "ChevronDown"}
-          className="size-3"
-          aria-hidden
-        />
+        Needs you
       </button>
       {expanded && (
-        <div
-          ref={list}
-          id={bodyId}
-          role="region"
-          aria-label="Plan steps"
-          tabIndex={0}
-          className={cn(
-            "relative overflow-y-auto overscroll-contain",
-            waiting ? "max-h-[min(60dvh,32rem)]" : "max-h-32",
-          )}
-        >
-          {snapshot.items.map((step) => (
-            <div key={step.id}>
-              <Step step={step} executing={executing && !quiet} />
-              {step.interactionIds.map((id) => {
-                const interaction = interactions.find((i) => i.id === id);
-                return interaction ? (
-                  <Question
-                    key={id}
-                    interaction={interaction}
-                    threadId={props.threadId}
-                    placement={props.placement}
-                    focused={focused}
-                  />
-                ) : null;
-              })}
-            </div>
-          ))}
+        <div className="max-h-[60dvh] overflow-y-auto overscroll-contain">
+          <ThreadPlanQuestion
+            interaction={interaction}
+            threadId={props.threadId}
+            placement={props.placement}
+            focused={focused}
+            focusRequest={focusRequest}
+          />
         </div>
       )}
     </section>
@@ -281,13 +86,22 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
   const result = useThreadPlans({ threadIds: [props.threadId] });
   const interactions = useThreadPendingInteractions(props.threadId).data ?? [];
   const thread = useThread(props.threadId).data;
+  const environment = useEnvironment(thread?.environmentId).data;
   const view = result.plans[props.threadId];
+  const onOpenThread =
+    props.onOpenThread ??
+    (() => void sdk.threads.open({ threadId: props.threadId, file: null }));
   const root = useRef<HTMLDivElement>(null);
+  const focused = useOptionalPaneContext()?.isFocused ?? true;
+  const [focusRequest, setFocusRequest] = useState<ThreadPlanFocusRequest>();
+  const current = useRef({ view, interactions, focused });
+  current.current = { view, interactions, focused };
   const [narrow, setNarrow] = useState<boolean | null>(null);
   useEffect(() => {
     const container =
       props.placement === "overlay"
-        ? (root.current?.closest("[data-thread-window]") ??
+        ? (root.current?.closest("[data-thread-chat]") ??
+          root.current?.closest("[data-thread-window]") ??
           root.current?.parentElement)
         : root.current;
     if (!container) return;
@@ -295,21 +109,82 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
       setNarrow(container.getBoundingClientRect().width <= 640);
       return;
     }
-    const resize = () =>
-      setNarrow(container.getBoundingClientRect().width <= 640);
+    const resize = () => {
+      const rect = container.getBoundingClientRect();
+      setNarrow(rect.width <= 640);
+      root.current?.style.setProperty(
+        "--thread-plan-max-height",
+        `${Math.max(96, Math.floor(rect.height * 0.6))}px`,
+      );
+    };
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(container);
     return () => observer.disconnect();
   }, [props.placement]);
   const executing =
-    thread?.status === "active" && !view?.attentionInteractionIds.length;
+    thread?.runtime?.displayStatus === "active" &&
+    !thread.serviceTurn &&
+    !view?.attentionInteractionIds.length;
+  const hidden =
+    thread?.archivedAt != null ||
+    (environment &&
+      (environment.hostLifecycle !== "active" ||
+        environment.status === "destroyed"));
+  useEffect(() => {
+    if (props.placement !== "overlay") return;
+    return registerThreadPlanFocusTarget({
+      threadId: props.threadId,
+      isFocused: () => current.current.focused,
+      request: ({ interactionId }) => {
+        const { view, interactions } = current.current;
+        if (!isThreadPlanVisible(root.current) || !view) return false;
+        if (interactionId) {
+          const pending = interactions.find(
+            (item) =>
+              item.id === interactionId &&
+              item.threadId === props.threadId &&
+              item.status === "pending" &&
+              item.payload.kind === "user_question",
+          );
+          const displayed =
+            view.unboundInteractionIds.includes(interactionId) ||
+            [view.current, ...view.previousPlans].some((snapshot) =>
+              snapshot?.items.some((step) =>
+                step.interactionIds.includes(interactionId),
+              ),
+            );
+          if (!pending || !displayed) return false;
+        } else if (!view.current) return false;
+        setFocusRequest(createThreadPlanFocusRequest(interactionId));
+        return true;
+      },
+    });
+  }, [props.threadId, props.placement]);
+  useEffect(() => {
+    if (!props.focusInteractionId) return;
+    if (props.placement === "overlay")
+      focusThreadPlan({
+        threadId: props.threadId,
+        interactionId: props.focusInteractionId,
+      });
+    else
+      setFocusRequest(createThreadPlanFocusRequest(props.focusInteractionId));
+  }, [
+    props.focusInteractionId,
+    props.threadId,
+    props.placement,
+    view?.revision,
+    narrow,
+  ]);
   return (
     <div
+      hidden={Boolean(hidden)}
       ref={root}
       className={cn(
         "pointer-events-auto min-w-0 space-y-1",
-        props.placement === "overlay" && "w-[340px] max-w-full",
+        props.placement === "overlay" &&
+          "w-[340px] max-w-full max-h-[var(--thread-plan-max-height,60dvh)] overflow-y-auto overscroll-contain",
       )}
       data-thread-plan=""
     >
@@ -326,10 +201,11 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
           )}
         </div>
       )}
-      {narrow !== null && view?.current && (
-        <Snapshot
+      {!hidden && narrow !== null && view?.current && (
+        <ThreadTodoCard
           key={view.current.planId ?? view.current.sourceSeq}
           {...props}
+          focusRequest={focusRequest}
           snapshot={view.current}
           earlier={false}
           narrow={narrow}
@@ -337,11 +213,15 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
           interactions={interactions}
         />
       )}
-      {narrow !== null &&
+      {!hidden &&
+        narrow !== null &&
         view?.previousPlans.map((snapshot) => (
-          <Snapshot
+          <ThreadTodoCard
             key={snapshot.planId ?? snapshot.sourceSeq}
             {...props}
+            focusRequest={
+              focusRequest?.interactionId ? focusRequest : undefined
+            }
             snapshot={snapshot}
             earlier
             narrow={narrow}
@@ -349,32 +229,29 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
             interactions={interactions}
           />
         ))}
-      {view?.unboundInteractionIds.map((id) => {
-        const interaction = interactions.find((i) => i.id === id);
-        return interaction?.payload.kind === "user_question" ? (
-          <section
-            key={id}
-            className="rounded-xl border border-warning bg-background text-xs"
-          >
-            <div className="px-3 pt-2 text-warning">Needs you</div>
-            <Question
+      {narrow !== null &&
+        !hidden &&
+        view?.unboundInteractionIds.map((id) => {
+          const interaction = interactions.find((i) => i.id === id);
+          return interaction?.payload.kind === "user_question" ? (
+            <NativeWaitingRow
+              key={id}
+              {...props}
               interaction={interaction}
-              threadId={props.threadId}
-              placement={props.placement}
-              focused
+              narrow={narrow}
+              focusRequest={focusRequest}
             />
-          </section>
-        ) : (
-          <button
-            key={id}
-            type="button"
-            className="text-xs text-warning"
-            onClick={props.onOpenThread}
-          >
-            Needs you · Open
-          </button>
-        );
-      })}
+          ) : (
+            <button
+              key={id}
+              type="button"
+              className="text-xs text-warning"
+              onClick={onOpenThread}
+            >
+              Needs you · Open
+            </button>
+          );
+        })}
       {view?.historyTruncated && (
         <span className="sr-only">Earlier plan history truncated</span>
       )}

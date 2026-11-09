@@ -1,3 +1,4 @@
+import { latestServiceTurn } from "./service-turns.js";
 import {
   listQueuedThreadMessageCountsByThreadIds,
   getLatestCompletedThreadContextClearSequence,
@@ -64,7 +65,10 @@ export function readThreadPlan(
     return projectThreadPlan({
       threadId: thread.id,
       revision,
-      status: thread.status,
+      status:
+        thread.status === "error" && latestServiceTurn(deps.db, thread.id)
+          ? "idle"
+          : thread.status,
       events: rows.map(toThreadEventWithMeta),
       turnEvents: rows[0]
         ? listPlanStalenessEventRows(deps.db, rows[0], revision).map(

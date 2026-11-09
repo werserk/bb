@@ -249,7 +249,14 @@ export const threadEventPlanStepsItemSchema = z.object({
   type: z.literal("planSteps"),
   id: z.string(),
   planId: planIdentifierSchema.optional(),
-  steps: z.array(threadEventPlanStepSchema),
+  steps: z
+    .array(threadEventPlanStepSchema)
+    .refine(
+      (steps) =>
+        new Set(steps.flatMap((step) => (step.id ? [step.id] : []))).size ===
+        steps.filter((step) => step.id).length,
+      "Duplicate step IDs",
+    ),
   explanation: z.string().optional(),
   status: threadEventItemStatusSchema,
   ...itemPresentationField,

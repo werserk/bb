@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { usePlanEditorOwner } from "../pending-interactions/plan-editor-ownership";
 import { QuestionForm } from "@bb/shared-ui/question-form";
 import type {
   Question,
@@ -955,4 +956,59 @@ it("plan mode shows every native question, retains skipped drafts and validates 
   fireEvent.click(view.getByRole("button", { name: "Skip" }));
   expect(onCancel).toHaveBeenCalledOnce();
   expect(view.queryByRole("button", { name: "Next" })).toBeNull();
+});
+
+it("hands actual native drafts between presentation owners and keeps refused answers", async () => {
+  const submit = vi.fn(async () => {
+    throw new Error("Refused");
+  });
+  const questions = [{ ...singleSelect.questions[0]!, options: [] }];
+  function Editor({ priority }: { priority: number }) {
+    const owns = usePlanEditorOwner("handoff", priority);
+    return owns ? (
+      <QuestionForm
+        draftKey="handoff-real"
+        mode={priority ? "plan" : "native"}
+        questions={questions}
+        disabled={false}
+        cancelDisabled={false}
+        onSubmit={submit}
+        onCancel={() => {}}
+      />
+    ) : null;
+  }
+  const body = (overlay: boolean) => (
+    <AppCommandProvider>
+      <ThreadQuestionFormHost
+        density="default"
+        promptShownAbove={null}
+        closeInline={null}
+      >
+        <Editor priority={0} />
+        {overlay && <Editor priority={30} />}
+      </ThreadQuestionFormHost>
+    </AppCommandProvider>
+  );
+  const view = renderReact(body(false));
+  fireEvent.change(view.getByRole("textbox"), {
+    target: { value: "Keep this answer" },
+  });
+  view.rerender(body(true));
+  expect(view.getAllByRole("textbox")).toHaveLength(1);
+  expect((view.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Keep this answer",
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: "Answer" })),
+  );
+  expect(submit).toHaveBeenCalledOnce();
+  expect((view.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Keep this answer",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Skip" }));
+  view.rerender(body(false));
+  expect(view.getAllByRole("textbox")).toHaveLength(1);
+  expect((view.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Keep this answer",
+  );
 });

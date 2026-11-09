@@ -5943,15 +5943,17 @@ export interface PluginSdkApp {
    * the switch settles. Experimental: see docs/api_to_audit.md.
    */
   experimental_useNavigationSettled(): boolean;
+  /** Experimental canonical plan coverage; see the Plugin Guide. */
+  experimental_useThreadPlans?: (args: {
+    threadIds: readonly string[];
+  }) => ThreadPlansResult;
+  experimental_ThreadPlanSteps?: ComponentType<ThreadPlanStepsProps>;
+  experimental_focusThreadPlan?: (args: FocusThreadPlanArgs) => boolean;
   /**
    * The host-owned chat component (see {@link ThreadChatProps}). Together
    * with `Markdown`, the only components the SDK ships — everything else
    * stays vendored per §5.5.
    */
-  experimental_useThreadPlans?: (args: {
-    threadIds: readonly string[];
-  }) => ThreadPlansResult;
-  experimental_ThreadPlanSteps?: ComponentType<ThreadPlanStepsProps>;
   ThreadChat: ComponentType<ThreadChatProps>;
   /**
    * The host-owned chat-message markdown renderer (see
@@ -6164,4 +6166,9 @@ export interface ThreadPlanStepsProps {
   placement: "overlay" | "panel";
   focusInteractionId?: string;
   onOpenThread?: () => void;
+}
+
+export interface FocusThreadPlanArgs {
+  threadId: string;
+  interactionId?: string;
 }

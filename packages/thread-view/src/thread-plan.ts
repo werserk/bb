@@ -28,6 +28,7 @@ export function projectThreadPlan(args: {
   const snapshots: PlanSnapshotView[] = [];
   const seen = new Set<string>();
   let truncated = args.historyTruncated;
+  let outputTruncated = false;
   for (const event of ordered) {
     const snapshot = extractThreadTimelinePendingTodos(
       args.status,
@@ -43,7 +44,7 @@ export function projectThreadPlan(args: {
     if (snapshot.planId) seen.add(snapshot.planId);
     if (snapshots.length && !snapshot.planId) continue;
     if (snapshots.length === 4) {
-      truncated = true;
+      outputTruncated = true;
       continue;
     }
     snapshots.push({
@@ -91,7 +92,7 @@ export function projectThreadPlan(args: {
     revision: args.revision,
     current,
     previousPlans: snapshots.slice(1),
-    historyTruncated: truncated,
+    historyTruncated: truncated || outputTruncated,
     ownAttention:
       args.attentionInteractionIds.length || args.ownInputRequired
         ? "needs_input"

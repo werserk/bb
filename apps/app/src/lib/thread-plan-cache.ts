@@ -73,7 +73,7 @@ export class ThreadPlanCache {
               const view = result.plans[id];
               const previous = this.plans[id];
               if (view && (!previous || view.revision >= previous.revision))
-                this.plans[id] = view;
+                this.plans = { ...this.plans, [id]: view };
               else
                 this.errors[id] =
                   result.errors[id] ??

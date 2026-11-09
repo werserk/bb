@@ -375,3 +375,7 @@ export const experimental_useThreadPlans: PluginSdkApp["experimental_useThreadPl
 export const experimental_ThreadPlanSteps = runtimeComponent(
   "experimental_ThreadPlanSteps",
 );
+
+export const experimental_focusThreadPlan = runtimeFunction(
+  "experimental_focusThreadPlan",
+);

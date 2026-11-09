@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { ThreadPlansResult } from "@get-bb/plugin-sdk";
 import { sdk } from "@/lib/sdk";
 import { wsManager } from "@/lib/ws";
@@ -9,8 +9,9 @@ export const threadPlanCache = new ThreadPlanCache((threadIds) =>
 const consumers = new Map<string, number>();
 let detach: (() => void) | null = null;
 function retain(ids: readonly string[]) {
-  if (!detach)
-    detach = wsManager.onChanged((event) => {
+  if (!ids.length) return;
+  if (!detach) {
+    const detachChanged = wsManager.onChanged((event) => {
       if (event.entity !== "thread") return;
       const affected = event.id
         ? consumers.has(event.id)
@@ -19,26 +20,36 @@ function retain(ids: readonly string[]) {
         : [...consumers.keys()];
       if (affected.length) void threadPlanCache.refresh(affected);
     });
+    const detachConnected = wsManager.onConnected(() => {
+      if (consumers.size) void threadPlanCache.refresh([...consumers.keys()]);
+    });
+    detach = () => {
+      detachChanged();
+      detachConnected();
+    };
+  }
+  const fresh = ids.filter((id) => !consumers.has(id));
   for (const id of ids) {
     if (!consumers.has(id))
       wsManager.subscribe({ kind: "thread-detail", threadId: id });
     consumers.set(id, (consumers.get(id) ?? 0) + 1);
   }
-  threadPlanCache.ensure(ids);
-  return () => {
-    for (const id of ids) {
-      const count = (consumers.get(id) ?? 1) - 1;
-      if (count) consumers.set(id, count);
-      else {
-        consumers.delete(id);
-        wsManager.unsubscribe({ kind: "thread-detail", threadId: id });
-      }
+  if (fresh.length) void threadPlanCache.refresh(fresh);
+  else threadPlanCache.ensure(ids);
+}
+function release(ids: readonly string[]) {
+  for (const id of ids) {
+    const count = (consumers.get(id) ?? 1) - 1;
+    if (count) consumers.set(id, count);
+    else {
+      consumers.delete(id);
+      wsManager.unsubscribe({ kind: "thread-detail", threadId: id });
     }
-    if (!consumers.size) {
-      detach?.();
-      detach = null;
-    }
-  };
+  }
+  if (!consumers.size) {
+    detach?.();
+    detach = null;
+  }
 }
 export function useThreadPlans({
   threadIds,
@@ -51,9 +62,22 @@ export function useThreadPlans({
     threadPlanCache.snapshot,
   );
   const key = JSON.stringify([...new Set(threadIds)]);
-  useEffect(() => retain(JSON.parse(key)), [key]);
+  const retained = useRef<readonly string[]>([]);
+  useEffect(() => {
+    const next: string[] = JSON.parse(key);
+    release(retained.current.filter((id) => !next.includes(id)));
+    retain(next.filter((id) => !retained.current.includes(id)));
+    retained.current = next;
+  }, [key]);
+  useEffect(
+    () => () => {
+      release(retained.current);
+      retained.current = [];
+    },
+    [],
+  );
   const ids: string[] = JSON.parse(key);
-  const loaded = threadPlanCache.loaded(ids);
+  const loaded = threadPlanCache.loaded(ids).filter((id) => consumers.has(id));
   const errors = Object.fromEntries(
     ids.flatMap((id) =>
       threadPlanCache.errors[id] ? [[id, threadPlanCache.errors[id]!]] : [],

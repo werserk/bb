@@ -32,7 +32,8 @@ export function usePlanEditorOwner(
     subscribe,
     () => {
       const owners = claims.get(key);
-      if (!enabled || !owners) return false;
+      if (!enabled) return false;
+      if (!owners) return true;
       return [...owners].sort((a, b) => b[1] - a[1])[0]?.[0] === id;
     },
     () => false,

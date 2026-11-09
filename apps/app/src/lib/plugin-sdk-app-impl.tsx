@@ -1,3 +1,4 @@
+import { focusThreadPlan } from "@/views/thread-detail/thread-plan-focus";
 import { ThreadPlanSteps } from "@/views/thread-detail/ThreadPlanSteps";
 import { useThreadPlans } from "@/hooks/queries/thread-plans";
 import { applicationLinkApprovals } from "./application-url";
@@ -204,6 +205,7 @@ export const pluginSdkAppImplementation = {
   useSettings,
   experimental_useThreadPlans: useThreadPlans,
   experimental_ThreadPlanSteps: ThreadPlanSteps,
+  experimental_focusThreadPlan: focusThreadPlan,
   ThreadChat: LazyPluginThreadChat,
   Markdown: LazyPluginMarkdown,
   experimental_FileLink: ExperimentalFileLink,

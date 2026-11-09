@@ -21,6 +21,9 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
   useThread: () => ({ data: { status: "idle" } }),
   useThreadPendingInteractions: () => ({ data: [] }),
 }));
+vi.mock("@/hooks/queries/environment-queries", () => ({
+  useEnvironment: () => ({ data: null }),
+}));
 vi.mock("./PaneContext", () => ({ useOptionalPaneContext: () => null }));
 beforeEach(() => {
   facts.width = 768;

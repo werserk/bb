@@ -81,3 +81,29 @@ describe("canonical plan projection", () => {
     ).toBe(true);
   });
 });
+
+it("keeps concurrent native IDs and excludes old or stale failures from own attention", () => {
+  const anchor = {
+    interactionId: "q1",
+    event: plan(1, "work"),
+    turnId: "turn",
+  };
+  const result = read(
+    [plan(2, "work")],
+    [
+      anchor,
+      { ...anchor, interactionId: "q2" },
+      { ...anchor, interactionId: "foreign", turnId: "other" },
+    ],
+  );
+  expect(result.current?.items[0]?.interactionIds).toEqual(["q1", "q2"]);
+  expect(result.unboundInteractionIds).toEqual(["foreign"]);
+  expect(result.ownAttention).toBe("needs_input");
+  const old = plan(1, "old");
+  if (
+    old.event.type === "item/completed" &&
+    old.event.item.type === "planSteps"
+  )
+    old.event.item.steps[0]!.status = "failed";
+  expect(read([old, plan(2, "work")]).ownAttention).toBe("none");
+});

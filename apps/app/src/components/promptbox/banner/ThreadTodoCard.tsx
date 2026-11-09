@@ -1,360 +1,343 @@
-import { threadPresentationText as t } from "@bb/thread-view";
+import {
+  focusPlanElement,
+  type ThreadPlanFocusRequest,
+} from "@/views/thread-detail/thread-plan-focus";
+import { ThreadQuestionFormHost } from "@/components/thread/user-questions/ThreadQuestionFormHost";
 import { useEffect, useId, useRef, useState } from "react";
 import type {
-  ThreadTimelinePendingTodoItem,
-  ThreadTimelinePendingTodoItemStatus,
-  ThreadTimelinePendingTodos,
+  PlanSnapshotView,
+  PlanStepView,
+  PendingInteraction,
 } from "@bb/domain";
-import {
-  PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-  PromptStackCard,
-} from "@/components/promptbox/banner/PromptStackCard";
-import {
-  activityIconClass,
-  activityRowClass,
-  activityTextClass,
-  type ActivityRowState,
-} from "@bb/shared-ui/activity-row-styles";
+import type { ThreadPlanStepsProps } from "@get-bb/plugin-sdk";
+import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
+import { UserQuestionAnswerForm } from "@/components/thread/user-questions/UserQuestionInteractionContent";
+import { usePlanEditorOwner } from "@/components/thread/pending-interactions/plan-editor-ownership";
+import { planDisclosureState } from "@/views/thread-detail/thread-plan-state";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
-
-const STATUS_ACTIVITY_STATE: Record<
-  ThreadTimelinePendingTodoItemStatus,
-  ActivityRowState
-> = {
-  in_progress: "active",
-  pending: "pending",
-  completed: "completed",
-  failed: "failed",
-};
-
-interface ThreadTodoCardProps {
-  pendingTodos: ThreadTimelinePendingTodos | null;
-  state?: "active" | "waiting" | "finished";
-  locale?: string;
-  isExpanded: boolean;
-  onToggle: () => void;
-}
-
-const TODO_HEADER_BUTTON_CLASS = activityRowClass(
-  "active",
-  PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-);
-const TODO_ACTIVE_ROW_CLASS = "shadow-none ring-0";
-const TODO_ACTIVE_ICON_CLASS = "text-foreground";
-
-function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]) {
-  const count = items.filter((item) => item.status === "completed").length;
-  return { count, aria: `${count} of ${items.length} items complete` };
-}
-
-function TodoStatusIcon({
-  status,
-  failedLabel,
+export function ThreadPlanQuestion({
+  interaction,
+  threadId,
+  placement,
+  focused,
+  focusRequest,
 }: {
-  status: ThreadTimelinePendingTodoItemStatus;
-  failedLabel: string;
+  interaction: PendingInteraction;
+  threadId: string;
+  placement: "overlay" | "panel";
+  focused: boolean;
+  focusRequest?: ThreadPlanFocusRequest;
 }) {
-  const className = "size-3.5 shrink-0";
-  const activityState = STATUS_ACTIVITY_STATE[status];
-  switch (status) {
-    case "in_progress":
-      return (
-        <Icon
-          name="Square"
-          className={cn(className, TODO_ACTIVE_ICON_CLASS)}
-          aria-hidden="true"
-        />
-      );
-    case "completed":
-      return (
-        <Icon
-          name="Check"
-          className={cn(className, activityIconClass(activityState))}
-          aria-hidden="true"
-        />
-      );
-    case "failed":
-      return (
-        <span role="img" aria-label={failedLabel}>
-          <Icon
-            name="CircleX"
-            aria-hidden="true"
-            className={cn(className, activityIconClass(activityState))}
-          />
-        </span>
-      );
-    case "pending":
-      return (
-        <Icon
-          name="Square"
-          className={cn(className, activityIconClass(activityState))}
-          aria-hidden="true"
-        />
-      );
-  }
-}
-
-function TodoBody({
-  items,
-  failedLabel,
-  stale,
-  regionLabel,
-}: {
-  regionLabel: string;
-  items: readonly ThreadTimelinePendingTodoItem[];
-  failedLabel: string;
-  stale: boolean;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const activeIndex = items.findIndex((item) => item.status === "in_progress");
+  const [skipped, setSkipped] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const requested = focusRequest?.interactionId === interaction.id;
+  const priority = requested
+    ? 40 + focusRequest.sequence
+    : placement === "overlay"
+      ? focused
+        ? 30
+        : 10
+      : 20;
+  const ownsEditor = usePlanEditorOwner(
+    `${threadId}:${interaction.id}`,
+    priority,
+    interaction.payload.kind === "user_question",
+  );
   useEffect(() => {
-    const viewport = listRef.current;
-    const first = viewport?.querySelector("li");
-    if (viewport && first)
-      viewport.scrollTop =
-        Math.max(0, activeIndex - 1) * first.getBoundingClientRect().height;
-  }, [activeIndex]);
+    if (requested) setSkipped(false);
+  }, [requested, focusRequest]);
+  useEffect(() => {
+    if (!requested || skipped || !ownsEditor) return;
+    const fields = root.current?.querySelectorAll<HTMLElement>(
+      'textarea,input,select,[role="radio"],[role="checkbox"]',
+    );
+    const field = [...(fields ?? [])].find(
+      (element) =>
+        !element.matches(':disabled,[aria-disabled="true"],[type="hidden"]'),
+    );
+    focusPlanElement(
+      field ??
+        root.current?.querySelector<HTMLButtonElement>(
+          "button:not(:disabled)",
+        ) ??
+        null,
+    );
+  }, [focusRequest, requested, skipped, ownsEditor]);
+  if (interaction.payload.kind !== "user_question") return null;
   return (
     <div
-      ref={listRef}
-      className="max-h-36 overflow-y-auto overscroll-contain snap-y snap-mandatory outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-ring"
-      role="region"
-      aria-label={regionLabel}
-      tabIndex={0}
+      ref={root}
+      className="m-2 rounded-md border border-warning bg-warning/5 p-3"
+      data-plan-interaction={interaction.id}
     >
-      <ul className="m-0 list-none p-0">
-        {items.map((item) => {
-          const activityState = STATUS_ACTIVITY_STATE[item.status];
-          const isActive = activityState === "active";
-          const muted =
-            stale && item.status !== "completed" && item.status !== "failed";
-          return (
-            <li
-              key={item.id}
-              className={activityRowClass(
-                activityState,
-                cn(
-                  "flex h-9 min-w-0 snap-start items-center gap-2 overflow-hidden px-2.5 py-0 text-xs",
-                  isActive && TODO_ACTIVE_ROW_CLASS,
-                  muted &&
-                    "!text-muted-foreground [&_span]:!text-muted-foreground [&_[data-icon-root]]:!text-muted-foreground",
-                ),
-              )}
-            >
-              <TodoStatusIcon status={item.status} failedLabel={failedLabel} />
-              <div className="min-w-0 flex-1">
-                <span
-                  className={activityTextClass(
-                    activityState,
-                    "block min-w-0 truncate leading-4",
-                  )}
-                  title={item.text}
-                >
-                  {item.text}
-                </span>
-                {item.note && (
-                  <span
-                    className="block truncate text-2xs leading-3.5 text-muted-foreground"
-                    title={item.note}
-                  >
-                    {item.note}
-                  </span>
-                )}
-              </div>
-              {item.actor && (
-                <span
-                  className="max-w-16 shrink-0 truncate rounded border px-1 text-2xs text-muted-foreground"
-                  title={item.actor}
-                >
-                  {item.actor}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {!ownsEditor ? (
+        <span className="text-muted-foreground">Answer in the active view</span>
+      ) : skipped ? (
+        <button type="button" onClick={() => setSkipped(false)}>
+          Needs you · Answer
+        </button>
+      ) : (
+        <ThreadQuestionFormHost
+          density="default"
+          promptShownAbove={null}
+          closeInline={null}
+        >
+          <UserQuestionAnswerForm
+            threadId={threadId}
+            interactionId={interaction.id}
+            isResolving={interaction.status === "resolving"}
+            questions={interaction.payload.questions}
+            plan={{ priority, onSkip: () => setSkipped(true) }}
+          />
+        </ThreadQuestionFormHost>
+      )}
     </div>
   );
 }
-
-export function ThreadTodoCard({
-  pendingTodos,
-  state = "active",
-  locale = typeof navigator === "undefined" ? "en" : navigator.language,
-  isExpanded,
-  onToggle,
-}: ThreadTodoCardProps) {
-  const bodyId = useId();
-  const toggleId = useId();
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-  const items = pendingTodos?.items ?? [];
-  if (items.length === 0) {
-    return null;
-  }
-  const summary = getTodoSummary(items);
-  const ru = locale.toLowerCase().startsWith("ru");
-  const labels = ru
-    ? {
-        active: "План",
-        waiting: "План · ждёт тебя",
-        finished: "План завершён",
-      }
-    : {
-        active: "Plan",
-        waiting: "Plan · waiting for you",
-        finished: "Plan completed",
-      };
-  const muted = state === "finished";
-  const time = new Date(pendingTodos?.updatedAt ?? 0).toLocaleTimeString(
-    locale,
-    {
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    },
-  );
-  const progressLabel = ru
-    ? `Выполнено: ${summary.count}/${items.length}`
-    : summary.aria;
-  const title = `${labels[state]}${!isExpanded && muted ? ` · ${time}` : ""}${!isExpanded ? ` · ${summary.count}/${items.length}` : ""}`;
-  const elapsedMinutes = Math.max(
-    0,
-    Math.floor((now - (pendingTodos?.updatedAt ?? now)) / 60_000),
-  );
-  const age =
-    elapsedMinutes === 0
-      ? ru
-        ? "только что"
-        : "just now"
-      : new Intl.RelativeTimeFormat(locale, {
-          style: "short",
-          numeric: "always",
-        }).format(
-          -Math.floor(
-            elapsedMinutes >= 1440
-              ? elapsedMinutes / 1440
-              : elapsedMinutes >= 60
-                ? elapsedMinutes / 60
-                : elapsedMinutes,
-          ),
-          elapsedMinutes >= 1440
-            ? "day"
-            : elapsedMinutes >= 60
-              ? "hour"
-              : "minute",
-        );
-  const metadata = `${ru ? "Обновлено" : "Updated"} ${age}`;
-  const stale =
-    pendingTodos?.staleSince !== undefined &&
-    items.some((item) => item.status !== "completed");
-  const staleLabel = ru
-    ? "Не обновлён после завершения более позднего хода"
-    : "Not updated since a later turn ended";
+function Step({ step, executing }: { step: PlanStepView; executing: boolean }) {
+  const state = step.status;
   return (
-    <PromptStackCard
-      ariaLabel={labels[state]}
-      className={cn(
-        "max-w-full overflow-hidden shadow-lg",
-        isExpanded
-          ? "w-76 rounded-xl @min-[880px]/thread-chat:w-80"
-          : "w-auto rounded-full",
-        state === "waiting" && "border-warning text-warning",
-        muted &&
-          "text-muted-foreground [&_li]:!text-muted-foreground [&_li_span]:!text-muted-foreground [&_li_[data-icon-root]]:!text-muted-foreground",
+    <div
+      className="flex h-8 min-w-0 items-center gap-2 px-3 text-xs"
+      tabIndex={-1}
+      data-plan-step={step.id}
+      data-plan-step-status={state}
+      aria-label={`${state === "needs_input" ? "Waiting for you" : state === "in_progress" ? "In progress" : state === "completed" ? "Done" : state === "failed" ? "Failed" : "Next"}: ${step.text}`}
+    >
+      <Icon
+        name={
+          state === "completed"
+            ? "Check"
+            : state === "failed"
+              ? "CircleX"
+              : state === "needs_input"
+                ? "Circle"
+                : state === "in_progress" && executing
+                  ? "Spinner"
+                  : "Circle"
+        }
+        aria-hidden
+        className={cn(
+          "size-3.5 shrink-0",
+          state === "completed"
+            ? "text-success"
+            : state === "failed"
+              ? "text-destructive-text"
+              : state === "needs_input"
+                ? "fill-warning text-warning"
+                : state === "in_progress"
+                  ? executing
+                    ? "text-info"
+                    : "text-muted-foreground"
+                  : "text-muted-foreground",
+          state === "in_progress" && executing && "motion-safe:animate-spin",
+        )}
+      />
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate",
+            state === "completed" && "text-muted-foreground line-through",
+          )}
+          title={step.text}
+        >
+          {step.text}
+        </div>
+        {(step.note || state === "needs_input" || state === "failed") && (
+          <div
+            className={cn(
+              "truncate text-2xs",
+              state === "needs_input"
+                ? "text-warning"
+                : state === "failed"
+                  ? "text-destructive-text"
+                  : "text-muted-foreground",
+            )}
+            title={step.note}
+          >
+            {state === "needs_input"
+              ? "Needs you"
+              : state === "failed"
+                ? "Failed"
+                : ""}
+            {step.note &&
+              `${state === "needs_input" || state === "failed" ? " · " : ""}${step.note}`}
+          </div>
+        )}
+      </div>
+      {step.actor && (
+        <span
+          className="max-w-20 truncate rounded border px-1 text-2xs text-muted-foreground"
+          title={step.actor}
+        >
+          {step.actor}
+        </span>
       )}
+    </div>
+  );
+}
+export function ThreadTodoCard({
+  snapshot,
+  earlier,
+  narrow,
+  executing,
+  interactions,
+  focusRequest,
+  ...props
+}: ThreadPlanStepsProps & {
+  snapshot: PlanSnapshotView;
+  earlier: boolean;
+  narrow: boolean;
+  executing: boolean;
+  interactions: readonly PendingInteraction[];
+  focusRequest?: ThreadPlanFocusRequest;
+}) {
+  const focused = useOptionalPaneContext()?.isFocused ?? true;
+  const { waiting, failed, finished, quiet } = planDisclosureState(
+    snapshot,
+    earlier,
+  );
+  const [expanded, setExpanded] = useState(!narrow && !quiet);
+  const previous = useRef({ narrow, quiet, waiting });
+  const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
+  useEffect(() => {
+    const before = previous.current;
+    if ((narrow && !before.narrow) || (quiet && !before.quiet))
+      setExpanded(false);
+    else if (waiting && !before.waiting && !narrow) setExpanded(true);
+    previous.current = { narrow, quiet, waiting };
+  }, [narrow, quiet, waiting]);
+  useEffect(() => {
+    if (
+      !props.focusInteractionId ||
+      !snapshot.items.some((item) =>
+        item.interactionIds.includes(props.focusInteractionId!),
+      )
+    )
+      return;
+    setExpanded(true);
+  }, [props.focusInteractionId]);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (
+      focusRequest.interactionId &&
+      !snapshot.items.some((step) =>
+        step.interactionIds.includes(focusRequest.interactionId!),
+      )
+    )
+      return;
+    if (
+      focusRequest.interactionId ||
+      snapshot.items.some((step) => step.status === "failed")
+    )
+      setExpanded(true);
+  }, [focusRequest, snapshot.items]);
+  useEffect(() => {
+    if (!focusRequest || focusRequest.interactionId) return;
+    const failedRow = list.current?.querySelector<HTMLElement>(
+      '[data-plan-step-status="failed"]',
+    );
+    focusPlanElement(failedRow ?? trigger.current);
+  }, [focusRequest, expanded]);
+  const activeId = snapshot.items.find(
+    (item) => item.status === "needs_input" || item.status === "in_progress",
+  )?.id;
+  useEffect(() => {
+    if (!expanded || !list.current) return;
+    const row = [
+      ...list.current.querySelectorAll<HTMLElement>("[data-plan-step]"),
+    ].find((el) => el.dataset.planStep === activeId);
+    if (row)
+      list.current.scrollTop = Math.max(
+        0,
+        row.offsetTop - list.current.offsetTop - 32,
+      );
+  }, [activeId, expanded]);
+  const title = waiting
+    ? "Plan · Needs you"
+    : earlier
+      ? "Plan from an earlier task"
+      : finished
+        ? "Plan finished"
+        : snapshot.staleSince !== undefined
+          ? "Earlier plan"
+          : failed
+            ? "Plan · Failed"
+            : "Plan";
+  return (
+    <section
+      className={cn(
+        "min-w-0 overflow-hidden rounded-xl border bg-background shadow-lg",
+        quiet && "text-muted-foreground",
+        waiting && "border-warning",
+        !quiet && !waiting && failed && "border-destructive-text",
+      )}
+      data-plan-snapshot={snapshot.sourceSeq}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && isExpanded) {
+        if (event.key === "Escape" && expanded) {
           event.preventDefault();
           event.stopPropagation();
-          onToggle();
-          triggerRef.current?.focus();
+          setExpanded(false);
+          trigger.current?.focus();
         }
       }}
     >
       <button
+        ref={trigger}
         type="button"
-        id={toggleId}
-        aria-expanded={isExpanded}
-        aria-controls={isExpanded ? bodyId : undefined}
-        aria-label={`${title}: ${progressLabel} · ${metadata}${stale ? ` · ${staleLabel}` : ""}`}
-        ref={triggerRef}
-        onClick={onToggle}
-        className={cn(
-          TODO_HEADER_BUTTON_CLASS,
-          "h-8 py-0 focus-visible:outline-offset-[-2px]",
-          isExpanded && "border-b",
-          state === "waiting" && "!text-warning",
-          muted && "!text-muted-foreground",
-        )}
+        className="flex h-8 w-full items-center gap-2 px-3 text-left text-xs"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => setExpanded((value) => !value)}
       >
+        <span className="min-w-0 flex-1 truncate">
+          {title}
+          {quiet &&
+            ` · ${new Date(snapshot.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}
+        </span>
         <Icon
-          name={
-            state === "finished"
-              ? "Check"
-              : state === "waiting" || stale
-                ? "CircleAlert"
-                : "ListTodo"
-          }
-          className="size-3.5 shrink-0"
-          aria-hidden="true"
+          name={expanded ? "ChevronUp" : "ChevronDown"}
+          className="size-3"
+          aria-hidden
         />
-        <span
-          className="shrink-0"
-          title={`${metadata}${stale ? ` · ${staleLabel}` : ""}`}
-        >
-          {labels[state]}
-        </span>
-        {isExpanded && (
-          <span
-            className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-surface-recessed"
-            aria-hidden="true"
-          >
-            <span
-              className="block h-full bg-success"
-              style={{ width: `${(summary.count / items.length) * 100}%` }}
-            />
-          </span>
-        )}
-        <span className="shrink-0 tabular-nums">
-          {summary.count}/{items.length}
-        </span>
-        <span
-          className={
-            isExpanded
-              ? "ml-auto min-w-0 truncate text-2xs text-muted-foreground"
-              : "sr-only"
-          }
-          data-plan-age=""
-        >
-          <time dateTime={new Date(pendingTodos?.updatedAt ?? 0).toISOString()}>
-            {metadata}
-          </time>
-          {stale && <span className="sr-only">{staleLabel}</span>}
-        </span>
-        {isExpanded && (
-          <Icon
-            name="ChevronUp"
-            className="size-3 shrink-0"
-            aria-hidden="true"
-          />
-        )}
       </button>
-      {isExpanded && (
-        <div id={bodyId}>
-          <TodoBody
-            items={items}
-            failedLabel={t("plan.failed", locale)}
-            stale={stale}
-            regionLabel={ru ? "Шаги плана" : "Plan steps"}
-          />
+      {expanded && (
+        <div
+          ref={list}
+          id={bodyId}
+          role="region"
+          aria-label="Plan steps"
+          tabIndex={0}
+          className={cn(
+            "relative overflow-y-auto overscroll-contain",
+            waiting
+              ? "max-h-[min(var(--thread-plan-max-height,60dvh),32rem)]"
+              : "max-h-32",
+          )}
+        >
+          {snapshot.items.map((step) => (
+            <div key={step.id}>
+              <Step step={step} executing={executing && !quiet} />
+              {step.interactionIds.map((id) => {
+                const interaction = interactions.find((i) => i.id === id);
+                return interaction ? (
+                  <ThreadPlanQuestion
+                    key={id}
+                    interaction={interaction}
+                    threadId={props.threadId}
+                    placement={props.placement}
+                    focused={focused}
+                    focusRequest={focusRequest}
+                  />
+                ) : null;
+              })}
+            </div>
+          ))}
         </div>
       )}
-    </PromptStackCard>
+    </section>
   );
 }
