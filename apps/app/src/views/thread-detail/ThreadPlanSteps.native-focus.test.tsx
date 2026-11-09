@@ -18,6 +18,8 @@ import {
 } from "@/components/commands/AppCommandProvider";
 import { ThreadPendingInteractionBanners } from "@/components/thread/pending-interactions/ThreadPendingInteractionBanner";
 import { ThreadPlanSteps } from "./ThreadPlanSteps";
+import { ThreadPlanQuestion } from "@/components/promptbox/banner/ThreadTodoCard";
+import { createThreadPlanFocusRequest } from "./thread-plan-focus";
 
 const facts = vi.hoisted(() => ({
   stop: vi.fn(),
@@ -220,3 +222,167 @@ it.each([false, true])(
     expect(facts.composerFocus).toHaveBeenCalledOnce();
   },
 );
+
+function custodyHost(children: React.ReactNode) {
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <AppCommandProvider>
+          {children}
+          <ThreadPendingInteractionBanners
+            threadId="native"
+            interactions={[question]}
+          />
+          <ComposerCommand />
+        </AppCommandProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+it.each(
+  (
+    [
+      { hidden: true },
+      { "aria-hidden": true },
+      { style: { contentVisibility: "hidden" } },
+      { style: { visibility: "hidden" } },
+      { style: { display: "none" } },
+      { inert: true },
+    ] as const
+  ).flatMap((hidden) =>
+    ["plan", "native"].map((surface) => ({ hidden, surface })),
+  ),
+)(
+  "initially hidden $surface leaves a real native Answer available ($hidden)",
+  ({ hidden, surface }) => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 480,
+      height: 900,
+      top: 0,
+      left: 0,
+      bottom: 900,
+      right: 480,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const view = render(
+      custodyHost(
+        <div data-testid="hidden-editor" {...hidden}>
+          {surface === "plan" ? (
+            <ThreadPlanQuestion
+              interaction={question}
+              threadId="native"
+              placement="panel"
+              focused
+              focusRequest={createThreadPlanFocusRequest(question.id)}
+            />
+          ) : (
+            <ThreadPendingInteractionBanners
+              threadId="native"
+              interactions={[question]}
+            />
+          )}
+        </div>,
+      ),
+    );
+    expect(
+      view.container.querySelector('[data-testid="hidden-editor"] textarea'),
+    ).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: "Answer answer" }),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Submit answer" })).toBeDefined();
+  },
+);
+it("releases hidden requested custody, preserves real drafts through panels/native, and never replays focus on reveal", async () => {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 480,
+    height: 900,
+    top: 0,
+    left: 0,
+    bottom: 900,
+    right: 480,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  const request = createThreadPlanFocusRequest(question.id);
+  const panels = (a: boolean, b: boolean) => (
+    <>
+      {a && (
+        <div data-testid="panel-a">
+          <ThreadPlanQuestion
+            interaction={question}
+            threadId="native"
+            placement="panel"
+            focused
+            focusRequest={request}
+          />
+        </div>
+      )}
+      {b && (
+        <div data-testid="panel-b">
+          <ThreadPlanQuestion
+            interaction={question}
+            threadId="native"
+            placement="panel"
+            focused
+          />
+        </div>
+      )}
+    </>
+  );
+  const view = render(custodyHost(panels(true, true)));
+  const a = screen.getByTestId("panel-a"),
+    b = screen.getByTestId("panel-b");
+  const fieldA = within(a).getByRole("textbox");
+  fireEvent.change(fieldA, { target: { value: "Panel A draft" } });
+  await act(async () => {
+    a.setAttribute("aria-hidden", "true");
+    a.style.contentVisibility = "hidden";
+    a.style.visibility = "hidden";
+  });
+  expect(a.querySelector("textarea")).toBeNull();
+  const fieldB = within(b).getByRole("textbox");
+  expect((fieldB as HTMLTextAreaElement).value).toBe("Panel A draft");
+  fireEvent.change(fieldB, { target: { value: "Panel B draft" } });
+  await act(async () => {
+    b.hidden = true;
+  });
+  expect(b.querySelector("textarea")).toBeNull();
+  const native = screen.getByRole("textbox", { name: "Answer answer" });
+  expect((native as HTMLTextAreaElement).value).toBe("Panel B draft");
+  fireEvent.change(native, { target: { value: "Native handoff draft" } });
+  const composer = screen.getByRole("textbox", { name: "Composer" });
+  composer.focus();
+  await act(async () => {
+    b.hidden = false;
+  });
+  const retained = within(b).getByRole("textbox");
+  expect((retained as HTMLTextAreaElement).value).toBe("Native handoff draft");
+  expect(document.activeElement).toBe(composer);
+  await act(async () => {
+    a.removeAttribute("aria-hidden");
+    a.style.contentVisibility = "";
+    a.style.visibility = "";
+  });
+  expect(within(b).getByRole("textbox")).toBe(retained);
+  expect(a.querySelector("textarea")).toBeNull();
+  expect(document.activeElement).toBe(composer);
+  view.rerender(custodyHost(panels(true, false)));
+  expect((within(a).getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Native handoff draft",
+  );
+  expect(document.activeElement).toBe(composer);
+  view.rerender(custodyHost(panels(false, false)));
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Answer answer",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toBe("Native handoff draft");
+  expect(facts.stop).not.toHaveBeenCalled();
+  expect(facts.resolve).not.toHaveBeenCalled();
+});

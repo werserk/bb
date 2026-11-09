@@ -281,6 +281,7 @@ function QuestionTabs({
 }
 
 interface QuestionInputBlockProps {
+  autoFocus: boolean;
   density: QuestionFormHost["density"];
   showPrompt: boolean;
   disabled: boolean;
@@ -295,6 +296,7 @@ interface QuestionInputBlockProps {
 }
 
 function QuestionInputBlock({
+  autoFocus,
   density,
   showPrompt,
   disabled,
@@ -392,7 +394,7 @@ function QuestionInputBlock({
           aria-label={freeTextLabel}
           value={state.otherText}
           rows={1}
-          autoFocus={!isPointerCoarse}
+          autoFocus={autoFocus && !isPointerCoarse}
           autoComplete="off"
           onValueChange={onFreeTextChange}
           onVoiceInputActiveChange={onVoiceInputActiveChange}
@@ -634,6 +636,7 @@ export function QuestionForm({
         {(mode === "plan" ? questions : [currentQuestion]).map((question) => (
           <QuestionInputBlock
             key={question.id}
+            autoFocus={mode === "native"}
             density={density}
             showPrompt={
               mode === "plan" ||

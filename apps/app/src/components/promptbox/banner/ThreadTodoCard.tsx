@@ -14,6 +14,7 @@ import type { ThreadPlanStepsProps } from "@get-bb/plugin-sdk";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
 import { UserQuestionAnswerForm } from "@/components/thread/user-questions/UserQuestionInteractionContent";
 import { usePlanEditorOwner } from "@/components/thread/pending-interactions/plan-editor-ownership";
+import { usePlanSurfaceVisible } from "@/components/thread/pending-interactions/plan-surface-visibility";
 import { planDisclosureState } from "@/views/thread-detail/thread-plan-state";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
@@ -32,9 +33,24 @@ export function ThreadPlanQuestion({
 }) {
   const [skipped, setSkipped] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const requested = focusRequest?.interactionId === interaction.id;
+  const visible = usePlanSurfaceVisible(root);
+  const [activeRequest, setActiveRequest] = useState<ThreadPlanFocusRequest>();
+  const seenRequest = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (visible === null) return;
+    if (!visible) {
+      if (focusRequest?.interactionId === interaction.id)
+        focusRequest.consumeFocus();
+      seenRequest.current = focusRequest?.sequence;
+      setActiveRequest(undefined);
+    } else if (focusRequest && seenRequest.current !== focusRequest.sequence) {
+      seenRequest.current = focusRequest.sequence;
+      setActiveRequest(focusRequest);
+    }
+  }, [visible, focusRequest, interaction.id]);
+  const requested = activeRequest?.interactionId === interaction.id;
   const priority = requested
-    ? 40 + focusRequest.sequence
+    ? 40 + activeRequest.sequence
     : placement === "overlay"
       ? focused
         ? 30
@@ -43,13 +59,13 @@ export function ThreadPlanQuestion({
   const ownsEditor = usePlanEditorOwner(
     `${threadId}:${interaction.id}`,
     priority,
-    interaction.payload.kind === "user_question",
+    visible === true && interaction.payload.kind === "user_question",
   );
   useEffect(() => {
     if (requested) setSkipped(false);
-  }, [requested, focusRequest]);
+  }, [requested, activeRequest]);
   useEffect(() => {
-    if (!requested || skipped || !ownsEditor || !focusRequest.consumeFocus())
+    if (!requested || skipped || !ownsEditor || !activeRequest.consumeFocus())
       return;
     const fields = root.current?.querySelectorAll<HTMLElement>(
       'textarea,input,select,[role="radio"],[role="checkbox"]',
@@ -65,7 +81,7 @@ export function ThreadPlanQuestion({
         ) ??
         null,
     );
-  }, [focusRequest, requested, skipped, ownsEditor]);
+  }, [activeRequest, requested, skipped, ownsEditor]);
   if (interaction.payload.kind !== "user_question") return null;
   return (
     <div

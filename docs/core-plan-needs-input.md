@@ -15,6 +15,7 @@ Owner-approved core apply unit, based on `7f3b96b7b65e3c39da16f8f9a3cee6c656a370
 | Mounted plan focus                         | thread-plan-focus registry → useThreadPlanFocus; native/SDK focus props and experimental_focusThreadPlan                          |
 | Available form height                      | thread-plan-layout observes external pane/scrollport height and real container width, with viewport fallback                      |
 | Native question custody                    | plan-editor-ownership; UserQuestionInteractionContent; QuestionForm and existing question-form-draft; native interaction mutation |
+| Visible editor eligibility                 | plan-surface-visibility checks mounted ancestors for both plan and native editor claims; shared by the focus controller           |
 | API discovery                              | API audit, Plugin Guide surfaces, CLI thread-inspection guide and command index                                                   |
 
 The old relative-age timer and progress counters were removed from ThreadTodoCard. Its stories and focused tests use the canonical snapshot renderer. Core and plugin consumers use the same renderer and resolver. Context-clear, explicit empty-clear, archive/environment guards and service-turn failure suppression retain their existing meaning.
@@ -40,6 +41,8 @@ Escape flushes the disclosure collapse and native editor custody handoff before 
 Form height comes from the external owning chat pane or scrollport, never the plan's content height. Panel/embedded roots retain their own width measurement for the 640px cutoff. ResizeObserver tracks the width source and external height owner; viewport resize also updates the bounded fallback when no observer or pane exists. Long question bodies retain bounded scrolling. Installed panel geometry and Escape acceptance remain parent gates.
 
 ## React Compiler store boundary
+
+Editor custody requires a mounted visible surface. The shared eligibility hook observes only the editor root and its ancestor chain for visibility attributes, classes/styles, reparenting and closed details, plus viewport resize; it never scans the document or polls. Hidden/maximized surfaces release claims and native fallbacks use the same eligibility rule. Visibility is independent of the editor body's height so an empty native wrapper can become eligible before its form mounts. Hiding drops an old requested priority and consumes its focus intent; showing can reacquire normal custody without replay. Plan form mounts do not autofocus: explicit focus requests use the shared controller, while the native form keeps its existing autofocus policy. Real form/command tests preserve drafts across requested panel → visible panel → native fallback and back, including initial hidden mount and unmount cleanup. These source/compiled tests do not establish installed visibility acceptance.
 
 The plan cache publishes immutable snapshots containing plan data, errors, loaded IDs and active subscription membership. `useThreadPlans` derives every returned data/coverage field from the snapshot returned by `useSyncExternalStore`; no mutable cache or membership read participates in rendering. Discarding that hook result allowed React Compiler to reuse the initial loading result even after successful responses and store notifications.
 

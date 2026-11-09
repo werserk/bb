@@ -1,5 +1,6 @@
 import { usePlanEditorOwner } from "../pending-interactions/plan-editor-ownership";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { usePlanSurfaceVisible } from "../pending-interactions/plan-surface-visibility";
 import type { PendingInteractionUserQuestionQuestion } from "@bb/domain";
 import { QuestionForm } from "@bb/shared-ui/question-form";
 import { useResolveThreadPendingInteraction } from "@/hooks/mutations/thread-interaction-mutations";
@@ -33,10 +34,12 @@ export function UserQuestionAnswerForm({
   const resolvePendingInteraction =
     useResolveThreadPendingInteraction(threadId);
   const stopThread = useStopThread();
+  const root = useRef<HTMLDivElement>(null);
+  const visible = usePlanSurfaceVisible(root, !plan);
   const ownsEditor = usePlanEditorOwner(
     `${threadId}:${interactionId}`,
     0,
-    !plan,
+    !plan && visible === true,
   );
   const disabled = resolvePendingInteraction.isPending || isResolving;
   const error = resolvePendingInteraction.error
@@ -46,9 +49,9 @@ export function UserQuestionAnswerForm({
         lifecycleOperation: "resolve_interaction",
       })
     : null;
-  if (!plan && !ownsEditor) return null;
+  if (!plan && !ownsEditor) return <div ref={root} />;
   return (
-    <div>
+    <div ref={root}>
       <QuestionForm
         mode={plan ? "plan" : "native"}
         key={interactionId}

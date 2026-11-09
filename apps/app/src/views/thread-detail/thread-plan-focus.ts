@@ -1,4 +1,5 @@
 import type { FocusThreadPlanArgs } from "@get-bb/plugin-sdk";
+import { isPlanSurfaceVisible } from "@/components/thread/pending-interactions/plan-surface-visibility";
 export interface ThreadPlanFocusRequest {
   sequence: number;
   interactionId?: string;
@@ -45,28 +46,7 @@ export function focusThreadPlan(args: FocusThreadPlanArgs): boolean {
   return matching.some((target) => target.request(args));
 }
 export function isThreadPlanVisible(root: HTMLElement | null): boolean {
-  if (!root?.isConnected) return false;
-  for (
-    let element: HTMLElement | null = root;
-    element;
-    element = element.parentElement
-  ) {
-    if (
-      element.hidden ||
-      element.inert ||
-      element.getAttribute("aria-hidden") === "true"
-    )
-      return false;
-    const style = getComputedStyle(element);
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      style.visibility === "collapse" ||
-      style.opacity === "0" ||
-      style.contentVisibility === "hidden"
-    )
-      return false;
-  }
+  if (!root || !isPlanSurfaceVisible(root)) return false;
   const rect = root.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 }
