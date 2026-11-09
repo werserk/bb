@@ -6,11 +6,8 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import { useProviderCliInstallRunner } from "@/components/provider-cli/provider-cli-install";
 import { providerCliJobKey } from "@/components/provider-cli/provider-cli-install-store";
 import { SidebarMenuItem } from "@/components/ui/sidebar.js";
-import { useSystemProviders } from "@/hooks/queries/system-queries";
 import { useUpdateInventory } from "@/hooks/useUpdateInventory";
 import { useMachineAttention } from "@/hooks/useMachineAttention";
-import { ProviderIconMark } from "@/components/settings/ProviderIconMark";
-import { getProviderIconInfo } from "@/lib/provider-icon";
 import { getSettingsRoutePath } from "@/lib/route-paths";
 
 interface SidebarUpdatesBadgeProps {
@@ -18,8 +15,8 @@ interface SidebarUpdatesBadgeProps {
 }
 
 const CHIP_CLASS = cn(
-  "flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-sidebar-border px-2",
-  "text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
+  "flex size-(--bb-sidebar-row-height) shrink-0 items-center justify-center rounded-full border border-sidebar-border/60 max-md:pointer-coarse:size-(--bb-sidebar-row-height-coarse)",
+  "text-sm font-normal text-muted-foreground transition-colors hover:bg-sidebar-accent",
 );
 
 function joinNames(names: string[]): string {
@@ -36,7 +33,6 @@ interface StaleProvider {
 
 export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
   const inventory = useUpdateInventory();
-  const providers = useSystemProviders().data;
   const { runningJobKey } = useProviderCliInstallRunner();
 
   const machineAttention = useMachineAttention(
@@ -94,7 +90,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
       : `${pluginUpdateCount} plugin updates available`;
 
   return (
-    <SidebarMenuItem className="flex min-w-0 items-center gap-1">
+    <SidebarMenuItem className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
       {machineAttention.label !== null ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -124,7 +120,6 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
               data-testid="sidebar-updates-badge-bb"
               className={CHIP_CLASS}
             >
-              <Icon name="Download" className="size-3 text-muted-foreground" />
               bb
             </Link>
           </TooltipTrigger>
@@ -139,7 +134,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
               onClick={onNavigate}
               aria-label={providerLabel}
               data-testid="sidebar-updates-badge-providers"
-              className={cn(CHIP_CLASS, "min-w-0 shrink")}
+              className={CHIP_CLASS}
             >
               <Icon
                 name={providerUpdateRunning ? "Loading" : "Download"}
@@ -148,40 +143,6 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
                   providerUpdateRunning && "animate-spin",
                 )}
               />
-              <span className="flex min-w-0 items-center gap-1 overflow-hidden">
-                {staleProviders.map((stale) => {
-                  const providerId = stale.provider;
-                  const provider = providers?.find(
-                    (candidate) => candidate.id === providerId,
-                  );
-                  const iconInfo = getProviderIconInfo(
-                    "agent",
-                    providerId,
-                    provider ?? null,
-                  );
-                  if (iconInfo === undefined) {
-                    return null;
-                  }
-                  return (
-                    <span
-                      key={stale.provider}
-                      data-provider-icon={providerId}
-                      aria-hidden
-                      className="flex size-3 shrink-0 items-center justify-center"
-                    >
-                      {provider === undefined ? (
-                        <iconInfo.icon className="size-3" />
-                      ) : (
-                        <ProviderIconMark
-                          provider={provider}
-                          icon={iconInfo.icon}
-                          className="size-3"
-                        />
-                      )}
-                    </span>
-                  );
-                })}
-              </span>
             </Link>
           </TooltipTrigger>
           <TooltipContent side="top">{providerLabel}</TooltipContent>
@@ -198,7 +159,7 @@ export function SidebarUpdatesBadge({ onNavigate }: SidebarUpdatesBadgeProps) {
               className={CHIP_CLASS}
             >
               <Icon name="Plug02" className="size-3 text-muted-foreground" />
-              {pluginUpdateCount}
+              <span className="sr-only">{pluginUpdateCount}</span>
             </Link>
           </TooltipTrigger>
           <TooltipContent side="top">{pluginLabel}</TooltipContent>
