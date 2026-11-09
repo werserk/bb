@@ -374,3 +374,27 @@ describe("plan staleness from normalized turn events", () => {
     }
   });
 });
+
+it("preserves stable step identity across reordered snapshots", () => {
+  const result = extractThreadTimelinePendingTodos(ACTIVE, [
+    planStepsEvent({
+      seq: 2,
+      steps: [
+        {
+          id: "verify",
+          step: "Verify",
+          status: "failed",
+          note: "refused",
+          actor: "reviewer",
+        },
+      ],
+    }),
+  ]);
+  expect(result?.items[0]).toEqual({
+    id: "verify",
+    text: "Verify",
+    status: "failed",
+    note: "refused",
+    actor: "reviewer",
+  });
+});

@@ -1,3 +1,5 @@
+import { ThreadPlanSteps } from "@/views/thread-detail/ThreadPlanSteps";
+import { useThreadPlans } from "@/hooks/queries/thread-plans";
 import { applicationLinkApprovals } from "./application-url";
 import {
   LazyPluginMarkdown,
@@ -200,6 +202,8 @@ export const pluginSdkAppImplementation = {
   experimental_useRpcMutation,
   experimental_useRpcRefresh,
   useSettings,
+  experimental_useThreadPlans: useThreadPlans,
+  experimental_ThreadPlanSteps: ThreadPlanSteps,
   ThreadChat: LazyPluginThreadChat,
   Markdown: LazyPluginMarkdown,
   experimental_FileLink: ExperimentalFileLink,

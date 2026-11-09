@@ -99,3 +99,5 @@ export type {
   CollapseBackgroundTurnsOptions,
   TimelineBackgroundTurnsRow,
 } from "./background-turns.js";
+
+export * from "./thread-plan.js";

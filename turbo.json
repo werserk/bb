@@ -55,6 +55,10 @@
     // file, or none at all.
     // The docs' UI-anatomy manifest is the contract this test checks the real
     // app components against, so a manifest edit must re-run it.
+    "@bb/app#test:focused": {
+      "dependsOn": ["//#ensure-native-modules", "topo"],
+      "outputs": []
+    },
     "@bb/app#test": {
       "env": ["BB_CI_TEST_SHARD", "VITEST_MAX_WORKERS"],
       "dependsOn": ["//#ensure-native-modules", "topo"],

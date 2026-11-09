@@ -410,6 +410,7 @@ function QuestionInputBlock({
 }
 
 export interface QuestionFormProps {
+  mode?: "native" | "plan";
   draftKey?: string;
   questions: readonly Question[];
   disabled: boolean;
@@ -419,6 +420,7 @@ export interface QuestionFormProps {
 }
 
 export function QuestionForm({
+  mode = "native",
   draftKey,
   questions,
   disabled: inputDisabled,
@@ -434,6 +436,7 @@ export function QuestionForm({
   const disabled = inputDisabled || settledAction !== null;
   const [voiceBusy, setVoiceBusy] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
+  const submitting = useRef(false);
   const {
     density,
     promptShownAbove,
@@ -500,17 +503,21 @@ export function QuestionForm({
   };
 
   const submitAnswer = async (): Promise<void> => {
-    if (disabled || voiceBusy || !canSubmit) return;
+    if (disabled || voiceBusy || !canSubmit || submitting.current) return;
+    submitting.current = true;
     try {
       await onSubmit(buildQuestionAnswers(questions, formState));
       setSettledAction("submit");
       clearDraft();
-    } catch {}
+    } catch {
+    } finally {
+      submitting.current = false;
+    }
   };
 
   const handleAdvance = (): void => {
     if (navigationDisabled) return;
-    if (isLast) {
+    if (isLast || mode === "plan") {
       void submitAnswer();
       return;
     }
@@ -522,6 +529,10 @@ export function QuestionForm({
   };
 
   const handleCancel = async (): Promise<void> => {
+    if (mode === "plan") {
+      await onCancel();
+      return;
+    }
     if (closeInline) {
       closeInline();
       return;
@@ -585,7 +596,6 @@ export function QuestionForm({
 
   if (!currentQuestion) return null;
 
-  const currentState = answerStateFor(formState, currentQuestion);
   const compactButtonClass = density === "compact" ? "font-normal" : undefined;
 
   return (
@@ -611,7 +621,7 @@ export function QuestionForm({
       }}
       className="-m-1 flex min-h-0 flex-col rounded-md p-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      {totalQuestions > 1 ? (
+      {totalQuestions > 1 && mode !== "plan" ? (
         <QuestionTabs
           disabled={navigationDisabled}
           currentIndex={currentIndex}
@@ -621,28 +631,27 @@ export function QuestionForm({
         />
       ) : null}
       <div>
-        <QuestionInputBlock
-          key={currentQuestion.id}
-          density={density}
-          showPrompt={
-            density !== "compact" ||
-            totalQuestions > 1 ||
-            currentQuestion.prompt !== promptShownAbove
-          }
-          disabled={disabled}
-          question={currentQuestion}
-          state={currentState}
-          onToggleOption={(optionValue) =>
-            handleToggleOption(currentQuestion, optionValue)
-          }
-          onSelectOther={() => handleSelectOther(currentQuestion)}
-          onFreeTextChange={(value) =>
-            handleFreeTextChange(currentQuestion, value)
-          }
-          onVoiceInputActiveChange={setVoiceBusy}
-          onFreeTextSubmit={() => runAction("submit")}
-          shortcuts={shortcuts}
-        />
+        {(mode === "plan" ? questions : [currentQuestion]).map((question) => (
+          <QuestionInputBlock
+            key={question.id}
+            density={density}
+            showPrompt={
+              mode === "plan" ||
+              density !== "compact" ||
+              totalQuestions > 1 ||
+              question.prompt !== promptShownAbove
+            }
+            disabled={disabled}
+            question={question}
+            state={answerStateFor(formState, question)}
+            onToggleOption={(value) => handleToggleOption(question, value)}
+            onSelectOther={() => handleSelectOther(question)}
+            onFreeTextChange={(value) => handleFreeTextChange(question, value)}
+            onVoiceInputActiveChange={setVoiceBusy}
+            onFreeTextSubmit={() => runAction("submit")}
+            shortcuts={shortcuts}
+          />
+        ))}
       </div>
       <div
         className={cn(
@@ -659,10 +668,10 @@ export function QuestionForm({
           disabled={cancelBlocked}
           onClick={handleCancel}
         >
-          Cancel
+          {mode === "plan" ? "Skip" : "Cancel"}
         </Button>
         <div className="flex items-center gap-2">
-          {!isFirst ? (
+          {!isFirst && mode !== "plan" ? (
             <Button
               type="button"
               size="sm"
@@ -682,17 +691,21 @@ export function QuestionForm({
             size="sm"
             className={compactButtonClass}
             aria-keyshortcuts={actionShortcuts.get("submit")?.ariaKeyshortcuts}
-            disabled={navigationDisabled || (isLast && !canSubmit)}
+            disabled={
+              navigationDisabled || ((isLast || mode === "plan") && !canSubmit)
+            }
             onClick={handleAdvance}
           >
             {inputDisabled || settledAction === "submit" ? (
               <Icon name="Spinner" className="size-3 animate-spin" />
             ) : null}
-            {isLast
-              ? density === "compact"
-                ? "Submit"
-                : "Submit answer"
-              : "Next"}
+            {mode === "plan"
+              ? "Answer"
+              : isLast
+                ? density === "compact"
+                  ? "Submit"
+                  : "Submit answer"
+                : "Next"}
           </Button>
         </div>
       </div>

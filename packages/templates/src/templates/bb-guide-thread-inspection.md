@@ -163,3 +163,7 @@ The SDK uses `threads.tabs.get({ threadId })` and
 `threads.tabs.update({ threadId, expectedRevision, tabs })` for the same state.
 Selection stays local to each client. Plugin authors can find registration and
 navigation details in the Plugin Guide's Thread side-panel tabs surface.
+
+### Canonical plan
+
+`bb thread plan <id> --json` (or `--self`) reads the same plan projection as native chat and the Plugin SDK: revision, current plan/step IDs, at most three distinct previous identified plans, truncation, own attention and native interaction IDs. History reads the latest 32 plan events within context and empty-clear boundaries. Unbound questions remain native input. Resolve them with the existing `bb thread interaction` commands. Plan updates use `bb_update_plan`: statuses pending/in_progress/completed/failed, optional planId and unique step id (1–128 trimmed single-line characters), note and actor. Needs input is derived from native interactions.

@@ -922,3 +922,37 @@ describe("question tabs on a narrow card", () => {
     expect(fades(slot)).toEqual({ left: false, right: false });
   });
 });
+
+it("plan mode shows every native question, retains skipped drafts and validates one Answer", () => {
+  const onCancel = vi.fn();
+  const questions = [
+    singleSelect.questions[0]!,
+    { ...singleSelect.questions[0]!, id: "second", prompt: "Second question" },
+  ];
+  const view = renderReact(
+    <AppCommandProvider>
+      <ThreadQuestionFormHost
+        density="default"
+        promptShownAbove={null}
+        closeInline={null}
+      >
+        <QuestionForm
+          draftKey="plan-handoff"
+          questions={questions}
+          disabled={false}
+          cancelDisabled={false}
+          onSubmit={vi.fn()}
+          onCancel={onCancel}
+          mode="plan"
+        />
+      </ThreadQuestionFormHost>
+    </AppCommandProvider>,
+  );
+  expect(view.getAllByText("Second question").length).toBeGreaterThan(0);
+  expect(
+    view.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(view.getByRole("button", { name: "Skip" }));
+  expect(onCancel).toHaveBeenCalledOnce();
+  expect(view.queryByRole("button", { name: "Next" })).toBeNull();
+});

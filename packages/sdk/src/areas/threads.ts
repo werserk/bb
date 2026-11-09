@@ -1,3 +1,4 @@
+import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
   type PromptInput,
   type PendingInteraction,
@@ -609,6 +610,10 @@ export interface ThreadQueueArea {
 }
 
 export interface ThreadsArea {
+  plans(args: {
+    threadIds: readonly string[];
+    signal?: AbortSignal;
+  }): Promise<ThreadPlansReadResponse>;
   archive(args: ThreadActionArgs): Promise<ThreadArchiveResult>;
   archiveAll(args: ThreadActionArgs): Promise<ThreadArchiveAllResult>;
   childSummary(args: ThreadStatusArgs): Promise<ThreadChildSummaryResult>;
@@ -1271,6 +1276,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
   };
   return {
+    async plans(input) {
+      return transport.readJson(
+        transport.api.v1.threads.plans.$post(
+          { json: { threadIds: [...input.threadIds] } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
     archive: archiveAll,
     archiveAll,
     async childSummary(input) {

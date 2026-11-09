@@ -4697,3 +4697,18 @@ export function getLatestTurnRequestEventRow(
     .limit(1)
     .get();
 }
+
+export function listPlanHistoryEventRows(db: DbConnection, args: {threadId: string; boundary: number; atOrBeforeSequence?: number; limit: number}): StoredEventRow[] {
+  return db.select(storedEventRowFields).from(events).where(and(
+    eq(events.threadId, args.threadId), gte(events.sequence, args.boundary),
+    args.atOrBeforeSequence === undefined ? undefined : lte(events.sequence, args.atOrBeforeSequence),
+    sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
+  )).orderBy(desc(events.sequence)).limit(args.limit).all();
+}
+
+export function getPlanInteractionCreationRow(db: DbConnection, threadId: string, interactionId: string): StoredEventRow | null {
+  return db.select(storedEventRowFields).from(events).where(and(
+    eq(events.threadId, threadId), eq(events.type, "system/interaction/lifecycle"),
+    sql`json_extract(${events.data}, '$.interaction.id') = ${interactionId}`,
+  )).orderBy(events.sequence).limit(1).get() ?? null;
+}

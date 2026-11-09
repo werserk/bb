@@ -336,3 +336,5 @@ Use `--selected-model <model-id>` to discover its reasoning choices and include 
 - `bb browser watch`
 - `bb browser import-sources`
 - `bb browser import-cookies`
+
+- `bb thread plan [id] --self --json`: canonical plan/history/native interaction IDs; see `bb guide thread-inspection`.

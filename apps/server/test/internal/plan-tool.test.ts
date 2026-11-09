@@ -52,6 +52,7 @@ describe("bb_update_plan", () => {
               tool: "bb_update_plan",
               arguments: {
                 explanation: "Working",
+                planId: "work",
                 plan: [
                   { step: "Inspect", status: "completed" },
                   {
@@ -60,7 +61,7 @@ describe("bb_update_plan", () => {
                     note: "  читает изменения  ",
                     actor: "  ревьюер  ",
                   },
-                  { step: "Check", status: "pending" },
+                  { id: "check", step: "Check", status: "failed" },
                 ],
               },
             }),
@@ -98,7 +99,7 @@ describe("bb_update_plan", () => {
             note: "читает изменения",
             actor: "ревьюер",
           },
-          { text: "Check", status: "pending" },
+          { id: "check", text: "Check", status: "failed" },
         ]);
         const rows = harness.db
           .select()
@@ -111,6 +112,7 @@ describe("bb_update_plan", () => {
           item: {
             type: "planSteps",
             id: "plan:turn-plan:plan-1",
+            planId: "work",
             presentation: { suppress: true },
             explanation: "Working",
             steps: [
@@ -121,7 +123,7 @@ describe("bb_update_plan", () => {
                 note: "читает изменения",
                 actor: "ревьюер",
               },
-              { step: "Check", status: "pending" },
+              { id: "check", step: "Check", status: "failed" },
             ],
           },
         });
@@ -130,7 +132,21 @@ describe("bb_update_plan", () => {
   );
 
   it.each([
+    { input: { planId: "", plan: [] }, turnId: "turn-plan", crossHost: false },
+    {
+      input: {
+        plan: [
+          { id: "same", step: "A", status: "pending" },
+          { id: "same", step: "B", status: "pending" },
+        ],
+      },
+      turnId: "turn-plan",
+      crossHost: false,
+    },
     ...[
+      { id: "" },
+      { id: "x".repeat(129) },
+      { id: "line\nbreak" },
       { note: "line\nbreak" },
       { actor: "line\rbreak" },
       { note: "x".repeat(1001) },

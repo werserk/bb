@@ -1,3 +1,4 @@
+import { useHasPlanEditor } from "./plan-editor-ownership";
 import { PendingInteractionShell } from "./PendingInteractionShell";
 import { useMemo, useState, type ReactNode } from "react";
 import {
@@ -120,6 +121,9 @@ function PendingInteractionBanner({
   threadId,
   collapsedByDefault,
 }: PendingInteractionBannerProps) {
+  const hasPlanEditor = useHasPlanEditor(`${threadId}:${interaction.id}`);
+  if (interaction.payload.kind === "user_question" && hasPlanEditor)
+    return null;
   const request = classifyInteractionRequest(interaction);
   if (request.family === "approval") {
     return (

@@ -1,3 +1,5 @@
+import { readThreadPlan } from "../../services/threads/thread-plans.js";
+import type { ThreadPlansReadResponse } from "@bb/domain";
 import { PLUGIN_INTERACTION_MAX_PAYLOAD_BYTES } from "@bb/domain";
 import {
   publicApiRoutes,
@@ -35,6 +37,22 @@ export function registerThreadInteractionRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
+
+  post(routes.plans, (context, payload) => {
+    const result: ThreadPlansReadResponse = { plans: {}, errors: {} };
+    for (const id of new Set(payload.threadIds)) {
+      try {
+        result.plans[id] = readThreadPlan(
+          deps,
+          requirePublicThread(deps.db, id),
+        );
+      } catch (error) {
+        result.errors[id] =
+          error instanceof Error ? error.message : "Plan unavailable";
+      }
+    }
+    return context.json(result);
+  });
 
   get(routes.interactions, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));

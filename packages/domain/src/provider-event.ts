@@ -135,7 +135,15 @@ const threadEventPlanStepStatusSchema = z.enum([
   "failed",
 ]);
 
+export const planIdentifierSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(/^[^\r\n\u2028\u2029]*$/u);
+
 export const threadEventPlanStepSchema = z.object({
+  id: planIdentifierSchema.optional(),
   step: z.string(),
   status: threadEventPlanStepStatusSchema.optional(),
   note: z
@@ -240,6 +248,7 @@ export type ThreadEventDelegationItem = z.infer<
 export const threadEventPlanStepsItemSchema = z.object({
   type: z.literal("planSteps"),
   id: z.string(),
+  planId: planIdentifierSchema.optional(),
   steps: z.array(threadEventPlanStepSchema),
   explanation: z.string().optional(),
   status: threadEventItemStatusSchema,

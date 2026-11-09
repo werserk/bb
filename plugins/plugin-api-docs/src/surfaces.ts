@@ -46,6 +46,33 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
       "The main bb window, containing the sidebar, the conversation, and the side panel. A plugin can add rows, controls, panel tabs, and message content to the numbered regions.",
     surfaces: [
       {
+        id: "thread-plan-steps",
+        title: "Thread plans and native input",
+        experimental: true,
+        summary:
+          "Read complete batched plan facts and render the same native steps and question controls as chat.",
+        bullets: [
+          "Use experimental_useThreadPlans for all descendant IDs, including collapsed cards; wait for ready coverage before totals or Next",
+          "Core limits batches to 40 IDs and two flights, rejects stale revisions and refreshes on native events",
+          "experimental_ThreadPlanSteps shares question drafts and editor ownership with native chat; Skip only folds locally",
+          "Read current and up to three previous identified plans within a bounded 32-event history; failures and native IDs are preserved",
+          "Check both optional capabilities together; keep native Open/input recovery on older runtimes",
+        ],
+        apiSymbols: [
+          "experimental_useThreadPlans",
+          "experimental_ThreadPlanSteps",
+          "ThreadPlansResult",
+          "ThreadPlanStepsProps",
+          "ThreadPlanView",
+        ],
+        firstParty: [
+          "ThreadPlanCard",
+          "ThreadPlanSteps",
+          "bb thread plan",
+          "sdk.threads.plans",
+        ],
+      },
+      {
         id: "sidebar-navigation",
         title: "Sidebar navigation",
         summary:

@@ -4336,3 +4336,11 @@ consumers must handle the additive members. Docs: `provider-bridge-protocol.md`
 and `system-overview.md` (Deferred owner steers). Audit requires upstream recovery
 semantics, queue-reader compatibility, preservation of owner authority and the
 core upgrade/rollback rehearsal before treating this downstream contract as stable.
+
+## Thread plans and native question steps
+
+`experimental_useThreadPlans({threadIds})` and `experimental_ThreadPlanSteps` are optional app capabilities. Detect both before enabling the plan surface. The batch result distinguishes loading/ready/error/unavailable, complete requested/loaded coverage, errors and explicit refresh. It retains stale display facts but ready requires every requested member. The shared cache rejects older revisions, bounds reads to 40 IDs/two requests and invalidates on native thread changes, without per-thread timers. `ThreadPlanView` exposes current, up to three previous explicit identities, historyTruncated, ownAttention and native interaction IDs. History is bounded to the latest 32 plan events within context/empty clear boundaries; question anchors use separate targeted creation/nearest-plan reads.
+
+Core callers: ThreadScreen → ThreadPlanCard → ThreadPlanSteps → useThreadPlans; public SDK `threads.plans` and `bb thread plan` use the same server `readThreadPlan` projection. Questions use UserQuestionAnswerForm, the native draft key and resolveThreadPendingInteractionMutationOptions. One presentation owner per interaction is selected across foreground overlay/panel/native fallback. Unsupported inputs retain native controls. Skip preserves the pending interaction and its draft; Stop remains native chat control. Failure and needs_input come from authoritative own facts, with no historical/descendant failure roll-up.
+
+Stabilization requires independent review, native/plugin custody and focus handoff, complete/error/event batch tests, off-page context/empty-clear and old/new event readback, installed-runtime capability/upgrade verification, then project-wide experimental rename/removal of this entry. Isolated runtime verification belongs to the parent apply direction.

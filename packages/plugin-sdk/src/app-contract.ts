@@ -5948,6 +5948,10 @@ export interface PluginSdkApp {
    * with `Markdown`, the only components the SDK ships — everything else
    * stays vendored per §5.5.
    */
+  experimental_useThreadPlans?: (args: {
+    threadIds: readonly string[];
+  }) => ThreadPlansResult;
+  experimental_ThreadPlanSteps?: ComponentType<ThreadPlanStepsProps>;
   ThreadChat: ComponentType<ThreadChatProps>;
   /**
    * The host-owned chat-message markdown renderer (see
@@ -6138,4 +6142,26 @@ export interface PluginSdkApp {
   experimental_ThreadTitleText: ComponentType<ExperimentalThreadTitleTextProps>;
   /** @internal Superseded by `useComposer()`; kept for plugins built against older SDKs. */
   useComposerView(): ComposerView;
+}
+
+export type {
+  PlanStepStatus,
+  PlanOwnAttention,
+  PlanStepView,
+  PlanSnapshotView,
+  ThreadPlanView,
+} from "@bb/domain";
+export interface ThreadPlansResult {
+  status: "loading" | "ready" | "error" | "unavailable";
+  requestedThreadIds: readonly string[];
+  loadedThreadIds: readonly string[];
+  plans: Readonly<Record<string, import("@bb/domain").ThreadPlanView>>;
+  errors: Readonly<Record<string, string>>;
+  refresh(threadIds?: readonly string[]): Promise<void>;
+}
+export interface ThreadPlanStepsProps {
+  threadId: string;
+  placement: "overlay" | "panel";
+  focusInteractionId?: string;
+  onOpenThread?: () => void;
 }

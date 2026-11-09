@@ -20,6 +20,7 @@ function trimAndTruncate(value: string): string {
 }
 
 interface SnapshotCandidate {
+  planId?: string;
   seq: number;
   createdAt: number;
   turnId: string | null;
@@ -59,7 +60,7 @@ function extractPlanStepsCandidate(
     const text = trimAndTruncate(step.step);
     if (text.length === 0) continue;
     items.push({
-      id: todoIdFor(meta.seq, index),
+      id: step.id ?? todoIdFor(meta.seq, index),
       text,
       ...(step.note === undefined ? {} : { note: step.note }),
       ...(step.actor === undefined ? {} : { actor: step.actor }),
@@ -67,6 +68,7 @@ function extractPlanStepsCandidate(
     });
   }
   return {
+    ...(event.item.planId ? { planId: event.item.planId } : {}),
     seq: meta.seq,
     createdAt: meta.createdAt,
     turnId: getThreadEventScopeTurnId(event.scope) ?? null,
@@ -120,6 +122,7 @@ export function extractThreadTimelinePendingTodos(
   if (best === null) return null;
   const staleAt = staleSince(best, turnEvents);
   return {
+    ...(best.planId ? { planId: best.planId } : {}),
     sourceSeq: best.seq,
     updatedAt: best.createdAt,
     ...(staleAt === undefined ? {} : { staleSince: staleAt }),

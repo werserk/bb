@@ -5,6 +5,7 @@ import {
 } from "@bb/db";
 import {
   turnScope,
+  planIdentifierSchema,
   threadEventPlanStepSchema,
   type DynamicTool,
   type ToolCallResponse,
@@ -15,18 +16,26 @@ import { appendThreadEventInTransaction } from "./thread-events.js";
 
 const planInputSchema = z
   .object({
+    planId: planIdentifierSchema.optional(),
     plan: z
       .array(
         z
           .object({
+            id: planIdentifierSchema.optional(),
             step: z.string().trim().min(1).max(1000),
-            status: z.enum(["pending", "in_progress", "completed"]),
+            status: z.enum(["pending", "in_progress", "completed", "failed"]),
             note: threadEventPlanStepSchema.shape.note,
             actor: threadEventPlanStepSchema.shape.actor,
           })
           .strict(),
       )
-      .max(100),
+      .max(100)
+      .refine(
+        (steps) =>
+          new Set(steps.flatMap((step) => (step.id ? [step.id] : []))).size ===
+          steps.filter((step) => step.id).length,
+        "Duplicate step IDs",
+      ),
     explanation: z.string().max(4000).optional(),
   })
   .strict();
@@ -43,7 +52,7 @@ delete inputSchema.$schema;
 export const BB_UPDATE_PLAN_TOOL: DynamicTool = {
   name: "bb_update_plan",
   description:
-    "Replace this thread's visible progress plan. Send the full list of steps with pending, in_progress or completed status. Optional note describes the current action and actor tags the helper, both single-line. The plan stays visible after the turn until replaced; an empty plan clears the list. Use this tool unless a native plan/todo tool is available.",
+    "Replace this thread's visible progress plan. Send the full list of steps with pending, in_progress, completed or failed status. Optional planId and step id preserve identity across updates (1-128 trimmed single-line characters; unique step IDs). Optional note describes the current action and actor tags the helper, both single-line. The plan stays visible after the turn until replaced; an empty plan clears the list. Use this tool unless a native plan/todo tool is available.",
   inputSchema,
   presentation,
 };
@@ -89,6 +98,7 @@ export function handleUpdatePlanToolCall(
           providerThreadId: args.providerThreadId,
           item: {
             type: "planSteps",
+            ...(parsed.data.planId ? { planId: parsed.data.planId } : {}),
             id: `plan:${args.turnId}:${args.callId}`,
             status: "completed",
             presentation,

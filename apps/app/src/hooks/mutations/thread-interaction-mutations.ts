@@ -16,6 +16,8 @@ import {
   invalidateThreadPendingInteractionResolutionQueries,
 } from "../cache-owners/mutation-cache-effects";
 
+const activeResolutions = new Set<string>();
+
 interface ResolveThreadPendingInteractionMutationRequest {
   threadId: string;
   interactionId: string;
@@ -51,12 +53,15 @@ export function resolveThreadPendingInteractionMutationOptions(
       threadId,
       interactionId,
       resolution,
-    }: ResolveThreadPendingInteractionMutationRequest): Promise<PendingInteraction> =>
-      sdk.threads.interactions.resolve({
-        interactionId,
-        resolution,
-        threadId,
-      }),
+    }: ResolveThreadPendingInteractionMutationRequest): Promise<PendingInteraction> => {
+      const key = `${threadId}:${interactionId}`;
+      if (activeResolutions.has(key))
+        return Promise.reject(new Error("Answer already submitting"));
+      activeResolutions.add(key);
+      return sdk.threads.interactions
+        .resolve({ interactionId, resolution, threadId })
+        .finally(() => activeResolutions.delete(key));
+    },
     onSuccess: (interaction, variables) => {
       applyResolvedThreadPendingInteraction({ interaction, queryClient });
       invalidateThreadPendingInteractionResolutionQueries({

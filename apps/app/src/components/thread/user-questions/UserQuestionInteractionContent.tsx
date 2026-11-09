@@ -1,3 +1,4 @@
+import { usePlanEditorOwner } from "../pending-interactions/plan-editor-ownership";
 import { useMemo } from "react";
 import type { PendingInteractionUserQuestionQuestion } from "@bb/domain";
 import { QuestionForm } from "@bb/shared-ui/question-form";
@@ -7,6 +8,7 @@ import { getMutationErrorMessage } from "@/lib/mutation-errors";
 
 interface UserQuestionAnswerFormProps {
   interactionId: string;
+  plan?: { priority: number; onSkip: () => void };
   isResolving: boolean;
   questions: readonly PendingInteractionUserQuestionQuestion[];
   threadId: string;
@@ -14,6 +16,7 @@ interface UserQuestionAnswerFormProps {
 
 export function UserQuestionAnswerForm({
   interactionId,
+  plan,
   isResolving,
   questions,
   threadId,
@@ -30,6 +33,11 @@ export function UserQuestionAnswerForm({
   const resolvePendingInteraction =
     useResolveThreadPendingInteraction(threadId);
   const stopThread = useStopThread();
+  const ownsEditor = usePlanEditorOwner(
+    `${threadId}:${interactionId}`,
+    0,
+    !plan,
+  );
   const disabled = resolvePendingInteraction.isPending || isResolving;
   const error = resolvePendingInteraction.error
     ? getMutationErrorMessage({
@@ -38,9 +46,11 @@ export function UserQuestionAnswerForm({
         lifecycleOperation: "resolve_interaction",
       })
     : null;
+  if (!plan && !ownsEditor) return null;
   return (
     <div>
       <QuestionForm
+        mode={plan ? "plan" : "native"}
         key={interactionId}
         draftKey={`${threadId}:${interactionId}`}
         questions={normalizedQuestions}
@@ -55,7 +65,11 @@ export function UserQuestionAnswerForm({
             })
             .then(() => {});
         }}
-        onCancel={() => stopThread.mutateAsync(threadId).then(() => {})}
+        onCancel={
+          plan
+            ? plan.onSkip
+            : () => stopThread.mutateAsync(threadId).then(() => {})
+        }
       />
       {error ? (
         <div className="mt-2 shrink-0 rounded-md border border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text">

@@ -1,3 +1,5 @@
+import { z as planZ } from "zod";
+import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
   machineEnvironmentSetSchema,
   machineEnvironmentDeleteSchema,
@@ -1670,6 +1672,24 @@ export const publicApiRoutes = {
         reorderPinnedThreadRequestSchema,
       ),
       response: jsonResponse<ThreadListResponse>(),
+    }),
+    plans: defineRoute({
+      path: "/threads/plans",
+      method: "post",
+      request: jsonRequest<{}, { threadIds: string[] }>(
+        planZ
+          .object({
+            threadIds: planZ
+              .array(
+                planZ
+                  .string()
+                  .regex(/^thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/),
+              )
+              .max(40),
+          })
+          .strict(),
+      ),
+      response: jsonResponse<ThreadPlansReadResponse>(),
     }),
     interactions: defineRoute({
       path: "/threads/:id/interactions",

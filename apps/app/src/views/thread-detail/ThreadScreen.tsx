@@ -607,13 +607,7 @@ export function ThreadScreen({
   const plan =
     thread.archivedAt === null &&
     resolveEnvironmentGoneStatus(environment) === null ? (
-      <ThreadPlanCard
-        key={thread.id}
-        pendingTodos={timeline.pendingTodos}
-        rows={timelineRows}
-        waitingForOwner={hasPendingInteraction}
-        placement={presentation.kind === "page" ? "stacked" : "floating"}
-      />
+      <ThreadPlanCard key={thread.id} threadId={thread.id} />
     ) : null;
 
   const chat = (() => {

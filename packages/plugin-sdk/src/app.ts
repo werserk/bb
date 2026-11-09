@@ -51,7 +51,7 @@ interface PluginRuntimeHost {
 }
 
 type RuntimeFunctionName = {
-  [Name in keyof PluginSdkApp]: PluginSdkApp[Name] extends (
+  [Name in keyof PluginSdkApp]-?: NonNullable<PluginSdkApp[Name]> extends (
     ...args: never[]
   ) => unknown
     ? Name
@@ -368,4 +368,10 @@ export const experimental_getApplicationLinkApprovals = runtimeFunction(
 );
 export const experimental_revokeApplicationLinkApproval = runtimeFunction(
   "experimental_revokeApplicationLinkApproval",
+);
+
+export const experimental_useThreadPlans: PluginSdkApp["experimental_useThreadPlans"] =
+  (args) => runtimeMember("experimental_useThreadPlans")!(args);
+export const experimental_ThreadPlanSteps = runtimeComponent(
+  "experimental_ThreadPlanSteps",
 );

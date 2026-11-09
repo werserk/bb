@@ -26,3 +26,8 @@ export { noopNotifier } from "./notifier.js";
 export type { DbNotifier } from "./notifier.js";
 
 export * from "./data/index.js";
+
+export {
+  listPlanHistoryEventRows,
+  getPlanInteractionCreationRow,
+} from "./data/events.js";
