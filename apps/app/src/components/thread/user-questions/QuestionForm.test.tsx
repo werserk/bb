@@ -924,7 +924,7 @@ describe("question tabs on a narrow card", () => {
   });
 });
 
-it("plan mode shows every native question, retains skipped drafts and validates one Answer", () => {
+it("plan mode shows every native question and offers cancellation", () => {
   const onCancel = vi.fn();
   const questions = [
     singleSelect.questions[0]!,
@@ -953,7 +953,7 @@ it("plan mode shows every native question, retains skipped drafts and validates 
   expect(
     view.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
   ).toBe(true);
-  fireEvent.click(view.getByRole("button", { name: "Skip" }));
+  fireEvent.click(view.getByRole("button", { name: "Cancel" }));
   expect(onCancel).toHaveBeenCalledOnce();
   expect(view.queryByRole("button", { name: "Next" })).toBeNull();
 });
@@ -1005,7 +1005,6 @@ it("hands actual native drafts between presentation owners and keeps refused ans
   expect((view.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
     "Keep this answer",
   );
-  fireEvent.click(view.getByRole("button", { name: "Skip" }));
   view.rerender(body(false));
   expect(view.getAllByRole("textbox")).toHaveLength(1);
   expect((view.getByRole("textbox") as HTMLTextAreaElement).value).toBe(

@@ -125,7 +125,7 @@ export function buildFollowUpSubmitMode({
     return { kind: "queue-while-stopping" };
   }
   if (hasPendingInteraction) {
-    return { kind: "blocked", reason: "pending-interaction" };
+    return { kind: "queue", onStop };
   }
   if (shouldQueueFollowUpMessage(runtimeDisplayStatus)) {
     return { kind: "queue", onStop };

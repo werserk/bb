@@ -33,7 +33,6 @@ export function ThreadPlanQuestion({
   focused: boolean;
   focusRequest?: ThreadPlanFocusRequest;
 }) {
-  const [skipped, setSkipped] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const visible = usePlanSurfaceVisible(root);
   const [activeRequest, setActiveRequest] = useState<ThreadPlanFocusRequest>();
@@ -64,11 +63,7 @@ export function ThreadPlanQuestion({
     visible === true && interaction.payload.kind === "user_question",
   );
   useEffect(() => {
-    if (requested) setSkipped(false);
-  }, [requested, activeRequest]);
-  useEffect(() => {
-    if (!requested || skipped || !ownsEditor || !activeRequest.consumeFocus())
-      return;
+    if (!requested || !ownsEditor || !activeRequest.consumeFocus()) return;
     const fields = root.current?.querySelectorAll<HTMLElement>(
       'textarea,input,select,[role="radio"],[role="checkbox"]',
     );
@@ -83,7 +78,7 @@ export function ThreadPlanQuestion({
         ) ??
         null,
     );
-  }, [activeRequest, requested, skipped, ownsEditor]);
+  }, [activeRequest, requested, ownsEditor]);
   if (interaction.payload.kind !== "user_question") return null;
   return (
     <div
@@ -97,10 +92,6 @@ export function ThreadPlanQuestion({
     >
       {!ownsEditor ? (
         <span className="text-muted-foreground">Answer in the active view</span>
-      ) : skipped ? (
-        <button type="button" onClick={() => setSkipped(false)}>
-          Needs you · Answer
-        </button>
       ) : (
         <ThreadQuestionFormHost
           density="default"
@@ -112,7 +103,7 @@ export function ThreadPlanQuestion({
             interactionId={interaction.id}
             isResolving={interaction.status === "resolving"}
             questions={interaction.payload.questions}
-            plan={{ priority, onSkip: () => setSkipped(true) }}
+            plan={{ priority }}
           />
         </ThreadQuestionFormHost>
       )}

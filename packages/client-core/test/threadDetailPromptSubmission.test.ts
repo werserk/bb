@@ -356,7 +356,7 @@ describe("threadDetailPromptSubmission", () => {
     }
   });
 
-  it("offers a stop-free queue mode while a stop is in flight, and keeps pending interactions blocked", () => {
+  it("offers a stop-free queue mode while a stop is in flight, and accepts queued messages while questions are pending", () => {
     const onStop = () => undefined;
     expect(
       buildFollowUpSubmitMode({
@@ -375,6 +375,6 @@ describe("threadDetailPromptSubmission", () => {
         onStop,
         runtimeDisplayStatus: "starting",
       }),
-    ).toEqual({ kind: "blocked", reason: "pending-interaction" });
+    ).toEqual({ kind: "queue", onStop });
   });
 });

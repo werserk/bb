@@ -142,3 +142,14 @@ branches, non-owner inputs and legacy in-flight requests without provenance are
 outside this recovery. Persisted JSON and public union types change without a SQL
 migration. A .68 downgrade with deferred rows is prohibited; release must prove
 remaining-history compatibility or require the stopped pre-upgrade snapshot.
+
+### Pending questions in chat
+
+Pending input keeps the normal composer visible. Owner sends use the existing
+durable queue and do not resolve questions or approve actions. In-flow native
+questions offer Cancel through the existing stop-turn action; cancellation errors
+remain visible and retryable. Pending native questions and plugin forms keep
+their background segment visible. Completed reasoning details use the assistant
+message renderer with their original row/thread/turn and workspace context, so
+already-emitted links, images, directives and code-fence previews remain usable.
+This rendering cannot supply material the provider has not emitted.

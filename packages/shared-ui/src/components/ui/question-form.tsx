@@ -531,10 +531,6 @@ export function QuestionForm({
   };
 
   const handleCancel = async (): Promise<void> => {
-    if (mode === "plan") {
-      await onCancel();
-      return;
-    }
     if (closeInline) {
       closeInline();
       return;
@@ -671,7 +667,15 @@ export function QuestionForm({
           disabled={cancelBlocked}
           onClick={handleCancel}
         >
-          {mode === "plan" ? "Skip" : "Cancel"}
+          <span
+            title={
+              mode === "plan"
+                ? "Cancel question and stop current turn"
+                : undefined
+            }
+          >
+            Cancel
+          </span>
         </Button>
         <div className="flex items-center gap-2">
           {!isFirst && mode !== "plan" ? (

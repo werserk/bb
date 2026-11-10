@@ -1558,7 +1558,7 @@ describe("ThreadDetailPromptArea", () => {
     expect(document.querySelector(".pending-rule")).toBeNull();
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
     expect(screen.getByTestId("submit-mode").textContent).toBe(
-      "blocked:pending-interaction",
+      "queue:",
     );
     expect(screen.queryByTestId("queued-message-list")).toBeNull();
   });

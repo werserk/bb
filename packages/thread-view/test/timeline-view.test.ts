@@ -915,16 +915,14 @@ describe("reasoning before a pending question", () => {
       thought("ask", 5),
       pendingQuestion(),
     ]);
-    expect(rows.map((row) => row.kind)).toEqual([
-      "bundle-summary",
-      "system",
-      "work",
+    expect(rows.map((row) => row.id)).toEqual([
+      "before",
+      "read-2",
+      "between",
+      "read-4",
+      "ask",
+      "question",
     ]);
-    expect(
-      expectBundleSummaryRow(rows[0]).children.map((child) => child.id),
-    ).toEqual(["before", "read-2", "between", "read-4"]);
-    expect(rows[1]?.id).toBe("ask");
-    expect(rows[2]?.id).toBe("question");
   });
 
   it("keeps earlier thoughts folded and shows every trailing thought with text", () => {
@@ -940,6 +938,33 @@ describe("reasoning before a pending question", () => {
       "second",
       "question",
     ]);
+  });
+
+  it("shows context before a pending plugin form", () => {
+    const form = {
+      ...baseRow("form"),
+      kind: "work" as const,
+      workKind: "form" as const,
+      status: "pending" as const,
+      interactionId: "form-1",
+      pluginId: "codex",
+      rendererId: "async-question",
+      title: "Choose",
+      lifecycle: "pending" as const,
+      statusReason: null,
+      payload: null,
+      presentation: {
+        label: { pending: "Asking", completed: "Asked" },
+        icon: { glyph: "MessageQuestion" },
+      },
+    };
+    expect(
+      buildTimelineViewRows([
+        commandRowReadingPaths(["a"], 1),
+        thought("material", 2),
+        form,
+      ]).map((row) => row.id),
+    ).toEqual(["read-1", "material", "form"]);
   });
 
   it("shows a long thought whose text the server deferred", () => {

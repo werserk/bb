@@ -9,7 +9,7 @@ import { getMutationErrorMessage } from "@/lib/mutation-errors";
 
 interface UserQuestionAnswerFormProps {
   interactionId: string;
-  plan?: { priority: number; onSkip: () => void };
+  plan?: { priority: number };
   isResolving: boolean;
   questions: readonly PendingInteractionUserQuestionQuestion[];
   threadId: string;
@@ -41,10 +41,12 @@ export function UserQuestionAnswerForm({
     0,
     !plan && visible === true,
   );
-  const disabled = resolvePendingInteraction.isPending || isResolving;
-  const error = resolvePendingInteraction.error
+  const disabled =
+    resolvePendingInteraction.isPending || isResolving || stopThread.isPending;
+  const actionError = resolvePendingInteraction.error ?? stopThread.error;
+  const error = actionError
     ? getMutationErrorMessage({
-        error: resolvePendingInteraction.error,
+        error: actionError,
         fallbackMessage: "Failed to submit answer",
         lifecycleOperation: "resolve_interaction",
       })
@@ -68,11 +70,7 @@ export function UserQuestionAnswerForm({
             })
             .then(() => {});
         }}
-        onCancel={
-          plan
-            ? plan.onSkip
-            : () => stopThread.mutateAsync(threadId).then(() => {})
-        }
+        onCancel={() => stopThread.mutateAsync(threadId).then(() => {})}
       />
       {error ? (
         <div className="mt-2 shrink-0 rounded-md border border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text">

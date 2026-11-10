@@ -534,7 +534,7 @@ describe("reasoning before a pending question", () => {
     ).toBe(true);
   });
 
-  it("does not open a thought without text or one folded in a group", () => {
+  it("opens material even when a command separates it from the question", () => {
     const rows = buildTimelineViewRows([
       read(),
       thought("empty", null),
@@ -545,6 +545,6 @@ describe("reasoning before a pending question", () => {
     ]);
     const ids = collectAutoExpandedIds({ rows, scopeActive: false });
     expect(ids.has("empty")).toBe(false);
-    expect(ids.has("ask")).toBe(false);
+    expect(ids.has("ask")).toBe(true);
   });
 });

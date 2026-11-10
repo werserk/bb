@@ -1,6 +1,9 @@
 import type { TimelineRowBase, TimelineRowStatus } from "@bb/server-contract";
 import { isOwnerPostRow } from "./owner-post.js";
-import type { ThreadTimelineViewRow } from "./timeline-view.js";
+import {
+  isPendingQuestionRow,
+  type ThreadTimelineViewRow,
+} from "./timeline-view.js";
 
 export interface TimelineBackgroundTurnsRow extends TimelineRowBase {
   kind: "background-turns";
@@ -38,6 +41,16 @@ function isOwnerSteer(row: ThreadTimelineViewRow): boolean {
     row.role === "user" &&
     row.initiator === "user" &&
     row.turnRequest.kind === "steer"
+  );
+}
+
+function hasPendingInput(rows: readonly ThreadTimelineViewRow[]): boolean {
+  return rows.some(
+    (row) =>
+      isPendingQuestionRow(row) ||
+      (row.kind === "turn" &&
+        row.children !== null &&
+        hasPendingInput(row.children)),
   );
 }
 
@@ -106,7 +119,7 @@ export function collapseBackgroundTurns(
 
   const flush = (endedBy: ThreadTimelineViewRow | null): void => {
     if (segment.length === 0) return;
-    if (hasFailure(segment)) {
+    if (hasFailure(segment) || hasPendingInput(segment)) {
       out.push(...segment);
     } else if (endedBy !== null && isOwnerSteer(endedBy)) {
       let steeredFrom = segment.length - 1;
