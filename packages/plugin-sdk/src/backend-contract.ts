@@ -2171,7 +2171,54 @@ export interface PluginThreadAttentionPolicy {
   backgroundTurns: "silent";
 }
 
+export type PluginPreCompletionGap =
+  | "unsupported_provider"
+  | "missing_identity"
+  | "pending_questions_unavailable"
+  | "policy_unavailable"
+  | "policy_timeout"
+  | "policy_failed"
+  | "durable_guard_unavailable"
+  | "invalid_input"
+  | "observation_unavailable";
+
+export interface PluginPreCompletionContext {
+  projectId: string;
+  threadId: string;
+  turnId: string;
+  turnOrigin: "provider";
+  providerId: string;
+  finalText: string;
+  truncated: boolean;
+  pendingUserQuestionIds: string[];
+  correctionAttempt: 0;
+  signal: AbortSignal;
+}
+
+export type PluginPreCompletionHandler = (
+  context: PluginPreCompletionContext,
+) =>
+  | { action: "allow" }
+  | { action: "continue"; instruction: string }
+  | Promise<{ action: "allow" } | { action: "continue"; instruction: string }>;
+
 export interface PluginExperimentalThreads {
+  /** Source support only; matching provider bridge deployment must be verified separately. */
+  experimental_preCompletionCapabilities(): {
+    version: 1;
+    providers: {
+      "claude-code": "requires-matching-bridge";
+      codex: "unsupported";
+    };
+    deadlineMs: 2000;
+    finalTextLimit: 8192;
+  };
+  /** Opt in a managed thread. Cleared on plugin disposal/restart; re-register on startup. The core durable once reservation survives both. */
+  experimental_setPreCompletionPolicy(
+    threadId: string,
+    handler: PluginPreCompletionHandler | null,
+  ): void;
+
   experimental_serviceTurnCapabilities(): { serviceTurns: { version: 1 } };
   /**
    * Present when this server sends a native parent notice for a child thread

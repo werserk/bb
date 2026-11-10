@@ -1,6 +1,6 @@
 # Owner-attention pre-completion checkpoint
 
-Status: feasibility checkpoint, not a correction feature or an available SDK API.
+Status: historical feasibility checkpoint. The partial implementation and current API are documented in [core-owner-attention.md](core-owner-attention.md); the proposed names below are superseded.
 Baseline: `504c9a246d2c12f08ad4ba1f20a9df611f12e2a7`. Owner approved
 the companion through coordinator `thr_mayigfigsx` on 2026-11-10; the
 approved plugin plan is `68b7dd6fd8d2f3969059ad4cab8e9914f7c6b0fe`.

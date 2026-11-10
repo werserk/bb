@@ -436,3 +436,5 @@ export {
 } from "@bb/skill-index";
 
 export { CONVERSATION_QUESTION_TOOL_NAME as internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME } from "@bb/domain";
+export { BB_PRE_COMPLETION_TOOL_NAME as experimental_PRE_COMPLETION_TOOL_NAME } from "@bb/domain";
+export { BB_PRE_COMPLETION_LIMITS as experimental_PRE_COMPLETION_LIMITS } from "@bb/domain";

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { experimental_PRE_COMPLETION_TOOL_NAME as PRE_COMPLETION_TOOL_NAME } from "@get-bb/plugin-sdk/provider-bridge";
+import { checkNativePreCompletion } from "./pre-completion.js";
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { ClaudeContextUsageCollector } from "./context-usage.js";
@@ -655,6 +657,12 @@ function createForwardToolCall(
   scope: object,
 ): ToolCallForwarder {
   return (toolName, args) => {
+    if (toolName === PRE_COMPLETION_TOOL_NAME) {
+      return Promise.resolve({
+        content: "Reserved core callback",
+        isError: true,
+      });
+    }
     if (origin.turnId === undefined || origin.retired) {
       return Promise.resolve({
         content: origin.retired
@@ -1529,7 +1537,50 @@ export function buildSessionTrackingHooks(
     PostToolUse: [{ hooks: [clearToolUse, planTurnCheck.recordPlan] }],
     PostToolUseFailure: [{ hooks: [clearToolUse] }],
     PreToolUse: [{ hooks: [trackPreToolUse] }],
-    Stop: [{ hooks: [planTurnCheck.checkPlan] }],
+    Stop: [
+      {
+        hooks: [
+          async (input, _toolUseId, options) => {
+            if (input.hook_event_name !== "Stop") return { continue: true };
+            const session = threadAttachments.get(
+              threadIdRef.current,
+            )?.residentSession;
+            if (
+              !session ||
+              session.closing ||
+              session.toolOrigin.retired ||
+              !session.toolOrigin.turnId
+            )
+              return planTurnCheck.checkPlan(input, _toolUseId, options);
+            const origin = session.toolOrigin.turnId;
+            const result = await checkNativePreCompletion({
+              finalText: input.last_assistant_message ?? "",
+              signal: options.signal,
+              request: (arguments_) =>
+                forwardToolCall({
+                  arguments: arguments_,
+                  providerThreadId:
+                    session.attachment.providerThreadId ?? threadIdRef.current,
+                  scope: session.toolOrigin,
+                  threadId: threadIdRef.current,
+                  turnId: origin,
+                  toolName: PRE_COMPLETION_TOOL_NAME,
+                }),
+            });
+            if (
+              session.closing ||
+              session.toolOrigin.retired ||
+              session.toolOrigin.turnId !== origin ||
+              options.signal.aborted
+            )
+              return { continue: true };
+            if ("decision" in result && result.decision === "block")
+              return result;
+            return planTurnCheck.checkPlan(input, _toolUseId, options);
+          },
+        ],
+      },
+    ],
     SubagentStart: [{ hooks: [trackSubagentStart] }],
     SubagentStop: [{ hooks: [clearSubagent] }],
   };

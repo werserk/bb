@@ -1,4 +1,9 @@
 import { readOwnerInstructions } from "../threads/workspace-agent-instructions.js";
+import { BB_PRE_COMPLETION_LIMITS } from "@bb/domain";
+import {
+  clearPreCompletionPolicies,
+  setPreCompletionPolicy,
+} from "../threads/pre-completion.js";
 import {
   rpcInvalidationTags,
   type ContractTagDeclarations,
@@ -1476,6 +1481,22 @@ export function createPluginApi(options: {
   };
 
   const experimental_threads: PluginExperimentalThreads = {
+    experimental_preCompletionCapabilities() {
+      assertLive();
+      return {
+        version: 1,
+        providers: {
+          "claude-code": "requires-matching-bridge",
+          codex: "unsupported",
+        },
+        deadlineMs: BB_PRE_COMPLETION_LIMITS.deadlineMs,
+        finalTextLimit: BB_PRE_COMPLETION_LIMITS.finalTextLimit,
+      };
+    },
+    experimental_setPreCompletionPolicy(threadId, handler) {
+      assertLive();
+      setPreCompletionPolicy(pluginId, threadId, handler);
+    },
     experimental_serviceTurnCapabilities() {
       assertLive();
       return { serviceTurns: { version: 1 } };
@@ -1528,6 +1549,7 @@ export function createPluginApi(options: {
     pendingAttentionPolicies.clear();
     if (activated) clearThreadAttentionPoliciesOfPlugin(pluginId);
   });
+  disposeHooks.push(() => clearPreCompletionPolicies(pluginId));
 
   const api: BbPluginApi = {
     experimental_userInstructions: {

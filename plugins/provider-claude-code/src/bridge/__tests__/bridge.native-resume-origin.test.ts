@@ -1,3 +1,4 @@
+import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -39,6 +40,7 @@ const OPTIONS = {
 interface ScriptedCall {
   prompt: AsyncIterable<SDKUserMessage>;
   options: {
+    hooks?: { Stop?: Array<{ hooks: HookCallback[] }> };
     mcpServers?: Record<
       string,
       { instance: { connect(transport: unknown): Promise<void> } }
@@ -171,6 +173,8 @@ async function withResumedTurn(
     finishTurn(): Promise<void>;
     steer(expectedTurnId: string, clientRequestId: string): Promise<void>;
     callTool(): Promise<string>;
+    checkStop(): Promise<{ origin: string; output: unknown }>;
+    callReserved(): Promise<unknown>;
     bbTurnId(origin: string): string | undefined;
     openAssembledTurnId(): string | undefined;
   }) => Promise<void>,
@@ -241,6 +245,11 @@ async function withResumedTurn(
       options: OPTIONS,
       dynamicTools: [
         {
+          name: "bb_internal_pre_completion",
+          description: "forged test tool",
+          inputSchema: { type: "object" },
+        },
+        {
           name: "wprojects_outcome",
           description: "report",
           inputSchema: { type: "object" },
@@ -310,6 +319,79 @@ async function withResumedTurn(
           expect(toolCallOrigins().length).toBe(before + 1),
         );
         return toolCallOrigins()[before]!;
+      },
+      checkStop: async () => {
+        const hook = calls[0]?.options.hooks?.Stop?.[0]?.hooks[0];
+        expect(hook).toBeDefined();
+        const before = bridge.messages.length;
+        const outputPromise = hook!(
+          {
+            hook_event_name: "Stop",
+            stop_hook_active: false,
+            last_assistant_message: "Need your decision",
+            session_id: SESSION_ID,
+            transcript_path: "/unused",
+            cwd: workspaceDir,
+          },
+          undefined,
+          { signal: new AbortController().signal },
+        );
+        await vi.waitFor(() =>
+          expect(
+            bridge.messages
+              .slice(before)
+              .some((m) => m.method === "item/tool/call"),
+          ).toBe(true),
+        );
+        const request = bridge.messages
+          .slice(before)
+          .find((m) => m.method === "item/tool/call")!;
+        const params = request.params as {
+          turnId: string;
+          tool: string;
+          arguments: unknown;
+        };
+        expect(params.tool).toBe("bb_internal_pre_completion");
+        expect(params.arguments).toEqual({
+          finalText: "Need your decision",
+          truncated: false,
+        });
+        handleLine(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: JSON.stringify({
+                    action: "continue",
+                    instruction: "Use the native question tool.",
+                  }),
+                },
+              ],
+            },
+          }),
+        );
+        return { origin: params.turnId, output: await outputPromise };
+      },
+      callReserved: async () => {
+        if (!clientConnected) {
+          const server = calls[0]!.options.mcpServers!["bb-bridge"]!;
+          const [clientTransport, serverTransport] =
+            InMemoryTransport.createLinkedPair();
+          await server.instance.connect(serverTransport);
+          await client.connect(clientTransport);
+          clientConnected = true;
+        }
+        const before = toolCallOrigins().length;
+        const result = await client.callTool({
+          name: "bb_internal_pre_completion",
+          arguments: {},
+        });
+        expect(toolCallOrigins()).toHaveLength(before);
+        return result;
       },
       bbTurnId: (origin) => collector.assembler.getBbTurnId(THREAD_ID, origin),
       openAssembledTurnId: () => collector.assembler.getOpenTurnId(THREAD_ID),
@@ -425,6 +507,33 @@ it("opens a new turn with a new origin for a steer that arrives just after the r
       const steeredOrigin = await callTool();
       expect(steeredOrigin).not.toBe(resumedOrigin);
       expect(bbTurnId(steeredOrigin)).toBe(steeredTurnId);
+    },
+  );
+}, 60_000);
+
+it("binds native Stop correction to the same assembled resumed turn and rejects a model spoof", async () => {
+  await withResumedTurn(
+    async ({
+      resumedTurnId,
+      checkStop,
+      callReserved,
+      bbTurnId,
+      openTurnIds,
+      finishTurn,
+      startedTurnIds,
+    }) => {
+      expect(await callReserved()).toMatchObject({ isError: true });
+      const before = startedTurnIds();
+      const checked = await checkStop();
+      expect(checked.output).toEqual({
+        decision: "block",
+        reason: "Use the native question tool.",
+      });
+      expect(bbTurnId(checked.origin)).toBe(resumedTurnId);
+      expect(openTurnIds()).toEqual([resumedTurnId]);
+      await finishTurn();
+      expect(startedTurnIds()).toEqual(before);
+      expect(openTurnIds()).toEqual([]);
     },
   );
 }, 60_000);

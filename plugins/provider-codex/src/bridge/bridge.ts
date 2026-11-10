@@ -3,6 +3,7 @@ import {
   CODEX_ASYNC_QUESTION_EXTENSION_KIND,
   codexAsyncQuestionStateSchema,
 } from "../extension-kinds.js";
+import { experimental_PRE_COMPLETION_TOOL_NAME as PRE_COMPLETION_TOOL_NAME } from "@get-bb/plugin-sdk/provider-bridge";
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { createHash } from "node:crypto";
@@ -915,6 +916,13 @@ function handleChildRequest(
       responder.error(
         BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
         `Invalid codex tool call params: ${parsed.error.message}`,
+      );
+      return;
+    }
+    if (parsed.data.tool === PRE_COMPLETION_TOOL_NAME) {
+      responder.error(
+        BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
+        "Reserved core callback",
       );
       return;
     }

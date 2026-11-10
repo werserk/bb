@@ -1639,6 +1639,31 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
       },
       {
+        id: "pre-completion-policy",
+        tagline: "Experimental native Stop policy",
+        title: "Pre-completion policy",
+        summary:
+          "Opt in managed threads to a bounded native Stop check. This partial core companion supports matching Claude bridges; Codex remains unsupported.",
+        bullets: [
+          "Register a policy per thread and remove it with null; re-register after restart",
+          "Read trusted bb turn identity, capped final text and native user-question IDs",
+          "Allow completion or request one short same-turn continuation; core reserves the attempt durably",
+          "Timeout, unavailable facts and unsupported providers allow completion with coverage gaps",
+          "Source capability is not installed-runtime proof; unsupported stops remain in the denominator",
+        ],
+        apiSymbols: [
+          "PluginPreCompletionContext",
+          "PluginPreCompletionHandler",
+          "PluginPreCompletionGap",
+          "bb.experimental_threads.experimental_preCompletionCapabilities",
+          "bb.experimental_threads.experimental_setPreCompletionPolicy",
+          "experimental_PRE_COMPLETION_TOOL_NAME",
+          "experimental_PRE_COMPLETION_LIMITS",
+        ],
+        experimental: true,
+        reference: ["docs/core-owner-attention.md"],
+      },
+      {
         id: "bb-sdk",
         tagline: "Create threads and projects from plugin code",
         title: "The bb SDK",
