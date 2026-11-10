@@ -1,3 +1,8 @@
+import type {
+  ConversationQuestion,
+  ConversationQuestionPublication,
+  ConversationQuestionAnswer,
+} from "@bb/domain";
 import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
   type PromptInput,
@@ -544,6 +549,35 @@ export class ThreadWaitUnreachableError extends Error {
   }
 }
 
+export interface ThreadQuestionTargetArgs {
+  threadId: string;
+  questionId: string;
+}
+export interface ThreadQuestionPublishArgs {
+  threadId: string;
+  source: { turnId: string; providerThreadId: string; callId: string };
+  publication: ConversationQuestionPublication;
+}
+export interface ThreadQuestionsArea {
+  list(args: {
+    threadId: string;
+    signal?: AbortSignal;
+  }): Promise<ConversationQuestion[]>;
+  get(
+    args: ThreadQuestionTargetArgs & { signal?: AbortSignal },
+  ): Promise<ConversationQuestion>;
+  publish(args: ThreadQuestionPublishArgs): Promise<ConversationQuestion>;
+  answer(
+    args: ThreadQuestionTargetArgs & ConversationQuestionAnswer,
+  ): Promise<ConversationQuestion>;
+  dismiss(
+    args: ThreadQuestionTargetArgs & { revision: number },
+  ): Promise<ConversationQuestion>;
+  withdraw(
+    args: ThreadQuestionTargetArgs & { revision: number },
+  ): Promise<ConversationQuestion>;
+}
+
 export interface ThreadInteractionsArea {
   cancel(
     args: ThreadInteractionTargetArgs,
@@ -692,6 +726,7 @@ export interface ThreadsArea {
   ): Promise<ThreadPluginMetadataResult>;
   queue: ThreadQueueArea;
   interactions: ThreadInteractionsArea;
+  questions: ThreadQuestionsArea;
   list(args?: ThreadListArgs): Promise<ThreadListResult>;
   listRunning(args?: { signal?: AbortSignal }): Promise<ThreadRunningResult>;
   markRead(args: ThreadActionArgs): Promise<ThreadReadStateResult>;
@@ -1075,6 +1110,58 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       return parseThreadEventRow(await response.json());
     },
   };
+  const questions: ThreadQuestionsArea = {
+    async list(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions.$get(
+          { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async get(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions[":questionId"].$get(
+          { param: { id: input.threadId, questionId: input.questionId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async publish(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions.$post({
+          param: { id: input.threadId },
+          json: { source: input.source, publication: input.publication },
+        }),
+      );
+    },
+    async answer(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions[":questionId"].answer.$post({
+          param: { id: input.threadId, questionId: input.questionId },
+          json: { revision: input.revision, answers: input.answers },
+        }),
+      );
+    },
+    async dismiss(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions[":questionId"].dismiss.$post({
+          param: { id: input.threadId, questionId: input.questionId },
+          json: { revision: input.revision },
+        }),
+      );
+    },
+    async withdraw(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions[":questionId"].withdraw.$post(
+          {
+            param: { id: input.threadId, questionId: input.questionId },
+            json: { revision: input.revision },
+          },
+        ),
+      );
+    },
+  };
   const interactions: ThreadInteractionsArea = {
     async cancel(input) {
       return transport.readJson(
@@ -1441,6 +1528,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
     queue,
     interactions,
+    questions,
     async list(input) {
       return transport.readJson(
         transport.api.v1.threads.$get(

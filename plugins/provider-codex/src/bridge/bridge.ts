@@ -1,9 +1,14 @@
 #!/usr/bin/env node
+import {
+  CODEX_ASYNC_QUESTION_EXTENSION_KIND,
+  codexAsyncQuestionStateSchema,
+} from "../extension-kinds.js";
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
+  internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME as CONVERSATION_QUESTION_TOOL_NAME,
   isStandaloneBuiltinCompactCommand,
   type DynamicTool,
   type PromptInput,
@@ -776,7 +781,72 @@ async function handleChildNotification(
     }
     if (currentSession(bbThreadId, serial) !== session) return;
   }
-  sendThreadDeltas(session, deltas);
+  const independentQuestions =
+    session.construction.dynamicTools?.some(
+      (tool) => tool.name === CONVERSATION_QUESTION_TOOL_NAME,
+    ) === true;
+  const ordinaryDeltas = independentQuestions
+    ? deltas.filter(
+        (delta) =>
+          delta.kind !== "extension.state" ||
+          delta.extensionKind !== CODEX_ASYNC_QUESTION_EXTENSION_KIND,
+      )
+    : deltas;
+  sendThreadDeltas(session, ordinaryDeltas);
+  if (independentQuestions) {
+    for (const delta of deltas) {
+      if (
+        delta.kind !== "extension.state" ||
+        delta.extensionKind !== CODEX_ASYNC_QUESTION_EXTENSION_KIND
+      )
+        continue;
+      const state = codexAsyncQuestionStateSchema.parse(delta.payload);
+      const origin = z
+        .object({
+          threadId: z.string().min(1),
+          turnId: z.string().min(1),
+          item: z.object({ text: z.string() }),
+        })
+        .parse(params);
+      const publicationResult = await sendRuntimeRequest(
+        BRIDGE_INBOUND_REQUEST_METHODS.toolCall,
+        {
+          providerThreadId: origin.threadId,
+          threadId: session.bbThreadId,
+          turnId: origin.turnId,
+          callId: `async-question:${state.itemId}`,
+          tool: CONVERSATION_QUESTION_TOOL_NAME,
+          arguments: {
+            body: origin.item.text,
+            materials: [],
+            questions: state.questions.map((question, index) => ({
+              id: `question_${index + 1}`,
+              prompt: question.title,
+              multiSelect: false,
+              allowFreeText: true,
+              required: true,
+              ...(question.options === null
+                ? {}
+                : {
+                    options: question.options.map((label, optionIndex) => ({
+                      value: `option_${optionIndex + 1}`,
+                      label,
+                    })),
+                  }),
+            })),
+          },
+        },
+      );
+      if (
+        !z.object({ success: z.literal(true) }).safeParse(publicationResult)
+          .success
+      )
+        throw new Error(
+          `Asynchronous question ${state.itemId} was not published through ${CONVERSATION_QUESTION_TOOL_NAME}`,
+        );
+      if (currentSession(bbThreadId, serial) !== session) return;
+    }
+  }
   for (const delta of deltas) {
     if (delta.kind === "provider.error" && delta.willRetry !== true) {
       emitTerminalAccountErrorHint(session, delta);
@@ -855,6 +925,19 @@ function handleChildRequest(
           error instanceof Error ? error.message : String(error),
         );
       });
+    return;
+  }
+
+  if (
+    method === "item/tool/requestUserInput" &&
+    session.construction.dynamicTools?.some(
+      (tool) => tool.name === CONVERSATION_QUESTION_TOOL_NAME,
+    )
+  ) {
+    responder.error(
+      BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR,
+      `Native questions are unavailable here. Use ${CONVERSATION_QUESTION_TOOL_NAME} to publish a persistent question; no answer was selected.`,
+    );
     return;
   }
 

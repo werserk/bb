@@ -354,6 +354,12 @@ export function registerThreadActionRoutes(
       id: context.req.param("queuedMessageId"),
       threadId: thread.id,
     });
+    if (result.kind === "immutable")
+      throw new ApiError(
+        409,
+        "invalid_request",
+        "Accepted question responses cannot be edited",
+      );
     if (result.kind === "not_found") {
       throw new ApiError(404, "invalid_request", "Queued message not found");
     }

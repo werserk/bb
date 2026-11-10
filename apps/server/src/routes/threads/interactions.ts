@@ -1,3 +1,14 @@
+import {
+  conversationQuestionIdSchema,
+  conversationQuestionPublicationSchema,
+} from "@bb/domain";
+import {
+  publishConversationQuestion,
+  listConversationQuestionsForThread,
+  readConversationQuestion,
+  answerConversationQuestion,
+  closeConversationQuestion,
+} from "../../services/threads/conversation-questions.js";
 import { readThreadPlan } from "../../services/threads/thread-plans.js";
 import type { ThreadPlansReadResponse } from "@bb/domain";
 import { PLUGIN_INTERACTION_MAX_PAYLOAD_BYTES } from "@bb/domain";
@@ -38,6 +49,77 @@ export function registerThreadInteractionRoutes(
   });
   const routes = publicApiRoutes.threads;
 
+  const questionTarget = (threadId: string, rawId: string) => {
+    requirePublicThread(deps.db, threadId);
+    const parsed = conversationQuestionIdSchema.safeParse(rawId);
+    if (!parsed.success)
+      throw new ApiError(400, "invalid_request", "Invalid question id");
+    return { threadId, questionId: parsed.data };
+  };
+  get(routes.questions, async (context) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    return context.json(
+      await listConversationQuestionsForThread(deps, { threadId: thread.id }),
+    );
+  });
+  post(routes.publishQuestion, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    return context.json(
+      await publishConversationQuestion(deps, {
+        threadId: thread.id,
+        source: payload.source,
+        publication: conversationQuestionPublicationSchema.parse(
+          payload.publication,
+        ),
+      }),
+    );
+  });
+  get(routes.question, async (context) =>
+    context.json(
+      await readConversationQuestion(
+        deps,
+        questionTarget(
+          context.req.param("id"),
+          context.req.param("questionId"),
+        ),
+      ),
+    ),
+  );
+  post(routes.answerQuestion, async (context, payload) =>
+    context.json(
+      await answerConversationQuestion(deps, {
+        ...questionTarget(
+          context.req.param("id"),
+          context.req.param("questionId"),
+        ),
+        ...payload,
+      }),
+    ),
+  );
+  post(routes.dismissQuestion, async (context, payload) =>
+    context.json(
+      await closeConversationQuestion(deps, {
+        ...questionTarget(
+          context.req.param("id"),
+          context.req.param("questionId"),
+        ),
+        ...payload,
+        action: "dismiss",
+      }),
+    ),
+  );
+  post(routes.withdrawQuestion, async (context, payload) =>
+    context.json(
+      await closeConversationQuestion(deps, {
+        ...questionTarget(
+          context.req.param("id"),
+          context.req.param("questionId"),
+        ),
+        ...payload,
+        action: "withdraw",
+      }),
+    ),
+  );
   post(routes.plans, (context, payload) => {
     const result: ThreadPlansReadResponse = { plans: {}, errors: {} };
     for (const id of new Set(payload.threadIds)) {

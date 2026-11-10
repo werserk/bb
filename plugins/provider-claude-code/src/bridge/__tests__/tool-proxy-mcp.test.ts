@@ -38,7 +38,7 @@ async function connect(server: ReturnType<typeof buildBridgeMcpServer>) {
 }
 
 describe("buildBridgeMcpServer", () => {
-  it("always loads the plan tool while leaving other tools deferrable", async () => {
+  it("always loads plan and question tools while leaving other tools deferrable", async () => {
     const coreSource = readFileSync(
       new URL(
         "../../../../../apps/server/src/services/threads/thread-plan-tool.ts",
@@ -53,7 +53,7 @@ describe("buildBridgeMcpServer", () => {
       throw new Error("Cannot read BB_UPDATE_PLAN_TOOL.name from core");
     }
     const server = buildBridgeMcpServer(
-      [name, "bb_workflow_result"].map((name) => ({
+      [name, "bb_workflow_result", "bb_ask_question"].map((name) => ({
         name,
         description: name,
         inputSchema: { type: "object" },
@@ -68,6 +68,7 @@ describe("buildBridgeMcpServer", () => {
         "anthropic/alwaysLoad": true,
       });
       expect(listed.tools[1]?._meta).toBeUndefined();
+      expect(listed.tools[2]?._meta).toEqual({ "anthropic/alwaysLoad": true });
       const result = await client.callTool({
         name,
         arguments: { plan: [{ step: "First", status: "completed" }] },

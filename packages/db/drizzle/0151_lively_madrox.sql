@@ -1,0 +1,1 @@
+ALTER TABLE `conversation_questions` ADD `dispatched_at` integer;

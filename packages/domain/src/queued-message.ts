@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { pluginIdSchema } from "./plugin-id.js";
-import { clientTurnRequestIdSchema } from "./protocol-ids.js";
+import {
+  clientTurnRequestIdSchema,
+  conversationQuestionIdSchema,
+} from "./protocol-ids.js";
 import {
   childThreadOutcomeSchema,
   systemMessageKindSchema,
@@ -161,6 +164,7 @@ export const queuedMessagePayloadKindValues = [
   "inline",
   "retry",
   "deferredSteer",
+  "questionResponse",
 ] as const;
 export const queuedMessagePayloadKindSchema = z.enum(
   queuedMessagePayloadKindValues,
@@ -171,6 +175,11 @@ export type QueuedMessagePayloadKind = z.infer<
 
 export const queuedMessagePayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("inline") }),
+  z.object({
+    kind: z.literal("questionResponse"),
+    questionId: conversationQuestionIdSchema,
+    revision: z.number().int().positive(),
+  }),
   z.object({
     kind: z.literal("deferredSteer"),
     sourceRequestId: clientTurnRequestIdSchema,

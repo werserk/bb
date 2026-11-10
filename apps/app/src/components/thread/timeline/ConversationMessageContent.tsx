@@ -1,3 +1,5 @@
+import { parseConversationQuestionMarker } from "@bb/domain";
+import { ConversationQuestionCard } from "../user-questions/ConversationQuestionCard";
 import {
   useLayoutEffect,
   useMemo,
@@ -751,6 +753,15 @@ export function ConversationMessageContent(
       />
     );
   }
+
+  const questionId = parseConversationQuestionMarker(text);
+  if (questionId !== null)
+    return (
+      <ConversationQuestionCard
+        threadId={props.threadId}
+        questionId={questionId}
+      />
+    );
 
   return (
     <AssistantConversationMessage

@@ -415,6 +415,8 @@ type ExpectedThreadsKey =
   | "fork"
   | "get"
   | "interactions"
+  | "questions"
+  | "plans"
   | "list"
   | "listRunning"
   | "markRead"
@@ -619,6 +621,9 @@ describe("SDK public type entrypoints", () => {
     expectTypeOf<
       keyof RootBbSdk["threads"]["interactions"]
     >().toEqualTypeOf<ExpectedThreadInteractionsKey>();
+    expectTypeOf<keyof RootBbSdk["threads"]["questions"]>().toEqualTypeOf<
+      "publish" | "list" | "get" | "answer" | "dismiss" | "withdraw"
+    >();
     expectTypeOf<
       keyof RootBbSdk["threads"]["queuedMessages"]
     >().toEqualTypeOf<ExpectedThreadQueuedMessagesKey>();

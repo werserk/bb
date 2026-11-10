@@ -1,3 +1,4 @@
+import { conversationQuestionsQueryKey } from "./queries/conversation-question-query-key";
 import {
   pluginTagScope,
   runTaggedRead,
@@ -3458,3 +3459,30 @@ describe("createRealtimeCacheEffects", () => {
     });
   });
 });
+
+it.each([
+  "interactions-changed",
+  "queue-changed",
+  "status-changed",
+  "archived-changed",
+] as const)(
+  "refreshes durable question cards for their own thread on %s",
+  (change) => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const own = [...conversationQuestionsQueryKey("thr_1"), "qst_23456789ab"];
+    const other = [...conversationQuestionsQueryKey("thr_2"), "qst_23456789ac"];
+    queryClient.setQueryData(own, { status: "open" });
+    queryClient.setQueryData(other, { status: "open" });
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      changes: [change],
+    });
+    vi.advanceTimersByTime(50);
+    expect(queryClient.getQueryState(own)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(other)?.isInvalidated).not.toBe(true);
+    effects.dispose();
+  },
+);

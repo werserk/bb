@@ -1,3 +1,4 @@
+import { parseConversationQuestionMarker } from "@bb/domain";
 import type { EventProjectionMessage } from "./event-projection-types.js";
 import { ownerPostText } from "./owner-post.js";
 import { parseSentThreadMessage } from "./tool-call-parsing.js";
@@ -25,7 +26,10 @@ export function isTimelineUngroupableMessage(
     return !isTimelineSummaryGroupableSteerMessage(message);
   }
   if (message.kind === "assistant-text") {
-    return message.isLegacyUserMessage === true;
+    return (
+      message.isLegacyUserMessage === true ||
+      parseConversationQuestionMarker(message.text) !== null
+    );
   }
   if (message.kind === "command") {
     return parseSentThreadMessage(message) !== null;

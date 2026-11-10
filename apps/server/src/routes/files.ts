@@ -1,3 +1,4 @@
+import { readConversationQuestion } from "../services/threads/conversation-questions.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Hono } from "hono";
@@ -204,7 +205,6 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     });
   }
 
-
   const runHostFileMutationCommand = <TCommand extends HostDaemonRpcCommand>(
     hostId: string,
     command: TCommand,
@@ -385,6 +385,51 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       context.req.raw,
       { hostId: lease.hostId, rootPath: lease.rootPath, ref: null },
       parseRelativeFileSegments(context.req.param("filePath")),
+    );
+  });
+
+  get(threadRoutes.questionFile, async (context) => {
+    const question = readConversationQuestion(deps, {
+      threadId: context.req.param("id"),
+      questionId: context.req.param("questionId"),
+    });
+    const segments = parseRelativeFileSegments(context.req.param("filePath"));
+    const relativePath = segments.join("/");
+    const manifest = question.materialManifest;
+    const file = manifest.files.find(
+      (file) => file.snapshotPath === relativePath,
+    );
+    if (!file || manifest.hostId === null || manifest.storageRootPath === null)
+      throw new ApiError(
+        404,
+        "question_material_not_found",
+        "Question material not found",
+      );
+    return serveDaemonFileStream(
+      deps,
+      {
+        hostId: manifest.hostId,
+        path: joinHostPath(manifest.storageRootPath, segments),
+        rootPath: manifest.storageRootPath,
+      },
+      context.req.raw,
+      (metadata) => {
+        if (
+          metadata.revision !== file.snapshotRevision ||
+          metadata.sizeBytes !== file.sizeBytes
+        )
+          throw new ApiError(
+            409,
+            "question_material_changed",
+            "Question material snapshot changed",
+          );
+        const headers = createRawFileHeaders({ mimeType: file.mimeType });
+        headers.set(
+          "content-type",
+          file.mimeType ?? "application/octet-stream",
+        );
+        return headers;
+      },
     );
   });
 

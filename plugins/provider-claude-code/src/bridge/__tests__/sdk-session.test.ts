@@ -90,6 +90,28 @@ describe("SdkSession", () => {
     vi.restoreAllMocks();
   });
 
+  it("preserves injected question aliases alongside native tool exclusions", () => {
+    const toolAliases = { AskUserQuestion: "mcp__bb__bb_ask_question" };
+    const session = new SdkSession(
+      { ...defaultOptions, toolAliases, disallowedTools: ["AskUserQuestion"] },
+      vi.fn(),
+      vi.fn(),
+    );
+    session.start();
+    expect(getLatestQueryCall().options.toolAliases).toEqual(toolAliases);
+    expect(getLatestQueryCall().options.disallowedTools).toEqual([
+      "AskUserQuestion",
+    ]);
+    session.stop();
+  });
+
+  it("omits question aliases when none are supplied", () => {
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    expect(getLatestQueryCall().options).not.toHaveProperty("toolAliases");
+    session.stop();
+  });
+
   it("rejects queued input when the SDK input stream closes before consumption", async () => {
     const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
     const consumed = session.pushInput("hello");

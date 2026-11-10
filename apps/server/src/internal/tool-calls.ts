@@ -1,4 +1,8 @@
 import {
+  BB_ASK_QUESTION_TOOL,
+  handleConversationQuestionToolCall,
+} from "../services/threads/conversation-question-tool.js";
+import {
   hostDaemonToolCallRequestSchema,
   typedRoutes,
   type HostDaemonInternalSchema,
@@ -84,7 +88,8 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
       if (
         payload.turnId === undefined &&
         (payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME ||
-          payload.tool === BB_UPDATE_PLAN_TOOL.name)
+          payload.tool === BB_UPDATE_PLAN_TOOL.name ||
+          payload.tool === BB_ASK_QUESTION_TOOL.name)
       ) {
         throw new ApiError(400, "invalid_request", "This tool requires turnId");
       }
@@ -112,6 +117,21 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             threadId: thread.id,
             providerThreadId: payload.providerThreadId,
             turnId: payload.turnId,
+            callId: payload.callId,
+            input: payload.arguments,
+          }),
+        );
+      }
+
+      if (
+        payload.tool === BB_ASK_QUESTION_TOOL.name &&
+        payload.turnId !== undefined
+      ) {
+        return context.json(
+          await handleConversationQuestionToolCall(deps, {
+            threadId: thread.id,
+            turnId: payload.turnId,
+            providerThreadId: payload.providerThreadId,
             callId: payload.callId,
             input: payload.arguments,
           }),

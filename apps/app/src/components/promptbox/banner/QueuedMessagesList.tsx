@@ -967,7 +967,8 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
-                {queuedMessage.editable ? (
+                {queuedMessage.editable &&
+                queuedMessage.payload.kind !== "questionResponse" ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button

@@ -1,3 +1,4 @@
+import { conversationQuestionsQueryKey } from "../queries/conversation-question-query-key";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
   EnvironmentChangeKind,
@@ -387,6 +388,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
     flush: "debounced",
     patch: [patchThreadListPendingInteractionState],
     dirty: [
+      ({ threadId }) => [conversationQuestionsQueryKey(threadId)],
       dirtyThreadSearchQueries,
       getThreadPendingInteractionInvalidationQueryKeys,
     ],
@@ -394,7 +396,11 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   "status-changed": {
     flush: "immediate",
     patch: [patchThreadStatusState],
-    dirty: [refreshThreadListStatusState, dirtyThreadDetailQueries],
+    dirty: [
+      ({ threadId }) => [conversationQuestionsQueryKey(threadId)],
+      refreshThreadListStatusState,
+      dirtyThreadDetailQueries,
+    ],
   },
   "title-changed": {
     flush: "debounced",
@@ -403,6 +409,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   "queue-changed": {
     flush: "debounced",
     dirty: [
+      ({ threadId }) => [conversationQuestionsQueryKey(threadId)],
       getThreadQueueContentInvalidationQueryKeys,
       dirtyActiveThreadListQueries,
     ],
@@ -410,6 +417,7 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
   "archived-changed": {
     flush: "debounced",
     dirty: [
+      ({ threadId }) => [conversationQuestionsQueryKey(threadId)],
       dirtyThreadListQueries,
       dirtyThreadDetailQueries,
       dirtyProjectPromptHistoryQueries,

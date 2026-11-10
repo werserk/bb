@@ -1,3 +1,4 @@
+import { registerQuestionCommands } from "./questions.js";
 import { registerPlanCommand } from "./plans.js";
 import { registerContextCommand } from "./context.js";
 import { registerSessionStateCommands } from "./session-state.js";
@@ -33,4 +34,5 @@ export function registerThreadCommands(
   registerOrganizationCommands(thread, getUrl);
   registerActionsCommands(thread, getUrl);
   registerInteractionCommands(thread, getUrl);
+  registerQuestionCommands(thread, getUrl);
 }

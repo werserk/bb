@@ -24,6 +24,7 @@ import type {
   EnvironmentStatus,
   FaviconColorPreference,
   PendingInteractionStatus,
+  ConversationQuestionStatus,
   PermissionMode,
   PromptHistoryScope,
   ProjectSourceType,
@@ -1032,6 +1033,8 @@ export const queuedThreadMessages = sqliteTable(
     retryOfTurnRequestId: text("retry_of_turn_request_id"),
     retryAttempt: integer("retry_attempt"),
     retryReason: text("retry_reason"),
+    questionId: text("question_id"),
+    questionRevision: integer("question_revision"),
     claimedAt: integer("claimed_at"),
     claimToken: text("claim_token"),
     editHeldUntil: integer("edit_held_until"),
@@ -1215,6 +1218,50 @@ export const terminalSessions = sqliteTable(
     ),
     index("terminal_sessions_host_status_idx").on(table.hostId, table.status),
     index("terminal_sessions_daemon_session_idx").on(table.daemonSessionId),
+  ],
+);
+
+export const conversationQuestions = sqliteTable(
+  "conversation_questions",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(1),
+    sourceTurnId: text("source_turn_id"),
+    sourceCallId: text("source_call_id"),
+    status: text("status")
+      .$type<ConversationQuestionStatus>()
+      .notNull()
+      .default("open"),
+    publication: text("publication").notNull(),
+    materialManifest: text("material_manifest").notNull(),
+    response: text("response"),
+    queuedMessageId: text("queued_message_id"),
+    dispatchedAt: integer("dispatched_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("conversation_questions_thread_created_idx").on(
+      table.threadId,
+      table.createdAt,
+      table.id,
+    ),
+    index("conversation_questions_thread_status_idx").on(
+      table.threadId,
+      table.status,
+    ),
+    uniqueIndex("conversation_questions_source_idx").on(
+      table.threadId,
+      table.sourceTurnId,
+      table.sourceCallId,
+    ),
+    check(
+      "conversation_questions_answer_custody",
+      sql`${table.status} != 'answered' OR (${table.response} IS NOT NULL AND ${table.queuedMessageId} IS NOT NULL)`,
+    ),
   ],
 );
 

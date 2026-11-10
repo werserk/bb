@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   PLUGIN_INTERACTION_MAX_PAYLOAD_BYTES,
+  normalizeConversationQuestionAnswers,
   type ApprovalPendingInteraction,
   type ApprovalPendingInteractionResolution,
   type PendingInteraction,
@@ -78,10 +79,6 @@ function hasGrantedPermissions(
     (permissions.fileSystem?.read.length ?? 0) > 0 ||
     (permissions.fileSystem?.write.length ?? 0) > 0
   );
-}
-
-function hasNonWhitespaceText(value: string): boolean {
-  return value.trim().length > 0;
 }
 
 function validatePluginExtensionResolution(
@@ -377,99 +374,16 @@ function validateUserQuestionResolution(
     );
   }
 
-  const questionById = new Map(
-    interaction.payload.questions.map((question) => [question.id, question]),
-  );
-  for (const answerQuestionId of Object.keys(resolution.answers)) {
-    if (!questionById.has(answerQuestionId)) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Answer references unknown question '${answerQuestionId}'`,
-      );
-    }
-  }
-
-  for (const question of interaction.payload.questions) {
-    const answer = resolution.answers[question.id];
-    if (!answer) {
-      if (!question.required) continue;
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Missing answer for question '${question.id}'`,
-      );
-    }
-
-    const selectedValues = new Set(answer.selected);
-    if (selectedValues.size !== answer.selected.length) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Answer for question '${question.id}' contains duplicate selections`,
-      );
-    }
-
-    const optionCount = question.options?.length ?? 0;
-    if (answer.selected.length > optionCount) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Answer for question '${question.id}' selects more options than are available`,
-      );
-    }
-
-    if (!question.multiSelect && answer.selected.length > 1) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Question '${question.id}' accepts only one selected option`,
-      );
-    }
-
-    const optionValues = new Set(
-      (question.options ?? []).map((option) => option.value),
+  try {
+    normalizeConversationQuestionAnswers(
+      interaction.payload.questions,
+      resolution.answers,
     );
-    for (const selectedValue of answer.selected) {
-      if (!optionValues.has(selectedValue)) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          `Answer for question '${question.id}' selected an unavailable option`,
-        );
-      }
-    }
-
-    if (!question.allowFreeText && answer.freeText !== undefined) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Question '${question.id}' does not accept free-text answers`,
-      );
-    }
-
-    if (
-      question.allowFreeText &&
-      answer.freeText !== undefined &&
-      !hasNonWhitespaceText(answer.freeText)
-    ) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        "User question free text cannot be blank",
-      );
-    }
-
-    if (
-      question.required &&
-      answer.selected.length === 0 &&
-      answer.freeText === undefined
-    ) {
-      throw new ApiError(
-        400,
-        "invalid_request",
-        `Question '${question.id}' must include a selected option or free-text answer`,
-      );
-    }
+  } catch (error) {
+    throw new ApiError(
+      400,
+      "invalid_request",
+      error instanceof Error ? error.message : "Invalid question answer",
+    );
   }
 }
