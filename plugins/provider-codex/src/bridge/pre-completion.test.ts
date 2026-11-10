@@ -272,23 +272,79 @@ it("fails open on malformed, error and overlong policy replies", async () => {
 });
 
 it.each(["sessionFlags", "user", "project", "system", "enterpriseManaged"])(
-  "refuses existing hooks or trust state in %s before launch injection",
+  "refuses existing hooks declarations in %s before launch injection",
   async (type) => {
-    for (const hooks of [
-      { Stop: [{ hooks: [{ type: "command", command: "existing" }] }] },
-      { state: { existing: { trusted_hash: "preserve" } } },
-    ]) {
-      const request = vi.fn(async () => ({
-        layers: [{ name: { type }, config: { hooks } }],
-      }));
-      expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(false);
-      expect(request).toHaveBeenCalledExactlyOnceWith("config/read", {
-        cwd: "/fixture",
-        includeLayers: true,
-      });
-    }
+    const hooks = {
+      Stop: [{ hooks: [{ type: "command", command: "existing" }] }],
+    };
+    const request = vi.fn(async () => ({
+      layers: [{ name: { type }, config: { hooks } }],
+    }));
+    expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(false);
+    expect(request).toHaveBeenCalledExactlyOnceWith("config/read", {
+      cwd: "/fixture",
+      includeLayers: true,
+    });
   },
 );
+const orphanTrust = {
+  state: {
+    "/home/user/.codex/hooks.json:pre_tool_use:0:0": {
+      trusted_hash: "sha256:" + "b".repeat(64),
+    },
+  },
+};
+const cleanDiscovery = { data: [{ hooks: [], warnings: [], errors: [] }] };
+it.each(["sessionFlags", "project", "system", "enterpriseManaged"])(
+  "refuses trust state in %s before launch injection",
+  async (type) => {
+    const request = async (method: string) =>
+      method === "config/read"
+        ? { layers: [{ name: { type }, config: { hooks: orphanTrust } }] }
+        : cleanDiscovery;
+    expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(false);
+  },
+);
+it("permits user trust state that no discovered hook uses, as in a lab that links the owner's config.toml", async () => {
+  const request = async (method: string) =>
+    method === "config/read"
+      ? {
+          layers: [
+            { name: { type: "user" }, config: { hooks: orphanTrust } },
+            { name: { type: "system" }, config: {} },
+          ],
+        }
+      : cleanDiscovery;
+  expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(true);
+});
+it("still refuses user trust state beside a hook declaration, malformed trust state or a discovered hook", async () => {
+  const layers = (hooks: unknown) => ({
+    layers: [{ name: { type: "user" }, config: { hooks } }],
+  });
+  for (const response of [
+    layers({ ...orphanTrust, Stop: [{ hooks: [] }] }),
+    layers({ state: { key: "sha256:x" } }),
+    layers({ state: { key: { trusted_hash: "x", extra: true } } }),
+    layers({ state: [] }),
+    layers({}),
+  ])
+    expect(
+      await codexStopHookConfigIsClear(
+        async (method) =>
+          method === "config/read" ? response : cleanDiscovery,
+        "/fixture",
+      ),
+    ).toBe(false);
+  expect(
+    await codexStopHookConfigIsClear(
+      async (method) =>
+        method === "config/read"
+          ? layers(orphanTrust)
+          : { data: [{ hooks: [{}], warnings: [], errors: [] }] },
+      "/fixture",
+    ),
+  ).toBe(false);
+});
 it("refuses unknown layers, discovery errors and hooks discovered outside TOML layers", async () => {
   for (const response of [
     null,
@@ -317,10 +373,42 @@ it("refuses unknown layers, discovery errors and hooks discovered outside TOML l
     ).toBe(false);
   }
 });
+it("keeps user trust state while trusting only its declaration", async () => {
+  const f = await fixture();
+  const request = async (method: string) =>
+    method === "config/read"
+      ? {
+          layers: [
+            { name: { type: "user" }, config: { hooks: orphanTrust } },
+            {
+              name: { type: "sessionFlags" },
+              config: {
+                hooks: {
+                  Stop: [
+                    {
+                      hooks: [
+                        {
+                          type: "command",
+                          command: f.command,
+                          timeout: 4,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        }
+      : f.listing;
+  const config = await f.hook.trustConfig(request, "/fixture");
+  expect(config).toEqual(f.config);
+  expect(JSON.stringify(config)).not.toContain("hooks.json");
+});
 it("rechecks all source layers before replacing session-local trust configuration", async () => {
   const f = await fixture();
   const existing = { state: { old: { trusted_hash: "keep" } } };
-  for (const type of ["sessionFlags", "user", "project"]) {
+  for (const type of ["sessionFlags", "project"]) {
     await expect(
       f.hook.trustConfig(
         async () => ({

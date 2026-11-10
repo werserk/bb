@@ -504,7 +504,9 @@ async function handleRequest(message) {
               command && script.hookActivationFailure === "recheck"
                 ? {
                     hooks: {
-                      state: { existing: { trusted_hash: "preserve" } },
+                      Stop: [
+                        { hooks: [{ type: "command", command: "existing" }] },
+                      ],
                     },
                   }
                 : {},

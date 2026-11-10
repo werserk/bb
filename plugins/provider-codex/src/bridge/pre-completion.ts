@@ -85,6 +85,19 @@ const configLayersSchema = z.object({
     )
     .min(1),
 });
+const trustStateOnlySchema = z
+  .object({
+    state: z.record(
+      z.string(),
+      z
+        .object({
+          trusted_hash: z.string().optional(),
+          enabled: z.boolean().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 const featuresSchema = z.object({ hooks: z.boolean().optional() });
 const discoverySchema = z.object({
   data: z
@@ -113,6 +126,11 @@ export async function codexStopHookConfigIsClear(
         if (!features.success || features.data.hooks === false) return false;
       }
       if (!Object.hasOwn(layer.config, "hooks")) continue;
+      if (
+        layer.name.type === "user" &&
+        trustStateOnlySchema.safeParse(layer.config.hooks).success
+      )
+        continue;
       if (
         !own ||
         layer.name.type !== "sessionFlags" ||
