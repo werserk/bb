@@ -85,6 +85,7 @@ const configLayersSchema = z.object({
     )
     .min(1),
 });
+const featuresSchema = z.object({ hooks: z.boolean().optional() });
 const discoverySchema = z.object({
   data: z
     .array(
@@ -107,6 +108,10 @@ export async function codexStopHookConfigIsClear(
       await request("config/read", { cwd, includeLayers: true }),
     );
     for (const layer of config.layers) {
+      if (Object.hasOwn(layer.config, "features")) {
+        const features = featuresSchema.safeParse(layer.config.features);
+        if (!features.success || features.data.hooks === false) return false;
+      }
       if (!Object.hasOwn(layer.config, "hooks")) continue;
       if (
         !own ||

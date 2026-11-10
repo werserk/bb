@@ -351,3 +351,56 @@ it("permits known empty source layers with clean discovery", async () => {
     ),
   ).toBe(true);
 });
+
+it.each([
+  "packagedDefaults",
+  "mdm",
+  "system",
+  "enterpriseManaged",
+  "user",
+  "project",
+  "sessionFlags",
+  "legacyManagedConfigTomlFromFile",
+  "legacyManagedConfigTomlFromMdm",
+])(
+  "preserves explicit hooks opt-out in %s even beneath session flags",
+  async (type) => {
+    const f = await fixture();
+    const disabled = {
+      name: { type },
+      config: { features: { hooks: false } },
+      disabledReason: "inactive layer",
+    };
+    const request = async (method: string) =>
+      method === "config/read"
+        ? {
+            layers: [
+              disabled,
+              {
+                name: { type: "sessionFlags" },
+                config: { features: { hooks: true } },
+              },
+            ],
+          }
+        : { data: [{ hooks: [], warnings: [], errors: [] }] };
+    expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(false);
+    await expect(f.hook.trustConfig(request, "/fixture")).rejects.toThrow(
+      "Conflicting or unknown",
+    );
+    expect(disabled.config.features.hooks).toBe(false);
+  },
+);
+it.each([{}, { hooks: true }])(
+  "permits clean default/enabled hook features: %j",
+  async (features) => {
+    expect(
+      await codexStopHookConfigIsClear(
+        async (method) =>
+          method === "config/read"
+            ? { layers: [{ name: { type: "user" }, config: { features } }] }
+            : { data: [{ hooks: [], warnings: [], errors: [] }] },
+        "/fixture",
+      ),
+    ).toBe(true);
+  },
+);

@@ -16,6 +16,8 @@ it
   .each([
     "continue",
     "cancel",
+    "optout-launch",
+    "optout-user",
     "existing-launch-enabled",
     "existing-launch-disabled",
     "existing-user-enabled",
@@ -118,6 +120,17 @@ it
     const marker = join(root, "existing-hook-ran");
     const userConfig = join(root, "home", "config.toml");
     let userConfigBefore: string | null = null;
+    const optedOut = mode.startsWith("optout-");
+    if (mode === "optout-user") {
+      userConfigBefore = "features.hooks=false\n";
+      await writeFile(userConfig, userConfigBefore);
+    } else if (mode === "optout-launch") {
+      const launchArgs = z
+        .array(z.string())
+        .parse(JSON.parse(process.env.BB_CODEX_BRIDGE_APP_SERVER_ARGS!));
+      launchArgs.push("-c", "features.hooks=false");
+      vi.stubEnv("BB_CODEX_BRIDGE_APP_SERVER_ARGS", JSON.stringify(launchArgs));
+    }
     if (conflicting) {
       const client = join(root, "existing-hook.cjs");
       await writeFile(
@@ -211,7 +224,7 @@ it
         clientRequestId: "creq_a2b3c4d5e6",
         options: FULL_ACCESS_SESSION_OPTIONS,
       });
-      if (conflicting) {
+      if (conflicting || optedOut) {
         let policyCalls = 0;
         await vi.waitFor(
           () => {
@@ -258,11 +271,21 @@ it
           { timeout: 15000 },
         );
         expect(policyCalls).toBe(0);
-        expect(await readFile(marker, "utf8")).toBe("ran\n");
+        if (conflicting) expect(await readFile(marker, "utf8")).toBe("ran\n");
         expect(requests).toBe(1);
-        expect(JSON.stringify(bridge.messages)).toContain(
-          "pre_completion: unsupported_provider",
-        );
+        const configWarnings = bridge.messages
+          .flatMap(
+            (m) =>
+              (
+                m.params as
+                  | { deltas?: Array<{ kind: string; category?: string }> }
+                  | undefined
+              )?.deltas ?? [],
+          )
+          .filter(
+            (d) => d.kind === "provider.warning" && d.category === "config",
+          );
+        expect(configWarnings).toEqual([]);
         if (userConfigBefore !== null)
           expect(await readFile(userConfig, "utf8")).toBe(userConfigBefore);
         return;

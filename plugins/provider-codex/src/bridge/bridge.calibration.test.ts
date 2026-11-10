@@ -421,7 +421,6 @@ function firstTurnId(events: readonly ThreadEvent[]): string | undefined {
 const GOLDEN_EVENT_STREAM: string[] = [
   "thread/started",
   "thread/identity",
-  "provider/warning",
   "turn/started",
   "turn/input/accepted",
   "item/started:agentMessage",
@@ -483,11 +482,7 @@ it("replays one scripted codex session onto the golden event stream", async () =
 
   expect(
     canonical.events.find((event) => event.type === "provider/warning"),
-  ).toMatchObject({
-    type: "provider/warning",
-    summary:
-      "pre_completion: unsupported_provider (trusted Codex Stop hook unavailable)",
-  });
+  ).toBeUndefined();
   expect(canonical.approvals).toHaveLength(1);
   const approvalRequest = canonical.approvals[0];
   const canonicalApproval = approvalRequest?.payload;

@@ -1552,23 +1552,17 @@ async function constructThreadSession(
       instructionMode: args.instructionMode,
       options: decoded.sessionOptions,
     });
-    let hookConfig: NonNullable<BbThreadStartParams["config"]> = {};
-    try {
-      hookConfig =
-        (await session.stopHook?.trustConfig(
-          (method, params) =>
-            connection.request({
-              method,
-              params,
-              resultSchema: ignoredChildResultSchema,
-              timeoutMs: 3000,
-            }),
-          args.cwd,
-        )) ?? {};
-    } catch {
-      await session.stopHook?.close();
-      session.stopHook = null;
-    }
+    const hookConfig =
+      (await session.stopHook?.trustConfig(
+        (method, params) =>
+          connection.request({
+            method,
+            params,
+            resultSchema: ignoredChildResultSchema,
+            timeoutMs: 3000,
+          }),
+        args.cwd,
+      )) ?? {};
     const sharedConstructionParams = {
       approvalPolicy: preparedGitRoots.permissionSettings.approvalPolicy,
       approvalsReviewer: preparedGitRoots.permissionSettings.approvalsReviewer,
@@ -1632,30 +1626,16 @@ async function constructThreadSession(
     );
     const codexThreadId = result.thread.id;
     session.codexThreadId = codexThreadId;
-    try {
-      await session.stopHook?.verify(
-        (method, params) =>
-          connection.request({
-            method,
-            params,
-            resultSchema: ignoredChildResultSchema,
-            timeoutMs: 3000,
-          }),
-        codexThreadId,
-      );
-    } catch {
-      await session.stopHook?.close();
-      session.stopHook = null;
-    }
-    if (!session.stopHook)
-      sendThreadDeltas(session, [
-        {
-          kind: "provider.warning",
-          category: "config",
-          summary:
-            "pre_completion: unsupported_provider (trusted Codex Stop hook unavailable)",
-        },
-      ]);
+    await session.stopHook?.verify(
+      (method, params) =>
+        connection.request({
+          method,
+          params,
+          resultSchema: ignoredChildResultSchema,
+          timeoutMs: 3000,
+        }),
+      codexThreadId,
+    );
     translator.activateThreadGitWritableRoots({
       providerThreadId: codexThreadId,
       threadId: args.threadId,

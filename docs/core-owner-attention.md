@@ -101,22 +101,28 @@ baseline checks, not proof of a Codex correction.
 session directory, a 0600 Node hook client with a random session credential and
 a Unix socket. Before injecting flags, an unmodified app-server probe reads `config/read`
 with the actual workspace cwd and `includeLayers: true`, then `hooks/list`.
-Any existing hooks declaration or trust state in any source layer, including a
-disabled layer, prevents new activation. Discovered hooks outside TOML (such as
-hooks.json and plugin hooks), unknown source layers, missing config information
+Any existing hooks declaration or trust state, or explicit `features.hooks=false`,
+in any source layer, including a disabled layer, prevents new activation.
+Discovered hooks outside TOML (such as hooks.json and plugin hooks), unknown
+source layers, missing config information
 and discovery warnings/errors also prevent activation. This conservative path
 leaves configured launch arguments, declarations and trust state unchanged,
-regardless of whether the server policy is enabled, and emits the existing
-`pre_completion: unsupported_provider` coverage-gap warning.
+regardless of whether the server policy is enabled. Nonactivation does not emit
+a visible provider warning: the bridge has no plugin opt-in information. For an
+opted-in thread, absence of a server pre_completion observation remains a coverage
+gap in the acceptance denominator; it never counts as successful coverage.
 
 Only a clear configuration allows that session's app-server to receive
 `features.hooks` and `hooks.Stop` through launch flags. Before thread/start,
 resume or fork receives new trust state, the same source-layer/discovery check
 runs again, allowing only the exact generated session-flags declaration with
-no prior trust state. A conflict at this point closes the private hook and
-omits the thread hook override. `hooks/list` supplies the exact declaration
-hash; a second list on the loaded thread must report trusted. Only the generated
-declaration is trusted. No global or repository hook configuration is written;
+no prior trust state or explicit hook opt-out. `hooks/list` supplies the exact
+declaration hash; a second list on the loaded thread must report trusted. A
+recheck refusal or loaded-thread verification failure fails construction
+explicitly, closes private IPC, removes its script and terminates the child
+before returning the error. The bridge does not continue with forced hook flags
+pointing at a deleted client. A fresh construction starts with the original
+configured arguments. Only the generated declaration is trusted. No global or repository hook configuration is written;
 existing hooks and trust are never replaced to obtain correction coverage.
 
 The bridge requires a native synchronous sessionFlags Stop-start notification
@@ -141,10 +147,11 @@ The credential is private host-process custody, not an OS sandbox against a
 malicious process with the same uid or unrestricted filesystem access. Native
 notification gating additionally prevents ordinary model tool calls and direct
 socket traffic outside the exact native Stop window from invoking policy.
-Windows activation is currently fail-open/unsupported. Old CLIs, discovery or
-trust failures also allow normal completion and emit a provider warning with
-`pre_completion: unsupported_provider`; matching source capability alone never
-establishes coverage on a particular host.
+Windows activation is currently fail-open/unsupported. Old CLIs and preflight
+discovery failures retain the unmodified connection and allow normal completion
+without a visible warning. Once hook activation has started, trust recheck or
+verification failure explicitly fails construction and cleans up the child.
+Matching source capability alone never establishes coverage on a particular host.
 
 ## Checked and missing runtime evidence
 
@@ -157,9 +164,13 @@ an in-flight policy and verifies no corrective second model request. It does
 not spend model quota or install a bb candidate. Four further installed CLI fixtures configure a trusted existing Stop through
 launch flags or an isolated user config, each with enabled/disabled policy
 responses. They prove the original hook executes once, no correction call is
-emitted, the coverage-gap warning is present and the user config is unchanged.
-Unit fixtures reject declarations/trust across source layers and unknown
-discovery, including a conflict introduced before thread trust configuration.
+emitted, no provider warning is shown and the user config is unchanged. Further
+native fixtures preserve explicit user/launch hook opt-out without policy calls.
+Unit fixtures reject declarations/trust and explicit hook opt-out across every
+known source layer and unknown discovery. Construction fixtures introduce a
+conflict before thread trust configuration or reject loaded-thread trust,
+verifying an explicit error, exited children, no private script or writer lock,
+and successful clean reconstruction with the original arguments.
 Unit fixtures also execute the real generated client and cover authentication,
 bounded text, replay, cross-session
 and turn rejection, malformed/unavailable policy, deadline and cancellation.
