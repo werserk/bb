@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -62,6 +63,79 @@ type Request = (
   params: Record<string, unknown>,
 ) => Promise<unknown>;
 
+const configLayersSchema = z.object({
+  layers: z
+    .array(
+      z.object({
+        name: z.object({
+          type: z.enum([
+            "packagedDefaults",
+            "mdm",
+            "system",
+            "enterpriseManaged",
+            "user",
+            "project",
+            "sessionFlags",
+            "legacyManagedConfigTomlFromFile",
+            "legacyManagedConfigTomlFromMdm",
+          ]),
+        }),
+        config: z.record(z.string(), z.unknown()),
+      }),
+    )
+    .min(1),
+});
+const discoverySchema = z.object({
+  data: z
+    .array(
+      z.object({
+        hooks: z.array(z.unknown()),
+        warnings: z.array(z.string()),
+        errors: z.array(z.string()),
+      }),
+    )
+    .length(1),
+});
+
+export async function codexStopHookConfigIsClear(
+  request: Request,
+  cwd: string,
+  own?: { command: string; hooks: JsonValue },
+): Promise<boolean> {
+  try {
+    const config = configLayersSchema.parse(
+      await request("config/read", { cwd, includeLayers: true }),
+    );
+    for (const layer of config.layers) {
+      if (!Object.hasOwn(layer.config, "hooks")) continue;
+      if (
+        !own ||
+        layer.name.type !== "sessionFlags" ||
+        !isDeepStrictEqual(layer.config.hooks, own.hooks)
+      )
+        return false;
+    }
+    const listing = discoverySchema.parse(
+      await request("hooks/list", { cwds: [cwd] }),
+    );
+    const ownListing = own ? listingSchema.safeParse(listing) : null;
+    for (const entry of listing.data) {
+      if (entry.errors.length || entry.warnings.length) return false;
+      if (!own && entry.hooks.length) return false;
+      if (
+        own &&
+        (entry.hooks.length !== 1 ||
+          !ownListing?.success ||
+          ownListing.data.data[0].hooks[0].command !== own.command)
+      )
+        return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function createCodexStopHook(args: {
   identity: () => {
     threadId: string | null;
@@ -81,6 +155,9 @@ export async function createCodexStopHook(args: {
   const token = randomBytes(32).toString("hex");
   const client = join(root, "hook.cjs");
   const command = `${quote(process.execPath)} ${quote(client)}`;
+  const declaration = {
+    Stop: [{ hooks: [{ type: "command", command, timeout: 4 }] }],
+  };
   let retired = false;
   let source: { path: string; order: number } | null = null;
   const runs = new Map<string, { threadId: string; turnId: string }>();
@@ -236,6 +313,13 @@ process.stdin.on('end',()=>{try{const input=JSON.parse(data);if(typeof input.las
       request: Request,
       cwd: string,
     ): Promise<Record<string, JsonValue>> {
+      if (
+        !(await codexStopHookConfigIsClear(request, cwd, {
+          command,
+          hooks: declaration,
+        }))
+      )
+        throw new Error("Conflicting or unknown Codex hook configuration");
       const listing = listingSchema.parse(
         await request("hooks/list", { cwds: [cwd] }),
       );

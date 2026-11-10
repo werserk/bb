@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { connect } from "node:net";
 import { afterEach, expect, it, vi } from "vitest";
-import { createCodexStopHook, type CodexStopHook } from "./pre-completion.js";
+import {
+  codexStopHookConfigIsClear,
+  createCodexStopHook,
+  type CodexStopHook,
+} from "./pre-completion.js";
 
 const hooks: CodexStopHook[] = [];
 afterEach(async () => {
@@ -54,6 +58,8 @@ async function fixture(
   const listing = {
     data: [
       {
+        warnings: [],
+        errors: [],
         hooks: [
           {
             key: "/<session-flags>/config.toml:stop:0:0",
@@ -70,7 +76,26 @@ async function fixture(
       },
     ],
   };
-  const config = await hook.trustConfig(async () => listing, "/fixture");
+  const config = await hook.trustConfig(
+    async (method) =>
+      method === "config/read"
+        ? {
+            layers: [
+              {
+                name: { type: "sessionFlags" },
+                config: {
+                  hooks: {
+                    Stop: [
+                      { hooks: [{ type: "command", command, timeout: 4 }] },
+                    ],
+                  },
+                },
+              },
+            ],
+          }
+        : listing,
+    "/fixture",
+  );
   await hook.verify(async () => listing, identity.threadId);
   const call = (value = input) =>
     new Promise<string>((resolve, reject) => {
@@ -244,4 +269,85 @@ it("fails open on malformed, error and overlong policy replies", async () => {
     f.started();
     expect(JSON.parse(await f.call())).toEqual({});
   }
+});
+
+it.each(["sessionFlags", "user", "project", "system", "enterpriseManaged"])(
+  "refuses existing hooks or trust state in %s before launch injection",
+  async (type) => {
+    for (const hooks of [
+      { Stop: [{ hooks: [{ type: "command", command: "existing" }] }] },
+      { state: { existing: { trusted_hash: "preserve" } } },
+    ]) {
+      const request = vi.fn(async () => ({
+        layers: [{ name: { type }, config: { hooks } }],
+      }));
+      expect(await codexStopHookConfigIsClear(request, "/fixture")).toBe(false);
+      expect(request).toHaveBeenCalledExactlyOnceWith("config/read", {
+        cwd: "/fixture",
+        includeLayers: true,
+      });
+    }
+  },
+);
+it("refuses unknown layers, discovery errors and hooks discovered outside TOML layers", async () => {
+  for (const response of [
+    null,
+    { layers: null },
+    { layers: [] },
+    { layers: [{ name: { type: "unknown-future-layer" }, config: {} }] },
+    { layers: [{ name: { type: "user" }, config: null }] },
+  ]) {
+    expect(
+      await codexStopHookConfigIsClear(async () => response, "/fixture"),
+    ).toBe(false);
+  }
+  for (const data of [
+    { hooks: [{}], warnings: [], errors: [] },
+    { hooks: [], warnings: ["unreadable hooks.json"], errors: [] },
+    { hooks: [], warnings: [], errors: ["invalid hook"] },
+  ]) {
+    expect(
+      await codexStopHookConfigIsClear(
+        async (method) =>
+          method === "config/read"
+            ? { layers: [{ name: { type: "user" }, config: {} }] }
+            : { data: [data] },
+        "/fixture",
+      ),
+    ).toBe(false);
+  }
+});
+it("rechecks all source layers before replacing session-local trust configuration", async () => {
+  const f = await fixture();
+  const existing = { state: { old: { trusted_hash: "keep" } } };
+  for (const type of ["sessionFlags", "user", "project"]) {
+    await expect(
+      f.hook.trustConfig(
+        async () => ({
+          layers: [{ name: { type }, config: { hooks: existing } }],
+        }),
+        "/fixture",
+      ),
+    ).rejects.toThrow("Conflicting or unknown");
+  }
+  expect(existing).toEqual({ state: { old: { trusted_hash: "keep" } } });
+});
+it("permits known empty source layers with clean discovery", async () => {
+  expect(
+    await codexStopHookConfigIsClear(
+      async (method) =>
+        method === "config/read"
+          ? {
+              layers: [
+                { name: { type: "user" }, config: {} },
+                {
+                  name: { type: "sessionFlags" },
+                  config: { model: "fixture" },
+                },
+              ],
+            }
+          : { data: [{ hooks: [], warnings: [], errors: [] }] },
+      "/fixture",
+    ),
+  ).toBe(true);
 });

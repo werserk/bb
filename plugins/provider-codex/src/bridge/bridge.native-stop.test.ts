@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
+import { createCodexAppServerConnection } from "./app-server-connection.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { experimental_createBridgeJsonRpcTestHarness as createHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
@@ -11,8 +13,15 @@ afterEach(() => vi.unstubAllEnvs());
 
 it
   .runIf(process.env.BB_CODEX_NATIVE_STOP_FIXTURE === "1")
-  .each(["continue", "cancel"])(
-  "installed Codex refuses Stop and continues inside the same provider turn through bridge IPC: %s",
+  .each([
+    "continue",
+    "cancel",
+    "existing-launch-enabled",
+    "existing-launch-disabled",
+    "existing-user-enabled",
+    "existing-user-disabled",
+  ])(
+  "installed Codex preserves Stop custody and continuity: %s",
   async (mode) => {
     const root = await mkdtemp(join(tmpdir(), "bb-native-stop-"));
     await mkdir(join(root, "home"));
@@ -105,6 +114,83 @@ it
     vi.stubEnv("CODEX_OPENAI_BASE_URL", "");
     vi.stubEnv("CODEX_POOL_AUTH_TOKEN", "");
     vi.stubEnv("CODEX_HOME", join(root, "home"));
+    const conflicting = mode.startsWith("existing-");
+    const marker = join(root, "existing-hook-ran");
+    const userConfig = join(root, "home", "config.toml");
+    let userConfigBefore: string | null = null;
+    if (conflicting) {
+      const client = join(root, "existing-hook.cjs");
+      await writeFile(
+        client,
+        `require('node:fs').appendFileSync(${JSON.stringify(marker)},'ran\\n');process.stdout.write('{}');`,
+      );
+      const command = `'${process.execPath}' '${client}'`;
+      const stop = `[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=4}]}]`;
+      const launchArgs = z
+        .array(z.string())
+        .parse(JSON.parse(process.env.BB_CODEX_BRIDGE_APP_SERVER_ARGS!));
+      if (mode.startsWith("existing-user")) {
+        await writeFile(
+          userConfig,
+          `features.hooks=true\n[hooks]\nStop=${stop}\n`,
+        );
+      } else {
+        launchArgs.push(
+          "-c",
+          "features.hooks=true",
+          "-c",
+          `hooks.Stop=${stop}`,
+        );
+      }
+      const probe = createCodexAppServerConnection({
+        command: "codex",
+        args: launchArgs,
+        cwd: root,
+        env: process.env,
+        recordThreadId: null,
+        onNotification: () => {},
+        onRequest: (_m, _p, r) => r.error(-32601, "fixture"),
+        onExit: () => {},
+      });
+      try {
+        await probe.request({
+          method: "initialize",
+          params: {
+            clientInfo: { name: "bb-fixture", version: "1" },
+            capabilities: { experimentalApi: true },
+          },
+          resultSchema: z.unknown(),
+        });
+        const listing = await probe.request({
+          method: "hooks/list",
+          params: { cwds: [root] },
+          resultSchema: z.object({
+            data: z.array(
+              z.object({
+                hooks: z.array(
+                  z.object({ key: z.string(), currentHash: z.string() }),
+                ),
+              }),
+            ),
+          }),
+        });
+        const existing = listing.data[0].hooks[0];
+        if (mode.startsWith("existing-user")) {
+          userConfigBefore =
+            (await readFile(userConfig, "utf8")) +
+            `[hooks.state.${JSON.stringify(existing.key)}]\ntrusted_hash=${JSON.stringify(existing.currentHash)}\n`;
+          await writeFile(userConfig, userConfigBefore);
+        } else {
+          launchArgs.push(
+            "-c",
+            `hooks.state={${JSON.stringify(existing.key)}={trusted_hash=${JSON.stringify(existing.currentHash)}}}`,
+          );
+        }
+      } finally {
+        await probe.kill();
+      }
+      vi.stubEnv("BB_CODEX_BRIDGE_APP_SERVER_ARGS", JSON.stringify(launchArgs));
+    }
     const bridge = createHarness(handleLine);
     let releasedProviderThreadId = "unstarted";
     try {
@@ -125,6 +211,62 @@ it
         clientRequestId: "creq_a2b3c4d5e6",
         options: FULL_ACCESS_SESSION_OPTIONS,
       });
+      if (conflicting) {
+        let policyCalls = 0;
+        await vi.waitFor(
+          () => {
+            for (const call of bridge.messages.filter(
+              (m) => m.method === "item/tool/call",
+            )) {
+              policyCalls++;
+              handleLine(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: call.id,
+                  result: {
+                    success: true,
+                    contentItems: [
+                      {
+                        type: "inputText",
+                        text: JSON.stringify(
+                          mode.endsWith("enabled")
+                            ? {
+                                action: "continue",
+                                instruction: "Ask natively",
+                              }
+                            : { action: "allow" },
+                        ),
+                      },
+                    ],
+                  },
+                }),
+              );
+            }
+            expect(
+              bridge.messages
+                .flatMap(
+                  (m) =>
+                    (
+                      m.params as
+                        | { deltas?: Array<{ kind: string }> }
+                        | undefined
+                    )?.deltas ?? [],
+                )
+                .some((d) => d.kind === "turn.boundary"),
+            ).toBe(true);
+          },
+          { timeout: 15000 },
+        );
+        expect(policyCalls).toBe(0);
+        expect(await readFile(marker, "utf8")).toBe("ran\n");
+        expect(requests).toBe(1);
+        expect(JSON.stringify(bridge.messages)).toContain(
+          "pre_completion: unsupported_provider",
+        );
+        if (userConfigBefore !== null)
+          expect(await readFile(userConfig, "utf8")).toBe(userConfigBefore);
+        return;
+      }
       await vi.waitFor(
         () =>
           expect(

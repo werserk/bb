@@ -6,7 +6,11 @@ import {
 import { experimental_PRE_COMPLETION_TOOL_NAME as PRE_COMPLETION_TOOL_NAME } from "@get-bb/plugin-sdk/provider-bridge";
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
-import { createCodexStopHook, type CodexStopHook } from "./pre-completion.js";
+import {
+  codexStopHookConfigIsClear,
+  createCodexStopHook,
+  type CodexStopHook,
+} from "./pre-completion.js";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import {
@@ -1436,28 +1440,79 @@ async function constructThreadSession(
   }
   sendThreadDeltas(session, [{ kind: "session.reset" }]);
 
-  try {
-    session.stopHook = await createCodexStopHook({
-      identity: () => ({
-        threadId: session.codexThreadId,
-        openTurnIds: session.openCodexTurnIds,
-        live:
-          !session.closing && currentSession(args.threadId, serial) === session,
-      }),
-      request: (turnId, input, signal) =>
-        sendRuntimeRequest(
-          BRIDGE_INBOUND_REQUEST_METHODS.toolCall,
-          {
-            providerThreadId: session.codexThreadId,
-            threadId: session.bbThreadId,
-            turnId,
-            callId: `bb-stop-${serial}-${turnId}`,
-            tool: PRE_COMPLETION_TOOL_NAME,
-            arguments: input,
-          },
-          signal,
-        ),
+  let notifications = Promise.resolve();
+  const spawnSessionConnection = (extraArgs?: string[]) => {
+    const child = spawnChildConnection({
+      extraArgs,
+      envVars: decoded.sessionOptions.envVars,
+      recordThreadId: args.threadId,
+      onNotification: (method, params) => {
+        notifications = notifications
+          .then(() =>
+            handleChildNotification(args.threadId, serial, method, params),
+          )
+          .catch((error: unknown) =>
+            sendNotification(BRIDGE_NOTIFICATION_METHODS.error, {
+              threadId: args.threadId,
+              message: describeCodexLaunchError(error),
+            }),
+          );
+      },
+      onRequest: (method, params, responder) =>
+        handleChildRequest(args.threadId, serial, method, params, responder),
+      onExit: (info) => {
+        void notifications.then(() => {
+          if (session.connection === child)
+            handleChildExit(args.threadId, serial, info);
+        });
+      },
     });
+    session.connection = child;
+    return child;
+  };
+  let connection = spawnSessionConnection();
+  let initialized = false;
+  let hookConfigClear = false;
+  try {
+    await initializeChild(connection);
+    initialized = true;
+    hookConfigClear = await codexStopHookConfigIsClear(
+      (method, params) =>
+        connection.request({
+          method,
+          params,
+          resultSchema: ignoredChildResultSchema,
+          timeoutMs: 3000,
+        }),
+      args.cwd,
+    );
+  } catch {
+    hookConfigClear = false;
+  }
+  try {
+    if (hookConfigClear && !session.closing)
+      session.stopHook = await createCodexStopHook({
+        identity: () => ({
+          threadId: session.codexThreadId,
+          openTurnIds: session.openCodexTurnIds,
+          live:
+            !session.closing &&
+            currentSession(args.threadId, serial) === session,
+        }),
+        request: (turnId, input, signal) =>
+          sendRuntimeRequest(
+            BRIDGE_INBOUND_REQUEST_METHODS.toolCall,
+            {
+              providerThreadId: session.codexThreadId,
+              threadId: session.bbThreadId,
+              turnId,
+              callId: `bb-stop-${serial}-${turnId}`,
+              tool: PRE_COMPLETION_TOOL_NAME,
+              arguments: input,
+            },
+            signal,
+          ),
+      });
   } catch {
     session.stopHook = null;
   }
@@ -1468,35 +1523,22 @@ async function constructThreadSession(
       new Error("session released before launch"),
     );
   }
-  let notifications = Promise.resolve();
-  const connection = spawnChildConnection({
-    extraArgs: session.stopHook?.launchArgs,
-    envVars: decoded.sessionOptions.envVars,
-    recordThreadId: args.threadId,
-    onNotification: (method, params) => {
-      notifications = notifications
-        .then(() =>
-          handleChildNotification(args.threadId, serial, method, params),
-        )
-        .catch((error: unknown) => {
-          sendNotification(BRIDGE_NOTIFICATION_METHODS.error, {
-            threadId: args.threadId,
-            message: describeCodexLaunchError(error),
-          });
-        });
-    },
-    onRequest: (method, params, responder) =>
-      handleChildRequest(args.threadId, serial, method, params, responder),
-    onExit: (info) => {
-      void notifications.then(() =>
-        handleChildExit(args.threadId, serial, info),
+  if (session.stopHook) {
+    session.connection = null;
+    await connection.kill();
+    if (session.closing) {
+      await session.stopHook?.close();
+      session.stopHook = null;
+      throw new CodexSessionReleasedError(
+        new Error("session released during hook activation"),
       );
-    },
-  });
-  session.connection = connection;
+    }
+    connection = spawnSessionConnection(session.stopHook.launchArgs);
+    initialized = false;
+  }
 
   try {
-    await initializeChild(connection);
+    if (!initialized) await initializeChild(connection);
 
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       command: {

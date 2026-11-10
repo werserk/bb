@@ -99,15 +99,25 @@ baseline checks, not proof of a Codex correction.
 
 `plugins/provider-codex/src/bridge/pre-completion.ts` creates a private 0700
 session directory, a 0600 Node hook client with a random session credential and
-a Unix socket. Only that session's app-server receives `features.hooks` and
-`hooks.Stop` through launch flags. No global or repository hook configuration
-is written. `hooks/list` supplies the exact declaration hash; thread/start,
-resume and fork receive that hash in session-local hook state together with
-the same declaration. A second list on the loaded thread must report trusted.
-Only the generated declaration is trusted. The session Stop override replaces
-other Stop declarations in the session-flags layer; it does not persist edits
-to their source files. Existing other event declarations are not deliberately
-trusted by this feature.
+a Unix socket. Before injecting flags, an unmodified app-server probe reads `config/read`
+with the actual workspace cwd and `includeLayers: true`, then `hooks/list`.
+Any existing hooks declaration or trust state in any source layer, including a
+disabled layer, prevents new activation. Discovered hooks outside TOML (such as
+hooks.json and plugin hooks), unknown source layers, missing config information
+and discovery warnings/errors also prevent activation. This conservative path
+leaves configured launch arguments, declarations and trust state unchanged,
+regardless of whether the server policy is enabled, and emits the existing
+`pre_completion: unsupported_provider` coverage-gap warning.
+
+Only a clear configuration allows that session's app-server to receive
+`features.hooks` and `hooks.Stop` through launch flags. Before thread/start,
+resume or fork receives new trust state, the same source-layer/discovery check
+runs again, allowing only the exact generated session-flags declaration with
+no prior trust state. A conflict at this point closes the private hook and
+omits the thread hook override. `hooks/list` supplies the exact declaration
+hash; a second list on the loaded thread must report trusted. Only the generated
+declaration is trusted. No global or repository hook configuration is written;
+existing hooks and trust are never replaced to obtain correction coverage.
 
 The bridge requires a native synchronous sessionFlags Stop-start notification
 from the discovered source path and display order, exact provider session ID,
@@ -144,8 +154,14 @@ isolated CODEX_HOME, with pool routing cleared. It proves trusted hook execution
 actual bridge IPC, the corrective text reaching a second model request and one
 provider turn.open/turn.boundary pair with identical origin. It also interrupts
 an in-flight policy and verifies no corrective second model request. It does
-not spend model quota or install a bb candidate. Unit fixtures execute the real
-generated client and cover authentication, bounded text, replay, cross-session
+not spend model quota or install a bb candidate. Four further installed CLI fixtures configure a trusted existing Stop through
+launch flags or an isolated user config, each with enabled/disabled policy
+responses. They prove the original hook executes once, no correction call is
+emitted, the coverage-gap warning is present and the user config is unchanged.
+Unit fixtures reject declarations/trust across source layers and unknown
+discovery, including a conflict introduced before thread trust configuration.
+Unit fixtures also execute the real generated client and cover authentication,
+bounded text, replay, cross-session
 and turn rejection, malformed/unavailable policy, deadline and cancellation.
 Shared server fixtures exercise both provider IDs against real migrated SQLite.
 
