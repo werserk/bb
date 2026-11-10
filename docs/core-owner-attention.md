@@ -95,14 +95,35 @@ text and old-host responses. They use real migrated SQLite and simulated native
 provider streams. Existing Codex question and identity fixtures remain relevant
 baseline checks, not proof of a Codex correction.
 
+## Pending question across a daemon replacement
+
+A provider's native question is answered through a continuation held in the
+replaced daemon's memory (`apps/host-daemon/src/interactive-request-registry.ts`),
+so a new daemon instance cannot receive its answer. Opening a session with a
+different `instanceId` interrupts the host's pending interactions with a
+"Host daemon restarted" reason; a socket replacement by the same instance keeps
+them pending. The interrupted row keeps its thread, turn and provider request
+identity and is returned by id, but `thread interactions list` shows only
+`pending`/`resolving` rows, so a list-based observation reads "absent". A late
+answer is refused as already interrupted, repeated replacement changes nothing,
+and the once guard of the ended turn is untouched. Answering after replacement
+would need a resume contract (a new turn carrying the answer), which is a
+separate decision; none exists, and no answer is bound to a different root.
+
 ## Codex activation and private IPC
 
 `plugins/provider-codex/src/bridge/pre-completion.ts` creates a private 0700
 session directory, a 0600 Node hook client with a random session credential and
 a Unix socket. Before injecting flags, an unmodified app-server probe reads `config/read`
 with the actual workspace cwd and `includeLayers: true`, then `hooks/list`.
-Any existing hooks declaration or trust state, or explicit `features.hooks=false`,
-in any source layer, including a disabled layer, prevents new activation.
+Any existing hooks declaration, or explicit `features.hooks=false`, in any source
+layer, including a disabled layer, prevents new activation. Trust state alone in
+the user layer (`hooks.state` entries with only `trusted_hash`/`enabled`, no
+declaration) does not: Codex merges session configuration into the user table, a
+probe on Codex 0.166 showed a user hook's trust surviving beside the session Stop
+trust, and a discovered hook still prevents activation. The owner's own
+`config.toml` carries such an entry, so a lab that links it was refused silently
+before this rule.
 Discovered hooks outside TOML (such as hooks.json and plugin hooks), unknown
 source layers, missing config information
 and discovery warnings/errors also prevent activation. This conservative path
@@ -116,7 +137,7 @@ Only a clear configuration allows that session's app-server to receive
 `features.hooks` and `hooks.Stop` through launch flags. Before thread/start,
 resume or fork receives new trust state, the same source-layer/discovery check
 runs again, allowing only the exact generated session-flags declaration with
-no prior trust state or explicit hook opt-out. `hooks/list` supplies the exact
+no prior declaration or explicit hook opt-out. `hooks/list` supplies the exact
 declaration hash; a second list on the loaded thread must report trusted. A
 recheck refusal or loaded-thread verification failure fails construction
 explicitly, closes private IPC, removes its script and terminates the child

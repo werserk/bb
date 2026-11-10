@@ -1223,6 +1223,107 @@ describe("pending interaction lifecycle", () => {
     });
   });
 
+  it("keeps a replaced daemon's question as an interrupted record that no answer can rebind", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-pending-interaction-replaced-instance",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "claude-code",
+      });
+      const created = registerPendingInteraction(
+        harness.deps,
+        harness.deps.pendingInteractions,
+        {
+          threadId: thread.id,
+          turnId: "turn-replaced-instance",
+          providerId: "claude-code",
+          providerThreadId: "provider-thread-replaced-instance",
+          providerRequestId: "request-replaced-instance",
+          payload: createUserQuestionPayload(),
+        },
+      );
+      if (created.outcome === "rejected") {
+        throw new Error(
+          `Expected interaction registration to succeed: ${created.reason}`,
+        );
+      }
+      const reasonPrefix =
+        "Host daemon restarted while awaiting user interaction";
+      const stored = () =>
+        harness.db
+          .select()
+          .from(pendingInteractionTable)
+          .where(eq(pendingInteractionTable.id, created.interaction.id))
+          .get();
+
+      const replacement = seedSession(harness.deps, host.id, {
+        instanceId: "instance-2",
+      });
+      await handleHostSessionOpened(harness.deps, {
+        activeThreads: [],
+        undeliveredEventThreadIds: [],
+        hostId: host.id,
+        openedSession: replacement,
+        previousSession: session,
+      });
+
+      const interrupted = stored();
+      expect(interrupted).toMatchObject({
+        id: created.interaction.id,
+        threadId: thread.id,
+        turnId: "turn-replaced-instance",
+        providerRequestId: "request-replaced-instance",
+        status: "interrupted",
+      });
+      expect(interrupted?.statusReason).toContain(reasonPrefix);
+      expect(
+        harness.deps.pendingInteractions.listPendingThreadInteractions(
+          thread.id,
+        ),
+      ).toEqual([]);
+      expect(
+        harness.deps.pendingInteractions.getThreadInteraction({
+          threadId: thread.id,
+          interactionId: created.interaction.id,
+        }),
+      ).toMatchObject({
+        status: "interrupted",
+        turnId: "turn-replaced-instance",
+      });
+      expect(() =>
+        harness.deps.pendingInteractions.resolvePendingInteraction({
+          threadId: thread.id,
+          interactionId: created.interaction.id,
+          resolution: createUserAnswerResolution(),
+        }),
+      ).toThrowError(
+        `Pending interaction ${created.interaction.id} is already interrupted`,
+      );
+
+      const again = seedSession(harness.deps, host.id, {
+        instanceId: "instance-3",
+      });
+      await handleHostSessionOpened(harness.deps, {
+        activeThreads: [],
+        undeliveredEventThreadIds: [],
+        hostId: host.id,
+        openedSession: again,
+        previousSession: replacement,
+      });
+      expect(stored()).toEqual(interrupted);
+    });
+  });
+
   it("rejects active provider request reuse with a different payload", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, {
