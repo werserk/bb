@@ -167,7 +167,9 @@ export function ThreadPlanSteps({
         <ThreadTodoCard
           key={view.current.planId ?? "current"}
           {...props}
-          focusRequest={compact ? undefined : focusRequest}
+          focusRequest={
+            compact && focusRequest?.interactionId ? undefined : focusRequest
+          }
           compact={compact}
           snapshot={view.current}
           earlier={false}

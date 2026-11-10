@@ -501,6 +501,11 @@ export function ThreadScreen({
 
   const isPanelPresentation = presentation.kind !== "page";
   const selectionAddToChat = composer ? handleAddToChat : undefined;
+  const questions =
+    thread.archivedAt === null &&
+    resolveEnvironmentGoneStatus(environment) === null ? (
+      <ThreadPendingQuestions threadId={thread.id} />
+    ) : null;
   const surface = (
     <SelectionAddToChatContext.Provider value={selectionAddToChat}>
       <ThreadTimelineSurface
@@ -653,7 +658,7 @@ export function ThreadScreen({
               }
             >
               {surface}
-              <ThreadPendingQuestions threadId={thread.id} />
+              {questions}
             </PageShell>
           </div>
         );
@@ -671,7 +676,7 @@ export function ThreadScreen({
               surface={
                 <>
                   {surface}
-                  <ThreadPendingQuestions threadId={thread.id} />
+                  {questions}
                 </>
               }
               threadId={thread.id}

@@ -13,6 +13,7 @@ function ThreadPlanCard({ threadId }: { threadId: string }) {
   return <ThreadPlanSteps threadId={threadId} placement="overlay" />;
 }
 import { ThreadPlanSteps } from "./ThreadPlanSteps";
+import { focusThreadPlan } from "./thread-plan-focus";
 const facts = vi.hoisted(() => ({
   view: null as ThreadPlanView | null,
   width: 768,
@@ -330,3 +331,12 @@ it.each([360, 710])(
     ).toBe("false");
   },
 );
+
+it("preserves SDK focus on the native compact plan", () => {
+  render(<CompactPlanCard threadId="t" />);
+  const toggle = screen.getByRole("button", { name: "Plan 0/1 · Paused" });
+  act(() => {
+    expect(focusThreadPlan({ threadId: "t" })).toBe(true);
+  });
+  expect(document.activeElement).toBe(toggle);
+});
