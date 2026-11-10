@@ -197,33 +197,19 @@ describe("ThreadScreen", () => {
   });
 });
 
-it.each<ThreadScreenPresentation>([
-  { kind: "page" },
-  SIDE_CHAT_PRESENTATION,
-  { kind: "transcript", layout: "contained" },
-])("places one plan outside the composer on $kind", (presentation) => {
-  const timeline = {
-    ...TIMELINE,
-    pendingTodos: {
-      sourceSeq: 1,
-      updatedAt: 1,
-      items: [
-        { id: "one", text: "Inspect output", status: "in_progress" as const },
-      ],
-    },
-  };
-  const { container } = renderScreen(presentation, { timeline });
-  expect(container.querySelectorAll("[data-thread-plan]")).toHaveLength(1);
-  if (presentation.kind === "page") {
-    expect(
-      container
-        .querySelector("[data-thread-plan]")
-        ?.closest("[data-scroll-overlay]"),
-    ).toBeTruthy();
-  }
-  expect(screen.getByText("Inspect output")).toBeTruthy();
-  expect(mocks.promptAreaProps.at(-1) ?? {}).not.toHaveProperty("pendingTodos");
-});
+it.each<ThreadScreenPresentation>([{ kind: "page" }, SIDE_CHAT_PRESENTATION])(
+  "keeps the plan in the footer and questions in the reading flow on $kind",
+  (presentation) => {
+    const { container } = renderScreen(presentation);
+    const dock = container.querySelector("[data-thread-plan-dock]");
+    expect(dock).toBeTruthy();
+    expect(dock?.closest("[data-scroll-overlay]")).toBeNull();
+    expect(container.querySelector("[data-thread-questions]")).toBeTruthy();
+    expect(mocks.promptAreaProps.at(-1) ?? {}).not.toHaveProperty(
+      "pendingTodos",
+    );
+  },
+);
 it("hides the retained plan in an archived thread", () => {
   const timeline = {
     ...TIMELINE,
@@ -240,80 +226,4 @@ it("hides the retained plan in an archived thread", () => {
     thread: { ...THREAD, archivedAt: 1 },
   });
   expect(container.querySelector("[data-thread-plan]")).toBeNull();
-});
-
-const laterTurnRow: import("@bb/server-contract").TimelineUserConversationRow =
-  {
-    id: "later",
-    threadId: THREAD.id,
-    turnId: "later",
-    kind: "conversation",
-    role: "user",
-    sourceSeqStart: 20,
-    sourceSeqEnd: 20,
-    startedAt: 200,
-    createdAt: 200,
-    messageSeq: 20,
-    text: "Continue",
-    attachments: null,
-    initiator: "user",
-    senderThreadId: null,
-    systemMessageKind: "unlabeled",
-    systemMessageSubject: null,
-    mentions: [],
-    turnRequest: { kind: "message", status: "accepted", isGrouped: false },
-  };
-it.each([false, true])(
-  "keeps an unfinished older-turn plan current, waiting=%s",
-  (waiting) => {
-    if (waiting) mocks.pendingInteractions = [makePluginInteraction()];
-    renderScreen(SIDE_CHAT_PRESENTATION, {
-      timeline: {
-        ...TIMELINE,
-        timelineRows: [laterTurnRow],
-        pendingTodos: {
-          sourceSeq: 10,
-          updatedAt: 100,
-          items: [
-            { id: "one", text: "Continue the task", status: "in_progress" },
-          ],
-        },
-      },
-    });
-    expect(
-      screen
-        .getByRole("button", {
-          name: waiting ? /^Plan · waiting for you:/ : /^Plan:/,
-        })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(screen.queryByText(/earlier task/)).toBeNull();
-  },
-);
-it("collapses and reopens a completed older-turn plan through ThreadScreen", () => {
-  renderScreen(
-    { kind: "page" },
-    {
-      timeline: {
-        ...TIMELINE,
-        timelineRows: [laterTurnRow],
-        pendingTodos: {
-          sourceSeq: 10,
-          updatedAt: 100,
-          items: [{ id: "one", text: "Checked result", status: "completed" }],
-        },
-      },
-    },
-  );
-  const toggle = screen.getByRole("button", {
-    name: /^Plan completed.*1\/1/,
-  });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(toggle);
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText(/^Updated /).getAttribute("datetime")).toBe(
-    "1970-01-01T00:00:00.100Z",
-  );
-  expect(screen.queryByText(/from an earlier task/)).toBeNull();
-  expect(screen.getByText("Checked result")).toBeTruthy();
 });

@@ -1,3 +1,4 @@
+import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
 import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
   useCallback,
@@ -627,11 +628,15 @@ export function ThreadScreen({
               scrollAreaClassName="scroll-pt-4"
               contentClassName="gap-2 pt-4"
               footerClassName="chat-prompt-box"
-              footer={promptArea}
+              footer={
+                <>
+                  {plan}
+                  {promptArea}
+                </>
+              }
               scrollOverlay={
                 <>
                   <div className="pointer-events-none flex min-h-0 max-h-full max-w-full shrink-0 flex-col items-end gap-3 [&>[data-thread-context-card]]:min-h-0 [&>[data-thread-context-card]]:shrink">
-                    {plan}
                     <ThreadContextCard />
                   </div>
                   <div className="pointer-events-auto my-auto">
@@ -648,6 +653,7 @@ export function ThreadScreen({
               }
             >
               {surface}
+              <ThreadPendingQuestions threadId={thread.id} />
             </PageShell>
           </div>
         );
@@ -656,8 +662,18 @@ export function ThreadScreen({
           <WithoutThreadContextCard>
             <ThreadScreenPanelShell
               presentation={presentation}
-              promptArea={promptArea}
-              surface={surface}
+              promptArea={
+                <>
+                  {plan}
+                  {promptArea}
+                </>
+              }
+              surface={
+                <>
+                  {surface}
+                  <ThreadPendingQuestions threadId={thread.id} />
+                </>
+              }
               threadId={thread.id}
             />
           </WithoutThreadContextCard>
@@ -683,7 +699,6 @@ export function ThreadScreen({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
-        {presentation.kind !== "page" && plan}
       </div>
     </div>
   );
