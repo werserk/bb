@@ -8,7 +8,6 @@ import {
   isThreadDisplayStatusBannerActive,
   ThreadChildThreadsBanner,
   ThreadPromptContextBanner,
-  type ChildThreadQuestion,
   type ThreadPromptArchivedSection,
   type ThreadPromptChildThreadsSection,
   type ThreadPromptEnvironmentGoneSection,
@@ -111,44 +110,6 @@ function childThreadItem(
   { pending = false }: { pending?: boolean } = {},
 ) {
   return { id, title, href: `/threads/${id}`, hasPendingInteraction: pending };
-}
-
-function childQuestion(
-  childThreadId: string,
-  childTitle: string,
-  prompt: string,
-): ChildThreadQuestion {
-  return {
-    childThreadId,
-    childTitle,
-    href: `/threads/${childThreadId}`,
-    interaction: {
-      id: `pint_${childThreadId}`,
-      threadId: childThreadId,
-      turnId: "turn_1",
-      providerId: "claude-code",
-      providerThreadId: "pt_1",
-      providerRequestId: `req_${childThreadId}`,
-      status: "pending",
-      statusReason: null,
-      createdAt: 1,
-      resolvedAt: null,
-      resolution: null,
-      payload: {
-        kind: "user_question",
-        questions: [
-          {
-            id: "choice",
-            prompt,
-            multiSelect: false,
-            allowFreeText: false,
-            required: true,
-            options: [],
-          },
-        ],
-      },
-    },
-  };
 }
 
 describe("ThreadPromptContextBanner", () => {
@@ -343,7 +304,6 @@ describe("ThreadPromptContextBanner", () => {
           parentThreadSection={null}
           childThreadsSection={{
             items: [childThreadItem("thr_child", "Investigate failing checks")],
-            pendingInteractions: [],
           }}
           expandedSection={null}
           onToggleSection={noop}
@@ -378,7 +338,6 @@ describe("ThreadPromptContextBanner", () => {
               }),
               childThreadItem("thr_b", "Investigate failing checks"),
             ],
-            pendingInteractions: [],
           }}
           expandedSection={CHILD_THREADS}
           onToggleSection={noop}
@@ -397,7 +356,7 @@ describe("ThreadPromptContextBanner", () => {
     expect(isThreadDisplayStatusBannerActive("waiting-for-host")).toBe(true);
   });
 
-  it("shows the waiting question in the header only while collapsed", () => {
+  it("keeps waiting child navigation in the expanded summary without question text", () => {
     const renderBanner = (expandedSection: string | null) => (
       <MemoryRouter>
         <Banner
@@ -413,13 +372,6 @@ describe("ThreadPromptContextBanner", () => {
               }),
               childThreadItem("thr_working", "Investigate failing checks"),
             ],
-            pendingInteractions: [
-              childQuestion(
-                "thr_blocked",
-                "Install workspace tools",
-                "Which color should the badge use?",
-              ),
-            ],
           }}
           expandedSection={expandedSection}
           onToggleSection={noop}
@@ -430,7 +382,8 @@ describe("ThreadPromptContextBanner", () => {
     for (const state of [null, CHILD_THREADS]) {
       const markup = renderToMarkup(renderBanner(state));
       expect(markup).not.toContain("Which color should the badge use?");
-      expect(markup).not.toContain("Install workspace tools");
+      if (state === CHILD_THREADS)
+        expect(markup).toContain("Install workspace tools");
       expect(markup).toContain("1 needs you · 1 working");
     }
   });
@@ -454,7 +407,7 @@ describe("ThreadPromptContextBanner", () => {
           archivedSection={null}
           environmentGoneSection={null}
           parentThreadSection={null}
-          childThreadsSection={{ items, pendingInteractions: [] }}
+          childThreadsSection={{ items }}
           expandedSection={null}
           onToggleSection={onToggleSection}
         />
@@ -517,7 +470,6 @@ describe("ThreadPromptContextBanner", () => {
                 pending: true,
               }),
             ],
-            pendingInteractions: [],
           }}
           expandedSection={null}
           onToggleSection={noop}
@@ -561,7 +513,6 @@ describe("ThreadPromptContextBanner", () => {
           parentThreadSection={null}
           childThreadsSection={{
             items,
-            pendingInteractions: [],
           }}
           expandedSection={expandedSection}
           onToggleSection={onToggleSection}

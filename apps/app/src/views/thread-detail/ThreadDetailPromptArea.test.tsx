@@ -289,7 +289,7 @@ it.each([
     environmentGoneStatus: "removed" as const,
   },
 ])(
-  "keeps child questions answerable with a hidden composer: $name",
+  "does not relay child answer forms with a hidden composer: $name",
   ({ thread, environmentGoneStatus }) => {
     renderPromptArea({
       thread,
@@ -303,20 +303,12 @@ it.each([
             hasPendingInteraction: true,
           },
         ],
-        pendingInteractions: [
-          {
-            childThreadId: "thr_child",
-            childTitle: "Child",
-            href: "/threads/thr_child",
-            interaction: makePendingInteraction(),
-          },
-        ],
       },
     });
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
     expect(
-      screen.getByRole("button", { name: "Answer child question" }),
-    ).toBeTruthy();
+      screen.queryByRole("button", { name: "Answer child question" }),
+    ).toBeNull();
   },
 );
 

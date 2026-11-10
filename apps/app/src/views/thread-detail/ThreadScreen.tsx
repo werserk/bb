@@ -72,10 +72,6 @@ import {
   useThreadPendingInteractions,
 } from "@/hooks/queries/thread-queries";
 import {
-  useChildThreadPendingAttention,
-  type ChildThreadPendingAttentionSource,
-} from "@/hooks/queries/child-thread-pending-interactions";
-import {
   useEditThreadMessage,
   useSendThreadMessage,
 } from "@/hooks/mutations/thread-runtime-mutations";
@@ -86,8 +82,6 @@ import {
 } from "./ThreadDetailPromptArea";
 
 const THREAD_DETAIL_COMPOSER_ID = "thread-detail-follow-up-composer";
-const EMPTY_CHILD_THREAD_ITEMS: readonly ChildThreadPendingAttentionSource[] =
-  [];
 
 export type ThreadScreenPresentation =
   | { kind: "page" }
@@ -212,7 +206,7 @@ function useChildThreadsSection(
     enabled,
     parentThreadId: threadId,
   });
-  const childThreadsSection = useMemo(() => {
+  return useMemo(() => {
     const list = enabled ? (childThreadSubsetQuery.data ?? []) : [];
     const activeItems = list
       .filter(
@@ -240,26 +234,6 @@ function useChildThreadsSection(
     if (activeItems.length === 0) return null;
     return { items: activeItems };
   }, [childThreadSubsetQuery.data, enabled]);
-  const childPendingInteractions = useChildThreadPendingAttention(
-    childThreadsSection?.items ?? EMPTY_CHILD_THREAD_ITEMS,
-  );
-  return useMemo((): ThreadPromptChildThreadsSection | null => {
-    if (!childThreadsSection) return null;
-    const pendingInteractions = childPendingInteractions
-      .flatMap((child) =>
-        child.interactions.map((interaction) => ({
-          childThreadId: child.childThreadId,
-          childTitle: child.childTitle,
-          href: child.href,
-          interaction,
-        })),
-      )
-      .sort(
-        (left, right) =>
-          right.interaction.createdAt - left.interaction.createdAt,
-      );
-    return { ...childThreadsSection, pendingInteractions };
-  }, [childThreadsSection, childPendingInteractions]);
 }
 
 interface UseSentMessageEditingArgs {

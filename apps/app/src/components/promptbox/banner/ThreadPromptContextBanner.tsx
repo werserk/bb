@@ -1,10 +1,3 @@
-import { useAtomValue } from "jotai";
-import {
-  maximizedPaneIdAtom,
-  multiPaneSplitLayoutAtom,
-} from "@/lib/split-layout/atoms";
-import { listPanes } from "@/lib/split-layout/ops";
-import { useSplitWorkspaceActive } from "@/hooks/useSplitWorkspaceActive";
 import {
   experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
   type ExperimentalThreadContextSegmentInput,
@@ -36,11 +29,7 @@ import {
   type RefObject,
 } from "react";
 import { NavLink } from "react-router-dom";
-import type {
-  EnvironmentStatus,
-  PendingInteraction,
-  ThreadRuntimeDisplayStatus,
-} from "@bb/domain";
+import type { EnvironmentStatus, ThreadRuntimeDisplayStatus } from "@bb/domain";
 import {
   PromptStackCard,
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
@@ -54,7 +43,6 @@ import {
   activityRowClass,
   activityTextClass,
 } from "@bb/shared-ui/activity-row-styles";
-import { ThreadPendingInteractionBanners } from "@/components/thread/pending-interactions/ThreadPendingInteractionBanner";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { useThreadContextKind } from "@/components/plugin/PluginThreadContextCard";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
@@ -91,16 +79,8 @@ interface ThreadPromptChildThreadItem {
   hasPendingInteraction: boolean;
 }
 
-export interface ChildThreadQuestion {
-  childThreadId: string;
-  childTitle: string;
-  href: string;
-  interaction: PendingInteraction;
-}
-
 export interface ThreadPromptChildThreadsSection {
   items: readonly ThreadPromptChildThreadItem[];
-  pendingInteractions: readonly ChildThreadQuestion[];
 }
 
 export interface ThreadPromptArchivedSection {
@@ -317,8 +297,6 @@ function ParentThreadSectionBody({
 const CHILD_THREAD_ROW_CLASS =
   "flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-foreground/90 underline-offset-2 hover:underline";
 
-// The strip is a state summary. Questions have one answer path in the
-// relayed cards below it, using the same interaction as the child's own card.
 function ActiveChildThreadsCard({
   childThreadsSection,
   isExpanded,
@@ -374,16 +352,23 @@ function ActiveChildThreadsCard({
         isExpanded={isExpanded}
       >
         <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pt-1.5">
-          {working.map((item) => (
+          {items.map((item) => (
             <li key={item.id} className="text-xs">
               <NavLink to={item.href} className={CHILD_THREAD_ROW_CLASS}>
                 <Icon
-                  name="Loading"
+                  name={
+                    item.hasPendingInteraction ? "CircleQuestion" : "Loading"
+                  }
                   className={cn(
-                    "size-3.5 shrink-0 animate-spin motion-reduce:animate-none",
-                    SIDEBAR_WORKING_STATUS_COLOR_CLASS,
+                    "size-3.5 shrink-0",
+                    !item.hasPendingInteraction &&
+                      "animate-spin motion-reduce:animate-none",
+                    !item.hasPendingInteraction &&
+                      SIDEBAR_WORKING_STATUS_COLOR_CLASS,
                   )}
-                  aria-label="Working"
+                  aria-label={
+                    item.hasPendingInteraction ? "Needs you" : "Working"
+                  }
                 />
                 <ThreadTitle title={item.title} tooltip className="flex-1" />
               </NavLink>
@@ -399,87 +384,6 @@ function ActiveChildThreadsCard({
         />
       </AnimatedBody>
     </PromptStackCard>
-  );
-}
-
-export function ThreadChildQuestionCards({
-  questions,
-  ownInteractions = [],
-}: {
-  questions: readonly ChildThreadQuestion[];
-  ownInteractions?: readonly PendingInteraction[];
-}) {
-  const layout = useAtomValue(multiPaneSplitLayoutAtom);
-  const maximizedPaneId = useAtomValue(maximizedPaneIdAtom);
-  const splitActive = useSplitWorkspaceActive();
-  const panes = layout && splitActive ? listPanes(layout.root) : [];
-  const maximizedPane = panes.find((pane) => pane.paneId === maximizedPaneId);
-  const visibleChildThreads = new Set(
-    (maximizedPane ? [maximizedPane] : panes).flatMap((pane) =>
-      pane.content.kind === "thread" ? [pane.content.threadId] : [],
-    ),
-  );
-  const seen = new Set(ownInteractions.map((interaction) => interaction.id));
-  const relayedQuestions = questions.filter(
-    ({ interaction, childThreadId }) => {
-      if (visibleChildThreads.has(childThreadId)) return false;
-      if (
-        seen.has(interaction.id) ||
-        !["pending", "resolving"].includes(interaction.status)
-      )
-        return false;
-      seen.add(interaction.id);
-      return true;
-    },
-  );
-  const overflow = relayedQuestions.slice(3);
-  return (
-    <>
-      {relayedQuestions
-        .slice(0, 3)
-        .map(({ interaction, childThreadId, childTitle, href }) => (
-          <div key={interaction.id} data-child-question-card={interaction.id}>
-            <NavLink
-              to={href}
-              className="px-3 text-xs text-muted-foreground underline underline-offset-2"
-            >
-              <ThreadTitle title={childTitle} inline />
-            </NavLink>
-            <ThreadPendingInteractionBanners
-              interactions={[interaction]}
-              threadId={childThreadId}
-            />
-          </div>
-        ))}
-      {overflow.length > 0 ? (
-        <PromptStackCard ariaLabel="More child questions">
-          <details>
-            <summary
-              className={cn(
-                PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-                "cursor-pointer text-xs",
-              )}
-            >
-              +{overflow.length} more need you
-            </summary>
-            <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pb-2">
-              {overflow.map(({ interaction, childTitle, href }) => (
-                <li key={interaction.id} className="text-xs">
-                  <NavLink to={href} className={CHILD_THREAD_ROW_CLASS}>
-                    <Icon
-                      name="CircleQuestion"
-                      className="size-3.5 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <ThreadTitle title={childTitle} tooltip />
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </details>
-        </PromptStackCard>
-      ) : null}
-    </>
   );
 }
 

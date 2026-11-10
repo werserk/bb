@@ -494,14 +494,6 @@ vi.mock("@/components/promptbox/banner/ThreadGoalCard", () => ({
 
 vi.mock("@/components/promptbox/banner/ThreadPromptContextBanner", () => ({
   ThreadPromptContextBanner: () => null,
-  ThreadChildQuestionCards: ({
-    questions,
-  }: {
-    questions: readonly { interaction: { id: string } }[];
-  }) =>
-    questions.map(({ interaction }) => (
-      <button key={interaction.id}>Answer child question</button>
-    )),
   ThreadChildThreadsBanner: ({
     childThreads,
   }: {

@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { PROMPT_STACK_TRACK_CLASS } from "@/components/promptbox/banner/PromptStackCard";
-import type {
-  MergeBaseState,
-} from "../../../../../../plugins/git/ui/merge-base";
+import type { MergeBaseState } from "../../../../../../plugins/git/ui/merge-base";
 import {
   ThreadChildThreadsBanner,
   ThreadPromptContextBanner,
@@ -314,7 +312,9 @@ const committedUnmergedStatus: WorkspaceStatus = {
   },
 };
 
-function sectionFor(status: WorkspaceStatus): WorkspaceChangedFilesSection<WorkspaceFileStatus> {
+function sectionFor(
+  status: WorkspaceStatus,
+): WorkspaceChangedFilesSection<WorkspaceFileStatus> {
   const section = selectWorkspaceChangedFilesSection(status);
   if (!section) throw new Error("fixture should produce a section");
   return section;
@@ -333,16 +333,17 @@ const committedManyFiles: WorkspaceFileStatus[] = Array.from(
     deletions: 2,
   }),
 );
-const committedManySection: WorkspaceChangedFilesSection<WorkspaceFileStatus> = {
-  ...committedSection,
-  files: committedManyFiles,
-  stats: {
-    ...committedSection.stats,
+const committedManySection: WorkspaceChangedFilesSection<WorkspaceFileStatus> =
+  {
+    ...committedSection,
     files: committedManyFiles,
-    insertions: 720,
-    deletions: 144,
-  },
-};
+    stats: {
+      ...committedSection.stats,
+      files: committedManyFiles,
+      insertions: 720,
+      deletions: 144,
+    },
+  };
 
 const featureBranchMergeBase = gitSegmentFixtureMergeBase();
 
@@ -385,7 +386,6 @@ const childThreadsFixture: ThreadPromptChildThreadsSection = {
       hasPendingInteraction: false,
     },
   ],
-  pendingInteractions: [],
 };
 
 const childThreadsPendingFixture: ThreadPromptChildThreadsSection = {
@@ -397,59 +397,7 @@ const childThreadsPendingFixture: ThreadPromptChildThreadsSection = {
       hasPendingInteraction: true,
     },
   ],
-  pendingInteractions: [
-    childQuestionFixture(
-      "thr_blocked",
-      "Install workspace tools",
-      "Which color should the QA badge use?",
-      [],
-      1,
-    ),
-  ],
 };
-
-function childQuestionFixture(
-  childThreadId: string,
-  childTitle: string,
-  prompt: string,
-  options: readonly { label: string; description: string }[],
-  createdAt: number,
-) {
-  return {
-    childThreadId,
-    childTitle,
-    href: `/projects/proj-1/threads/${childThreadId}`,
-    interaction: {
-      id: `pint_${childThreadId}`,
-      threadId: childThreadId,
-      turnId: "turn_story",
-      providerId: "claude-code",
-      providerThreadId: "provider-thread-story",
-      providerRequestId: `request-${childThreadId}`,
-      status: "pending" as const,
-      statusReason: null,
-      createdAt,
-      resolvedAt: null,
-      resolution: null,
-      payload: {
-        kind: "user_question" as const,
-        questions: [
-          {
-            id: "choice",
-            prompt,
-            multiSelect: false,
-            allowFreeText: true,
-            required: true,
-            options: options.map((option) => ({
-              value: option.label.toLowerCase(),
-              ...option,
-            })),
-          },
-        ],
-      },
-    },
-  };
-}
 
 const childThreadsQuestionsFixture: ThreadPromptChildThreadsSection = {
   items: [
@@ -478,38 +426,6 @@ const childThreadsQuestionsFixture: ThreadPromptChildThreadsSection = {
       hasPendingInteraction: false,
     },
   ],
-  pendingInteractions: [
-    childQuestionFixture(
-      "thr_size",
-      "Pick a size",
-      "Which size?",
-      [
-        { label: "Small", description: "Proceed with a small-scale change." },
-        { label: "Large", description: "Proceed with a large-scale change." },
-      ],
-      3,
-    ),
-    childQuestionFixture(
-      "thr_shape",
-      "Pick a shape",
-      "Which shape?",
-      [
-        { label: "Circle", description: "Select the circle shape." },
-        { label: "Square", description: "Select the square shape." },
-      ],
-      2,
-    ),
-    childQuestionFixture(
-      "thr_color",
-      "Pick a color",
-      "Which color?",
-      [
-        { label: "Red", description: "Choose red." },
-        { label: "Blue", description: "Choose blue." },
-      ],
-      1,
-    ),
-  ],
 };
 
 const childThreadsLargeFixture: ThreadPromptChildThreadsSection = {
@@ -519,7 +435,6 @@ const childThreadsLargeFixture: ThreadPromptChildThreadsSection = {
     href: `/projects/proj-1/threads/thr_large_${i}`,
     hasPendingInteraction: i === 1,
   })),
-  pendingInteractions: [],
 };
 
 interface RowConfig {

@@ -21,10 +21,6 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
   useThreadPendingInteractions: () => ({ data: mocks.pendingInteractions }),
 }));
 
-vi.mock("@/hooks/queries/child-thread-pending-interactions", () => ({
-  useChildThreadPendingAttention: () => [],
-}));
-
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: () => ({ data: undefined }),
 }));
