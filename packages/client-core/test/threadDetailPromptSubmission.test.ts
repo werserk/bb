@@ -346,7 +346,6 @@ describe("threadDetailPromptSubmission", () => {
     for (const runtimeDisplayStatus of queueableStatuses) {
       expect(
         buildFollowUpSubmitMode({
-          hasPendingInteraction: false,
           isDefaultExecutionOptionsLoading: true,
           isStopRequested: false,
           onStop,
@@ -356,11 +355,21 @@ describe("threadDetailPromptSubmission", () => {
     }
   });
 
-  it("offers a stop-free queue mode while a stop is in flight, and accepts queued messages while questions are pending", () => {
+  it("uses ordinary submission when the runtime is idle", () => {
+    expect(
+      buildFollowUpSubmitMode({
+        isDefaultExecutionOptionsLoading: false,
+        isStopRequested: false,
+        onStop: () => undefined,
+        runtimeDisplayStatus: "idle",
+      }),
+    ).toEqual({ kind: "ready" });
+  });
+
+  it("offers a stop-free queue mode while a stop is in flight and queues starting work", () => {
     const onStop = () => undefined;
     expect(
       buildFollowUpSubmitMode({
-        hasPendingInteraction: false,
         isDefaultExecutionOptionsLoading: false,
         isStopRequested: true,
         onStop,
@@ -369,7 +378,6 @@ describe("threadDetailPromptSubmission", () => {
     ).toEqual({ kind: "queue-while-stopping" });
     expect(
       buildFollowUpSubmitMode({
-        hasPendingInteraction: true,
         isDefaultExecutionOptionsLoading: false,
         isStopRequested: false,
         onStop,

@@ -1557,9 +1557,7 @@ describe("ThreadDetailPromptArea", () => {
     expect(screen.queryByRole("button", { name: "Prompt actions" })).toBeNull();
     expect(document.querySelector(".pending-rule")).toBeNull();
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
-    expect(screen.getByTestId("submit-mode").textContent).toBe(
-      "queue:",
-    );
+    expect(screen.getByTestId("submit-mode").textContent).toBe("ready:");
     expect(screen.queryByTestId("queued-message-list")).toBeNull();
   });
 

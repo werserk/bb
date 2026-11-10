@@ -962,7 +962,6 @@ export function ThreadDetailPromptArea({
       };
     }
     return buildFollowUpSubmitMode({
-      hasPendingInteraction,
       isDefaultExecutionOptionsLoading,
       isStopRequested,
       onStop: handleStopThread,
@@ -971,7 +970,6 @@ export function ThreadDetailPromptArea({
   }, [
     effectiveSelectedModel,
     handleStopThread,
-    hasPendingInteraction,
     isDefaultExecutionOptionsLoading,
     isHandoffSelection,
     modelLoadFailed,

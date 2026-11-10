@@ -145,8 +145,9 @@ remaining-history compatibility or require the stopped pre-upgrade snapshot.
 
 ### Pending questions in chat
 
-Pending input keeps the normal composer visible. Owner sends use the existing
-durable queue and do not resolve questions or approve actions. In-flow native
+Pending input keeps the normal composer visible. Submission mode follows runtime
+activity, so idle questions retain ordinary sending and active work uses the
+existing durable queue. Owner sends do not resolve questions or approve actions. In-flow native
 questions offer Cancel through the existing stop-turn action; cancellation errors
 remain visible and retryable. Pending native questions and plugin forms keep
 their background segment visible. Completed reasoning details use the assistant
