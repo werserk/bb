@@ -1,5 +1,7 @@
+import { useNativeQuestionFocus } from "./native-question-focus";
 import {
   focusPlanElement,
+  createThreadPlanFocusRequest,
   type ThreadPlanFocusRequest,
 } from "./thread-plan-focus";
 import { useThreadPlanLayout } from "./thread-plan-layout";
@@ -108,27 +110,14 @@ export function ThreadPlanSteps({
     focused,
     ready: result.status === "ready" && narrow !== null,
   });
+  const nativeQuestionFocus = useNativeQuestionFocus();
+  const revealQuestion = nativeQuestionFocus?.reveal;
   const jumpToQuestion = (interactionId: string) => {
-    const chat = root.current?.closest("[data-thread-chat]");
-    const question = [
-      ...(chat?.querySelectorAll<HTMLElement>("[data-flow-question]") ?? []),
-    ].find((element) => element.dataset.flowQuestion === interactionId);
-    focusPlanElement(question ?? null);
-    const field = question?.querySelector<HTMLElement>(
-      'textarea,input,[role="radio"],[role="checkbox"],button',
-    );
-    if (field) field.focus({ preventScroll: true });
+    revealQuestion?.(createThreadPlanFocusRequest(interactionId));
   };
   useEffect(() => {
-    if (
-      compact &&
-      focusRequest?.interactionId &&
-      focusRequest.consumeReveal()
-    ) {
-      jumpToQuestion(focusRequest.interactionId);
-      focusRequest.consumeFocus();
-    }
-  }, [compact, focusRequest]);
+    if (compact && focusRequest?.interactionId) revealQuestion?.(focusRequest);
+  }, [compact, focusRequest, revealQuestion]);
   const executing =
     thread?.runtime?.displayStatus === "active" &&
     !thread.serviceTurn &&
@@ -178,15 +167,15 @@ export function ThreadPlanSteps({
           interactions={interactions}
         />
       )}
-      {!compact &&
-        !hidden &&
+      {!hidden &&
         narrow !== null &&
         view?.previousPlans.map((snapshot) => (
           <ThreadTodoCard
             key={snapshot.planId ?? snapshot.sourceSeq}
             {...props}
+            compact={compact}
             focusRequest={
-              focusRequest?.interactionId ? focusRequest : undefined
+              !compact && focusRequest?.interactionId ? focusRequest : undefined
             }
             snapshot={snapshot}
             earlier

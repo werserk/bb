@@ -1,3 +1,4 @@
+import { NativeQuestionFocusProvider } from "./native-question-focus";
 import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
 import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
@@ -689,23 +690,30 @@ export function ThreadScreen({
             {presentation.layout === "contained" ? (
               <div className="min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
                 {surface}
+                {questions}
               </div>
             ) : (
-              <div className="bg-background px-2 pb-3 pt-3">{surface}</div>
+              <div className="bg-background px-2 pb-3 pt-3">
+                {surface}
+                {questions}
+              </div>
             )}
           </WithoutThreadContextCard>
         );
     }
   })();
   return (
-    <div
-      className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
-      data-thread-chat=""
-    >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+    <NativeQuestionFocusProvider key={thread.id}>
+      <div
+        className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
+        data-thread-chat=""
+      >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+          {presentation.kind === "transcript" && plan}
+        </div>
       </div>
-    </div>
+    </NativeQuestionFocusProvider>
   );
 }
 

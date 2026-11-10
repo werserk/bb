@@ -317,7 +317,7 @@ export function ThreadTodoCard({
       >
         <span className="min-w-0 flex-1 truncate">
           {compact
-            ? `Plan ${snapshot.items.filter((item) => item.status === "completed").length}/${snapshot.items.length} · ${waiting ? "Waiting for you" : failed ? "Failed" : finished ? "Finished" : executing ? "Running" : "Paused"}`
+            ? `${earlier ? "Plan from an earlier task" : "Plan"} ${snapshot.items.filter((item) => item.status === "completed").length}/${snapshot.items.length} · ${waiting ? "Waiting for you" : failed ? "Failed" : finished ? "Finished" : executing ? "Running" : "Paused"}`
             : title}
           {quiet &&
             ` · ${new Date(snapshot.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}

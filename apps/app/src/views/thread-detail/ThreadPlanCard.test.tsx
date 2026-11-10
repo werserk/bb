@@ -340,3 +340,28 @@ it("preserves SDK focus on the native compact plan", () => {
   });
   expect(document.activeElement).toBe(toggle);
 });
+
+it("retains expandable earlier plans in the native compact dock", () => {
+  facts.view!.previousPlans = [
+    {
+      ...facts.view!.current!,
+      planId: "older",
+      sourceSeq: 0,
+      items: [
+        {
+          ...facts.view!.current!.items[0]!,
+          id: "old",
+          text: "Earlier work",
+          status: "completed",
+        },
+      ],
+    },
+  ];
+  render(<CompactPlanCard threadId="t" />);
+  const history = screen.getByRole("button", {
+    name: /Plan from an earlier task/,
+  });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(history);
+  expect(screen.getByText("Earlier work")).toBeDefined();
+});

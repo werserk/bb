@@ -197,7 +197,12 @@ describe("ThreadScreen", () => {
   });
 });
 
-it.each<ThreadScreenPresentation>([{ kind: "page" }, SIDE_CHAT_PRESENTATION])(
+it.each<ThreadScreenPresentation>([
+  { kind: "page" },
+  SIDE_CHAT_PRESENTATION,
+  { kind: "transcript", layout: "contained" },
+  { kind: "transcript", layout: "document" },
+])(
   "keeps the plan in the footer and questions in the reading flow on $kind",
   (presentation) => {
     const { container } = renderScreen(presentation);
