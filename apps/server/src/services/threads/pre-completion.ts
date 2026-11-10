@@ -144,8 +144,19 @@ function observePreCompletion(
 // async-question renderer, a plugin-origin interaction rather than a
 // user_question. Origin, payload shape and thread provider must all match;
 // approvals, other plugins' forms and other renderers never count.
+// Mirrors plugins/provider-codex extension-kinds.ts codexAsyncQuestionSchema,
+// the shape its renderer displays (the server has no dependency on the plugin
+// package): trimmed non-empty title, options absent, null or a non-empty array
+// of trimmed non-empty strings.
 const codexAsyncQuestionDataSchema = z.object({
-  questions: z.array(z.object({ title: z.string().min(1) })).min(1),
+  questions: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1),
+        options: z.array(z.string().trim().min(1)).min(1).nullable().optional(),
+      }),
+    )
+    .min(1),
 });
 function isNativeUserQuestion(
   interaction: PendingInteraction,

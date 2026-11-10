@@ -60,7 +60,7 @@ It reads pending/resolving native interaction rows strictly, including corrupt
 row detection. Approval prompts do not count as `user_question`. On a Codex
 thread the host-native `provider-codex` `async-question` plugin interaction
 (origin `pluginId`/`rendererId`, `plugin` payload whose `data.questions` has at
-least one titled entry) counts as a native question; other plugins, other
+least one entry shaped as the renderer displays it: trimmed non-empty title, options absent, null or a non-empty array of non-empty strings) counts as a native question; other plugins, other
 renderers and malformed data never do. A question present before policy or appearing while it awaits suppresses correction.
 No question payload or final text is written to diagnostics.
 

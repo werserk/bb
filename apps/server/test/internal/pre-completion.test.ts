@@ -289,10 +289,43 @@ describe.each(["claude-code", "codex"])(
           });
         }));
       it.each([
+        [
+          "null options",
+          { questions: [{ title: "Free text?", options: null }] },
+        ],
+        ["absent options", { questions: [{ title: "Free text?" }] }],
+        [
+          "several questions",
+          { questions: [{ title: "One?" }, { title: "Two?", options: ["A"] }] },
+        ],
+      ])("blocks a Codex async-question with %s", async (_name, data) =>
+        fixture(async (f) => {
+          f.pluginQuestion({ data });
+          setPreCompletionPolicy("test", f.threadId, () => continues);
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            reason: "pending_question",
+          });
+        }),
+      );
+      it.each([
         ["another plugin", { pluginId: "other-plugin" }],
         ["another renderer", { rendererId: "form" }],
         ["no questions", { data: { questions: [] } }],
         ["an untitled question", { data: { questions: [{ title: "" }] } }],
+        ["a whitespace title", { data: { questions: [{ title: "  \n " }] } }],
+        [
+          "numeric options",
+          { data: { questions: [{ title: "A or B?", options: 42 }] } },
+        ],
+        [
+          "empty options",
+          { data: { questions: [{ title: "A or B?", options: [] }] } },
+        ],
+        [
+          "blank option entries",
+          { data: { questions: [{ title: "A or B?", options: ["A", " "] }] } },
+        ],
         ["non-object data", { data: "A or B?" }],
       ])("does not treat %s as a Codex user question", async (_name, o) =>
         fixture(async (f) => {
