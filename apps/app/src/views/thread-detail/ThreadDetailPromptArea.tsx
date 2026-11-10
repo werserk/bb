@@ -2076,11 +2076,7 @@ export function ThreadDetailPromptArea({
         ) : null}
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
-          childThreads={
-            thread.archivedAt === null && environmentGoneStatus === null
-              ? childThreadsSection
-              : null
-          }
+          childThreads={childThreadsSection}
           isExpanded={isChildThreadsExpanded}
           onExpandedChange={setIsChildThreadsExpanded}
         />

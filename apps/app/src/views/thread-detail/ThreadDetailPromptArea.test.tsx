@@ -289,7 +289,7 @@ it.each([
     environmentGoneStatus: "removed" as const,
   },
 ])(
-  "does not relay child answer forms with a hidden composer: $name",
+  "keeps child navigation without answer forms with a hidden composer: $name",
   ({ thread, environmentGoneStatus }) => {
     renderPromptArea({
       thread,
@@ -306,6 +306,7 @@ it.each([
       },
     });
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
+    expect(screen.getByTestId("child-threads-banner")).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: "Answer child question" }),
     ).toBeNull();
