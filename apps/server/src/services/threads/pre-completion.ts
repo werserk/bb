@@ -8,6 +8,7 @@ import {
   listPendingInteractionsByThread,
 } from "@bb/db";
 import {
+  type PendingInteraction,
   BB_PRE_COMPLETION_TOOL_NAME,
   BB_PRE_COMPLETION_LIMITS,
   threadScope,
@@ -139,6 +140,28 @@ function observePreCompletion(
   }
   return toolResponse(value);
 }
+// Codex raises its model questions through the host-native provider-codex
+// async-question renderer, a plugin-origin interaction rather than a
+// user_question. Origin, payload shape and thread provider must all match;
+// approvals, other plugins' forms and other renderers never count.
+const codexAsyncQuestionDataSchema = z.object({
+  questions: z.array(z.object({ title: z.string().min(1) })).min(1),
+});
+function isNativeUserQuestion(
+  interaction: PendingInteraction,
+  providerId: string,
+): boolean {
+  if (interaction.payload.kind === "user_question") return true;
+  const origin = interaction.origin;
+  return (
+    providerId === "codex" &&
+    origin?.kind === "plugin" &&
+    origin.pluginId === "provider-codex" &&
+    origin.rendererId === "async-question" &&
+    interaction.payload.kind === "plugin" &&
+    codexAsyncQuestionDataSchema.safeParse(interaction.payload.data).success
+  );
+}
 async function evaluatePreCompletion(
   deps: PreCompletionDeps,
   args: PreCompletionArgs,
@@ -186,7 +209,7 @@ async function evaluatePreCompletion(
       statuses: ["pending", "resolving"],
     })
       .map(toPendingInteraction)
-      .filter((i) => i.payload.kind === "user_question")
+      .filter((i) => isNativeUserQuestion(i, thread.providerId))
       .map((i) => i.id);
   let pendingUserQuestionIds: string[];
   try {

@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { createPendingInteraction } from "@bb/db";
+import {
+  createPendingInteraction,
+  setPendingInteractionResolving,
+} from "@bb/db";
 import {
   createUserQuestionPayload,
   createCommandApprovalPayload,
@@ -30,6 +33,13 @@ describe.each(["claude-code", "codex"])(
         call: (overrides?: Record<string, unknown>) => Promise<unknown>;
         stop: () => void;
         question: (approval?: boolean, corrupt?: boolean) => void;
+        pluginQuestion: (overrides?: {
+          pluginId?: string;
+          rendererId?: string;
+          data?: unknown;
+          payloadKind?: string;
+          resolving?: boolean;
+        }) => void;
         threadId: string;
       }) => Promise<void>,
       providerId = testProvider,
@@ -89,6 +99,27 @@ describe.each(["claude-code", "codex"])(
                         : createUserQuestionPayload(),
                     ),
               });
+            },
+            pluginQuestion: (o = {}) => {
+              const row = createPendingInteraction(h.db, {
+                originKind: "plugin",
+                pluginId: o.pluginId ?? "provider-codex",
+                rendererId: o.rendererId ?? "async-question",
+                threadId: thread.id,
+                turnId: "bb-turn",
+                payload: JSON.stringify({
+                  kind: o.payloadKind ?? "plugin",
+                  title: "Synthetic decision",
+                  data: o.data ?? {
+                    questions: [{ title: "A or B?", options: ["A", "B"] }],
+                  },
+                }),
+              });
+              if (o.resolving)
+                setPendingInteractionResolving(h.db, {
+                  id: row.id,
+                  resolution: JSON.stringify({ kind: "plugin_submitted" }),
+                });
             },
             stop: () => {
               seedEvent(h.deps, {
@@ -213,6 +244,74 @@ describe.each(["claude-code", "codex"])(
           reason: "pending_question",
         });
       }));
+    if (testProvider === "codex") {
+      const continues = { action: "continue", instruction: "Ask now" } as const;
+      it("treats a pending Codex async-question as a native user question", async () =>
+        fixture(async (f) => {
+          f.pluginQuestion();
+          setPreCompletionPolicy("test", f.threadId, () => continues);
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            reason: "pending_question",
+          });
+        }));
+      it("counts a resolving Codex async-question as pending", async () =>
+        fixture(async (f) => {
+          f.pluginQuestion({ resolving: true });
+          setPreCompletionPolicy("test", f.threadId, () => continues);
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            reason: "pending_question",
+          });
+        }));
+      it("rechecks a Codex async-question raised while the policy runs", async () =>
+        fixture(async (f) => {
+          setPreCompletionPolicy("test", f.threadId, async () => {
+            f.pluginQuestion();
+            return continues;
+          });
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            reason: "pending_question",
+          });
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            reason: "pending_question",
+          });
+        }));
+      it("keeps a malformed Codex async-question payload a coverage gap", async () =>
+        fixture(async (f) => {
+          f.pluginQuestion({ payloadKind: "mystery" });
+          setPreCompletionPolicy("test", f.threadId, () => continues);
+          expect(result(await f.call())).toMatchObject({
+            action: "allow",
+            gap: "pending_questions_unavailable",
+          });
+        }));
+      it.each([
+        ["another plugin", { pluginId: "other-plugin" }],
+        ["another renderer", { rendererId: "form" }],
+        ["no questions", { data: { questions: [] } }],
+        ["an untitled question", { data: { questions: [{ title: "" }] } }],
+        ["non-object data", { data: "A or B?" }],
+      ])("does not treat %s as a Codex user question", async (_name, o) =>
+        fixture(async (f) => {
+          f.pluginQuestion(o);
+          setPreCompletionPolicy("test", f.threadId, () => continues);
+          expect(result(await f.call())).toMatchObject({ action: "continue" });
+        }),
+      );
+    } else {
+      it("ignores a provider-codex async-question on a non-Codex thread", async () =>
+        fixture(async (f) => {
+          f.pluginQuestion();
+          setPreCompletionPolicy("test", f.threadId, () => ({
+            action: "continue",
+            instruction: "Ask now",
+          }));
+          expect(result(await f.call())).toMatchObject({ action: "continue" });
+        }));
+    }
     it("reserves at most one correction under duplicate concurrent callbacks", async () =>
       fixture(async (f) => {
         setPreCompletionPolicy("test", f.threadId, async () => ({
