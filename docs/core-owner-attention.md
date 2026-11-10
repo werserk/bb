@@ -1,9 +1,9 @@
 # Owner-attention core candidate
 
-This is a partial companion of the approved `owner-attention-stop-triage` change.
-It implements the server policy and Claude Stop path. Codex native hook injection
-is unfinished and reported as unsupported; the combined feature cannot pass
-claim_1 or seven-day acceptance. Source support is not installed-runtime proof.
+This is the core companion of the approved `owner-attention-stop-triage` change.
+It implements the shared server policy, Claude Stop callback and Codex 0.166
+session-local Stop activation with private IPC. Source and CLI fixture support
+are not installed bb runtime proof or seven-day acceptance.
 The earlier feasibility checkpoint remains historical; this document owns the
 implemented contract.
 
@@ -33,7 +33,7 @@ re-register its managed threads on startup. Core keeps no project-membership
 classifier or scheduler.
 
 Capabilities version 1 reports a 2000ms policy deadline, 8192 final text limit,
-Claude `requires-matching-bridge`, and Codex `unsupported`. This describes source
+both Claude and Codex `requires-matching-bridge`. This describes source
 support; it does not prove the host has the matching bridge. The fake plugin
 host rejects native policy registration instead of simulating successful support.
 
@@ -95,15 +95,62 @@ text and old-host responses. They use real migrated SQLite and simulated native
 provider streams. Existing Codex question and identity fixtures remain relevant
 baseline checks, not proof of a Codex correction.
 
-Missing: Codex native Stop injection and bridge calibration, installed
-Claude/Codex same-logical-bb-turn correction and native-question proof,
-installed reconnect/restart/rollback and upgrade gates, per-host runtime
-capability proof, final independent reviewer-critical and reviewer-codex on the
-same SHA, and owner-authorized core release. No live model call or installed lab
-was used to establish this candidate. No merge, release, push or PR is implied.
+## Codex activation and private IPC
 
-The installed Codex 0.166.0 local configuration probe discovered an untrusted
-Stop hook in session flags and returned its native key/hash without a model
-request. This establishes a possible injection route; it does not establish
-trusted hook activation or safe bridge IPC. The pinned upstream same-turn test
-linked in the feasibility checkpoint was inspected, not executed here.
+`plugins/provider-codex/src/bridge/pre-completion.ts` creates a private 0700
+session directory, a 0600 Node hook client with a random session credential and
+a Unix socket. Only that session's app-server receives `features.hooks` and
+`hooks.Stop` through launch flags. No global or repository hook configuration
+is written. `hooks/list` supplies the exact declaration hash; thread/start,
+resume and fork receive that hash in session-local hook state together with
+the same declaration. A second list on the loaded thread must report trusted.
+Only the generated declaration is trusted. The session Stop override replaces
+other Stop declarations in the session-flags layer; it does not persist edits
+to their source files. Existing other event declarations are not deliberately
+trusted by this feature.
+
+The bridge requires a native synchronous sessionFlags Stop-start notification
+from the discovered source path and display order, exact provider session ID,
+an open provider turn and a session credential. Each native run is consumed
+once. Model-selected reserved tool calls remain rejected. Foreign, replayed,
+retired and interrupted origins cannot block. A correction-active Stop allows
+completion without another policy correction. The server's persisted once
+guard also prevents reconnect/restart from admitting another correction.
+
+The client accepts at most 128 KiB of native stdin, trims candidate text before
+IPC, sends at most 8192 text units to policy, and exits fail-open after 3s.
+The socket accepts at most eight concurrent clients, 128 KiB per request and
+one request per connection. Policy transport is aborted after 2500ms, removes
+its pending bridge request, and ignores late replies. Owner Stop cancels this
+work before asking Codex to interrupt. Normal terminal events, session release,
+replacement and child exit retire the corresponding custody. Release/exit also
+remove the socket and script. Abrupt process kill may leave an inert temporary
+directory; there is no listening service or reusable credential after restart.
+
+The credential is private host-process custody, not an OS sandbox against a
+malicious process with the same uid or unrestricted filesystem access. Native
+notification gating additionally prevents ordinary model tool calls and direct
+socket traffic outside the exact native Stop window from invoking policy.
+Windows activation is currently fail-open/unsupported. Old CLIs, discovery or
+trust failures also allow normal completion and emit a provider warning with
+`pre_completion: unsupported_provider`; matching source capability alone never
+establishes coverage on a particular host.
+
+## Checked and missing runtime evidence
+
+The opt-in native fixture (`BB_CODEX_NATIVE_STOP_FIXTURE=1`, Turbo loose env)
+launches installed Codex 0.166 against an ephemeral loopback Responses mock and
+isolated CODEX_HOME, with pool routing cleared. It proves trusted hook execution,
+actual bridge IPC, the corrective text reaching a second model request and one
+provider turn.open/turn.boundary pair with identical origin. It also interrupts
+an in-flight policy and verifies no corrective second model request. It does
+not spend model quota or install a bb candidate. Unit fixtures execute the real
+generated client and cover authentication, bounded text, replay, cross-session
+and turn rejection, malformed/unavailable policy, deadline and cancellation.
+Shared server fixtures exercise both provider IDs against real migrated SQLite.
+
+Missing: installed bb daemon/server/end-to-end Claude/Codex correction and native
+question creation, process restart/reconnect/rollback and upgrade acceptance,
+Windows support, per-host deployment proof, reviewer-critical and reviewer-codex
+on the final SHA and owner-authorized core release. No full feature PASS or
+seven-day result is claimed. No merge, release, push or PR is implied.

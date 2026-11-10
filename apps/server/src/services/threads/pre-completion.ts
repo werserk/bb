@@ -160,7 +160,7 @@ async function evaluatePreCompletion(
     })
   )
     return reply({ action: "allow", gap: "missing_identity" });
-  if (thread.providerId !== "claude-code")
+  if (thread.providerId !== "claude-code" && thread.providerId !== "codex")
     return reply({ action: "allow", gap: "unsupported_provider" });
   const turnId = args.turnId;
   const ended = () =>

@@ -2208,7 +2208,7 @@ export interface PluginExperimentalThreads {
     version: 1;
     providers: {
       "claude-code": "requires-matching-bridge";
-      codex: "unsupported";
+      codex: "requires-matching-bridge";
     };
     deadlineMs: 2000;
     finalTextLimit: 8192;

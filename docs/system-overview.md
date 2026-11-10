@@ -556,5 +556,8 @@ strict native question read, bounded deadline, typed fail-open observations and
 atomic once reservation in existing core-namespaced KV. Claude's native Stop
 callback uses the ordinary authenticated builtin-tool action; both bridges
 reject model-selected calls of its reserved domain name. No daemon wire or
-schema change is introduced. Codex injection and installed proof remain missing;
+schema change is introduced. Codex 0.166 uses a session-local trusted command
+hook and bounded private Unix IPC into that same action. Its native lifecycle
+and exact session/turn gate precede the existing assembler mapping; installed bb
+runtime proof remains missing;
 see [the contract and limitations](core-owner-attention.md).

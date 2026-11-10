@@ -1487,7 +1487,7 @@ export function createPluginApi(options: {
         version: 1,
         providers: {
           "claude-code": "requires-matching-bridge",
-          codex: "unsupported",
+          codex: "requires-matching-bridge",
         },
         deadlineMs: BB_PRE_COMPLETION_LIMITS.deadlineMs,
         finalTextLimit: BB_PRE_COMPLETION_LIMITS.finalTextLimit,

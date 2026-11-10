@@ -615,6 +615,47 @@ describe("provider-native id translation", () => {
     expect(unmapped).toMatchObject({ turnId: "unmapped-turn" });
     expect(unmapped?.turnOrigin).not.toBe("provider");
   });
+  it("keeps Codex native Stop correction on the original mapped bb turn", () => {
+    const adapter = makeAdapter();
+    const opened = feedDeltas(adapter, "bb-stop", [
+      { kind: "turn.open", providerTurnId: "native-stop-turn" },
+    ]);
+    const first = opened.find((e) => e.type === "turn/started");
+    if (!first || first.scope.kind !== "turn")
+      throw new Error("missing root turn");
+    const request = (threadId: string, turnId: string) =>
+      adapter.decodeToolCallRequest({
+        id: 99,
+        method: "item/tool/call",
+        params: {
+          providerThreadId: "native-thread",
+          threadId,
+          turnId,
+          callId: "stop-hook",
+          tool: "bb_internal_pre_completion",
+          arguments: { finalText: "Need a choice", truncated: false },
+        },
+      });
+    expect(request("bb-stop", "native-stop-turn")).toMatchObject({
+      turnId: first.scope.turnId,
+      turnOrigin: "provider",
+    });
+    expect(request("foreign-bb", "native-stop-turn")?.turnOrigin).not.toBe(
+      "provider",
+    );
+    expect(request("bb-stop", "foreign-turn")?.turnOrigin).not.toBe("provider");
+    const completed = feedDeltas(adapter, "bb-stop", [
+      {
+        kind: "turn.boundary",
+        providerTurnId: "native-stop-turn",
+        status: "completed",
+      },
+    ]);
+    expect(completed.filter((e) => e.type === "turn/started")).toHaveLength(0);
+    expect(completed.find((e) => e.type === "turn/completed")?.scope).toEqual(
+      first.scope,
+    );
+  });
 });
 
 describe("deferred text flush", () => {

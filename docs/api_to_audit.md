@@ -4820,13 +4820,14 @@ question preservation, unknown-host coverage and SDK/CLI contract parity.
 `experimental_setPreCompletionPolicy`, `PluginPreCompletionContext`,
 `PluginPreCompletionHandler`, `PluginPreCompletionGap`, and provider-bridge
 `experimental_PRE_COMPLETION_TOOL_NAME` and `experimental_PRE_COMPLETION_LIMITS` are experimental. The source capability
-is conditional on a matching Claude bridge; Codex is explicitly unsupported.
-The fake host refuses native registration. The normal core caller is Claude's
-native Stop callback; the authenticated builtin route and server guard are its
+is conditional on matching bridges (Codex 0.166 uses trusted session-local
+Stop hooks and private Unix IPC; Windows is unsupported).
+The fake host refuses native registration. The normal core callers are Claude and Codex
+native Stop callbacks; the authenticated builtin route and server guard are its
 only action implementation. Plugins register policy, not a parallel continuation
 path. Both bridges reject model attempts to invoke the reserved builtin.
 
-Stabilization requires Codex hook integration, exact native-to-bb identity and
+Stabilization requires installed Codex hook integration, exact native-to-bb identity and
 question-format fixtures, deployment/cancellation compatibility across old hosts,
 installed same-turn correction, reconnect/restart/rollback proof for the durable
 reservation and retained gap observations, and review of per-host capability

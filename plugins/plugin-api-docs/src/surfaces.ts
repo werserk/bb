@@ -1643,7 +1643,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         tagline: "Experimental native Stop policy",
         title: "Pre-completion policy",
         summary:
-          "Opt in managed threads to a bounded native Stop check. This partial core companion supports matching Claude bridges; Codex remains unsupported.",
+          "Opt in managed threads to a bounded native Stop check. Source support requires matching Claude or Codex bridges. Codex 0.166 uses session-local trusted Stop hooks with private Unix IPC; verify installed host coverage separately.",
         bullets: [
           "Register a policy per thread and remove it with null; re-register after restart",
           "Read trusted bb turn identity, capped final text and native user-question IDs",
