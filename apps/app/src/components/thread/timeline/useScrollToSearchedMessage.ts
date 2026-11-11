@@ -14,6 +14,7 @@ import { useLocation } from "react-router-dom";
 import { parseMessageLink } from "@bb/client-core";
 import { appToast } from "@/components/ui/app-toast";
 import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-body.js";
+import { useQuestionNavigation } from "../user-questions/question-navigation";
 import { revealTimelineRow } from "./reveal-timeline-row.js";
 
 interface SeqAnchoredRow {
@@ -38,6 +39,10 @@ export interface SearchMessageLocationTarget extends SearchMessageTarget {
 interface SearchMessageLocation {
   target: SearchMessageLocationTarget | null;
   readLocationKey: () => string;
+  scope?: () => HTMLElement | null;
+  focusElementId?: string;
+  onRevealFailure?: (key: string) => void;
+  onRevealComplete?: (key: string) => void;
 }
 
 interface SearchMessageLocationProviderProps {
@@ -270,10 +275,17 @@ export function SearchMessageLocationProvider({
 }: SearchMessageLocationProviderProps) {
   const location = useLocation();
   const locationKey = `${location.key}:${location.pathname}${location.search}${location.hash}`;
-  const locationKeyRef = useRef(locationKey);
+  const navigation = useQuestionNavigation();
+  const localTarget =
+    navigation?.request?.routeKey === locationKey &&
+    navigation.request.threadId === threadId
+      ? navigation.request
+      : null;
+  const activeLocationKey = localTarget?.locationKey ?? locationKey;
+  const locationKeyRef = useRef(activeLocationKey);
   useLayoutEffect(() => {
-    locationKeyRef.current = locationKey;
-  }, [locationKey]);
+    locationKeyRef.current = activeLocationKey;
+  }, [activeLocationKey]);
   const readLocationKey = useCallback(() => locationKeyRef.current, []);
   const searchTarget = readSearchMessageTarget(location.state);
   const messageLinkTarget = parseMessageLink(
@@ -284,15 +296,24 @@ export function SearchMessageLocationProvider({
       ? searchTarget
       : { ...messageLinkTarget, match: "message" as const };
   const applies =
-    target !== null && searchTargetAppliesToThread(target, threadId);
+    target !== null &&
+    searchTargetAppliesToThread(target, threadId) &&
+    navigation?.suppressedRouteKey !== locationKey;
   const targetLocationKey = applies ? locationKey : null;
   const targetMatch = applies ? target.match : null;
   const targetSeq = applies ? target.seq : null;
   const targetThreadId = applies ? target.threadId : null;
   const value = useMemo<SearchMessageLocation>(
     () => ({
-      target:
-        targetLocationKey === null || targetMatch === null || targetSeq === null
+      scope: localTarget ? navigation?.scope : undefined,
+      focusElementId: localTarget?.elementId,
+      onRevealFailure: localTarget ? navigation?.fail : undefined,
+      onRevealComplete: localTarget ? navigation?.complete : undefined,
+      target: localTarget
+        ? { ...localTarget, match: "sequence" }
+        : targetLocationKey === null ||
+            targetMatch === null ||
+            targetSeq === null
           ? null
           : {
               locationKey: targetLocationKey,
@@ -304,6 +325,10 @@ export function SearchMessageLocationProvider({
     }),
     [
       readLocationKey,
+      localTarget,
+      navigation?.scope,
+      navigation?.fail,
+      navigation?.complete,
       targetLocationKey,
       targetMatch,
       targetSeq,
@@ -337,7 +362,14 @@ export function useScrollToSearchedMessage(
     reportsMissingTarget = false,
   }: SearchMessagePaginationOptions = {},
 ): boolean {
-  const { target, readLocationKey } = useSearchMessageLocation();
+  const {
+    target,
+    readLocationKey,
+    scope,
+    focusElementId,
+    onRevealFailure,
+    onRevealComplete,
+  } = useSearchMessageLocation();
   const bottomAnchor = useBottomAnchoredScroll();
   const handledKeyRef = useRef<string | null>(null);
   const olderLoadAttemptKeyRef = useRef<string | null>(null);
@@ -407,7 +439,8 @@ export function useScrollToSearchedMessage(
           if (readLocationKey() !== targetLocationKey) return;
           handledKeyRef.current = targetLocationKey;
           setSettledLocationKey(targetLocationKey);
-          if (reportsMissingTarget) {
+          if (onRevealFailure) onRevealFailure(targetLocationKey);
+          else if (reportsMissingTarget) {
             appToast.message("Failed to load message", {
               description: "Please try opening the link again.",
             });
@@ -422,6 +455,10 @@ export function useScrollToSearchedMessage(
         !isLoadingOlderRows
       ) {
         handledKeyRef.current = targetLocationKey;
+        if (onRevealFailure) {
+          onRevealFailure(targetLocationKey);
+          return;
+        }
         appToast.message("Message not found", {
           description:
             "It may have been removed by an edit or hidden by a context clear.",
@@ -430,7 +467,10 @@ export function useScrollToSearchedMessage(
       return;
     }
     const selector = `[data-timeline-row-id="${escapeTimelineRowId(targetLeafRow.id)}"]`;
-    const renderedTarget = document.querySelector<HTMLElement>(selector);
+    const findTarget = () =>
+      (scope ? scope() : document)?.querySelector<HTMLElement>(selector) ??
+      null;
+    const renderedTarget = findTarget();
     if (renderedTarget === null) {
       return;
     }
@@ -442,7 +482,7 @@ export function useScrollToSearchedMessage(
       if (readLocationKey() !== targetLocationKey) {
         return;
       }
-      const element = document.querySelector<HTMLElement>(selector);
+      const element = findTarget();
       if (element === null) {
         return;
       }
@@ -464,7 +504,12 @@ export function useScrollToSearchedMessage(
       ) {
         handledKeyRef.current = targetLocationKey;
         setSettledLocationKey(targetLocationKey);
-        revealTimelineRow(element, bottomAnchor);
+        const focused = focusElementId
+          ? element.querySelector<HTMLElement>(`[id="${focusElementId}"]`)
+          : null;
+        revealTimelineRow(focused ?? element, bottomAnchor);
+        focused?.focus({ preventScroll: true });
+        onRevealComplete?.(targetLocationKey);
         return;
       }
       frame = requestAnimationFrame(revealTarget);
@@ -476,6 +521,10 @@ export function useScrollToSearchedMessage(
     };
   }, [
     bottomAnchor,
+    scope,
+    focusElementId,
+    onRevealFailure,
+    onRevealComplete,
     canLoadOlderTarget,
     isLoadingOlderRows,
     loadedRange,

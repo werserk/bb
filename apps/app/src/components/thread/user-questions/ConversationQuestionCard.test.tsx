@@ -257,7 +257,7 @@ it("bounds Markdown reads and leaves download available", async () => {
   expect(screen.getByText("Download Large notes")).toBeTruthy();
 });
 
-it("retains the accepted response and held reason after withdrawal without offering a futile retry", async () => {
+it("retains access to the accepted response and held reason after withdrawal without offering a futile retry", async () => {
   api.get.mockResolvedValue({
     ...question,
     status: "withdrawn",
@@ -270,6 +270,41 @@ it("retains the accepted response and held reason after withdrawal without offer
     { wrapper: harness.wrapper },
   );
   await screen.findByText("Delivery held");
+  expect(screen.getByText("View answer")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show original question" }),
+  );
   expect(screen.getByText("A")).toBeTruthy();
+  expect(await screen.findByLabelText("Sample")).toBeTruthy();
   expect(screen.queryByText("Send now")).toBeNull();
+});
+
+it("settles compactly without duplicating answers and keeps original options and materials available", async () => {
+  api.get.mockResolvedValue({
+    ...question,
+    status: "answered",
+    updatedAt: 2000,
+    response: { voice: { selected: ["a"], freeText: "Owner detail" } },
+    delivery: { kind: "held", reason: "Thread archived" },
+  });
+  const harness = createQueryClientTestHarness();
+  render(
+    <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
+    { wrapper: harness.wrapper },
+  );
+  await screen.findByText("Agent question");
+  expect(await screen.findByRole("heading", { name: "Which voice?" })).toBeTruthy();
+  expect(screen.getByText("Response saved")).toBeTruthy();
+  expect(screen.getByText("View answer")).toBeTruthy();
+  expect(screen.queryByTestId("form")).toBeNull();
+  expect(screen.queryByText("Owner detail")).toBeNull();
+  expect(screen.queryByLabelText("Sample")).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show original question" }),
+  );
+  expect(screen.getByText("Listen before choosing")).toBeTruthy();
+  expect(screen.getByText("A")).toBeTruthy();
+  expect(await screen.findByLabelText("Sample")).toBeTruthy();
+  expect(screen.queryByText("Owner detail")).toBeNull();
+  expect(screen.getByText("Send now")).toBeTruthy();
 });

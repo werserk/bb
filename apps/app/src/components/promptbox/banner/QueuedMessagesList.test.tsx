@@ -2282,7 +2282,9 @@ it.each([true, false])(
       />,
     );
     expandQueue();
-    expect(screen.getByText("Question response")).toBeTruthy();
+    expect(
+      screen.getByText(valid ? "You answered" : "Question response"),
+    ).toBeTruthy();
     if (valid) {
       expect(screen.getByText("Readable label")).toBeTruthy();
       expect(screen.getByText("Owner note")).toBeTruthy();

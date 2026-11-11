@@ -1,3 +1,5 @@
+import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
+import { QuestionNavigator } from "@/components/thread/user-questions/QuestionNavigator";
 import { NativeQuestionFocusProvider } from "./native-question-focus";
 import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
 import { ThreadPlanCard } from "./ThreadPlanCard";
@@ -611,6 +613,12 @@ export function ThreadScreen({
               footer={
                 <>
                   {plan}
+                  <QuestionNavigator
+                    threadId={thread.id}
+                    onReturnToComposer={() =>
+                      requestComposerFocus(draftStorageKey)
+                    }
+                  />
                   {promptArea}
                 </>
               }
@@ -645,6 +653,12 @@ export function ThreadScreen({
               promptArea={
                 <>
                   {plan}
+                  <QuestionNavigator
+                    threadId={thread.id}
+                    onReturnToComposer={() =>
+                      requestComposerFocus(draftStorageKey)
+                    }
+                  />
                   {promptArea}
                 </>
               }
@@ -677,17 +691,25 @@ export function ThreadScreen({
     }
   })();
   return (
-    <NativeQuestionFocusProvider key={thread.id}>
-      <div
-        className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
-        data-thread-chat=""
-      >
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
-          {presentation.kind === "transcript" && plan}
+    <QuestionNavigationProvider
+      key={thread.id}
+      threadId={thread.id}
+      readOnly={
+        thread.archivedAt !== null || presentation.kind === "transcript"
+      }
+    >
+      <NativeQuestionFocusProvider key={thread.id}>
+        <div
+          className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
+          data-thread-chat=""
+        >
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+            {presentation.kind === "transcript" && plan}
+          </div>
         </div>
-      </div>
-    </NativeQuestionFocusProvider>
+      </NativeQuestionFocusProvider>
+    </QuestionNavigationProvider>
   );
 }
 

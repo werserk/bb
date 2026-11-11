@@ -147,7 +147,7 @@ it("retains readable snapshot when source is missing, with timestamp and inline 
     />,
     { wrapper: harness.wrapper },
   );
-  expect(screen.getByText("Question response")).toBeTruthy();
+  expect(screen.getByText("You answered")).toBeTruthy();
   expect(screen.getByText("First label")).toBeTruthy();
   await screen.findByText("Source unavailable · delivery unverified");
   expect(document.querySelector("time")?.getAttribute("dateTime")).toBe(
@@ -190,7 +190,7 @@ it.each([false, true])(
   },
 );
 
-it("renders the history envelope as a neutral event without user edit and preserves composer focus", async () => {
+it("renders the history envelope as an owner answer without user edit and preserves composer focus", async () => {
   api.get.mockRejectedValue(new Error("Missing"));
   const harness = createQueryClientTestHarness();
   render(
@@ -371,4 +371,29 @@ it("closes an inline current original card after expanding it", async () => {
   expect(screen.getByRole("region", { name: "Question" })).toBeTruthy();
   fireEvent.click(screen.getByText("Original question"));
   expect(screen.queryByRole("region", { name: "Question" })).toBeNull();
+});
+
+it("identifies the owner answer and anchors a concise original quote without moving composer focus", async () => {
+  api.get.mockRejectedValue(new Error("Missing"));
+  const harness = createQueryClientTestHarness();
+  const view = render(
+    <>
+      <input aria-label="Composer" autoFocus />
+      <QuestionResponseEvent
+        response={parseQuestionResponse(envelope)!}
+        threadId="thr_test"
+        timestamp={1000}
+      />
+    </>,
+    { wrapper: harness.wrapper },
+  );
+  expect(screen.getByText("You answered")).toBeTruthy();
+  expect(view.container.querySelector("blockquote")?.textContent).toBe(
+    "Choose carefully",
+  );
+  expect(screen.getByRole("region", { name: "Question response" }).id).toBe(
+    "conversation-question-response-thr_test-qst_23456789ab",
+  );
+  expect(document.activeElement).toBe(screen.getByLabelText("Composer"));
+  await screen.findByText("Source unavailable · delivery unverified");
 });

@@ -11,9 +11,13 @@ import { ConversationQuestionCard } from "./ConversationQuestionCard";
 import {
   QuestionAnswers,
   questionCardId,
+  questionResponseId,
+  QuestionOriginalPrompts,
   questionDeliveryLabels,
   type QuestionResponseSnapshot,
 } from "./question-response-presentation";
+
+import { useQuestionNavigation } from "./question-navigation";
 
 export function QuestionResponseEvent({
   response,
@@ -24,6 +28,7 @@ export function QuestionResponseEvent({
   threadId: string;
   timestamp: number;
 }) {
+  const navigation = useQuestionNavigation();
   const root = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
   const source = useQuery({
@@ -60,15 +65,23 @@ export function QuestionResponseEvent({
     <section
       ref={root}
       aria-label="Question response"
+      id={questionResponseId(threadId, response.questionId)}
+      tabIndex={-1}
       data-question-response=""
-      className="space-y-3 border-l border-border py-1 pl-4 text-sm"
+      className="ml-auto min-w-0 w-[calc(100%-0.75rem)] max-w-2xl space-y-3 rounded-xl rounded-tr-sm border border-timeline-accent/25 bg-timeline-accent/10 p-4 text-sm focus-visible:outline focus-visible:outline-ring"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>Question response</span>
+        <span className="font-medium text-foreground">You answered</span>
         <time dateTime={new Date(timestamp).toISOString()}>
           {new Date(timestamp).toLocaleString()}
         </time>
       </div>
+      <blockquote className="line-clamp-2 border-l-2 border-timeline-accent/30 pl-3 text-xs text-muted-foreground">
+        {response.publication.questions[0]?.prompt
+          .replace(/\s+/gu, " ")
+          .trim()
+          .slice(0, 180)}
+      </blockquote>
       <QuestionAnswers
         publication={response.publication}
         answers={response.answers}
@@ -89,11 +102,16 @@ export function QuestionResponseEvent({
         type="button"
         aria-expanded={expanded}
         className="text-xs underline"
-        onClick={() => {
+        onClick={async () => {
           if (expanded) {
             setExpanded(false);
             return;
           }
+          if (
+            navigation &&
+            (await navigation.navigate(response.questionId, "question"))
+          )
+            return;
           const scope = root.current?.closest("[data-thread-window]");
           const original = [
             ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
@@ -102,7 +120,13 @@ export function QuestionResponseEvent({
               element.id === questionCardId(threadId, response.questionId),
           );
           if (original)
-            original.scrollIntoView({ behavior: "smooth", block: "center" });
+            original.scrollIntoView({
+              behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
+                .matches
+                ? "auto"
+                : "smooth",
+              block: "center",
+            });
           else setExpanded((value) => !value);
         }}
       >
@@ -113,6 +137,7 @@ export function QuestionResponseEvent({
           <ConversationQuestionCard
             threadId={threadId}
             questionId={response.questionId}
+            defaultExpanded
           />
         ) : (
           <section
@@ -122,10 +147,7 @@ export function QuestionResponseEvent({
             <p className="whitespace-pre-wrap break-words">
               {response.publication.body}
             </p>
-            <QuestionAnswers
-              publication={response.publication}
-              answers={response.answers}
-            />
+            <QuestionOriginalPrompts publication={response.publication} />
           </section>
         )
       ) : null}

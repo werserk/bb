@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ConversationQuestion, FrozenQuestionFile } from "@bb/domain";
 import { QuestionForm } from "@bb/shared-ui/question-form";
@@ -9,10 +9,13 @@ import { MarkdownPreview } from "../../ui/markdown-preview";
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
 
 import {
-  QuestionAnswers,
+  QuestionOriginalPrompts,
+  questionResponseId,
   questionCardId,
   questionDeliveryLabels,
 } from "./question-response-presentation";
+
+import { useQuestionNavigation } from "./question-navigation";
 
 const formHost = {
   density: "default" as const,
@@ -167,6 +170,7 @@ function QuestionMaterial({
 }
 
 function QuestionDelivery({ question }: { question: ConversationQuestion }) {
+  const navigation = useQuestionNavigation();
   const client = useQueryClient();
   const retry = useMutation({
     mutationFn: () => {
@@ -189,7 +193,8 @@ function QuestionDelivery({ question }: { question: ConversationQuestion }) {
       {question.delivery.reason ? <p>{question.delivery.reason}</p> : null}
       {question.status === "answered" &&
       question.delivery.kind === "held" &&
-      question.queuedMessageId ? (
+      question.queuedMessageId &&
+      !navigation?.readOnly ? (
         <button
           type="button"
           className="rounded-md border border-border px-3 py-1 hover:bg-state-hover disabled:opacity-50"
@@ -211,10 +216,16 @@ function QuestionDelivery({ question }: { question: ConversationQuestion }) {
 export function ConversationQuestionCard({
   threadId,
   questionId,
+  defaultExpanded = false,
 }: {
   threadId: string;
   questionId: string;
+  defaultExpanded?: boolean;
 }) {
+  const root = useRef<HTMLElement>(null);
+  const navigation = useQuestionNavigation();
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [answerUnavailable, setAnswerUnavailable] = useState(false);
   const client = useQueryClient();
   const queryKey = [...conversationQuestionsQueryKey(threadId), questionId];
   const query = useQuery({
@@ -247,35 +258,80 @@ export function ConversationQuestionCard({
     onSuccess: (question) => client.setQueryData(queryKey, question),
   });
   const question = query.data;
+  useEffect(() => {
+    if (navigation?.request?.elementId === questionCardId(threadId, questionId))
+      setExpanded(true);
+  }, [navigation?.request, threadId, questionId]);
   const error = action.error ?? query.error;
   return (
     <section
+      ref={root}
+      tabIndex={-1}
       aria-label="Question"
       id={questionCardId(threadId, questionId)}
-      className="space-y-4 rounded-xl border border-border bg-card p-4"
+      className={`min-w-0 space-y-4 rounded-xl border border-border bg-card p-4 ${question?.status === "open" ? "border-l-2 border-l-attention" : ""}`}
     >
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>Question</span>
-        <span>{question?.status ?? "Loading"}</span>
+        <span
+          aria-hidden="true"
+          className="flex size-5 items-center justify-center rounded-full border border-current font-medium"
+        >
+          ?
+        </span>
+        <span>Agent question</span>
+        <span className="capitalize">{question?.status ?? "Loading"}</span>
       </div>
       {question ? (
         <>
-          {question.publication.body ? (
-            <MarkdownPreview
-              content={question.publication.body}
-              allowHtml={false}
-            />
+          <h3
+            tabIndex={-1}
+            className="break-words text-sm font-medium focus-visible:outline focus-visible:outline-ring"
+          >
+            {question.publication.questions[0]?.shortLabel ??
+              question.publication.questions[0]?.prompt ??
+              "Question"}
+          </h3>
+          {Number.isFinite(question.updatedAt) ? (
+            <time
+              className="block text-xs text-muted-foreground"
+              dateTime={new Date(question.updatedAt).toISOString()}
+            >
+              Updated {new Date(question.updatedAt).toLocaleString()}
+            </time>
           ) : null}
-          <div className="space-y-4">
-            {question.materialManifest.materials.map((material) => (
-              <QuestionMaterial
-                key={material.snapshotPath}
-                material={material}
-                threadId={threadId}
-                questionId={questionId}
-              />
-            ))}
-          </div>
+          {question.status !== "open" ? (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              className="text-xs underline"
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? "Hide original question" : "Show original question"}
+            </button>
+          ) : null}
+          {question.status === "open" || expanded ? (
+            <div className="space-y-4">
+              {question.publication.body ? (
+                <MarkdownPreview
+                  content={question.publication.body}
+                  allowHtml={false}
+                />
+              ) : null}
+              <div className="space-y-4">
+                {question.materialManifest.materials.map((material) => (
+                  <QuestionMaterial
+                    key={material.snapshotPath}
+                    material={material}
+                    threadId={threadId}
+                    questionId={questionId}
+                  />
+                ))}
+              </div>
+              {question.status !== "open" ? (
+                <QuestionOriginalPrompts publication={question.publication} />
+              ) : null}
+            </div>
+          ) : null}
           {question.status === "open" ? (
             <QuestionFormHostProvider value={formHost}>
               <QuestionForm
@@ -288,8 +344,10 @@ export function ConversationQuestionCard({
                     options: item.options ?? [],
                   }),
                 )}
-                disabled={action.isPending}
-                cancelDisabled={action.isPending}
+                disabled={action.isPending || navigation?.readOnly === true}
+                cancelDisabled={
+                  action.isPending || navigation?.readOnly === true
+                }
                 onSubmit={(answers) =>
                   action
                     .mutateAsync({ kind: "answer", question, answers })
@@ -314,10 +372,43 @@ export function ConversationQuestionCard({
               {question.status === "answered" || question.response != null ? (
                 <QuestionDelivery question={question} />
               ) : null}
-              <QuestionAnswers
-                publication={question.publication}
-                answers={question.response}
-              />
+              {question.response != null ? (
+                <button
+                  type="button"
+                  className="text-xs underline"
+                  onClick={async () => {
+                    if (
+                      navigation &&
+                      (await navigation.navigate(questionId, "answer"))
+                    ) {
+                      setAnswerUnavailable(false);
+                      return;
+                    }
+                    const scope = root.current?.closest("[data-thread-window]");
+                    const answer = [
+                      ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
+                    ].find(
+                      (element) =>
+                        element.id === questionResponseId(threadId, questionId),
+                    );
+                    if (answer) {
+                      answer.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                      });
+                      answer.focus({ preventScroll: true });
+                      setAnswerUnavailable(false);
+                    } else setAnswerUnavailable(true);
+                  }}
+                >
+                  View answer
+                </button>
+              ) : null}
+              {answerUnavailable ? (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Answer unavailable here. Retry View answer to load it again.
+                </p>
+              ) : null}
             </>
           )}
         </>

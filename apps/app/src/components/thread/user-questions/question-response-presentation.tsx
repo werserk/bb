@@ -182,3 +182,34 @@ export function QuestionAnswers({
 export function questionCardId(threadId: string, questionId: string) {
   return `conversation-question-${threadId}-${questionId}`;
 }
+
+export function questionResponseId(threadId: string, questionId: string) {
+  return `conversation-question-response-${threadId}-${questionId}`;
+}
+
+export function QuestionOriginalPrompts({
+  publication,
+}: {
+  publication: ConversationQuestionPublication;
+}) {
+  return (
+    <div className="space-y-3 text-sm">
+      {publication.questions.map((item) => (
+        <div
+          key={item.id}
+          className="space-y-1 whitespace-pre-wrap break-words"
+        >
+          <p className="font-medium">{item.prompt}</p>
+          {item.options?.map((option) => (
+            <div key={option.value}>
+              <p>{option.label}</p>
+              {option.description ? (
+                <p className="text-muted-foreground">{option.description}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}

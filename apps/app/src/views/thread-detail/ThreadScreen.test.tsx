@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { MemoryRouter } from "react-router-dom";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingInteraction } from "@bb/domain";
@@ -100,30 +101,32 @@ function renderScreen(
 ) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   return render(
-    <Wrapper>
-      <ThreadScreen
-        composer={{
-          environmentCheckout: undefined,
-          environmentChrome: undefined,
-          contextEnvironmentId: null,
-          permissionPolicy: "snapshot",
-        }}
-        environment={null}
-        presentation={presentation}
-        projectId={THREAD.projectId}
-        resolveMentionLink={() => null}
-        thread={THREAD}
-        timeline={TIMELINE}
-        timelineHost={{
-          environmentHostName: null,
-          includePluginMessageActions: false,
-          unreadDividerAutoScroll: false,
-          unreadDividerPlacement: null,
-        }}
-        workspaceRootPath={undefined}
-        {...overrides}
-      />
-    </Wrapper>,
+    <MemoryRouter>
+      <Wrapper>
+        <ThreadScreen
+          composer={{
+            environmentCheckout: undefined,
+            environmentChrome: undefined,
+            contextEnvironmentId: null,
+            permissionPolicy: "snapshot",
+          }}
+          environment={null}
+          presentation={presentation}
+          projectId={THREAD.projectId}
+          resolveMentionLink={() => null}
+          thread={THREAD}
+          timeline={TIMELINE}
+          timelineHost={{
+            environmentHostName: null,
+            includePluginMessageActions: false,
+            unreadDividerAutoScroll: false,
+            unreadDividerPlacement: null,
+          }}
+          workspaceRootPath={undefined}
+          {...overrides}
+        />
+      </Wrapper>
+    </MemoryRouter>,
   );
 }
 
