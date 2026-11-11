@@ -90,3 +90,20 @@ it("shows an actionable load error and refetches without submitting an answer", 
   await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
   expect(api.navigate).not.toHaveBeenCalled();
 });
+
+it("labels a capped recent list instead of implying that older questions are absent", async () => {
+  api.list.mockResolvedValue(
+    Array.from({ length: 200 }, (_, index) =>
+      q(`Closed ${index}`, index, "answered"),
+    ),
+  );
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  expect(
+    await screen.findByText(
+      "Showing the latest 200 cards. Older questions may remain in history.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Question · 0/ })).toBeNull();
+});

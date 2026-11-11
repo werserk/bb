@@ -29,6 +29,7 @@ export function QuestionNavigator({
         question.threadId === threadId && question.status === "open",
     )
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const recentOnly = (query.data?.length ?? 0) >= 200;
   const title = (question: (typeof questions)[number]) =>
     question.publication.questions[0]?.prompt.replace(/\s+/gu, " ").trim() ||
     "Question";
@@ -43,6 +44,7 @@ export function QuestionNavigator({
     query.isPending ||
     query.isError ||
     questions.length > 0 ||
+    recentOnly ||
     navigation?.error ||
     navigation?.pending ||
     (anchor && !anchor.isAtBottom);
@@ -62,7 +64,9 @@ export function QuestionNavigator({
             onClick={() => go(questions[0]!.id)}
           >
             <Icon name="MessageQuestion" className="size-4 shrink-0" />
-            <span className="shrink-0">Question · 1</span>
+            <span className="shrink-0">
+              {recentOnly ? "Recent question · 1" : "Question · 1"}
+            </span>
             <span className="max-w-64 truncate">{title(questions[0]!)}</span>
             <Icon name="ChevronRight" className="size-3 shrink-0" />
           </button>
@@ -77,7 +81,8 @@ export function QuestionNavigator({
             <PopoverTrigger asChild>
               <button type="button" className={buttonClass}>
                 <Icon name="MessageQuestion" className="size-4" />
-                Questions · {questions.length}
+                {recentOnly ? "Recent questions" : "Questions"} ·{" "}
+                {questions.length}
               </button>
             </PopoverTrigger>
             <PopoverContent
@@ -121,6 +126,12 @@ export function QuestionNavigator({
           </button>
         ) : null}
       </div>
+      {recentOnly ? (
+        <p className="px-2 text-xs text-muted-foreground">
+          Showing the latest {query.data?.length} cards. Older questions may
+          remain in history.
+        </p>
+      ) : null}
       {query.isError ? (
         <div
           role="alert"
