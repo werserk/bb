@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import {
@@ -11,9 +17,12 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { ConversationMessageContent } from "../timeline/ConversationMessageContent";
+import { QuestionNavigationProvider } from "./question-navigation";
 import { QuestionResponseEvent } from "./QuestionResponseEvent";
-const api = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("@/lib/sdk", () => ({ sdk: { threads: { questions: api } } }));
+const api = vi.hoisted(() => ({ get: vi.fn(), list: vi.fn() }));
+vi.mock("@/lib/sdk", () => ({
+  sdk: { threads: { questions: api, events: { list: api.list } } },
+}));
 const publication = {
   body: "Context",
   materials: [],
@@ -157,7 +166,7 @@ it("retains readable snapshot when source is missing, with timestamp and inline 
   expect(screen.getByText("Context")).toBeTruthy();
   fireEvent.click(screen.getByText("Original question"));
   expect(screen.queryByText("Context")).toBeNull();
-  expect(screen.queryByText("Submitted to agent")).toBeNull();
+  expect(screen.queryByText("Sent to agent")).toBeNull();
 });
 it.each([false, true])(
   "shows delivery only when current source matches snapshot (%s)",
@@ -182,9 +191,7 @@ it.each([false, true])(
       { wrapper: harness.wrapper },
     );
     await screen.findByText(
-      mismatch
-        ? "Source unavailable · delivery unverified"
-        : "Submitted to agent",
+      mismatch ? "Source unavailable · delivery unverified" : "Sent to agent",
     );
     expect(screen.queryByText("Agent read")).toBeNull();
   },
@@ -366,11 +373,11 @@ it("closes an inline current original card after expanding it", async () => {
     </div>,
     { wrapper: harness.wrapper },
   );
-  await screen.findByText("Submitted to agent");
+  await screen.findByText("Sent to agent");
   fireEvent.click(screen.getByText("Original question"));
-  expect(screen.getByRole("region", { name: "Question" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Choose carefully" })).toBeTruthy();
   fireEvent.click(screen.getByText("Original question"));
-  expect(screen.queryByRole("region", { name: "Question" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "Choose carefully" })).toBeNull();
 });
 
 it("identifies the owner answer and anchors a concise original quote without moving composer focus", async () => {
@@ -388,12 +395,44 @@ it("identifies the owner answer and anchors a concise original quote without mov
     { wrapper: harness.wrapper },
   );
   expect(screen.getByText("You answered")).toBeTruthy();
-  expect(view.container.querySelector("blockquote")?.textContent).toBe(
-    "Choose carefully",
-  );
+  expect(view.container.querySelector("blockquote")).toBeNull();
+  expect(screen.getAllByText("Choose carefully")).toHaveLength(1);
   expect(screen.getByRole("region", { name: "Question response" }).id).toBe(
     "conversation-question-response-thr_test-qst_23456789ab",
   );
   expect(document.activeElement).toBe(screen.getByLabelText("Composer"));
   await screen.findByText("Source unavailable · delivery unverified");
+});
+
+it("shows link-local progress and clears a failed lookup when the retained snapshot is revealed", async () => {
+  api.get.mockRejectedValue(new Error("Missing"));
+  let reject!: (reason: Error) => void;
+  api.list.mockImplementation(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  render(
+    <MemoryRouter>
+      <QuestionNavigationProvider threadId="thr_test">
+        <QuestionResponseEvent
+          response={parseQuestionResponse(envelope)!}
+          threadId="thr_test"
+          timestamp={1000}
+        />
+      </QuestionNavigationProvider>
+    </MemoryRouter>,
+    { wrapper: createQueryClientTestHarness().wrapper },
+  );
+  const button = screen.getByRole("button", { name: "Original question" });
+  fireEvent.click(button);
+  expect(await screen.findByText("Opening message…")).toBeTruthy();
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  reject(new Error("Lookup offline"));
+  expect(
+    await screen.findByRole("region", { name: "Original question snapshot" }),
+  ).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("Lookup offline")).toBeNull());
+  expect(screen.queryByText("Opening message…")).toBeNull();
 });

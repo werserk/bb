@@ -107,3 +107,26 @@ it("labels a capped recent list instead of implying that older questions are abs
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Question · 0/ })).toBeNull();
 });
+
+it("uses the same short label as the destination card for direct and list navigation", async () => {
+  const labeled = {
+    ...q("Full prompt", 1),
+    publication: {
+      questions: [{ prompt: "Full prompt", shortLabel: "Decision" }],
+    },
+  };
+  api.list.mockResolvedValue([labeled]);
+  const first = render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  expect(
+    await screen.findByRole("button", { name: /Question · 1 Decision/ }),
+  ).toBeTruthy();
+  first.unmount();
+  api.list.mockResolvedValue([labeled, q("Other", 2)]);
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /Questions · 2/ }));
+  expect(await screen.findByRole("button", { name: "Decision" })).toBeTruthy();
+});

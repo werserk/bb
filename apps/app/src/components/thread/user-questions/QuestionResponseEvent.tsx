@@ -9,13 +9,21 @@ import { sdk } from "@/lib/sdk";
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
 import { ConversationQuestionCard } from "./ConversationQuestionCard";
 import {
-  QuestionAnswers,
   questionCardId,
   questionResponseId,
   QuestionOriginalPrompts,
   questionDeliveryLabels,
   type QuestionResponseSnapshot,
 } from "./question-response-presentation";
+
+import {
+  QuestionResponseBody,
+  questionResponseClass,
+} from "./QuestionResponseBody";
+import {
+  QuestionNavigationFeedback,
+  useQuestionLinkState,
+} from "./QuestionNavigationFeedback";
 
 import { useQuestionNavigation } from "./question-navigation";
 
@@ -29,6 +37,7 @@ export function QuestionResponseEvent({
   timestamp: number;
 }) {
   const navigation = useQuestionNavigation();
+  const link = useQuestionLinkState(response.questionId, "question");
   const root = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
   const source = useQuery({
@@ -68,80 +77,83 @@ export function QuestionResponseEvent({
       id={questionResponseId(threadId, response.questionId)}
       tabIndex={-1}
       data-question-response=""
-      className="ml-auto min-w-0 w-[calc(100%-0.75rem)] max-w-2xl space-y-3 rounded-xl rounded-tr-sm border border-timeline-accent/25 bg-timeline-accent/10 p-4 text-sm focus-visible:outline focus-visible:outline-ring"
+      className={questionResponseClass}
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">You answered</span>
-        <time dateTime={new Date(timestamp).toISOString()}>
-          {new Date(timestamp).toLocaleString()}
-        </time>
-      </div>
-      <blockquote className="line-clamp-2 border-l-2 border-timeline-accent/30 pl-3 text-xs text-muted-foreground">
-        {response.publication.questions[0]?.prompt
-          .replace(/\s+/gu, " ")
-          .trim()
-          .slice(0, 180)}
-      </blockquote>
-      <QuestionAnswers
-        publication={response.publication}
-        answers={response.answers}
-        showPrompts={response.publication.questions.length > 1}
+      <QuestionResponseBody
+        response={response}
+        timestamp={timestamp}
+        footer={
+          <>
+            <span>
+              {matches && question
+                ? questionDeliveryLabels[question.delivery.kind]
+                : source.isPending
+                  ? "Checking response status…"
+                  : "Source unavailable · delivery unverified"}
+              {matches && question?.delivery.reason
+                ? ` — ${question.delivery.reason}`
+                : ""}
+            </span>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              className="min-h-9 shrink-0 text-xs text-foreground underline pointer-coarse:min-h-11"
+              disabled={link.pending}
+              aria-busy={link.pending}
+              onMouseDown={(event) => {
+                if (event.button === 0) event.preventDefault();
+              }}
+              onClick={async () => {
+                if (expanded) {
+                  setExpanded(false);
+                  return;
+                }
+                if (
+                  navigation &&
+                  (await navigation.navigate(
+                    response.questionId,
+                    "question",
+                    "inline",
+                  ))
+                )
+                  return;
+                navigation?.clear();
+                const scope = root.current?.closest("[data-thread-window]");
+                const original = [
+                  ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
+                ].find(
+                  (element) =>
+                    element.id ===
+                    questionCardId(threadId, response.questionId),
+                );
+                if (original)
+                  original.scrollIntoView({
+                    behavior: window.matchMedia?.(
+                      "(prefers-reduced-motion: reduce)",
+                    ).matches
+                      ? "auto"
+                      : "smooth",
+                    block: "center",
+                  });
+                else setExpanded((value) => !value);
+              }}
+            >
+              Original question
+            </button>
+          </>
+        }
       />
-      <p className="text-xs text-muted-foreground">
-        {matches && question
-          ? questionDeliveryLabels[question.delivery.kind]
-          : source.isPending
-            ? "Checking response status…"
-            : "Source unavailable · delivery unverified"}
-      </p>
-      {matches && question?.delivery.reason ? (
-        <p className="text-xs text-muted-foreground">
-          {question.delivery.reason}
-        </p>
-      ) : null}
-      <button
-        type="button"
-        aria-expanded={expanded}
-        className="text-xs underline"
-        onMouseDown={(event) => {
-          if (event.button === 0) event.preventDefault();
-        }}
-        onClick={async () => {
-          if (expanded) {
-            setExpanded(false);
-            return;
-          }
-          if (
-            navigation &&
-            (await navigation.navigate(response.questionId, "question"))
-          )
-            return;
-          const scope = root.current?.closest("[data-thread-window]");
-          const original = [
-            ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
-          ].find(
-            (element) =>
-              element.id === questionCardId(threadId, response.questionId),
-          );
-          if (original)
-            original.scrollIntoView({
-              behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
-                .matches
-                ? "auto"
-                : "smooth",
-              block: "center",
-            });
-          else setExpanded((value) => !value);
-        }}
-      >
-        Original question
-      </button>
+      <QuestionNavigationFeedback
+        questionId={response.questionId}
+        kind="question"
+      />
       {expanded ? (
         matches ? (
           <ConversationQuestionCard
             threadId={threadId}
             questionId={response.questionId}
             defaultExpanded
+            snapshot
           />
         ) : (
           <section

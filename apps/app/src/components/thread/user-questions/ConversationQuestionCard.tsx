@@ -10,11 +10,17 @@ import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-ques
 
 import {
   QuestionOriginalPrompts,
+  questionTitle,
+  questionTime,
   questionResponseId,
   questionCardId,
   questionDeliveryLabels,
 } from "./question-response-presentation";
 
+import {
+  QuestionNavigationFeedback,
+  useQuestionLinkState,
+} from "./QuestionNavigationFeedback";
 import { useQuestionNavigation } from "./question-navigation";
 
 const formHost = {
@@ -157,6 +163,7 @@ function QuestionMaterial({
           Loading {material.label}…
         </p>
       ) : null}
+      <QuestionNavigationFeedback questionId={questionId} kind="answer" />
       {error ? (
         <p role="alert" className="text-sm text-destructive-text">
           Unable to load {material.label}: {error}
@@ -217,10 +224,12 @@ export function ConversationQuestionCard({
   threadId,
   questionId,
   defaultExpanded = false,
+  snapshot = false,
 }: {
   threadId: string;
   questionId: string;
   defaultExpanded?: boolean;
+  snapshot?: boolean;
 }) {
   const root = useRef<HTMLElement>(null);
   const navigation = useQuestionNavigation();
@@ -258,57 +267,112 @@ export function ConversationQuestionCard({
     onSuccess: (question) => client.setQueryData(queryKey, question),
   });
   const question = query.data;
+  const link = useQuestionLinkState(questionId, "answer");
+  const headingId = `${questionCardId(threadId, questionId)}${snapshot ? "-snapshot" : ""}-heading`;
+
   useEffect(() => {
     if (navigation?.request?.elementId === questionCardId(threadId, questionId))
       setExpanded(true);
   }, [navigation?.request, threadId, questionId]);
+  const answerLink =
+    question?.response != null ? (
+      <button
+        type="button"
+        className="min-h-9 shrink-0 text-xs underline pointer-coarse:min-h-11"
+        disabled={link.pending}
+        aria-busy={link.pending}
+        onMouseDown={(event) => {
+          if (event.button === 0) event.preventDefault();
+        }}
+        onClick={async () => {
+          if (
+            navigation &&
+            (await navigation.navigate(questionId, "answer", "inline"))
+          ) {
+            setAnswerUnavailable(false);
+            return;
+          }
+          navigation?.clear();
+          const scope = root.current?.closest("[data-thread-window]");
+          const answer = [
+            ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
+          ].find(
+            (element) =>
+              element.id === questionResponseId(threadId, questionId),
+          );
+          if (answer) {
+            answer.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+            answer.focus({ preventScroll: true });
+            setAnswerUnavailable(false);
+          } else setAnswerUnavailable(true);
+        }}
+      >
+        View answer
+      </button>
+    ) : null;
   const error = action.error ?? query.error;
   return (
     <section
       ref={root}
       tabIndex={-1}
-      aria-label="Question"
-      id={questionCardId(threadId, questionId)}
-      className={`min-w-0 space-y-4 rounded-xl border border-border bg-card p-4 ${question?.status === "open" ? "border-l-2 border-l-attention" : ""}`}
+      aria-labelledby={question ? headingId : undefined}
+      aria-label={question ? undefined : "Question"}
+      id={`${questionCardId(threadId, questionId)}${snapshot ? "-snapshot" : ""}`}
+      className={`min-w-0 rounded-xl border border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent ${question?.status === "open" ? "space-y-4 border-l-2 border-l-attention bg-card p-4" : "space-y-2 bg-transparent p-3"}`}
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span
-          aria-hidden="true"
-          className="flex size-5 items-center justify-center rounded-full border border-current font-medium"
-        >
-          ?
-        </span>
-        <span>Agent question</span>
-        <span className="capitalize">{question?.status ?? "Loading"}</span>
-      </div>
       {question ? (
         <>
-          <h3
-            tabIndex={-1}
-            className="break-words text-sm font-medium focus-visible:outline focus-visible:outline-ring"
-          >
-            {question.publication.questions[0]?.shortLabel ??
-              question.publication.questions[0]?.prompt ??
-              "Question"}
-          </h3>
-          {Number.isFinite(question.updatedAt) ? (
-            <time
-              className="block text-xs text-muted-foreground"
-              dateTime={new Date(question.updatedAt).toISOString()}
-            >
-              Updated {new Date(question.updatedAt).toLocaleString()}
-            </time>
-          ) : null}
-          {question.status !== "open" ? (
-            <button
-              type="button"
-              aria-expanded={expanded}
-              className="text-xs underline"
-              onClick={() => setExpanded((value) => !value)}
-            >
-              {expanded ? "Hide original question" : "Show original question"}
-            </button>
-          ) : null}
+          {question.status === "open" ? (
+            <>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span aria-hidden="true" className="text-attention">
+                  ?
+                </span>
+                <span>Agent question</span>
+                <span className="text-foreground">Open</span>
+                {Number.isFinite(question.updatedAt) ? (
+                  <time
+                    className="ml-auto"
+                    dateTime={new Date(question.updatedAt).toISOString()}
+                    title={`Updated ${new Date(question.updatedAt).toLocaleString()}`}
+                  >
+                    {questionTime(question.updatedAt)}
+                  </time>
+                ) : null}
+              </div>
+              <h3 id={headingId} className="break-words text-sm font-medium">
+                {questionTitle(question.publication)}
+              </h3>
+            </>
+          ) : (
+            <div className="flex min-h-11 min-w-0 items-center justify-between gap-3">
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-label={
+                  expanded ? "Hide original question" : "Show original question"
+                }
+                onClick={() => setExpanded((value) => !value)}
+                className="min-w-0 flex-1 py-1 text-left"
+              >
+                <h3 id={headingId} className="truncate text-sm font-medium">
+                  {questionTitle(question.publication)}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  Agent question ·{" "}
+                  <span className="capitalize">{question.status}</span>
+                  {Number.isFinite(question.updatedAt)
+                    ? ` · ${questionTime(question.updatedAt)}`
+                    : ""}{" "}
+                  · {expanded ? "Hide original" : "Show original"}
+                </span>
+              </button>
+              {answerLink}
+            </div>
+          )}
           {question.status === "open" || expanded ? (
             <div className="space-y-4">
               {question.publication.body ? (
@@ -362,51 +426,11 @@ export function ConversationQuestionCard({
             </QuestionFormHostProvider>
           ) : (
             <>
-              <p className="text-sm">
-                {question.status === "answered"
-                  ? "Response saved"
-                  : question.status === "dismissed"
-                    ? "Question dismissed"
-                    : "Question withdrawn"}
-              </p>
-              {question.status === "answered" || question.response != null ? (
+              {(question.status === "answered" || question.response != null) &&
+              question.delivery.kind !== "submitted" ? (
                 <QuestionDelivery question={question} />
               ) : null}
-              {question.response != null ? (
-                <button
-                  type="button"
-                  className="text-xs underline"
-                  onMouseDown={(event) => {
-                    if (event.button === 0) event.preventDefault();
-                  }}
-                  onClick={async () => {
-                    if (
-                      navigation &&
-                      (await navigation.navigate(questionId, "answer"))
-                    ) {
-                      setAnswerUnavailable(false);
-                      return;
-                    }
-                    const scope = root.current?.closest("[data-thread-window]");
-                    const answer = [
-                      ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
-                    ].find(
-                      (element) =>
-                        element.id === questionResponseId(threadId, questionId),
-                    );
-                    if (answer) {
-                      answer.scrollIntoView({
-                        behavior: "smooth",
-                        block: "center",
-                      });
-                      answer.focus({ preventScroll: true });
-                      setAnswerUnavailable(false);
-                    } else setAnswerUnavailable(true);
-                  }}
-                >
-                  View answer
-                </button>
-              ) : null}
+
               {answerUnavailable ? (
                 <p role="status" className="text-xs text-muted-foreground">
                   Answer unavailable here. Retry View answer to load it again.
@@ -416,6 +440,7 @@ export function ConversationQuestionCard({
           )}
         </>
       ) : null}
+      <QuestionNavigationFeedback questionId={questionId} kind="answer" />
       {error ? (
         <p role="alert" className="text-sm text-destructive-text">
           {error.message}

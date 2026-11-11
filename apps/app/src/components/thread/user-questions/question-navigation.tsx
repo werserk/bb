@@ -34,6 +34,11 @@ interface QuestionNavigation {
     questionId: string,
     reveal: QueuedAnswerReveal,
   ) => () => void;
+  feedback: {
+    questionId: string;
+    kind: QuestionNavigationKind;
+    origin: "composer" | "inline";
+  } | null;
   readOnly: boolean;
   request: QuestionNavigationRequest | null;
   error: string | null;
@@ -44,6 +49,7 @@ interface QuestionNavigation {
   navigate: (
     questionId: string,
     kind: QuestionNavigationKind,
+    origin?: "composer" | "inline",
   ) => Promise<boolean>;
   retry: () => void;
   clear: () => void;
@@ -80,10 +86,13 @@ export function QuestionNavigationProvider({
   const last = useRef<{
     questionId: string;
     kind: QuestionNavigationKind;
+    origin: "composer" | "inline";
   } | null>(null);
   const [request, setRequest] = useState<QuestionNavigationRequest | null>(
     null,
   );
+  const [feedback, setFeedback] =
+    useState<QuestionNavigation["feedback"]>(null);
   const [pending, setPending] = useState(false);
   const [suppressedRouteKey, setSuppressedRouteKey] = useState<string | null>(
     null,
@@ -95,6 +104,7 @@ export function QuestionNavigationProvider({
     setPending(false);
     setRequest(null);
     setError(null);
+    setFeedback(null);
   }, []);
   useEffect(() => {
     clear();
@@ -102,11 +112,16 @@ export function QuestionNavigationProvider({
     return () => abort.current?.abort();
   }, [routeKey, threadId, clear]);
   const navigate = useCallback(
-    async (questionId: string, kind: QuestionNavigationKind) => {
+    async (
+      questionId: string,
+      kind: QuestionNavigationKind,
+      origin: "composer" | "inline" = "composer",
+    ) => {
       abort.current?.abort();
       const controller = new AbortController();
       abort.current = controller;
-      last.current = { questionId, kind };
+      last.current = { questionId, kind, origin };
+      setFeedback({ questionId, kind, origin });
       setError(null);
       setRequest(null);
       setPending(true);
@@ -178,7 +193,12 @@ export function QuestionNavigationProvider({
     [threadId, routeKey],
   );
   const retry = useCallback(() => {
-    if (last.current) void navigate(last.current.questionId, last.current.kind);
+    if (last.current)
+      void navigate(
+        last.current.questionId,
+        last.current.kind,
+        last.current.origin,
+      );
   }, [navigate]);
   const fail = useCallback(
     (key: string) => {
@@ -199,6 +219,7 @@ export function QuestionNavigationProvider({
     <Context.Provider
       value={{
         readOnly,
+        feedback,
         registerQueuedAnswer,
         suppressedRouteKey,
         complete,

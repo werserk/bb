@@ -120,7 +120,7 @@ it("renders materials before an independent form and saves the exact revision", 
       answers: { voice: { selected: ["a"] } },
     }),
   );
-  await screen.findByText("Response saved");
+  await screen.findByRole("button", { name: "Show original question" });
 });
 it("dismisses only its own question and shows errors without hiding materials", async () => {
   api.get.mockResolvedValue(question);
@@ -207,12 +207,15 @@ it.each(["queued", "held", "submitted", "removed"])(
       { wrapper: harness.wrapper },
     );
     const labels: Record<string, string> = {
-      queued: "Waiting in queue",
-      held: "Delivery held",
-      submitted: "Submitted to agent",
+      queued: "Queued · waiting to send",
+      held: "Held · not sent",
+      submitted: "Sent to agent",
       removed: "Queue entry removed; delivery unverified",
     };
-    await screen.findByText(labels[kind]!);
+    if (kind === "submitted") {
+      await screen.findByRole("heading", { name: "Which voice?" });
+      expect(screen.queryByText(labels[kind]!)).toBeNull();
+    } else await screen.findByText(labels[kind]!);
     if (kind === "held") {
       await screen.findByText("Thread archived");
       fireEvent.click(screen.getByText("Send now"));
@@ -269,7 +272,7 @@ it("retains access to the accepted response and held reason after withdrawal wit
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
-  await screen.findByText("Delivery held");
+  await screen.findByText("Held · not sent");
   expect(screen.getByText("View answer")).toBeTruthy();
   fireEvent.click(
     screen.getByRole("button", { name: "Show original question" }),
@@ -292,9 +295,11 @@ it("settles compactly without duplicating answers and keeps original options and
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
-  await screen.findByText("Agent question");
-  expect(await screen.findByRole("heading", { name: "Which voice?" })).toBeTruthy();
-  expect(screen.getByText("Response saved")).toBeTruthy();
+  await screen.findByRole("heading", { name: "Which voice?" });
+  expect(
+    await screen.findByRole("heading", { name: "Which voice?" }),
+  ).toBeTruthy();
+  expect(screen.getByText("answered")).toBeTruthy();
   expect(screen.getByText("View answer")).toBeTruthy();
   expect(screen.queryByTestId("form")).toBeNull();
   expect(screen.queryByText("Owner detail")).toBeNull();

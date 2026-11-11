@@ -7,6 +7,8 @@ import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
 import { useQuestionNavigation } from "./question-navigation";
 
+import { questionTitle, questionTime } from "./question-response-presentation";
+
 export function QuestionNavigator({
   threadId,
   onReturnToComposer,
@@ -30,27 +32,36 @@ export function QuestionNavigator({
     )
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   const recentOnly = (query.data?.length ?? 0) >= 200;
-  const title = (question: (typeof questions)[number]) =>
-    question.publication.questions[0]?.prompt.replace(/\s+/gu, " ").trim() ||
-    "Question";
   const go = (id: string) => {
     moving.current = true;
     setOpen(false);
     void navigation?.navigate(id, "question");
   };
   const buttonClass =
-    "inline-flex min-h-9 min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline focus-visible:outline-ring disabled:opacity-50";
+    "inline-flex min-h-9 min-w-0 items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline focus-visible:outline-ring disabled:opacity-50";
+  const showReturn = navigation?.request && anchor && !anchor.isAtBottom;
+  const composerFeedback = navigation?.feedback?.origin !== "inline";
   const visible =
-    query.isPending ||
     query.isError ||
     questions.length > 0 ||
     recentOnly ||
-    navigation?.error ||
-    navigation?.pending ||
-    (anchor && !anchor.isAtBottom);
-  if (!visible) return null;
+    (composerFeedback && (navigation?.error || navigation?.pending)) ||
+    showReturn;
+  if (!visible)
+    return (
+      <span role="status" className="sr-only">
+        {query.isPending ? "Questions · Loading…" : "0 open questions"}
+      </span>
+    );
   return (
-    <div className="mb-2 space-y-1" aria-label="Question navigation">
+    <div
+      className="mb-2 space-y-1"
+      role="group"
+      aria-label="Question navigation"
+    >
+      <span className="sr-only" aria-live="polite">
+        {questions.length} open questions
+      </span>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-1">
         {query.isPending ? (
           <span role="status" className="px-2 text-xs text-muted-foreground">
@@ -60,14 +71,20 @@ export function QuestionNavigator({
           <button
             type="button"
             className={buttonClass}
+            aria-label={`${recentOnly ? "Recent question" : "Question"} · 1 ${questionTitle(questions[0]!.publication)}`}
             disabled={navigation?.pending}
             onClick={() => go(questions[0]!.id)}
           >
-            <Icon name="MessageQuestion" className="size-4 shrink-0" />
+            <Icon
+              name="MessageQuestion"
+              className="size-4 shrink-0 text-attention"
+            />
             <span className="shrink-0">
               {recentOnly ? "Recent question · 1" : "Question · 1"}
             </span>
-            <span className="max-w-64 truncate">{title(questions[0]!)}</span>
+            <span className="max-w-64 truncate">
+              {questionTitle(questions[0]!.publication)}
+            </span>
             <Icon name="ChevronRight" className="size-3 shrink-0" />
           </button>
         ) : questions.length > 1 ? (
@@ -80,7 +97,10 @@ export function QuestionNavigator({
           >
             <PopoverTrigger asChild>
               <button type="button" className={buttonClass}>
-                <Icon name="MessageQuestion" className="size-4" />
+                <Icon
+                  name="MessageQuestion"
+                  className="size-4 text-attention"
+                />
                 {recentOnly ? "Recent questions" : "Questions"} ·{" "}
                 {questions.length}
               </button>
@@ -102,16 +122,24 @@ export function QuestionNavigator({
                 <button
                   type="button"
                   key={question.id}
+                  aria-label={questionTitle(question.publication)}
                   onClick={() => go(question.id)}
                   className="block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-state-hover focus-visible:outline focus-visible:outline-ring"
                 >
-                  {title(question)}
+                  <span className="flex min-w-0 items-center justify-between gap-3">
+                    <span className="truncate">
+                      {questionTitle(question.publication)}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {questionTime(question.createdAt)}
+                    </span>
+                  </span>
                 </button>
               ))}
             </PopoverContent>
           </Popover>
         ) : null}
-        {anchor && !anchor.isAtBottom ? (
+        {showReturn ? (
           <button
             type="button"
             className={buttonClass}
@@ -147,12 +175,12 @@ export function QuestionNavigator({
           </button>
         </div>
       ) : null}
-      {navigation?.pending ? (
+      {composerFeedback && navigation?.pending ? (
         <p role="status" className="px-2 text-xs text-muted-foreground">
           Opening message…
         </p>
       ) : null}
-      {navigation?.error ? (
+      {composerFeedback && navigation?.error ? (
         <div
           role="alert"
           className="flex items-center gap-2 px-2 text-xs text-destructive-text"

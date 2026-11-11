@@ -1,6 +1,9 @@
+import {
+  QuestionResponseBody,
+  questionResponseClass,
+} from "@/components/thread/user-questions/QuestionResponseBody";
 import { useQuestionNavigation } from "@/components/thread/user-questions/question-navigation";
 import {
-  QuestionAnswers,
   questionResponseId,
   queuedQuestionResponse,
 } from "@/components/thread/user-questions/question-response-presentation";
@@ -614,23 +617,17 @@ function QueuedMessagePreview({
             : undefined
         }
         tabIndex={-1}
-        className="ml-auto min-w-0 flex-1 space-y-2 rounded-xl border border-timeline-accent/25 bg-timeline-accent/10 p-3 text-foreground"
+        className={`${questionResponseClass} flex-1 text-foreground`}
       >
-        <span className="text-xs text-muted-foreground">
-          {response ? "You answered" : "Question response"}
-        </span>
         {response ? (
-          <blockquote className="line-clamp-2 border-l-2 border-timeline-accent/30 pl-3 text-xs text-muted-foreground">
-            {response.publication.questions[0]?.prompt}
-          </blockquote>
-        ) : null}
-        {response ? (
-          <QuestionAnswers
-            publication={response.publication}
-            answers={response.answers}
-            showPrompts={response.publication.questions.length > 1}
+          <QuestionResponseBody
+            response={response}
+            timestamp={queuedMessage.createdAt}
+            footer={<span>Queued · waiting to send</span>}
           />
-        ) : null}
+        ) : (
+          <span>Question response</span>
+        )}
       </div>
     );
   }

@@ -117,14 +117,41 @@ export function queuedQuestionResponse(
     : null;
 }
 
+export function questionTitle(publication: ConversationQuestionPublication) {
+  const first = publication.questions[0];
+  return (
+    first?.shortLabel?.trim() ||
+    first?.prompt.replace(/\s+/gu, " ").trim() ||
+    "Question"
+  );
+}
+
+export function questionTime(timestamp: number) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  return date.toLocaleString(undefined, {
+    ...(date.toDateString() === now.toDateString()
+      ? {}
+      : {
+          month: "short",
+          day: "numeric",
+          ...(date.getFullYear() === now.getFullYear()
+            ? {}
+            : { year: "numeric" }),
+        }),
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export const questionDeliveryLabels: Record<
   ConversationQuestion["delivery"]["kind"],
   string
 > = {
-  none: "Delivery not scheduled",
-  queued: "Waiting in queue",
-  held: "Delivery held",
-  submitted: "Submitted to agent",
+  none: "Saved · not sent yet",
+  queued: "Queued · waiting to send",
+  held: "Held · not sent",
+  submitted: "Sent to agent",
   removed: "Queue entry removed; delivery unverified",
 };
 
