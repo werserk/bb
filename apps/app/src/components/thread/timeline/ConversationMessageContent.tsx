@@ -1,3 +1,5 @@
+import { questionResponseForHistory } from "../user-questions/question-response-presentation";
+import { QuestionResponseEvent } from "../user-questions/QuestionResponseEvent";
 import { parseConversationQuestionMarker } from "@bb/domain";
 import { ConversationQuestionCard } from "../user-questions/ConversationQuestionCard";
 import {
@@ -721,7 +723,33 @@ export function ConversationMessageContent(
     [attachments],
   );
 
+  const user = props.role === "user" ? props : null;
+  const initiator = user?.initiator;
+  const senderThreadId = user?.senderThreadId;
+  const mentions = user?.mentions;
+  const response = useMemo(
+    () =>
+      initiator && senderThreadId !== undefined && mentions
+        ? questionResponseForHistory({
+            text,
+            attachments,
+            initiator,
+            senderThreadId,
+            mentions,
+          })
+        : null,
+    [text, attachments, initiator, senderThreadId, mentions],
+  );
+
   if (props.role === "user") {
+    if (response && props.threadId)
+      return (
+        <QuestionResponseEvent
+          response={response}
+          threadId={props.threadId}
+          timestamp={props.timestamp}
+        />
+      );
     return (
       <UserConversationMessage
         actionMetadata={props.actionMetadata}

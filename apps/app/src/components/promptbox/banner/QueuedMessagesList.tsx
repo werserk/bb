@@ -1,4 +1,8 @@
 import {
+  QuestionAnswers,
+  queuedQuestionResponse,
+} from "@/components/thread/user-questions/question-response-presentation";
+import {
   memo,
   useCallback,
   useEffect,
@@ -593,6 +597,27 @@ function QueuedMessagePreview({
     () => buildQueuedMessagePreviewText(queuedMessage.content),
     [queuedMessage.content],
   );
+
+  if (queuedMessage.payload.kind === "questionResponse") {
+    const response = queuedQuestionResponse(
+      queuedMessage.payload,
+      queuedMessage.content,
+    );
+    return (
+      <div
+        data-queued-question-response=""
+        className="min-w-0 flex-1 space-y-1 text-foreground"
+      >
+        <span className="text-xs text-muted-foreground">Question response</span>
+        {response ? (
+          <QuestionAnswers
+            publication={response.publication}
+            answers={response.answers}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   if (queuedMessage.payload.kind === "retry") {
     return (

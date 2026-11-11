@@ -2232,3 +2232,66 @@ describe("queued row affordances", () => {
     expect(queryByLabelText("Delete queued message 1")).not.toBeNull();
   });
 });
+
+it.each([true, false])(
+  "shows a readable typed question response queue preview (valid %s), retaining dispatch",
+  (valid) => {
+    const publication = {
+      body: "Context",
+      materials: [],
+      questions: [
+        {
+          id: "choice",
+          prompt: "Which option?",
+          required: true,
+          multiSelect: false,
+          allowFreeText: true,
+          options: [{ value: "secret_option_id", label: "Readable label" }],
+        },
+      ],
+    };
+    const manifest = {
+      hostId: null,
+      storageRootPath: null,
+      materials: [],
+      files: [],
+    };
+    const text = `Conversation question response: qst_23456789ab (revision 1)\nOriginal question:\n${JSON.stringify(publication)}\nFrozen materials:\n${JSON.stringify(manifest)}\nOwner answers:\n${JSON.stringify({ choice: { selected: ["secret_option_id"], freeText: "Owner note" } })}`;
+    const onSend = vi.fn();
+    render(
+      <QueuedMessagesList
+        queuedMessages={[
+          makeThreadQueuedMessage({
+            payload: {
+              kind: "questionResponse",
+              questionId: "qst_23456789ab",
+              revision: valid ? 1 : 2,
+            },
+            content: [{ type: "text", text, mentions: [] }],
+          }),
+        ]}
+        sendDisabled={false}
+        actionDisabled={false}
+        processingMessageId={null}
+        processingAction={null}
+        onSend={onSend}
+        onReorder={noop}
+        onSetGroupBoundary={noop}
+        onEdit={noop}
+        onDelete={noop}
+      />,
+    );
+    expandQueue();
+    expect(screen.getByText("Question response")).toBeTruthy();
+    if (valid) {
+      expect(screen.getByText("Readable label")).toBeTruthy();
+      expect(screen.getByText("Owner note")).toBeTruthy();
+    }
+    expect(screen.queryByText(/secret_option_id/)).toBeNull();
+    expect(screen.queryByText(/Original question:/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Send queued message 1 now" }),
+    );
+    expect(onSend).toHaveBeenCalled();
+  },
+);

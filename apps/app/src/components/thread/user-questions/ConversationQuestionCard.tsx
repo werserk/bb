@@ -8,6 +8,12 @@ import { sdk } from "@/lib/sdk";
 import { MarkdownPreview } from "../../ui/markdown-preview";
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
 
+import {
+  QuestionAnswers,
+  questionCardId,
+  questionDeliveryLabels,
+} from "./question-response-presentation";
+
 const formHost = {
   density: "default" as const,
   promptShownAbove: null,
@@ -177,16 +183,9 @@ function QuestionDelivery({ question }: { question: ConversationQuestion }) {
         queryKey: conversationQuestionsQueryKey(question.threadId),
       }),
   });
-  const labels = {
-    none: "Delivery not scheduled",
-    queued: "Waiting in queue",
-    held: "Delivery held",
-    submitted: "Submitted to agent",
-    removed: "Queue entry removed; delivery unverified",
-  };
   return (
     <div className="space-y-2 text-sm">
-      <p>{labels[question.delivery.kind]}</p>
+      <p>{questionDeliveryLabels[question.delivery.kind]}</p>
       {question.delivery.reason ? <p>{question.delivery.reason}</p> : null}
       {question.status === "answered" &&
       question.delivery.kind === "held" &&
@@ -252,11 +251,11 @@ export function ConversationQuestionCard({
   return (
     <section
       aria-label="Question"
+      id={questionCardId(threadId, questionId)}
       className="space-y-4 rounded-xl border border-border bg-card p-4"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>Question</span>
-        <span>{questionId}</span>
         <span>{question?.status ?? "Loading"}</span>
       </div>
       {question ? (
@@ -315,26 +314,10 @@ export function ConversationQuestionCard({
               {question.status === "answered" || question.response != null ? (
                 <QuestionDelivery question={question} />
               ) : null}
-              {question.publication.questions.map((item) => (
-                <div key={item.id} className="text-sm">
-                  <p className="font-medium">{item.prompt}</p>
-                  {question.response?.[item.id] ? (
-                    <p>
-                      {[
-                        ...question.response[item.id]!.selected.map(
-                          (value) =>
-                            item.options?.find(
-                              (option) => option.value === value,
-                            )?.label ?? value,
-                        ),
-                        question.response[item.id]!.freeText,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
+              <QuestionAnswers
+                publication={question.publication}
+                answers={question.response}
+              />
             </>
           )}
         </>
