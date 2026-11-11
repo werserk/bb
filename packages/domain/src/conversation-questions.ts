@@ -1,3 +1,7 @@
+import {
+  QUESTION_CARD_LIMITS,
+  questionPublicationSizeError,
+} from "./conversation-question-limits.js";
 import { conversationQuestionIdSchema } from "./protocol-ids.js";
 import { z } from "zod";
 import {
@@ -40,7 +44,10 @@ export const questionMaterialPathSchema = z
 export const conversationQuestionMaterialInputSchema = z.strictObject({
   path: questionMaterialPathSchema,
   label: z.string().trim().min(1).max(300),
-  dependencies: z.array(questionMaterialPathSchema).max(100).default([]),
+  dependencies: z
+    .array(questionMaterialPathSchema)
+    .max(QUESTION_CARD_LIMITS.dependencies)
+    .default([]),
 });
 
 export const conversationQuestionPublicationSchema = z
@@ -49,7 +56,7 @@ export const conversationQuestionPublicationSchema = z
     questions: userQuestionPendingInteractionPayloadSchema.shape.questions,
     materials: z
       .array(conversationQuestionMaterialInputSchema)
-      .max(20)
+      .max(QUESTION_CARD_LIMITS.materials)
       .default([]),
   })
   .superRefine((publication, context) => {
@@ -75,6 +82,26 @@ export const conversationQuestionPublicationSchema = z
       });
     }
   });
+export const conversationQuestionPublicationInputSchema = z.preprocess(
+  (input, context) => {
+    const error = questionPublicationSizeError(input);
+    if (error) context.addIssue({ code: "custom", message: error });
+    return input;
+  },
+  conversationQuestionPublicationSchema,
+);
+
+export function parseConversationQuestionPublication(
+  input: unknown,
+): ConversationQuestionPublication {
+  const parsed = conversationQuestionPublicationInputSchema.safeParse(input);
+  if (!parsed.success)
+    throw new Error(
+      parsed.error.issues[0]?.message ?? "Invalid question publication",
+    );
+  return parsed.data;
+}
+
 export type ConversationQuestionPublication = z.infer<
   typeof conversationQuestionPublicationSchema
 >;
@@ -235,11 +262,13 @@ export const conversationQuestionToolInputSchema = z.strictObject({
 export function normalizeConversationQuestionPublication(
   input: unknown,
 ): ConversationQuestionPublication {
+  const sizeError = questionPublicationSizeError(input);
+  if (sizeError) throw new Error(sizeError);
   const parsed = conversationQuestionToolInputSchema.parse(input);
   if (parsed.questions.every((question) => "prompt" in question))
-    return conversationQuestionPublicationSchema.parse(parsed);
+    return parseConversationQuestionPublication(parsed);
   const native = nativePublicationSchema.parse(parsed);
-  return conversationQuestionPublicationSchema.parse({
+  return parseConversationQuestionPublication({
     ...native,
     questions: native.questions.map((question, index) => ({
       id: `question_${index + 1}`,

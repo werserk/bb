@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CONVERSATION_QUESTION_TOOL_NAME,
+  QUESTION_CARD_LIMITS,
   conversationQuestionToolInputSchema,
   normalizeConversationQuestionPublication,
   type DynamicTool,
@@ -21,6 +22,7 @@ export const CONVERSATION_QUESTION_INSTRUCTIONS =
 export const BB_ASK_QUESTION_TOOL: DynamicTool = {
   name: CONVERSATION_QUESTION_TOOL_NAME,
   description:
+    `Keep the decision concise: at most ${QUESTION_CARD_LIMITS.total} Unicode code points across body, prompts, headers, option labels/descriptions and material labels; body at most ${QUESTION_CARD_LIMITS.body}, each prompt ${QUESTION_CARD_LIMITS.prompt}. Put long reports in materials. ` +
     "Publish a persistent question card with its explanation and material snapshots, then immediately return its ID. The user can answer or dismiss at any time; normal chat stays available. Use body for context and materials for files relative to this thread's storage, including explicit HTML dependencies. Normalized questions use id/prompt/multiSelect/allowFreeText/options(value,label,description). Claude-native questions/question/header/options(label,description) are also accepted and normalized. This tool never waits for an answer and never authorizes a command.",
   inputSchema,
   presentation: {

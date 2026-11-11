@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { Command } from "commander";
 import {
-  conversationQuestionPublicationSchema,
+  parseConversationQuestionPublication,
+  QUESTION_CARD_LIMITS,
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
 } from "@bb/domain";
@@ -71,7 +72,9 @@ export function registerQuestionCommands(
   targetOptions(
     questions
       .command("publish [id]")
-      .description("Publish body, prompts and materials from a JSON file"),
+      .description(
+        `Publish a concise question (total ${QUESTION_CARD_LIMITS.total} Unicode code points, body ${QUESTION_CARD_LIMITS.body}); put full reports in materials. Read publication JSON from a file`,
+      ),
   )
     .requiredOption("--file <path>", "Publication JSON file")
     .requiredOption("--turn-id <id>", "Existing live source turn")
@@ -88,7 +91,7 @@ export function registerQuestionCommands(
             callId: string;
           },
         ) => {
-          const publication = conversationQuestionPublicationSchema.parse(
+          const publication = parseConversationQuestionPublication(
             await readJsonFile(opts.file),
           );
           console.log(

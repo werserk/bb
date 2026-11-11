@@ -1,5 +1,5 @@
 import {
-  conversationQuestionPublicationSchema,
+  conversationQuestionPublicationInputSchema,
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
   type ConversationQuestion,
@@ -1719,7 +1719,7 @@ export const publicApiRoutes = {
         {
           source: { turnId: string; providerThreadId: string; callId: string };
           publication: planZ.input<
-            typeof conversationQuestionPublicationSchema
+            typeof conversationQuestionPublicationInputSchema
           >;
         }
       >(
@@ -1729,7 +1729,7 @@ export const publicApiRoutes = {
             providerThreadId: planZ.string().min(1),
             callId: planZ.string().min(1),
           }),
-          publication: conversationQuestionPublicationSchema,
+          publication: conversationQuestionPublicationInputSchema,
         }),
       ),
       response: jsonResponse<ConversationQuestion>(),

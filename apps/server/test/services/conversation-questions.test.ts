@@ -1,3 +1,6 @@
+import { createNodeBbSdk } from "@bb/sdk/node";
+import { internalAuthHeaders } from "../helpers/commands.js";
+import { createConversationQuestion } from "@bb/db";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
@@ -712,5 +715,238 @@ it("projects persistent-question attention across publish, multiple questions, a
         .ownAttention,
     ).toBe("none");
     expect(fourth.status).toBe("open");
+  });
+});
+
+describe("publication budget at authoritative entrypoints", () => {
+  it.each(["service", "http", "sdk", "normalized-tool", "legacy-tool"])(
+    "rejects through %s before all publication side effects",
+    async (surface) => {
+      await withTestHarness(async (h) => {
+        const { thread, host, session } = seedThreadFixture(h, {
+          thread: { status: "active" },
+        });
+        seedTurnStarted(h.deps, {
+          threadId: thread.id,
+          turnId: "origin",
+          providerThreadId: "p",
+        });
+        const source = {
+          turnId: "origin",
+          providerThreadId: "p",
+          callId: "big",
+        };
+        const oversized = {
+          ...publication,
+          body: "x".repeat(65537),
+          materials: [{ path: "report.md", label: "Report", dependencies: [] }],
+        };
+        const rpc = registerHostRpcResponder(h, {
+          hostId: host.id,
+          sessionId: session.id,
+          handle: () => {
+            throw new Error("Unexpected material snapshot");
+          },
+        });
+        const notify = vi.spyOn(h.deps.hub, "notifyThread");
+        const before = listEvents(h.db, { threadId: thread.id });
+        if (surface === "service") {
+          await expect(
+            publishConversationQuestion(h.deps, {
+              threadId: thread.id,
+              source,
+              publication: oversized,
+            }),
+          ).rejects.toThrow(
+            "65537/1500 code points. Shorten the question and put the full report in materials.",
+          );
+        } else if (surface === "http") {
+          const response = await h.app.request(
+            `/api/v1/threads/${thread.id}/questions`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ source, publication: oversized }),
+            },
+          );
+          expect(response.status).toBe(400);
+          expect(await response.text()).toContain("65537/1500");
+        } else if (surface === "sdk") {
+          const sdk = createNodeBbSdk({
+            baseUrl: "http://localhost",
+            fetch: async (input, init) =>
+              h.app.request(new Request(input, init)),
+          });
+          await expect(
+            sdk.threads.questions.publish({
+              threadId: thread.id,
+              source,
+              publication: oversized,
+            }),
+          ).rejects.toThrow(/65537\/1500/);
+        } else {
+          const input =
+            surface === "legacy-tool"
+              ? {
+                  ...oversized,
+                  questions: [{ question: "Proceed?", header: "Choice" }],
+                }
+              : oversized;
+          const response = await h.app.request("/internal/session/tool-call", {
+            method: "POST",
+            headers: internalAuthHeaders(h),
+            body: JSON.stringify({
+              sessionId: session.id,
+              threadId: thread.id,
+              ...source,
+              tool: "bb_ask_question",
+              arguments: input,
+            }),
+          });
+          expect(await response.json()).toMatchObject({
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: "Question was not published: Question card body: 65537/1500 code points. Shorten the question and put the full report in materials.",
+              },
+            ],
+          });
+        }
+        expect(rpc.requests).toHaveLength(0);
+        expect(notify).not.toHaveBeenCalled();
+        expect(listEvents(h.db, { threadId: thread.id })).toEqual(before);
+        expect(
+          listConversationQuestionsForThread(h.deps, { threadId: thread.id }),
+        ).toEqual([]);
+        expect(listQueuedThreadMessages(h.db, thread.id)).toEqual([]);
+      });
+    },
+  );
+  it("retains read/list/answer custody for a stored oversized card", async () => {
+    await withTestHarness(async (h) => {
+      const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
+      seedThreadRuntimeState(h.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "p",
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "origin",
+        providerThreadId: "p",
+      });
+      const old = { ...publication, body: "я".repeat(10000) };
+      const row = createConversationQuestion(h.db, {
+        threadId: thread.id,
+        sourceTurnId: "origin",
+        sourceCallId: "old",
+        publication: JSON.stringify(old),
+        materialManifest: JSON.stringify({
+          hostId: null,
+          storageRootPath: null,
+          materials: [],
+          files: [],
+        }),
+      });
+      expect(row).not.toBeNull();
+      const ref = { threadId: thread.id, questionId: row!.id };
+      expect(readConversationQuestion(h.deps, ref).publication.body).toBe(
+        old.body,
+      );
+      expect(
+        listConversationQuestionsForThread(h.deps, { threadId: thread.id })[0]!
+          .publication.body,
+      ).toBe(old.body);
+      const answered = await answerConversationQuestion(h.deps, {
+        ...ref,
+        revision: 1,
+        answers: { voice: { selected: ["a"] } },
+      });
+      expect(answered.status).toBe("answered");
+      expect(answered.publication.body).toBe(old.body);
+      expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(1);
+    });
+  });
+  it("accepts the same huge report as material beside a short question and preserves replay", async () => {
+    await withTestHarness(async (h) => {
+      const { thread, host, session } = seedThreadFixture(h, {
+        thread: { status: "active" },
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "origin",
+        providerThreadId: "p",
+      });
+      const report = "я".repeat(65537);
+      const bytes = Buffer.from(report);
+      const rpc = registerHostRpcResponder(h, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: ({ command }) => {
+          if (command.type === "host.read_file_chunk")
+            return {
+              ok: true,
+              result: {
+                path: command.path,
+                sizeBytes: bytes.length,
+                mimeType: "text/plain",
+                modifiedAtMs: 1,
+                revision: "0".repeat(64),
+                offset: command.offset,
+                content: bytes
+                  .subarray(command.offset, command.offset + command.length)
+                  .toString("base64"),
+              },
+            };
+          if (command.type === "host.write_file")
+            return {
+              ok: true,
+              result: {
+                outcome: "written",
+                sha256: createHash("sha256").update(bytes).digest("hex"),
+                sizeBytes: bytes.length,
+              },
+            };
+          throw new Error(`Unexpected ${command.type}`);
+        },
+      });
+      const args = {
+        threadId: thread.id,
+        source: { turnId: "origin", providerThreadId: "p", callId: "report" },
+        publication: {
+          ...publication,
+          materials: [
+            { path: "report.txt", label: "Full report", dependencies: [] },
+          ],
+        },
+      };
+      await expect(
+        publishConversationQuestion(h.deps, {
+          ...args,
+          publication: { ...args.publication, body: report },
+        }),
+      ).rejects.toThrow("65537/1500");
+      expect(rpc.requests).toHaveLength(0);
+      const question = await publishConversationQuestion(h.deps, args);
+      expect(question.status).toBe("open");
+      expect(question.materialManifest.files[0]!.sha256).toBe(
+        createHash("sha256").update(bytes).digest("hex"),
+      );
+      expect(question.materialManifest.files[0]!.sizeBytes).toBe(bytes.length);
+      const requests = rpc.requests.length;
+      const events = listEvents(h.db, { threadId: thread.id });
+      expect((await publishConversationQuestion(h.deps, args)).id).toBe(
+        question.id,
+      );
+      await expect(
+        publishConversationQuestion(h.deps, {
+          ...args,
+          publication: { ...args.publication, body: "Different" },
+        }),
+      ).rejects.toThrow(/conflicting/i);
+      expect(rpc.requests).toHaveLength(requests);
+      expect(listEvents(h.db, { threadId: thread.id })).toEqual(events);
+    });
   });
 });

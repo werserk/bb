@@ -210,3 +210,13 @@ Application links in messages:
   behavior. Desktop and native mobile clients need application-link support
   (mobile bridge version 3); older clients show an update message. Web browsers
   handle their own OS handoff and cannot reliably report missing applications.
+
+### Keep question cards concise
+
+New question cards allow at most 3,000 Unicode code points across body, prompts,
+headers, option labels/descriptions and material labels. Per-field caps are body
+1,500; prompt 500; header 80; option label 120; description 300; material label 120.
+Russian letters and astral emoji count one each; joined emoji count by their
+constituent code points. Publication rejects excess with actual/limit feedback.
+Put the full report in a declared material with a short label, and ask a short
+actionable question. Existing stored cards remain readable and answerable.

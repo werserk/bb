@@ -18,7 +18,7 @@ import {
 } from "@bb/db";
 import {
   conversationQuestionMarker,
-  conversationQuestionPublicationSchema,
+  parseConversationQuestionPublication,
   conversationQuestionSchema,
   normalizeConversationQuestionAnswers,
   queuedMessageWaitingOnSchema,
@@ -246,9 +246,7 @@ export async function publishConversationQuestion(
       "invalid_question_source",
       "Question publication requires exact source turn, provider thread and call IDs",
     );
-  const publication = conversationQuestionPublicationSchema.parse(
-    args.publication,
-  );
+  const publication = parseConversationQuestionPublication(args.publication);
   const serialized = JSON.stringify(publication);
   const thread = publicThread(deps.db, args.threadId, true);
   requireSource(deps.db, args.threadId, source.data, false);
