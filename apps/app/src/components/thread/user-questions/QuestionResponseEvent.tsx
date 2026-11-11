@@ -104,7 +104,7 @@ export function QuestionResponseEvent({
         aria-expanded={expanded}
         className="text-xs underline"
         onMouseDown={(event) => {
-          event.currentTarget.focus({ preventScroll: true });
+          if (event.button === 0) event.preventDefault();
         }}
         onClick={async () => {
           if (expanded) {
