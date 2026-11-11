@@ -1,5 +1,6 @@
 import {
   getThreadEventScopeTurnId,
+  parseConversationQuestionMarker,
   type ClientTurnRequestId,
 } from "@bb/domain";
 import type { TimelineRow } from "@bb/server-contract";
@@ -80,6 +81,12 @@ export function classifyServiceTurns(
       showLiveWork = false,
     ): TimelineRow[] {
       const exceptions = (row: TimelineRow): TimelineRow[] => {
+        if (
+          row.kind === "conversation" &&
+          row.role === "assistant" &&
+          parseConversationQuestionMarker(row.text) !== null
+        )
+          return [row];
         if (
           row.kind === "conversation" &&
           row.role === "user" &&

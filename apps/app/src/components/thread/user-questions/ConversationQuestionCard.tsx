@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ConversationQuestion, FrozenQuestionFile } from "@bb/domain";
+import { VoiceInputTextareaProvider } from "@bb/shared-ui/voice-input-textarea";
+import { VoiceInputTextarea } from "@/components/promptbox/VoiceInputTextarea";
 import { QuestionForm } from "@bb/shared-ui/question-form";
 import { QuestionFormHostProvider } from "@bb/shared-ui/question-form-host";
 import { fetchWithAppSurface } from "@/lib/app-surface";
@@ -33,9 +35,14 @@ const formHost = {
   registerActionHandler: () => () => {},
 };
 
+import { QuestionHtmlPreview } from "./QuestionHtmlPreview";
+
 const MARKDOWN_PREVIEW_BYTES = 1024 * 1024;
 
-async function readMarkdownSnapshot(response: Response): Promise<string> {
+async function readTextSnapshot(
+  response: Response,
+  limit: number,
+): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
   const decoder = new TextDecoder();
@@ -46,9 +53,9 @@ async function readMarkdownSnapshot(response: Response): Promise<string> {
       const chunk = await reader.read();
       if (chunk.done) return text + decoder.decode();
       size += chunk.value.byteLength;
-      if (size > MARKDOWN_PREVIEW_BYTES)
+      if (size > limit)
         throw new Error(
-          "Markdown preview exceeds 1 MiB; download the snapshot to read it",
+          "Preview exceeds its byte limit; download the snapshot to read it",
         );
       text += decoder.decode(chunk.value, { stream: true });
     }
@@ -69,6 +76,7 @@ function QuestionMaterial({
   const [failed, setFailed] = useState(false);
   const url = `/api/v1/threads/${encodeURIComponent(threadId)}/questions/${encodeURIComponent(questionId)}/files/${material.snapshotPath.split("/").map(encodeURIComponent).join("/")}`;
   const mime = material.mimeType ?? "";
+  const html = mime === "text/html";
   const markdown = mime === "text/markdown" || mime === "text/x-markdown";
   const preview = useQuery({
     queryKey: [
@@ -83,13 +91,18 @@ function QuestionMaterial({
     queryFn: async ({ signal }) => {
       const status = await fetchWithAppSurface(url, { method: "HEAD", signal });
       if (!status.ok) throw new Error(`HTTP ${status.status}`);
-      if (!markdown) return null;
+      if (!markdown && !html) return null;
       const response = await fetchWithAppSurface(url, {
         signal,
-        headers: { Range: `bytes=0-${MARKDOWN_PREVIEW_BYTES}` },
+        headers: {
+          Range: `bytes=0-${html ? material.sizeBytes : MARKDOWN_PREVIEW_BYTES}`,
+        },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return readMarkdownSnapshot(response);
+      return readTextSnapshot(
+        response,
+        html ? material.sizeBytes : MARKDOWN_PREVIEW_BYTES,
+      );
     },
   });
   const error = preview.error?.message ?? (failed ? "Media unavailable" : null);
@@ -122,6 +135,12 @@ function QuestionMaterial({
                 return "";
               }
             }}
+          />
+        ) : html ? (
+          <QuestionHtmlPreview
+            content={preview.data ?? ""}
+            url={url}
+            title={material.label}
           />
         ) : mime.startsWith("audio/") ? (
           <audio
@@ -399,33 +418,35 @@ export function ConversationQuestionCard({
             </div>
           ) : null}
           {question.status === "open" ? (
-            <QuestionFormHostProvider value={formHost}>
-              <QuestionForm
-                mode="plan"
-                draftKey={`${threadId}:${questionId}:${question.revision}`}
-                questions={question.publication.questions.map(
-                  (item, index) => ({
-                    ...item,
-                    shortLabel: item.shortLabel ?? `Question ${index + 1}`,
-                    options: item.options ?? [],
-                  }),
-                )}
-                disabled={action.isPending || navigation?.readOnly === true}
-                cancelDisabled={
-                  action.isPending || navigation?.readOnly === true
-                }
-                onSubmit={(answers) =>
-                  action
-                    .mutateAsync({ kind: "answer", question, answers })
-                    .then(() => {})
-                }
-                onCancel={() =>
-                  action
-                    .mutateAsync({ kind: "dismiss", question })
-                    .then(() => {})
-                }
-              />
-            </QuestionFormHostProvider>
+            <VoiceInputTextareaProvider value={VoiceInputTextarea}>
+              <QuestionFormHostProvider value={formHost}>
+                <QuestionForm
+                  mode="plan"
+                  draftKey={`${threadId}:${questionId}:${question.revision}`}
+                  questions={question.publication.questions.map(
+                    (item, index) => ({
+                      ...item,
+                      shortLabel: item.shortLabel ?? `Question ${index + 1}`,
+                      options: item.options ?? [],
+                    }),
+                  )}
+                  disabled={action.isPending || navigation?.readOnly === true}
+                  cancelDisabled={
+                    action.isPending || navigation?.readOnly === true
+                  }
+                  onSubmit={(answers) =>
+                    action
+                      .mutateAsync({ kind: "answer", question, answers })
+                      .then(() => {})
+                  }
+                  onCancel={() =>
+                    action
+                      .mutateAsync({ kind: "dismiss", question })
+                      .then(() => {})
+                  }
+                />
+              </QuestionFormHostProvider>
+            </VoiceInputTextareaProvider>
           ) : (
             <>
               {(question.status === "answered" || question.response != null) &&

@@ -255,7 +255,7 @@ it("bounds Markdown reads and leaves download available", async () => {
     { wrapper: harness.wrapper },
   );
   await screen.findByText(
-    "Unable to load Large notes: Markdown preview exceeds 1 MiB; download the snapshot to read it",
+    "Unable to load Large notes: Preview exceeds its byte limit; download the snapshot to read it",
   );
   expect(screen.getByText("Download Large notes")).toBeTruthy();
 });
@@ -308,4 +308,113 @@ it("settles compactly without duplicating answers and keeps original options and
   expect(await screen.findByLabelText("Sample")).toBeTruthy();
   expect(screen.queryByText("Owner detail")).toBeNull();
   expect(screen.getByText("Send now")).toBeTruthy();
+});
+
+it("themes frozen HTML and fits only messages from its own frame", async () => {
+  api.get.mockResolvedValue(question);
+  vi.mocked(fetch).mockImplementation(
+    async (_url, init) =>
+      new Response(
+        init?.method === "HEAD"
+          ? null
+          : '<html><head></head><body><h1>Material</h1><img src="sample.png"></body></html>',
+        { status: 200 },
+      ),
+  );
+  document.documentElement.classList.add("dark");
+  const harness = createQueryClientTestHarness();
+  const view = render(
+    <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
+    { wrapper: harness.wrapper },
+  );
+  await waitFor(() =>
+    expect(
+      view.container.querySelector("iframe")?.getAttribute("srcdoc"),
+    ).toContain("color-scheme:dark"),
+  );
+  const frame = view.container.querySelector("iframe")!;
+  expect(frame.getAttribute("srcdoc")).toContain(
+    '<base href="http://localhost',
+  );
+  const initial = frame.style.height;
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "ui/notifications/size-changed",
+        params: { height: 900 },
+      },
+      source: window,
+    }),
+  );
+  expect(frame.style.height).toBe(initial);
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "ui/notifications/size-changed",
+        params: { height: 900 },
+      },
+      source: frame.contentWindow,
+    }),
+  );
+  expect(frame.style.height).toBe("900px");
+  for (const height of [Number.NaN, -10]) {
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        data: {
+          jsonrpc: "2.0",
+          method: "ui/notifications/size-changed",
+          params: { height },
+        },
+        source: frame.contentWindow,
+      }),
+    );
+    expect(frame.style.height).toBe("900px");
+  }
+  fireEvent(
+    window,
+    new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "ui/notifications/size-changed",
+        params: { height: 10000 },
+      },
+      source: frame.contentWindow,
+    }),
+  );
+  expect(frame.style.height).toBe("2000px");
+  document.documentElement.classList.remove("dark");
+});
+
+it("preserves HTML material previews larger than the markdown limit", async () => {
+  const content = "<body>" + "x".repeat(1024 * 1024 + 1) + "</body>";
+  const material = question.materialManifest.materials.find(
+    (m) => m.mimeType === "text/html",
+  )!;
+  api.get.mockResolvedValue({
+    ...question,
+    materialManifest: {
+      materials: [
+        { ...material, sizeBytes: new TextEncoder().encode(content).length },
+      ],
+    },
+  });
+  vi.mocked(fetch).mockImplementation(
+    async (_url, init) =>
+      new Response(init?.method === "HEAD" ? null : content, { status: 200 }),
+  );
+  const harness = createQueryClientTestHarness();
+  const view = render(
+    <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
+    { wrapper: harness.wrapper },
+  );
+  await waitFor(() =>
+    expect(
+      view.container.querySelector("iframe")?.getAttribute("srcdoc"),
+    ).toContain(content),
+  );
 });

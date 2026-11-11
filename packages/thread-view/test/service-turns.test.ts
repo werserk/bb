@@ -338,3 +338,40 @@ it("shows new owner reasoning after a steer while older service reasoning is sti
     "OWNER_THOUGHT",
   );
 });
+
+it.each([false, true])(
+  "keeps standalone persistent questions in service turns (active=%s)",
+  (active) => {
+    const { e, rows } = fixture("self-reminder");
+    const marker = e.assistantCompleted({
+      itemId: "question:qst_23456789ab",
+      text: '::question{id="qst_23456789ab"}',
+    });
+    const result = timeline(
+      [...rows, marker],
+      false,
+      active ? "active" : "idle",
+    );
+    expect(result.rows).toContainEqual(
+      expect.objectContaining({
+        kind: "conversation",
+        role: "assistant",
+        text: '::question{id="qst_23456789ab"}',
+        sourceSeqStart: marker.seq,
+      }),
+    );
+    expect(JSON.stringify(result.rows)).not.toContain("private reply");
+    expect(JSON.stringify(result.rows)).not.toContain("ordinary wording");
+  },
+);
+
+it("does not expose service prose containing a question marker", () => {
+  const { e, rows } = fixture("self-reminder");
+  const result = timeline([
+    ...rows,
+    e.assistantCompleted({
+      text: 'Private details ::question{id="qst_23456789ab"}',
+    }),
+  ]);
+  expect(result.rows).toEqual([]);
+});

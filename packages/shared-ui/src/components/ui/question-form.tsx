@@ -327,12 +327,10 @@ function QuestionInputBlock({
     event: KeyboardEvent<HTMLTextAreaElement>,
   ): void => {
     if (
-      isPointerCoarse ||
+      (isPointerCoarse && !event.ctrlKey && !event.metaKey) ||
       event.nativeEvent.isComposing ||
       event.key !== "Enter" ||
       event.shiftKey ||
-      event.metaKey ||
-      event.ctrlKey ||
       event.altKey
     ) {
       return;

@@ -513,6 +513,16 @@
       "source": "./src/components/ui/list-loading-placeholder.tsx",
       "types": "./src/components/ui/list-loading-placeholder.tsx",
       "default": "./src/components/ui/list-loading-placeholder.tsx"
+    },
+    "./html-frame": {
+      "source": "./src/lib/html-frame.ts",
+      "types": "./src/lib/html-frame.ts",
+      "default": "./src/lib/html-frame.ts"
+    },
+    "./use-frame-theme": {
+      "source": "./src/lib/use-frame-theme.ts",
+      "types": "./src/lib/use-frame-theme.ts",
+      "default": "./src/lib/use-frame-theme.ts"
     }
   },
   "scripts": {
