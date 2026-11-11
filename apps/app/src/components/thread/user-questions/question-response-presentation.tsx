@@ -131,9 +131,11 @@ export const questionDeliveryLabels: Record<
 export function QuestionAnswers({
   publication,
   answers,
+  showPrompts = true,
 }: {
   publication: ConversationQuestionPublication;
   answers: ConversationQuestion["response"];
+  showPrompts?: boolean;
 }) {
   return (
     <div className="space-y-3 text-sm">
@@ -144,7 +146,7 @@ export function QuestionAnswers({
             key={item.id}
             className="space-y-1 whitespace-pre-wrap break-words"
           >
-            <p className="font-medium">{item.prompt}</p>
+            {showPrompts ? <p className="font-medium">{item.prompt}</p> : null}
             {answer ? (
               <>
                 {answer.selected.map((value) => (

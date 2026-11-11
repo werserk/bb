@@ -27,7 +27,13 @@ export interface QuestionNavigationRequest {
   elementId: string;
 }
 
+type QueuedAnswerReveal = (signal: AbortSignal) => Promise<HTMLElement | null>;
+
 interface QuestionNavigation {
+  registerQueuedAnswer: (
+    questionId: string,
+    reveal: QueuedAnswerReveal,
+  ) => () => void;
   readOnly: boolean;
   request: QuestionNavigationRequest | null;
   error: string | null;
@@ -60,6 +66,17 @@ export function QuestionNavigationProvider({
   const root = useRef<HTMLDivElement>(null);
   const abort = useRef<AbortController | null>(null);
   const cache = useRef(new Map<string, number>());
+  const queuedAnswers = useRef(new Map<string, QueuedAnswerReveal>());
+  const registerQueuedAnswer = useCallback(
+    (id: string, reveal: QueuedAnswerReveal) => {
+      queuedAnswers.current.set(id, reveal);
+      return () => {
+        if (queuedAnswers.current.get(id) === reveal)
+          queuedAnswers.current.delete(id);
+      };
+    },
+    [],
+  );
   const last = useRef<{
     questionId: string;
     kind: QuestionNavigationKind;
@@ -100,6 +117,18 @@ export function QuestionNavigationProvider({
           ? questionCardId(threadId, questionId)
           : questionResponseId(threadId, questionId);
       try {
+        const queued =
+          kind === "answer" ? queuedAnswers.current.get(questionId) : undefined;
+        if (queued) {
+          const element = await queued(controller.signal);
+          controller.signal.throwIfAborted();
+          if (element) {
+            element.scrollIntoView({ block: "nearest" });
+            element.focus({ preventScroll: true });
+            flashSearchTarget(element);
+            return true;
+          }
+        }
         const key = `${threadId}:${questionId}:${kind}`;
         const seq =
           cache.current.get(key) ??
@@ -170,6 +199,7 @@ export function QuestionNavigationProvider({
     <Context.Provider
       value={{
         readOnly,
+        registerQueuedAnswer,
         suppressedRouteKey,
         complete,
         request,

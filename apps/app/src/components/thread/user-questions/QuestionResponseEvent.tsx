@@ -85,6 +85,7 @@ export function QuestionResponseEvent({
       <QuestionAnswers
         publication={response.publication}
         answers={response.answers}
+        showPrompts={response.publication.questions.length > 1}
       />
       <p className="text-xs text-muted-foreground">
         {matches && question

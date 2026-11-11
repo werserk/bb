@@ -1,3 +1,4 @@
+import { useQuestionNavigation } from "@/components/thread/user-questions/question-navigation";
 import {
   QuestionAnswers,
   questionResponseId,
@@ -627,6 +628,7 @@ function QueuedMessagePreview({
           <QuestionAnswers
             publication={response.publication}
             answers={response.answers}
+            showPrompts={response.publication.questions.length > 1}
           />
         ) : null}
       </div>
@@ -1270,6 +1272,35 @@ export function QueuedMessagesList({
   const inlineEditorActive = inlineEditor !== undefined;
   const getScrollElement = useBottomAnchoredScroll()?.getScrollElement;
   const surfaceRef = useRef<HTMLElement>(null);
+  const questionNavigation = useQuestionNavigation();
+  useEffect(() => {
+    const register = questionNavigation?.registerQueuedAnswer;
+    if (!register) return;
+    const cleanups = queuedMessages.flatMap((queued) => {
+      const response = queuedQuestionResponse(queued.payload, queued.content);
+      if (!response) return [];
+      return [
+        register(response.questionId, async (signal) => {
+          onExpandedChange(true);
+          await new Promise(requestAnimationFrame);
+          signal.throwIfAborted();
+          return (
+            surfaceRef.current?.querySelector<HTMLElement>(
+              `[id="${questionResponseId(queued.threadId, response.questionId)}"]`,
+            ) ?? null
+          );
+        }),
+      ];
+    });
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [
+    questionNavigation?.registerQueuedAnswer,
+    queuedMessages,
+    onExpandedChange,
+  ]);
+
   const listRef = useRef<HTMLUListElement>(null);
   const wasInlineEditingRef = useRef(false);
   useEffect(() => {

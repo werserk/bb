@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import {
   cleanup,
@@ -93,4 +93,48 @@ it("loads an older question and focuses it only in the pane that requested navig
         element.textContent !== "Other pane question",
     ),
   ).toBe(true);
+});
+
+function QueuedAnswer() {
+  const navigation = useQuestionNavigation()!;
+  const [expanded, setExpanded] = useState(false);
+  useEffect(
+    () =>
+      navigation.registerQueuedAnswer(qid, async () => {
+        setExpanded(true);
+        await new Promise(requestAnimationFrame);
+        return document.querySelector<HTMLElement>(
+          "[data-fixture-queued-answer]",
+        );
+      }),
+    [navigation.registerQueuedAnswer],
+  );
+  return (
+    <>
+      <button onClick={() => void navigation.navigate(qid, "answer")}>
+        View queued answer
+      </button>
+      {expanded ? (
+        <section tabIndex={-1} data-fixture-queued-answer="">
+          Queued owner answer
+        </section>
+      ) : null}
+    </>
+  );
+}
+it("reveals the saved answer in a collapsed queue before looking for dispatched history", async () => {
+  api.list.mockClear();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  render(
+    <MemoryRouter>
+      <QuestionNavigationProvider threadId="thr_test">
+        <QueuedAnswer />
+      </QuestionNavigationProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View queued answer" }));
+  await waitFor(() =>
+    expect(document.activeElement?.textContent).toBe("Queued owner answer"),
+  );
+  expect(api.list).not.toHaveBeenCalled();
 });
