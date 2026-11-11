@@ -20,11 +20,15 @@ const facts = vi.hoisted(() => ({
   view: null as ThreadPlanView | null,
   interactions: [] as PendingInteraction[],
   stop: vi.fn(),
+  navigate: vi.fn().mockResolvedValue(true),
   resolve: vi.fn(),
   pendingReady: true,
   pendingFetching: false,
   resize: () => {},
   width: 480,
+}));
+vi.mock("@/components/thread/user-questions/question-navigation", () => ({
+  useQuestionNavigation: () => ({ navigate: facts.navigate }),
 }));
 vi.mock("@/hooks/queries/thread-plans", () => ({
   useThreadPlans: () => ({ status: "ready", plans: { focus: facts.view } }),
@@ -537,4 +541,68 @@ it("native compact SDK focus restores a skipped form and reclaims a panel-owned 
     screen.getByRole("textbox").closest("[data-thread-questions]"),
   ).not.toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("textbox"));
+});
+
+it("focuses a persistent-only question without requiring a plan or treating its ID as a native interaction", () => {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    () => ({
+      width: 480,
+      height: 0,
+      top: 0,
+      left: 0,
+      right: 480,
+      bottom: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  );
+  facts.view!.current = null;
+  facts.view!.questionAttention = { total: 2, firstQuestionId: "qst_oldest" };
+  facts.view!.attentionInteractionIds = [];
+  facts.view!.unboundInteractionIds = [];
+  facts.interactions = [];
+  render(<ThreadPlanSteps threadId="focus" placement="overlay" />);
+  expect(
+    experimental_focusThreadPlan!({
+      threadId: "focus",
+      questionId: "qst_oldest",
+    }),
+  ).toBe(true);
+  expect(facts.navigate).toHaveBeenCalledWith("qst_oldest", "question");
+});
+
+it("gives an existing native pending interaction precedence over a persistent focus target", () => {
+  facts.navigate.mockClear();
+  render(<ThreadPlanSteps threadId="focus" placement="overlay" />);
+  act(() => {
+    expect(
+      experimental_focusThreadPlan!({
+        threadId: "focus",
+        questionId: "qst_oldest",
+      }),
+    ).toBe(true);
+  });
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  expect(facts.navigate).not.toHaveBeenCalled();
+});
+
+it("refuses a persistent target in a hidden chat even when its plan is empty", () => {
+  facts.navigate.mockClear();
+  facts.view!.current = null;
+  facts.view!.attentionInteractionIds = [];
+  facts.view!.unboundInteractionIds = [];
+  facts.interactions = [];
+  render(
+    <div hidden>
+      <ThreadPlanSteps threadId="focus" placement="overlay" />
+    </div>,
+  );
+  expect(
+    experimental_focusThreadPlan!({
+      threadId: "focus",
+      questionId: "qst_oldest",
+    }),
+  ).toBe(false);
+  expect(facts.navigate).not.toHaveBeenCalled();
 });

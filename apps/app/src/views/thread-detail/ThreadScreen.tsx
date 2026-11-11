@@ -1,5 +1,6 @@
 import { threadNeedsOwnerAttention } from "@bb/client-core";
 import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
+import { QuestionFallback } from "@/components/thread/user-questions/QuestionFallback";
 import { QuestionNavigator } from "@/components/thread/user-questions/QuestionNavigator";
 import { NativeQuestionFocusProvider } from "./native-question-focus";
 import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
@@ -643,6 +644,7 @@ export function ThreadScreen({
             >
               {surface}
               {questions}
+              <QuestionFallback threadId={thread.id} />
             </PageShell>
           </div>
         );
@@ -667,6 +669,7 @@ export function ThreadScreen({
                 <>
                   {surface}
                   {questions}
+                  <QuestionFallback threadId={thread.id} />
                 </>
               }
               threadId={thread.id}

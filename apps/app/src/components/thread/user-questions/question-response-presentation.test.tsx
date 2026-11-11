@@ -405,9 +405,9 @@ it("identifies the owner answer and anchors a concise original quote without mov
 });
 
 it("shows link-local progress and clears a failed lookup when the retained snapshot is revealed", async () => {
-  api.get.mockRejectedValue(new Error("Missing"));
+  api.get.mockRejectedValueOnce(new Error("Missing"));
   let reject!: (reason: Error) => void;
-  api.list.mockImplementation(
+  api.get.mockImplementationOnce(
     () =>
       new Promise((_resolve, fail) => {
         reject = fail;

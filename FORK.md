@@ -36,5 +36,13 @@ its transaction; the summary may change at the same timeline revision.
 of open identity/revision pairs and archive state fences completeness: changed
 sets return 409 and invalid/cross-thread cursors 400. This read view never changes
 stored question status; history listing keeps its existing cap and array shape.
-The native navigator/plugin consumer work and installed acceptance for this
-contract are pending on the visible-owner-questions branch, not released.
+The native navigator traverses that view in bounded windows, restarts once on
+changed cursors and exposes incomplete/Retry instead of mixing revisions. It
+refreshes while visible every five seconds; query counts expire after 30 seconds
+without success. Known-card navigation re-reads the record, updates the native
+card cache and bypasses historical event scanning. The owning ThreadScreen hosts
+a native ConversationQuestionCard fallback at the timeline end, with pane-local
+focus and removal when the original marker becomes loaded. The existing optional
+focusThreadPlan capability accepts a separate questionId, with native interaction
+precedence, through the same navigation controller. The plugin consumer and
+installed acceptance remain pending; this branch is not released.

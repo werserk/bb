@@ -16,6 +16,8 @@ import {
   registerThreadPlanFocusTarget,
   type ThreadPlanFocusRequest,
 } from "./thread-plan-focus";
+import { isPlanSurfaceVisible } from "@/components/thread/pending-interactions/plan-surface-visibility";
+import { useQuestionNavigation } from "@/components/thread/user-questions/question-navigation";
 
 export function useThreadPlanFocus(facts: {
   props: ThreadPlanStepsProps;
@@ -27,6 +29,9 @@ export function useThreadPlanFocus(facts: {
   ready: boolean;
 }) {
   const { props, view, interactions, interactionsLoading, ready } = facts;
+  const navigation = useQuestionNavigation();
+  const navigate = useRef(navigation?.navigate);
+  navigate.current = navigation?.navigate;
   const current = useRef(facts);
   current.current = facts;
   const [request, setRequest] = useState<{
@@ -42,9 +47,22 @@ export function useThreadPlanFocus(facts: {
     | undefined
   >(undefined);
   const accept = useCallback(
-    ({ interactionId }: FocusThreadPlanArgs) => {
+    ({ interactionId, questionId }: FocusThreadPlanArgs) => {
       const { view, interactions, root, ready } = current.current;
-      if (!ready || !view || !isThreadPlanVisible(root.current)) return false;
+      if (!ready || !view) return false;
+      if (
+        !interactionId &&
+        questionId &&
+        !view.attentionInteractionIds.length
+      ) {
+        if (!navigate.current || !isPlanSurfaceVisible(root.current))
+          return false;
+        void navigate.current(questionId, "question");
+        return true;
+      }
+      if (!isThreadPlanVisible(root.current)) return false;
+      if (!interactionId && questionId)
+        interactionId = view.attentionInteractionIds[0];
       if (interactionId) {
         const pending = interactions?.some(
           (item) =>

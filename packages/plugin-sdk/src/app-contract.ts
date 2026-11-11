@@ -6182,4 +6182,5 @@ export interface ThreadPlanStepsProps {
 export interface FocusThreadPlanArgs {
   threadId: string;
   interactionId?: string;
+  questionId?: string;
 }

@@ -7,6 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
 import { useLocation } from "react-router-dom";
 import { sdk } from "@/lib/sdk";
 import { flashSearchTarget } from "@/lib/search-flash";
@@ -40,6 +42,7 @@ interface QuestionNavigation {
     origin: "composer" | "inline";
   } | null;
   readOnly: boolean;
+  fallbackQuestionId: string | null;
   request: QuestionNavigationRequest | null;
   error: string | null;
   pending: boolean;
@@ -68,6 +71,7 @@ export function QuestionNavigationProvider({
   readOnly?: boolean;
 }) {
   const location = useLocation();
+  const queryClient = useQueryClient();
   const routeKey = `${location.key}:${location.pathname}${location.search}${location.hash}`;
   const root = useRef<HTMLDivElement>(null);
   const abort = useRef<AbortController | null>(null);
@@ -94,6 +98,9 @@ export function QuestionNavigationProvider({
   const [feedback, setFeedback] =
     useState<QuestionNavigation["feedback"]>(null);
   const [pending, setPending] = useState(false);
+  const [fallbackQuestionId, setFallbackQuestionId] = useState<string | null>(
+    null,
+  );
   const [suppressedRouteKey, setSuppressedRouteKey] = useState<string | null>(
     null,
   );
@@ -105,6 +112,7 @@ export function QuestionNavigationProvider({
     setRequest(null);
     setError(null);
     setFeedback(null);
+    setFallbackQuestionId(null);
   }, []);
   useEffect(() => {
     clear();
@@ -132,6 +140,33 @@ export function QuestionNavigationProvider({
           ? questionCardId(threadId, questionId)
           : questionResponseId(threadId, questionId);
       try {
+        if (kind === "question") {
+          const question = await sdk.threads.questions.get({
+            threadId,
+            questionId,
+            signal: controller.signal,
+          });
+          controller.signal.throwIfAborted();
+          queryClient.setQueryData(
+            [...conversationQuestionsQueryKey(threadId), questionId],
+            question,
+          );
+          const target = root.current?.querySelector<HTMLElement>(
+            `[id="${elementId}"]`,
+          );
+          if (target) {
+            target.scrollIntoView({ block: "center" });
+            target.focus({ preventScroll: true });
+            flashSearchTarget(target);
+          } else {
+            if (readOnly)
+              throw new Error(
+                "This question is outside the loaded read-only history.",
+              );
+            setFallbackQuestionId(questionId);
+          }
+          return true;
+        }
         const queued =
           kind === "answer" ? queuedAnswers.current.get(questionId) : undefined;
         if (queued) {
@@ -190,7 +225,7 @@ export function QuestionNavigationProvider({
         if (!controller.signal.aborted && !requested) setPending(false);
       }
     },
-    [threadId, routeKey],
+    [threadId, routeKey, readOnly, queryClient],
   );
   const retry = useCallback(() => {
     if (last.current)
@@ -222,6 +257,7 @@ export function QuestionNavigationProvider({
     <Context.Provider
       value={{
         readOnly,
+        fallbackQuestionId,
         feedback,
         registerQueuedAnswer,
         suppressedRouteKey,

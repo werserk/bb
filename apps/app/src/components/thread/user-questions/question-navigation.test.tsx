@@ -4,12 +4,11 @@ import { MemoryRouter } from "react-router-dom";
 import {
   cleanup,
   fireEvent,
-  render,
+  render as renderView,
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { conversationQuestionMarker } from "@bb/domain";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   QuestionNavigationProvider,
   useQuestionNavigation,
@@ -19,8 +18,31 @@ import {
   useScrollToSearchedMessage,
 } from "../timeline/useScrollToSearchedMessage";
 import { questionCardId } from "./question-response-presentation";
-const api = vi.hoisted(() => ({ list: vi.fn() }));
-vi.mock("@/lib/sdk", () => ({ sdk: { threads: { events: api } } }));
+import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { QuestionFallback } from "./QuestionFallback";
+const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
+vi.mock("@/lib/sdk", () => ({
+  sdk: { threads: { events: { list: api.list }, questions: { get: api.get } } },
+}));
+vi.mock("./ConversationQuestionCard", async () => {
+  const { questionCardId } = await import("./question-response-presentation");
+  return {
+    ConversationQuestionCard: ({
+      threadId,
+      questionId,
+    }: {
+      threadId: string;
+      questionId: string;
+    }) => (
+      <section tabIndex={-1} id={questionCardId(threadId, questionId)}>
+        Native fallback card
+      </section>
+    ),
+  };
+});
+function render(ui: React.ReactElement) {
+  return renderView(ui, { wrapper: createQueryClientTestHarness().wrapper });
+}
 const qid = "qst_23456789ab";
 const row = { id: "old-row", sourceSeqStart: 1, sourceSeqEnd: 1 };
 function History({ name, older = false }: { name: string; older?: boolean }) {
@@ -55,25 +77,20 @@ function Pane({ name, older }: { name: string; older?: boolean }) {
     <QuestionNavigationProvider threadId="thr_test">
       <SearchMessageLocationProvider threadId="thr_test">
         <History name={name} older={older} />
+        <QuestionFallback threadId="thr_test" />
       </SearchMessageLocationProvider>
     </QuestionNavigationProvider>
   );
 }
+beforeEach(() => {
+  api.get.mockReset().mockResolvedValue({ id: qid, threadId: "thr_test" });
+  api.list.mockReset().mockResolvedValue([]);
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-it("loads an older question and focuses it only in the pane that requested navigation", async () => {
-  api.list.mockResolvedValue([
-    {
-      threadId: "thr_test",
-      seq: 1,
-      type: "item/completed",
-      data: {
-        item: { type: "agentMessage", text: conversationQuestionMarker(qid) },
-      },
-    },
-  ]);
+it("opens an unloaded question by ID and focuses only the requesting pane", async () => {
   const scroll = vi.fn();
   HTMLElement.prototype.scrollIntoView = scroll;
   render(
@@ -84,7 +101,7 @@ it("loads an older question and focuses it only in the pane that requested navig
   );
   fireEvent.click(screen.getByRole("button", { name: "This pane" }));
   await waitFor(() =>
-    expect(document.activeElement?.textContent).toBe("This pane question"),
+    expect(document.activeElement?.textContent).toBe("Native fallback card"),
   );
   expect(
     scroll.mock.instances.every(
@@ -139,57 +156,130 @@ it("reveals the saved answer in a collapsed queue before looking for dispatched 
   expect(api.list).not.toHaveBeenCalled();
 });
 
-function RevealFailure() {
+function FallbackIdentity() {
   const navigation = useQuestionNavigation()!;
   return (
     <>
-      <button
-        onClick={() => void navigation.navigate(qid, "question", "inline")}
-      >
-        Open inline
+      <button onClick={() => void navigation.navigate(qid, "question")}>
+        Open missing marker
       </button>
-      <button
-        disabled={!navigation.request}
-        onClick={() => navigation.fail(navigation.request!.locationKey)}
-      >
-        Fail reveal
-      </button>
-      <output>
-        {navigation.feedback?.origin}: {navigation.error}
-      </output>
+      <output>{navigation.fallbackQuestionId}</output>
     </>
   );
 }
-it("keeps an async reveal failure visible at the composer after the source link unmounts", async () => {
-  api.list.mockResolvedValue([
-    {
-      threadId: "thr_test",
-      seq: 1,
-      type: "item/completed",
-      data: {
-        item: { type: "agentMessage", text: conversationQuestionMarker(qid) },
-      },
-    },
-  ]);
+it("makes a persistent question reachable when its timeline marker no longer exists", async () => {
+  api.list.mockResolvedValue([]);
   render(
     <MemoryRouter>
       <QuestionNavigationProvider threadId="thr_test">
-        <RevealFailure />
+        <FallbackIdentity />
       </QuestionNavigationProvider>
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Open inline" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open missing marker" }));
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe(qid));
+});
+
+it("refuses navigation when the fresh record read fails, leaving an actionable error", async () => {
+  api.get.mockRejectedValue(new Error("offline"));
+  function Failure() {
+    const navigation = useQuestionNavigation()!;
+    return (
+      <>
+        <button onClick={() => void navigation.navigate(qid, "question")}>
+          Open
+        </button>
+        <output>{navigation.error}</output>
+      </>
+    );
+  }
+  render(
+    <MemoryRouter>
+      <QuestionNavigationProvider threadId="thr_test">
+        <Failure />
+      </QuestionNavigationProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
   await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe("inline: "),
+    expect(screen.getByRole("status").textContent).toBe("offline"),
   );
+  expect(screen.queryByText("Native fallback card")).toBeNull();
+});
+
+it("reuses a loaded native card and never scans history for a question", async () => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  render(
+    <MemoryRouter>
+      <Pane name="Loaded pane" />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Loaded pane" }));
   await waitFor(() =>
-    expect(
-      (screen.getByRole("button", { name: "Fail reveal" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false),
+    expect(document.activeElement?.textContent).toBe("Loaded pane question"),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Fail reveal" }));
-  expect(screen.getByRole("status").textContent).toBe(
-    "composer: Unable to reveal this message. Try again.",
+  expect(api.get).toHaveBeenCalledTimes(1);
+  expect(api.list).not.toHaveBeenCalled();
+  expect(screen.queryByText("Native fallback card")).toBeNull();
+});
+
+it("removes the fallback if its original native marker becomes loaded", async () => {
+  function Original() {
+    const [loaded, setLoaded] = useState(false);
+    const navigation = useQuestionNavigation()!;
+    return (
+      <>
+        <button onClick={() => void navigation.navigate(qid, "question")}>
+          Open
+        </button>
+        <button onClick={() => setLoaded(true)}>Load history</button>
+        {loaded && (
+          <section id={questionCardId("thr_test", qid)} tabIndex={-1}>
+            Original card
+          </section>
+        )}
+        <QuestionFallback threadId="thr_test" />
+      </>
+    );
+  }
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  render(
+    <MemoryRouter>
+      <QuestionNavigationProvider threadId="thr_test">
+        <Original />
+      </QuestionNavigationProvider>
+    </MemoryRouter>,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  await screen.findByText("Native fallback card");
+  fireEvent.click(screen.getByRole("button", { name: "Load history" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Native fallback card")).toBeNull(),
+  );
+  expect(document.activeElement?.textContent).toBe("Original card");
+});
+
+it("updates the shared native card from the fresh record before focusing a loaded marker", async () => {
+  const harness = createQueryClientTestHarness();
+  const key = ["conversationQuestions", "thr_test", qid];
+  harness.queryClient.setQueryData(key, { id: qid, status: "open" });
+  const answered = {
+    id: qid,
+    threadId: "thr_test",
+    status: "answered",
+    revision: 2,
+  };
+  api.get.mockResolvedValue(answered);
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  renderView(
+    <MemoryRouter>
+      <Pane name="Loaded pane" />
+    </MemoryRouter>,
+    { wrapper: harness.wrapper },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Loaded pane" }));
+  await waitFor(() =>
+    expect(harness.queryClient.getQueryData(key)).toEqual(answered),
+  );
+  expect(document.activeElement?.textContent).toBe("Loaded pane question");
 });

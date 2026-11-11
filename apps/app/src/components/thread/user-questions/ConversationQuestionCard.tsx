@@ -290,9 +290,22 @@ export function ConversationQuestionCard({
   const headingId = `${questionCardId(threadId, questionId)}${snapshot ? "-snapshot" : ""}-heading`;
 
   useEffect(() => {
-    if (navigation?.request?.elementId === questionCardId(threadId, questionId))
+    if (
+      navigation?.request?.elementId === questionCardId(threadId, questionId) ||
+      (navigation?.feedback?.questionId === questionId &&
+        navigation.feedback.kind === "question" &&
+        !navigation.pending &&
+        !navigation.error)
+    )
       setExpanded(true);
-  }, [navigation?.request, threadId, questionId]);
+  }, [
+    navigation?.request,
+    navigation?.feedback,
+    navigation?.pending,
+    navigation?.error,
+    threadId,
+    questionId,
+  ]);
   const answerLink =
     question?.response != null ? (
       <button

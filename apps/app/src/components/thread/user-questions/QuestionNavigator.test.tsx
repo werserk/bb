@@ -6,15 +6,17 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { BbHttpError } from "@bb/sdk/browser";
 import { QuestionNavigator } from "./QuestionNavigator";
 const api = vi.hoisted(() => ({
   list: vi.fn(),
+  open: vi.fn(),
   navigate: vi.fn().mockResolvedValue(true),
 }));
 vi.mock("@/lib/sdk", () => ({
-  sdk: { threads: { questions: { list: api.list } } },
+  sdk: { threads: { questions: { list: api.list, open: api.open } } },
 }));
 vi.mock("./question-navigation", () => ({
   useQuestionNavigation: () => ({
@@ -36,6 +38,21 @@ const q = (
   threadId,
   publication: { questions: [{ prompt: id }] },
 });
+beforeEach(() => {
+  api.list.mockReset();
+  api.open.mockReset().mockImplementation(async () => {
+    const questions = (await api.list()).filter(
+      (item: ReturnType<typeof q>) =>
+        item.status === "open" && item.threadId === "thr_test",
+    );
+    return {
+      questions,
+      total: questions.length,
+      nextCursor: null,
+      readRevision: "r1",
+    };
+  });
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -51,7 +68,7 @@ it("distinguishes loading from no open questions and excludes settled and child 
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  expect(screen.getByText(/Loading/)).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toMatch(/Loading/);
   resolve([q("settled", 1, "answered"), q("child", 2, "open", "thr_child")]);
   await waitFor(() => expect(screen.queryByText(/Loading/)).toBeNull());
   expect(screen.queryByRole("button", { name: /Question/ })).toBeNull();
@@ -92,6 +109,14 @@ it("shows an actionable load error and refetches without submitting an answer", 
 });
 
 it("labels a capped recent list instead of implying that older questions are absent", async () => {
+  api.open.mockRejectedValue(
+    new BbHttpError({
+      status: 404,
+      message: "unsupported",
+      code: null,
+      body: null,
+    }),
+  );
   api.list.mockResolvedValue(
     Array.from({ length: 200 }, (_, index) =>
       q(`Closed ${index}`, index, "answered"),
@@ -102,7 +127,7 @@ it("labels a capped recent list instead of implying that older questions are abs
   });
   expect(
     await screen.findByText(
-      "Showing the latest 200 cards. Older questions may remain in history.",
+      "Limited coverage · this core exposes recent history only. Older questions may remain in history.",
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Question · 0/ })).toBeNull();
@@ -129,4 +154,97 @@ it("uses the same short label as the destination card for direct and list naviga
   });
   fireEvent.click(await screen.findByRole("button", { name: /Questions · 2/ }));
   expect(await screen.findByRole("button", { name: "Decision" })).toBeTruthy();
+});
+
+it("loads an older open question through canonical pages and shows server total", async () => {
+  const first = {
+    questions: [q("Newest", 2)],
+    total: 201,
+    nextCursor: "next",
+    readRevision: "r1",
+  };
+  api.open.mockResolvedValue(first).mockImplementation(async ({ cursor }) =>
+    cursor
+      ? {
+          questions: [q("Oldest", 1)],
+          total: 201,
+          nextCursor: null,
+          readRevision: "r1",
+        }
+      : first,
+  );
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Questions · 201/ }),
+  );
+  expect(await screen.findByText("Showing 1 of 201")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Oldest" }));
+  expect(api.navigate).toHaveBeenCalledWith("Oldest", "question");
+  expect(api.list).not.toHaveBeenCalled();
+});
+
+it("hides a retained numeric total after 30 seconds without a successful read", async () => {
+  const harness = createQueryClientTestHarness();
+  harness.queryClient.setQueryData(
+    ["conversationQuestions", "thr_test", "open"],
+    {
+      questions: [q("Retained", 1)],
+      total: 23,
+      nextCursor: "next",
+      incomplete: false,
+      legacy: false,
+    },
+    { updatedAt: Date.now() - 31_000 },
+  );
+  api.open.mockRejectedValue(new Error("offline"));
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: harness.wrapper,
+  });
+  await screen.findByRole("alert");
+  expect(screen.queryByRole("button", { name: /Questions · 23/ })).toBeNull();
+  expect(screen.queryByText("0 open questions")).toBeNull();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+it("shows Retry after two changing cursor snapshots instead of mixing question lists", async () => {
+  const first = {
+    questions: [q("Discarded", 2)],
+    total: 201,
+    nextCursor: "next",
+    readRevision: "r1",
+  };
+  const second = {
+    questions: [q("Current", 3)],
+    total: 201,
+    nextCursor: "next2",
+    readRevision: "r2",
+  };
+  const changed = () =>
+    new BbHttpError({
+      status: 409,
+      code: "stale-question-cursor",
+      message: "changed",
+      body: null,
+    });
+  api.open
+    .mockResolvedValueOnce(first)
+    .mockResolvedValueOnce(first)
+    .mockRejectedValueOnce(changed())
+    .mockResolvedValueOnce(second)
+    .mockRejectedValueOnce(changed());
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Questions · 201/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+  expect(await screen.findByText(/The list keeps changing/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Discarded" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Current" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(api.open).toHaveBeenCalledTimes(5);
 });
