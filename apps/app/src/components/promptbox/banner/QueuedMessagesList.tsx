@@ -1278,6 +1278,7 @@ export function QueuedMessagesList({
       if (!response) return [];
       return [
         register(response.questionId, async (signal) => {
+          setWorkspaceOpen(true);
           onExpandedChange(true);
           await new Promise(requestAnimationFrame);
           signal.throwIfAborted();
@@ -1572,9 +1573,11 @@ export function QueuedMessagesList({
   );
   const baseSurfaceHeight =
     inlineEditor || mode === "workspace"
-      ? getWorkspaceHeight({
-          messageCount: queuedMessages.length,
-        })
+      ? queuedMessages.some(
+          (message) => message.payload.kind === "questionResponse",
+        )
+        ? WORKSPACE_MAX_HEIGHT
+        : getWorkspaceHeight({ messageCount: queuedMessages.length })
       : mode === "drawer"
         ? getQueuedMessagesDrawerHeight({
             queuedMessages,
