@@ -138,3 +138,58 @@ it("reveals the saved answer in a collapsed queue before looking for dispatched 
   );
   expect(api.list).not.toHaveBeenCalled();
 });
+
+function RevealFailure() {
+  const navigation = useQuestionNavigation()!;
+  return (
+    <>
+      <button
+        onClick={() => void navigation.navigate(qid, "question", "inline")}
+      >
+        Open inline
+      </button>
+      <button
+        disabled={!navigation.request}
+        onClick={() => navigation.fail(navigation.request!.locationKey)}
+      >
+        Fail reveal
+      </button>
+      <output>
+        {navigation.feedback?.origin}: {navigation.error}
+      </output>
+    </>
+  );
+}
+it("keeps an async reveal failure visible at the composer after the source link unmounts", async () => {
+  api.list.mockResolvedValue([
+    {
+      threadId: "thr_test",
+      seq: 1,
+      type: "item/completed",
+      data: {
+        item: { type: "agentMessage", text: conversationQuestionMarker(qid) },
+      },
+    },
+  ]);
+  render(
+    <MemoryRouter>
+      <QuestionNavigationProvider threadId="thr_test">
+        <RevealFailure />
+      </QuestionNavigationProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open inline" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("inline: "),
+  );
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Fail reveal" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Fail reveal" }));
+  expect(screen.getByRole("status").textContent).toBe(
+    "composer: Unable to reveal this message. Try again.",
+  );
+});

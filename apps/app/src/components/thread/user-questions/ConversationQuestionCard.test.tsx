@@ -120,7 +120,7 @@ it("renders materials before an independent form and saves the exact revision", 
       answers: { voice: { selected: ["a"] } },
     }),
   );
-  await screen.findByRole("button", { name: "Show original question" });
+  await screen.findByRole("button", { name: "Which voice?" });
 });
 it("dismisses only its own question and shows errors without hiding materials", async () => {
   api.get.mockResolvedValue(question);
@@ -274,9 +274,7 @@ it("retains access to the accepted response and held reason after withdrawal wit
   );
   await screen.findByText("Held · not sent");
   expect(screen.getByText("View answer")).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show original question" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Which voice?" }));
   expect(screen.getByText("A")).toBeTruthy();
   expect(await screen.findByLabelText("Sample")).toBeTruthy();
   expect(screen.queryByText("Send now")).toBeNull();
@@ -304,9 +302,7 @@ it("settles compactly without duplicating answers and keeps original options and
   expect(screen.queryByTestId("form")).toBeNull();
   expect(screen.queryByText("Owner detail")).toBeNull();
   expect(screen.queryByLabelText("Sample")).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show original question" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Which voice?" }));
   expect(screen.getByText("Listen before choosing")).toBeTruthy();
   expect(screen.getByText("A")).toBeTruthy();
   expect(await screen.findByLabelText("Sample")).toBeTruthy();

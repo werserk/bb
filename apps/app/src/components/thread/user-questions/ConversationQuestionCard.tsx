@@ -302,7 +302,10 @@ export function ConversationQuestionCard({
           );
           if (answer) {
             answer.scrollIntoView({
-              behavior: "smooth",
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                .matches
+                ? "instant"
+                : "smooth",
               block: "center",
             });
             answer.focus({ preventScroll: true });
@@ -349,17 +352,16 @@ export function ConversationQuestionCard({
             </>
           ) : (
             <div className="flex min-h-11 min-w-0 items-center justify-between gap-3">
-              <button
-                type="button"
-                aria-expanded={expanded}
-                aria-label={
-                  expanded ? "Hide original question" : "Show original question"
-                }
-                onClick={() => setExpanded((value) => !value)}
-                className="min-w-0 flex-1 py-1 text-left"
-              >
-                <h3 id={headingId} className="truncate text-sm font-medium">
-                  {questionTitle(question.publication)}
+              <div className="min-w-0 flex-1">
+                <h3 id={headingId} className="text-sm font-medium">
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    onClick={() => setExpanded((value) => !value)}
+                    className="block min-h-9 w-full truncate text-left pointer-coarse:min-h-11"
+                  >
+                    {questionTitle(question.publication)}
+                  </button>
                 </h3>
                 <span className="text-xs text-muted-foreground">
                   Agent question ·{" "}
@@ -369,7 +371,7 @@ export function ConversationQuestionCard({
                     : ""}{" "}
                   · {expanded ? "Hide original" : "Show original"}
                 </span>
-              </button>
+              </div>
               {answerLink}
             </div>
           )}

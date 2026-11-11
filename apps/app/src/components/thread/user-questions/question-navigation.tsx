@@ -205,6 +205,9 @@ export function QuestionNavigationProvider({
       if (request?.locationKey !== key) return;
       setPending(false);
       setError("Unable to reveal this message. Try again.");
+      setFeedback((current) =>
+        current ? { ...current, origin: "composer" } : null,
+      );
       setRequest(null);
     },
     [request],

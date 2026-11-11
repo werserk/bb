@@ -623,7 +623,7 @@ function QueuedMessagePreview({
           <QuestionResponseBody
             response={response}
             timestamp={queuedMessage.createdAt}
-            footer={<span>Queued · waiting to send</span>}
+            footer={<span>In queue</span>}
           />
         ) : (
           <span>Question response</span>
