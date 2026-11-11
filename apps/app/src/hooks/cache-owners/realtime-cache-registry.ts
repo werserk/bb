@@ -388,6 +388,10 @@ export const REALTIME_THREAD_CHANGE_REGISTRY = {
     flush: "debounced",
     patch: [patchThreadListPendingInteractionState],
     dirty: [
+      (context) =>
+        context.hasPendingInteraction === undefined
+          ? dirtyThreadListQueries(context)
+          : undefined,
       ({ threadId }) => [conversationQuestionsQueryKey(threadId)],
       dirtyThreadSearchQueries,
       getThreadPendingInteractionInvalidationQueryKeys,

@@ -1,3 +1,4 @@
+import { threadNeedsOwnerAttention } from "@bb/client-core";
 import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
 import { QuestionNavigator } from "@/components/thread/user-questions/QuestionNavigator";
 import { NativeQuestionFocusProvider } from "./native-question-focus";
@@ -215,12 +216,12 @@ function useChildThreadsSection(
         (entry) =>
           entry.originKind === null &&
           (isThreadDisplayStatusBannerActive(entry.runtime.displayStatus) ||
-            entry.hasPendingInteraction),
+            threadNeedsOwnerAttention(entry)),
       )
       .sort((left, right) =>
-        left.hasPendingInteraction === right.hasPendingInteraction
+        threadNeedsOwnerAttention(left) === threadNeedsOwnerAttention(right)
           ? right.latestAttentionAt - left.latestAttentionAt
-          : left.hasPendingInteraction
+          : threadNeedsOwnerAttention(left)
             ? -1
             : 1,
       )
@@ -231,7 +232,7 @@ function useChildThreadsSection(
           projectId: entry.projectId,
           threadId: entry.id,
         }),
-        hasPendingInteraction: entry.hasPendingInteraction,
+        needsOwnerAttention: threadNeedsOwnerAttention(entry),
       }));
     if (activeItems.length === 0) return null;
     return { items: activeItems };

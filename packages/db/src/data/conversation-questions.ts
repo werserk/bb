@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQLWrapper } from "drizzle-orm";
 import type { ConversationQuestionStatus } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { createConversationQuestionId } from "../ids.js";
@@ -205,4 +205,20 @@ export function requireQuestionResponseDeliverable(
                 : null;
   if (reason !== null)
     throw new QuestionResponseNotDeliverableError(row.id, reason);
+}
+
+export function openConversationQuestionExists(threadId: string | SQLWrapper) {
+  return sql<number>`EXISTS (SELECT 1 FROM ${conversationQuestions} WHERE ${conversationQuestions.threadId} = ${threadId} AND ${conversationQuestions.status} = 'open')`;
+}
+export function hasOpenConversationQuestion(
+  db: DbQueryConnection,
+  threadId: string,
+): boolean {
+  return (
+    (db
+      .select({ found: openConversationQuestionExists(threadId) })
+      .from(threads)
+      .where(eq(threads.id, threadId))
+      .get()?.found ?? 0) > 0
+  );
 }

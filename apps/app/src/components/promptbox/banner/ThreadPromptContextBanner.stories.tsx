@@ -365,25 +365,25 @@ const childThreadsFixture: ThreadPromptChildThreadsSection = {
       id: "thr_a",
       title: "Investigate Safari auth flake on staging",
       href: "/projects/proj-1/threads/thr_a",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_b",
       title: "Review PR #4521 reviewer comments",
       href: "/projects/proj-1/threads/thr_b",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_c",
       title: "Refactor email pipeline retry logic",
       href: "/projects/proj-1/threads/thr_c",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_d",
       title: "Backfill workspace-status invalidation cache",
       href: "/projects/proj-1/threads/thr_d",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
   ],
 };
@@ -394,7 +394,7 @@ const childThreadsPendingFixture: ThreadPromptChildThreadsSection = {
       id: "thr_blocked",
       title: "Install workspace tools",
       href: "/projects/proj-1/threads/thr_blocked",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
   ],
 };
@@ -405,25 +405,25 @@ const childThreadsQuestionsFixture: ThreadPromptChildThreadsSection = {
       id: "thr_size",
       title: "Pick a size",
       href: "/projects/proj-1/threads/thr_size",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_shape",
       title: "Pick a shape",
       href: "/projects/proj-1/threads/thr_shape",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_color",
       title: "Pick a color",
       href: "/projects/proj-1/threads/thr_color",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_working",
       title: "Investigate failing checks",
       href: "/projects/proj-1/threads/thr_working",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
   ],
 };
@@ -433,7 +433,7 @@ const childThreadsLargeFixture: ThreadPromptChildThreadsSection = {
     id: `thr_large_${i}`,
     title: `Child work item ${i + 1} that is busy doing thing-${i}`,
     href: `/projects/proj-1/threads/thr_large_${i}`,
-    hasPendingInteraction: i === 1,
+    needsOwnerAttention: i === 1,
   })),
 };
 

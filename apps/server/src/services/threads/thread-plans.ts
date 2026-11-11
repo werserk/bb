@@ -6,6 +6,7 @@ import {
   listPlanHistoryEventRows,
   getPlanInteractionCreationRow,
   listPlanStalenessEventRows,
+  hasOpenConversationQuestion,
 } from "@bb/db";
 import { projectThreadPlan } from "@bb/thread-view";
 import type { Thread, ThreadPlanView } from "@bb/domain";
@@ -83,6 +84,9 @@ export function readThreadPlan(
           threadIds: [thread.id],
           includeService: false,
         })[0]?.failedQueuedMessageCount ?? 0) > 0,
+      ownInputRequired:
+        thread.archivedAt === null &&
+        hasOpenConversationQuestion(deps.db, thread.id),
       anchors,
       attentionInteractionIds: interactions.map((i) => i.id),
       historyTruncated,

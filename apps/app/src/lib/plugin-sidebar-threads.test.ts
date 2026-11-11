@@ -21,8 +21,9 @@ describe("toPluginSidebarThread", () => {
   it("resolves the display title through the same rules bb's row uses", () => {
     expect(toPluginSidebarThread(makeThread()).displayTitle).toBe("A thread");
     expect(
-      toPluginSidebarThread(makeThread({ title: null, titleFallback: "Fallback" }))
-        .displayTitle,
+      toPluginSidebarThread(
+        makeThread({ title: null, titleFallback: "Fallback" }),
+      ).displayTitle,
     ).toBe("Fallback");
     expect(
       toPluginSidebarThread(
@@ -241,4 +242,17 @@ describe("toPluginSidebarThread", () => {
   it("reports no host when the thread has none", () => {
     expect(toPluginSidebarThread(makeThread()).host).toBeNull();
   });
+});
+
+it("exposes question attention through the plugin indicator while keeping native blocking state false", () => {
+  const result = toPluginSidebarThread(
+    makeThread({
+      hasOpenQuestion: true,
+      hasPendingInteraction: false,
+      status: "active",
+      runtime: { displayStatus: "active" },
+    }),
+  );
+  expect(result.hasPendingInteraction).toBe(false);
+  expect(result.indicator).toBe("waiting-for-input");
 });

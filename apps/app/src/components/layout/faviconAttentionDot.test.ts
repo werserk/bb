@@ -16,6 +16,7 @@ function makeSidebarThread(
     originKind: null,
     parentThreadId: null,
     hasPendingInteraction: false,
+    hasOpenQuestion: false,
     lastReadAt: 10,
     latestAttentionAt: 20,
     visibility: "visible",
@@ -206,4 +207,36 @@ it("reports pending threads separately from threads that are only unread, exclud
     pendingThreadIds: ["pending", "both"],
     unreadThreadIds: ["unread"],
   });
+});
+
+it("keeps an open persistent question visible in tab and desktop attention after read", () => {
+  const parent = makeSidebarThread({
+    id: "parent",
+    lastReadAt: 30,
+    hasOpenQuestion: true,
+  });
+  expect(
+    shouldShowFaviconAttentionDot({ ...BASE_ARGS, sidebarThreads: [parent] }),
+  ).toBe(true);
+  expect(
+    shouldShowFaviconAttentionDot({
+      ...BASE_ARGS,
+      isThreadView: true,
+      currentThreadId: "parent",
+      thread: parent,
+      sidebarThreads: [parent],
+    }),
+  ).toBe(true);
+  expect(
+    shouldShowFaviconAttentionDot({
+      ...BASE_ARGS,
+      isThreadView: true,
+      currentThreadId: "parent",
+      thread: parent,
+      sidebarThreads: [{ ...parent, id: "child", parentThreadId: "parent" }],
+    }),
+  ).toBe(true);
+  expect(desktopAttentionThreads([parent]).pendingThreadIds).toEqual([
+    "parent",
+  ]);
 });

@@ -17,7 +17,13 @@ import {
   getQueuedThreadMessage,
 } from "../../src/data/queued-thread-messages.js";
 import { parseStoredQueuedMessagePayload } from "../../src/data/queued-message-payload.js";
-import { createThread } from "../../src/data/threads.js";
+import {
+  createThread,
+  listThreadsWithPendingInteractionState,
+  hasActiveThreadAttention,
+  updateThread,
+  archiveThread,
+} from "../../src/data/threads.js";
 import { interruptPendingInteractionsForThreadIds } from "../../src/data/pending-interactions.js";
 import {
   createConversationQuestion,
@@ -272,6 +278,84 @@ it("commits the accepted answer and its question-bound outbox together or rolls 
       ),
     ).toThrow("withdrawn");
     expect(getQueuedThreadMessage(db, queueId)).not.toBeNull();
+  } finally {
+    db.$client.close();
+  }
+});
+
+it("keeps persistent-question attention independent of native waiters and newest200 list limits", () => {
+  const db = createMigratedConnection();
+  try {
+    const thread = createThread(db, noopNotifier, {
+      projectId: PERSONAL_PROJECT_ID,
+      providerId: "codex",
+      status: "active",
+    });
+    updateThread(db, noopNotifier, thread.id, {
+      lastReadAt: Date.now() + 10000,
+    });
+    const make = (i: number) =>
+      createConversationQuestion(db, {
+        threadId: thread.id,
+        sourceTurnId: `turn-${i}`,
+        sourceCallId: `call-${i}`,
+        publication: JSON.stringify(publication),
+        materialManifest: "[]",
+      })!;
+    const first = make(0),
+      second = make(1);
+    for (let i = 2; i < 203; i++) {
+      const q = make(i);
+      setConversationQuestionTerminal(db, {
+        threadId: thread.id,
+        questionId: q.id,
+        revision: 1,
+        status: "dismissed",
+        response: null,
+        queuedMessageId: null,
+      });
+    }
+    const row = () =>
+      listThreadsWithPendingInteractionState(db, {
+        threadIds: [thread.id],
+      })[0]!;
+    expect(row()).toMatchObject({
+      hasOpenQuestion: true,
+      hasPendingInteraction: false,
+      status: "active",
+    });
+    expect(hasActiveThreadAttention(db)).toBe(true);
+    setConversationQuestionTerminal(db, {
+      threadId: thread.id,
+      questionId: first.id,
+      revision: 1,
+      status: "dismissed",
+      response: null,
+      queuedMessageId: null,
+    });
+    expect(row()).toMatchObject({
+      hasOpenQuestion: true,
+      hasPendingInteraction: false,
+    });
+    withdrawConversationQuestion(db, {
+      threadId: thread.id,
+      questionId: second.id,
+      revision: 1,
+    });
+    expect(row()).toMatchObject({
+      hasOpenQuestion: false,
+      hasPendingInteraction: false,
+    });
+    expect(hasActiveThreadAttention(db)).toBe(false);
+    make(204);
+    archiveThread(db, noopNotifier, thread.id);
+    expect(
+      listThreadsWithPendingInteractionState(db, {
+        threadIds: [thread.id],
+        archived: true,
+      })[0],
+    ).toMatchObject({ hasOpenQuestion: false });
+    expect(hasActiveThreadAttention(db)).toBe(false);
   } finally {
     db.$client.close();
   }

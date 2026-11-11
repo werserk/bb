@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext } from "react";
 import type { ThreadListEntry } from "@bb/domain";
-import { isRunningThreadRuntimeDisplayStatus } from "@bb/client-core";
+import {
+  isRunningThreadRuntimeDisplayStatus,
+  threadNeedsOwnerAttention,
+} from "@bb/client-core";
 import { RouteAnchor } from "@/components/ui/app-route-anchor.js";
 import { useSidebarNavigationThreadSelection } from "@/hooks/queries/sidebar-navigation-query";
 import { useThread } from "@/hooks/queries/thread-queries";
@@ -34,6 +37,7 @@ const THREAD_CARD_STATUS_DOT_CLASS_NAMES: Record<ThreadCardStatus, string> = {
 interface ThreadCardStatusSource {
   archivedAt: number | null;
   hasPendingInteraction?: boolean;
+  hasOpenQuestion?: boolean;
   runtime: Pick<ThreadListEntry["runtime"], "displayStatus">;
 }
 
@@ -41,7 +45,7 @@ export function threadCardStatus(
   thread: ThreadCardStatusSource,
 ): ThreadCardStatus {
   if (thread.archivedAt !== null) return "archived";
-  if (thread.hasPendingInteraction === true) return "waiting";
+  if (threadNeedsOwnerAttention(thread)) return "waiting";
   if (thread.runtime.displayStatus === "error") return "error";
   if (isRunningThreadRuntimeDisplayStatus(thread.runtime.displayStatus)) {
     return "running";

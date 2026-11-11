@@ -1,3 +1,4 @@
+import { openConversationQuestionExists } from "./conversation-questions.js";
 import { prepareCachedQuery } from "../connection.js";
 import { markThreadPruningPolicyWork } from "./thread-pruning-work.js";
 import { copyProjectAttachmentOwnership } from "./project-attachments.js";
@@ -584,6 +585,7 @@ function threadWithPendingInteractionBaseQuery(db: DbConnection) {
       environmentName: environments.name,
       environmentPath: environments.path,
       environmentProviderId: environments.environmentProviderId,
+      hasOpenQuestion: sql<number>`${threads.archivedAt} IS NULL AND ${openConversationQuestionExists(threads.id)}`,
       hasPendingInteraction: sql<number>`EXISTS (SELECT 1 FROM ${pendingInteractions} WHERE ${pendingInteractions.threadId} = ${threads.id} AND ${pendingInteractions.status} = 'pending')`,
     })
     .from(threads)
@@ -626,6 +628,7 @@ export interface ThreadWithPendingInteractionState extends ThreadRow {
   environmentPath: string | null;
   environmentProviderId: string | null;
   hasPendingInteraction: boolean;
+  hasOpenQuestion: boolean;
 }
 
 interface ThreadWithPendingInteractionStateRow extends ThreadRow {
@@ -636,6 +639,7 @@ interface ThreadWithPendingInteractionStateRow extends ThreadRow {
   environmentPath: string | null;
   environmentProviderId: string | null;
   hasPendingInteraction: number;
+  hasOpenQuestion: number;
 }
 
 export interface CountLiveThreadsInEnvironmentArgs {
@@ -793,6 +797,7 @@ function toThreadWithPendingInteractionState(
     environmentPath,
     environmentProviderId,
     hasPendingInteraction,
+    hasOpenQuestion,
     ...thread
   } = row;
   return {
@@ -804,6 +809,7 @@ function toThreadWithPendingInteractionState(
     environmentPath,
     environmentProviderId,
     hasPendingInteraction: hasPendingInteraction > 0,
+    hasOpenQuestion: hasOpenQuestion > 0,
   };
 }
 
@@ -1490,7 +1496,11 @@ export function hasActiveThreadAttention(db: DbConnection): boolean {
     .where(
       liveThreads(
         eq(threads.visibility, "visible"),
-        or(unreadThread, isNotNull(pendingInteractions.id)),
+        or(
+          unreadThread,
+          isNotNull(pendingInteractions.id),
+          openConversationQuestionExists(threads.id),
+        ),
       ),
     )
     .limit(1)

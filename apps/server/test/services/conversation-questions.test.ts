@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   getQueuedThreadMessage,
   listQueuedThreadMessages,
@@ -19,6 +19,8 @@ import {
   turnScope,
   threadScope,
 } from "@bb/domain";
+import { readThreadPlan } from "../../src/services/threads/thread-plans.js";
+import { listThreadsWithPendingInteractionState } from "@bb/db";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -612,5 +614,103 @@ it("rejects a fresh publication from a source interrupted before its completion 
     expect(
       listConversationQuestionsForThread(h.deps, { threadId: thread.id }),
     ).toHaveLength(0);
+  });
+});
+
+it("projects persistent-question attention across publish, multiple questions, answer and Cancel without blocking the agent", async () => {
+  await withTestHarness(async (h) => {
+    const { thread } = seedThreadFixture(h, {
+      thread: { providerId: "codex", status: "active" },
+    });
+    seedThreadRuntimeState(h.deps, {
+      threadId: thread.id,
+      environmentId: thread.environmentId,
+      providerThreadId: "p",
+      permissionMode: "accept-edits",
+    });
+    seedTurnStarted(h.deps, {
+      threadId: thread.id,
+      turnId: "attention-origin",
+      providerThreadId: "p",
+    });
+    const notify = vi.spyOn(h.deps.hub, "notifyThread");
+    const make = (callId: string) =>
+      publishConversationQuestion(h.deps, {
+        threadId: thread.id,
+        source: { turnId: "attention-origin", providerThreadId: "p", callId },
+        publication,
+      });
+    const first = await make("one"),
+      second = await make("two");
+    const read = () => readThreadPlan(h.deps, thread);
+    expect(read()).toMatchObject({
+      ownAttention: "needs_input",
+      attentionInteractionIds: [],
+      unboundInteractionIds: [],
+    });
+    expect(
+      listThreadsWithPendingInteractionState(h.db, {
+        threadIds: [thread.id],
+      })[0],
+    ).toMatchObject({
+      hasOpenQuestion: true,
+      hasPendingInteraction: false,
+      status: "active",
+    });
+    expect(
+      notify.mock.calls
+        .filter(
+          ([id, changes]) =>
+            id === thread.id && changes.includes("interactions-changed"),
+        )
+        .at(-1)?.[2],
+    ).toMatchObject({ projectId: thread.projectId });
+    await answerConversationQuestion(h.deps, {
+      threadId: thread.id,
+      questionId: first.id,
+      revision: 1,
+      answers: { voice: { selected: ["a"] } },
+    });
+    expect(read().ownAttention).toBe("needs_input");
+    expect(
+      notify.mock.calls
+        .filter(
+          ([id, changes]) =>
+            id === thread.id && changes.includes("interactions-changed"),
+        )
+        .at(-1)?.[2],
+    ).toMatchObject({ projectId: thread.projectId });
+    closeConversationQuestion(h.deps, {
+      threadId: thread.id,
+      questionId: second.id,
+      revision: 1,
+      action: "dismiss",
+    });
+    expect(read().ownAttention).toBe("none");
+    expect(
+      notify.mock.calls
+        .filter(
+          ([id, changes]) =>
+            id === thread.id && changes.includes("interactions-changed"),
+        )
+        .at(-1)?.[2],
+    ).toMatchObject({ projectId: thread.projectId });
+    expect(
+      h.deps.pendingInteractions.listPendingThreadInteractions(thread.id),
+    ).toHaveLength(0);
+    const third = await make("three");
+    closeConversationQuestion(h.deps, {
+      threadId: thread.id,
+      questionId: third.id,
+      revision: 1,
+      action: "withdraw",
+    });
+    expect(read().ownAttention).toBe("none");
+    const fourth = await make("four");
+    expect(
+      readThreadPlan(h.deps, { ...thread, archivedAt: Date.now() })
+        .ownAttention,
+    ).toBe("none");
+    expect(fourth.status).toBe("open");
   });
 });

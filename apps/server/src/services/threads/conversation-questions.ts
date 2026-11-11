@@ -304,7 +304,11 @@ export async function publishConversationQuestion(
     deps.hub.notifyThread(
       args.threadId,
       ["events-appended", "interactions-changed"],
-      { timelineSequence: result.sequence, eventTypes: ["item/completed"] },
+      {
+        timelineSequence: result.sequence,
+        eventTypes: ["item/completed"],
+        projectId: thread.projectId,
+      },
     );
   return result.question;
 }
@@ -390,10 +394,11 @@ export async function answerConversationQuestion(
     { behavior: "immediate" },
   );
   if (accepted.created) {
-    deps.hub.notifyThread(args.threadId, [
-      "interactions-changed",
-      "queue-changed",
-    ]);
+    deps.hub.notifyThread(
+      args.threadId,
+      ["interactions-changed", "queue-changed"],
+      { projectId: publicThread(deps.db, args.threadId, true).projectId },
+    );
     requestQueuedMessageDispatch(deps, {
       kind: "thread-ready",
       threadId: args.threadId,
@@ -426,9 +431,10 @@ export function closeConversationQuestion(
     },
     { behavior: "immediate" },
   );
-  deps.hub.notifyThread(args.threadId, [
-    "interactions-changed",
-    "queue-changed",
-  ]);
+  deps.hub.notifyThread(
+    args.threadId,
+    ["interactions-changed", "queue-changed"],
+    { projectId: publicThread(deps.db, args.threadId, true).projectId },
+  );
   return question;
 }

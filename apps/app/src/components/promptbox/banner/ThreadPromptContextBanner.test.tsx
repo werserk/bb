@@ -109,7 +109,7 @@ function childThreadItem(
   title: string,
   { pending = false }: { pending?: boolean } = {},
 ) {
-  return { id, title, href: `/threads/${id}`, hasPendingInteraction: pending };
+  return { id, title, href: `/threads/${id}`, needsOwnerAttention: pending };
 }
 
 describe("ThreadPromptContextBanner", () => {

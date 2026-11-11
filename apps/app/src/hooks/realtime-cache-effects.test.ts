@@ -3486,3 +3486,29 @@ it.each([
     effects.dispose();
   },
 );
+
+it("refreshes sidebar and project lists for persistent question changes with no native pending metadata", () => {
+  vi.useFakeTimers();
+  const { effects, queryClient } = createRealtimeEffectsTestContext();
+  const project = threadListQueryKey({
+      archived: false,
+      projectId: "project-1",
+    }),
+    sidebar = sidebarNavigationQueryKey();
+  queryClient.setQueryData(project, []);
+  queryClient.setQueryData(sidebar, {
+    projects: [],
+    personalProject: { threads: [] },
+  });
+  effects.handleChanged({
+    type: "changed",
+    entity: "thread",
+    id: "thr_1",
+    metadata: { projectId: "project-1" },
+    changes: ["interactions-changed"],
+  });
+  vi.advanceTimersByTime(100);
+  expect(queryClient.getQueryState(project)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(sidebar)?.isInvalidated).toBe(true);
+  effects.dispose();
+});

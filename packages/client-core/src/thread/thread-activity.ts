@@ -63,6 +63,7 @@ function isBusyThread(
 
 export interface ThreadListIndicatorState {
   hasPendingInteraction: boolean;
+  hasOpenQuestion: boolean;
   hasUnsubmittedDraft: boolean;
   hasUnreadError: boolean;
   hasUnreadSuccess: boolean;
@@ -142,6 +143,7 @@ export function threadListIndicatorStateForThread(
   const unreadDone = isUnreadDoneThread(thread);
   return {
     hasPendingInteraction: thread.hasPendingInteraction,
+    hasOpenQuestion: thread.hasOpenQuestion,
     hasUnsubmittedDraft,
     hasUnreadError:
       unreadDone && !thread.serviceTurn && thread.status === "error",
@@ -163,7 +165,7 @@ export function resolveThreadListIndicator(
   state: ThreadListIndicatorState,
 ): ThreadListIndicatorKind {
   if (state.hasUnreadError) return "unread-error";
-  if (state.hasPendingInteraction) return "waiting-for-input";
+  if (threadNeedsOwnerAttention(state)) return "waiting-for-input";
 
   const hasActiveWork = hasThreadListWorkingActivity(state);
   if (state.hasUnsubmittedDraft && hasActiveWork) return "working-draft";
@@ -196,7 +198,10 @@ export interface CollapsedChildActivity {
 
 type ThreadActivityShape = ThreadStatusShape &
   ThreadRuntimeShape &
-  Pick<ThreadListEntry, "id" | "activity" | "hasPendingInteraction">;
+  Pick<
+    ThreadListEntry,
+    "id" | "activity" | "hasPendingInteraction" | "hasOpenQuestion"
+  >;
 
 const EMPTY_DRAFT_THREAD_IDS: ReadonlySet<string> = new Set();
 
@@ -226,7 +231,7 @@ export function getCollapsedChildActivity(
       unread = true;
     }
 
-    if (thread.hasPendingInteraction) {
+    if (threadNeedsOwnerAttention(thread)) {
       pending = true;
     }
     if (isBusyThread(thread)) working = true;
@@ -271,4 +276,13 @@ export function isUnreadDoneThread(thread: ThreadStatusShape): boolean {
     default:
       return assertNever(thread.status);
   }
+}
+
+export function threadNeedsOwnerAttention(thread: {
+  hasPendingInteraction?: boolean;
+  hasOpenQuestion?: boolean;
+}): boolean {
+  return (
+    thread.hasPendingInteraction === true || thread.hasOpenQuestion === true
+  );
 }

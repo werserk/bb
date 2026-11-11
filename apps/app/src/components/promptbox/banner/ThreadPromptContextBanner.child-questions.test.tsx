@@ -18,13 +18,13 @@ it("keeps waiting child counts and navigation without mounting answer forms", ()
               id: "waiting",
               title: "Choose fixture",
               href: "/threads/waiting",
-              hasPendingInteraction: true,
+              needsOwnerAttention: true,
             },
             {
               id: "working",
               title: "Inspect fixture",
               href: "/threads/working",
-              hasPendingInteraction: false,
+              needsOwnerAttention: false,
             },
           ],
         }}
@@ -48,7 +48,7 @@ it("keeps all waiting child links when there are more than three questions", () 
     id: `child_${i}`,
     title: `Waiting ${i}`,
     href: `/threads/child_${i}`,
-    hasPendingInteraction: true,
+    needsOwnerAttention: true,
   }));
   render(
     <MemoryRouter>

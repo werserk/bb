@@ -76,7 +76,7 @@ interface ThreadPromptChildThreadItem {
   id: string;
   title: string;
   href: string;
-  hasPendingInteraction: boolean;
+  needsOwnerAttention: boolean;
 }
 
 export interface ThreadPromptChildThreadsSection {
@@ -308,8 +308,8 @@ function ActiveChildThreadsCard({
 }) {
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
   const items = childThreadsSection.items;
-  const waiting = items.filter((item) => item.hasPendingInteraction).length;
-  const working = items.filter((item) => !item.hasPendingInteraction);
+  const waiting = items.filter((item) => item.needsOwnerAttention).length;
+  const working = items.filter((item) => !item.needsOwnerAttention);
   const summary = `${waiting} needs you · ${working.length} working`;
   if (items.length === 0) return null;
   return (
@@ -356,18 +356,16 @@ function ActiveChildThreadsCard({
             <li key={item.id} className="text-xs">
               <NavLink to={item.href} className={CHILD_THREAD_ROW_CLASS}>
                 <Icon
-                  name={
-                    item.hasPendingInteraction ? "CircleQuestion" : "Loading"
-                  }
+                  name={item.needsOwnerAttention ? "CircleQuestion" : "Loading"}
                   className={cn(
                     "size-3.5 shrink-0",
-                    !item.hasPendingInteraction &&
+                    !item.needsOwnerAttention &&
                       "animate-spin motion-reduce:animate-none",
-                    !item.hasPendingInteraction &&
+                    !item.needsOwnerAttention &&
                       SIDEBAR_WORKING_STATUS_COLOR_CLASS,
                   )}
                   aria-label={
-                    item.hasPendingInteraction ? "Needs you" : "Working"
+                    item.needsOwnerAttention ? "Needs you" : "Working"
                   }
                 />
                 <ThreadTitle title={item.title} tooltip className="flex-1" />
