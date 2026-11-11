@@ -1,5 +1,6 @@
 import type {
   ConversationQuestion,
+  ConversationQuestionsOpenPage,
   ConversationQuestionPublication,
   ConversationQuestionAnswer,
 } from "@bb/domain";
@@ -238,7 +239,8 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult =
+  ResolvedThreadExecutionOptions | null;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
@@ -559,6 +561,12 @@ export interface ThreadQuestionPublishArgs {
   publication: ConversationQuestionPublication;
 }
 export interface ThreadQuestionsArea {
+  open(args: {
+    threadId: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<ConversationQuestionsOpenPage>;
   list(args: {
     threadId: string;
     signal?: AbortSignal;
@@ -1111,6 +1119,20 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
   };
   const questions: ThreadQuestionsArea = {
+    async open(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].questions.open.$get(
+          {
+            param: { id: input.threadId },
+            query: {
+              ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+              ...(input.limit === undefined ? {} : { limit: input.limit }),
+            },
+          },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
     async list(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"].questions.$get(

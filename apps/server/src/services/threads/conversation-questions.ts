@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createConversationQuestion,
   createConversationQuestionId,
@@ -10,6 +11,8 @@ import {
   projects,
   getThread,
   listConversationQuestions,
+  listOpenConversationQuestionPage,
+  listOpenConversationQuestionIdentities,
   listStoredTurnCompletedKeys,
   setConversationQuestionTerminal,
   withdrawConversationQuestion,
@@ -22,12 +25,14 @@ import {
 } from "@bb/db";
 import {
   conversationQuestionMarker,
+  conversationQuestionIdSchema,
   parseConversationQuestionPublication,
   conversationQuestionSchema,
   normalizeConversationQuestionAnswers,
   queuedMessageWaitingOnSchema,
   turnScope,
   type ConversationQuestion,
+  type ConversationQuestionsOpenPage,
   type ConversationQuestionPublication,
   type ConversationQuestionStatus,
   type PendingInteractionUserAnswer,
@@ -49,6 +54,8 @@ import {
   withQuestionResolutionActor,
   type QuestionResolutionInvocation,
 } from "./question-resolution-scope.js";
+
+import { requirePublicThread } from "../lib/entity-lookup.js";
 
 const sourceSchema = z.strictObject({
   turnId: z.string().min(1),
@@ -549,4 +556,88 @@ export function closeConversationQuestion(
     { projectId: publicThread(deps.db, args.threadId, true).projectId },
   );
   return question;
+}
+
+const openQuestionCursorSchema = z.strictObject({
+  version: z.literal(1),
+  threadId: z.string(),
+  readRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  createdAt: z.number().int().nonnegative(),
+  id: conversationQuestionIdSchema,
+});
+
+function decodeOpenQuestionCursor(cursor: string, threadId: string) {
+  try {
+    const bytes = Buffer.from(cursor, "base64url");
+    if (bytes.toString("base64url") !== cursor)
+      throw new Error("Invalid encoding");
+    const parsed = openQuestionCursorSchema.parse(
+      JSON.parse(bytes.toString("utf8")),
+    );
+    if (parsed.threadId !== threadId) throw new Error("Different thread");
+    return parsed;
+  } catch {
+    throw new ApiError(400, "invalid_request", "Invalid open-question cursor");
+  }
+}
+
+export function listOpenConversationQuestionsForThread(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  args: { threadId: string; cursor?: string; limit?: number },
+): ConversationQuestionsOpenPage {
+  const cursor =
+    args.cursor === undefined
+      ? null
+      : decodeOpenQuestionCursor(args.cursor, args.threadId);
+  const limit = args.limit ?? 100;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+    throw new ApiError(400, "invalid_request", "Question limit must be 1–200");
+  return deps.db.transaction(() => {
+    const thread = requirePublicThread(deps.db, args.threadId);
+    const identities = listOpenConversationQuestionIdentities(
+      deps.db,
+      args.threadId,
+    );
+    const readRevision = createHash("sha256")
+      .update(
+        JSON.stringify({
+          archived: thread.archivedAt !== null,
+          identities,
+        }),
+      )
+      .digest("hex");
+    if (cursor !== null && cursor.readRevision !== readRevision)
+      throw new ApiError(
+        409,
+        "stale-question-cursor",
+        "Open questions changed; restart the list",
+      );
+    const rows = listOpenConversationQuestionPage(deps.db, {
+      threadId: args.threadId,
+      limit: limit + 1,
+      ...(cursor === null
+        ? {}
+        : { after: { createdAt: cursor.createdAt, id: cursor.id } }),
+    });
+    const visible = rows.slice(0, limit);
+    const last = visible.at(-1);
+    const nextCursor =
+      rows.length > limit && last !== undefined
+        ? Buffer.from(
+            JSON.stringify({
+              version: 1,
+              threadId: args.threadId,
+              readRevision,
+              createdAt: last.createdAt,
+              id: last.id,
+            }),
+          ).toString("base64url")
+        : null;
+    return {
+      questions: visible.map((row) => rowToQuestion(deps.db, row)),
+      total: identities.length,
+      nextCursor,
+      readRevision,
+    };
+  });
 }

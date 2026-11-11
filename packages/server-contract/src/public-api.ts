@@ -3,6 +3,7 @@ import {
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
   type ConversationQuestion,
+  type ConversationQuestionsOpenPage,
 } from "@bb/domain";
 import { z as planZ } from "zod";
 import type { ThreadPlansReadResponse } from "@bb/domain";
@@ -1733,6 +1734,17 @@ export const publicApiRoutes = {
         }),
       ),
       response: jsonResponse<ConversationQuestion>(),
+    }),
+    openQuestions: defineRoute({
+      path: "/threads/:id/questions/open",
+      method: "get",
+      request: queryRequest<PathId, { cursor?: string; limit?: number }>(
+        planZ.strictObject({
+          cursor: planZ.string().min(1).max(4096).optional(),
+          limit: planZ.coerce.number().int().min(1).max(200).optional(),
+        }),
+      ),
+      response: jsonResponse<ConversationQuestionsOpenPage>(),
     }),
     question: defineRoute({
       path: "/threads/:id/questions/:questionId",

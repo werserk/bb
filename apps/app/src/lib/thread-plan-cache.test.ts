@@ -52,3 +52,36 @@ it("bounds requests and keeps coverage incomplete until every member loads", asy
   expect(ready.subscribedThreadIds).toEqual(ids);
   expect(cache.snapshot().subscribedThreadIds).toEqual([]);
 });
+
+it("updates persistent question summaries when the plan revision stays equal", async () => {
+  let total = 1;
+  const cache = new ThreadPlanCache(async () => ({
+    plans: {
+      thread: {
+        threadId: "thread",
+        revision: 7,
+        current: null,
+        previousPlans: [],
+        historyTruncated: false,
+        ownAttention: total === 0 ? "none" : "needs_input",
+        attentionInteractionIds: [],
+        unboundInteractionIds: [],
+        questionAttention: {
+          total,
+          firstQuestionId: total === 0 ? null : "qst_23456789ab",
+        },
+      },
+    },
+    errors: {},
+  }));
+  await cache.refresh(["thread"]);
+  expect(cache.snapshot().plans.thread?.questionAttention?.total).toBe(1);
+  total = 0;
+  await cache.refresh(["thread"]);
+  expect(cache.snapshot().plans.thread?.revision).toBe(7);
+  expect(cache.snapshot().plans.thread?.questionAttention).toEqual({
+    total: 0,
+    firstQuestionId: null,
+  });
+  expect(cache.snapshot().plans.thread?.ownAttention).toBe("none");
+});

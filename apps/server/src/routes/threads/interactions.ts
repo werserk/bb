@@ -5,6 +5,7 @@ import {
 import {
   publishConversationQuestion,
   listConversationQuestionsForThread,
+  listOpenConversationQuestionsForThread,
   readConversationQuestion,
   answerConversationQuestion,
   closeConversationQuestion,
@@ -71,6 +72,15 @@ export function registerThreadInteractionRoutes(
         publication: conversationQuestionPublicationSchema.parse(
           payload.publication,
         ),
+      }),
+    );
+  });
+  get(routes.openQuestions, (context, query) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    return context.json(
+      listOpenConversationQuestionsForThread(deps, {
+        threadId: thread.id,
+        ...query,
       }),
     );
   });

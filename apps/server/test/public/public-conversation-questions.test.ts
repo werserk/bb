@@ -257,3 +257,122 @@ it("rejects invalid publication source and cross-thread question reads", async (
     ).rejects.toMatchObject({ status: 400 });
   });
 });
+
+it("pages all open questions with a stable complete-set cursor and always-present plan summary", async () => {
+  await withTestHarness(async (h) => {
+    const { createConversationQuestion, conversationQuestions, threads } =
+      await import("@bb/db");
+    const { eq } = await import("drizzle-orm");
+    const { thread } = seedThreadFixture(h, { thread: { status: "idle" } });
+    const publication = JSON.stringify({
+      body: "Choose",
+      questions: [
+        {
+          id: "q",
+          prompt: "Choice?",
+          multiSelect: false,
+          allowFreeText: true,
+          required: true,
+        },
+      ],
+      materials: [],
+    });
+    const ids = Array.from(
+      { length: 201 },
+      () =>
+        createConversationQuestion(h.deps.db, {
+          threadId: thread.id,
+          sourceTurnId: null,
+          sourceCallId: null,
+          publication,
+          materialManifest: JSON.stringify({
+            hostId: null,
+            storageRootPath: null,
+            materials: [],
+            files: [],
+          }),
+        })!.id,
+    );
+    h.deps.db
+      .update(conversationQuestions)
+      .set({ createdAt: 1000 })
+      .where(eq(conversationQuestions.threadId, thread.id))
+      .run();
+    const sdk = createNodeBbSdk({
+      baseUrl: "http://localhost",
+      fetch: async (input, init) => h.app.request(new Request(input, init)),
+    });
+    const { listOpenConversationQuestionsForThread } =
+      await import("../../src/services/threads/conversation-questions.js");
+    listOpenConversationQuestionsForThread(h.deps, {
+      threadId: thread.id,
+      limit: 100,
+    });
+    const first = await sdk.threads.questions.open({
+      threadId: thread.id,
+      limit: 100,
+    });
+    expect(first.total).toBe(201);
+    expect(first.questions).toHaveLength(100);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await sdk.threads.questions.open({
+      threadId: thread.id,
+      cursor: first.nextCursor!,
+      limit: 100,
+    });
+    const third = await sdk.threads.questions.open({
+      threadId: thread.id,
+      cursor: second.nextCursor!,
+      limit: 100,
+    });
+    expect(third.questions).toHaveLength(1);
+    expect(third.nextCursor).toBeNull();
+    expect(second.readRevision).toBe(first.readRevision);
+    expect(
+      [...first.questions, ...second.questions, ...third.questions].map(
+        (q) => q.id,
+      ),
+    ).toEqual([...ids].sort().reverse());
+    const plan = (await sdk.threads.plans({ threadIds: [thread.id] })).plans[
+      thread.id
+    ]!;
+    expect(plan.questionAttention).toEqual({
+      total: 201,
+      firstQuestionId: [...ids].sort()[0],
+    });
+    const request = (query: string, owner = thread.id) =>
+      h.app.request(`/api/v1/threads/${owner}/questions/open?${query}`);
+    expect((await request("cursor=garbage")).status).toBe(400);
+    expect((await request("limit=201")).status).toBe(400);
+    const other = seedThreadFixture(h, { thread: { status: "idle" } }).thread;
+    expect((await request(`cursor=${first.nextCursor}`, other.id)).status).toBe(
+      400,
+    );
+    h.deps.db
+      .update(conversationQuestions)
+      .set({ status: "dismissed" })
+      .where(eq(conversationQuestions.id, ids[0]!))
+      .run();
+    expect((await request(`cursor=${first.nextCursor}`)).status).toBe(409);
+    const next = await sdk.threads.questions.open({ threadId: thread.id });
+    expect(next.total).toBe(200);
+    const updated = (await sdk.threads.plans({ threadIds: [thread.id] })).plans[
+      thread.id
+    ]!;
+    expect(updated.revision).toBe(plan.revision);
+    expect(updated.questionAttention?.total).toBe(200);
+    h.deps.db
+      .update(threads)
+      .set({ archivedAt: 1000 })
+      .where(eq(threads.id, thread.id))
+      .run();
+    expect((await request(`cursor=${next.nextCursor}`)).status).toBe(409);
+    expect(
+      await sdk.threads.questions.open({ threadId: thread.id }),
+    ).toMatchObject({ total: 0, questions: [], nextCursor: null });
+    expect(
+      (await sdk.threads.plans({ threadIds: [thread.id] })).plans[thread.id]
+        ?.questionAttention,
+    ).toEqual({ total: 0, firstQuestionId: null });
+  });
+});

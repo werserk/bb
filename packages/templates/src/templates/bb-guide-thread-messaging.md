@@ -87,13 +87,20 @@ Ownership:
 
 Persistent ordinary questions:
 
-  bb thread questions list [id]
+  bb thread questions list [id] [--open [--limit <1-200>] [--cursor <cursor>]]
   bb thread questions show <question-id> [id]
   bb thread questions publish [id] --file <publication.json> --turn-id <turn> --provider-thread-id <provider> --call-id <call>
   bb thread questions answer <question-id> [id] --file <answer.json>
   bb thread questions dismiss <question-id> [id] --revision <number>
   bb thread questions withdraw <question-id> [id] --revision <number>
     --self and --json are available on every subcommand. Output is JSON.
+
+  `list --open` returns `{questions,total,nextCursor,readRevision}`. Continue
+  sequentially until nextCursor is null. Invalid/cross-thread cursors return 400;
+  a changed open set returns 409 stale-question-cursor: discard collected pages
+  and restart. Archived threads return an empty view without changing records.
+  The historical list without --open remains an array capped at 200 records.
+  SDK: `threads.questions.open({threadId,limit?,cursor?,signal?})`.
 
   Questions remain at their original conversation position and never hold the
   provider turn. Publish requires a real live source turn; retrying the same

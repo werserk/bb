@@ -241,3 +241,41 @@ it.each([3000, 3001])(
     }
   },
 );
+
+it("requests open pages and prints total and cursor instead of a capped history array", async () => {
+  const page = {
+    questions: [],
+    total: 201,
+    nextCursor: "next",
+    readRevision: "revision",
+  };
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(Response.json(page));
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const program = new Command().exitOverride();
+    registerQuestionCommands(program, () => "http://test");
+    await program.parseAsync([
+      "node",
+      "bb",
+      "questions",
+      "list",
+      "thr_23456789ab",
+      "--open",
+      "--limit",
+      "40",
+      "--cursor",
+      "older",
+      "--json",
+    ]);
+    const url = new URL(String(fetch.mock.calls[0]![0]));
+    expect(url.pathname).toBe("/api/v1/threads/thr_23456789ab/questions/open");
+    expect(url.searchParams.get("limit")).toBe("40");
+    expect(url.searchParams.get("cursor")).toBe("older");
+    expect(JSON.parse(String(output.mock.calls[0]![0]))).toEqual(page);
+  } finally {
+    fetch.mockRestore();
+    output.mockRestore();
+  }
+});

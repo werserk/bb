@@ -622,7 +622,7 @@ describe("SDK public type entrypoints", () => {
       keyof RootBbSdk["threads"]["interactions"]
     >().toEqualTypeOf<ExpectedThreadInteractionsKey>();
     expectTypeOf<keyof RootBbSdk["threads"]["questions"]>().toEqualTypeOf<
-      "publish" | "list" | "get" | "answer" | "dismiss" | "withdraw"
+      "publish" | "list" | "open" | "get" | "answer" | "dismiss" | "withdraw"
     >();
     expectTypeOf<
       keyof RootBbSdk["threads"]["queuedMessages"]

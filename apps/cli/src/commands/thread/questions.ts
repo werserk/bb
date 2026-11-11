@@ -30,19 +30,52 @@ export function registerQuestionCommands(
     );
   targetOptions(
     questions.command("list [id]").description("List persistent questions"),
-  ).action(
-    action(async (id: string | undefined, opts: TargetOptions) => {
-      console.log(
-        JSON.stringify(
-          await createCliBbSdk(getUrl()).threads.questions.list({
-            threadId: requireThreadIdOrSelf(id, opts),
-          }),
-          null,
-          2,
-        ),
-      );
-    }),
-  );
+  )
+    .option("--open", "Read the paginated open-question view")
+    .option("--cursor <cursor>", "Continue an open-question page")
+    .option("--limit <number>", "Open-question page size (1–200, default 100)")
+    .action(
+      action(
+        async (
+          id: string | undefined,
+          opts: TargetOptions & {
+            open?: boolean;
+            cursor?: string;
+            limit?: string;
+          },
+        ) => {
+          if (
+            !opts.open &&
+            (opts.cursor !== undefined || opts.limit !== undefined)
+          )
+            throw new Error("--cursor and --limit require --open");
+          const limit =
+            opts.limit === undefined ? undefined : Number(opts.limit);
+          if (
+            limit !== undefined &&
+            (!Number.isInteger(limit) || limit < 1 || limit > 200)
+          )
+            throw new Error("--limit must be an integer from 1 to 200");
+          const api = createCliBbSdk(getUrl()).threads.questions;
+          const threadId = requireThreadIdOrSelf(id, opts);
+          console.log(
+            JSON.stringify(
+              opts.open
+                ? await api.open({
+                    threadId,
+                    ...(limit === undefined ? {} : { limit }),
+                    ...(opts.cursor === undefined
+                      ? {}
+                      : { cursor: opts.cursor }),
+                  })
+                : await api.list({ threadId }),
+              null,
+              2,
+            ),
+          );
+        },
+      ),
+    );
   targetOptions(
     questions
       .command("show <questionId> [id]")

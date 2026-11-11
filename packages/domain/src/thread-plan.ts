@@ -26,6 +26,7 @@ export interface ThreadPlanView {
   current: PlanSnapshotView | null;
   previousPlans: readonly PlanSnapshotView[];
   historyTruncated: boolean;
+  questionAttention?: { total: number; firstQuestionId: string | null };
   ownAttention: PlanOwnAttention;
   attentionInteractionIds: readonly string[];
   unboundInteractionIds: readonly string[];

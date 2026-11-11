@@ -230,6 +230,13 @@ export const conversationQuestionSchema = z.object({
 });
 export type ConversationQuestion = z.infer<typeof conversationQuestionSchema>;
 
+export interface ConversationQuestionsOpenPage {
+  questions: ConversationQuestion[];
+  total: number;
+  nextCursor: string | null;
+  readRevision: string;
+}
+
 const nativePublicationSchema = z.strictObject({
   body: z.string().max(65536).default(""),
   materials: conversationQuestionPublicationSchema.shape.materials,

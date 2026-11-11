@@ -4341,6 +4341,16 @@ core upgrade/rollback rehearsal before treating this downstream contract as stab
 
 `experimental_useThreadPlans({threadIds})` and `experimental_ThreadPlanSteps` are optional app capabilities. Detect both before enabling the plan surface. The batch result distinguishes loading/ready/error/unavailable, complete requested/loaded coverage, errors and explicit refresh. It retains stale display facts but ready requires every requested member. The shared cache rejects older revisions, bounds reads to 40 IDs/two requests and invalidates on native thread changes, without per-thread timers. `ThreadPlanView` exposes current, up to three previous explicit identities, historyTruncated, ownAttention and native interaction IDs. History is bounded to the latest 32 plan events within context/empty clear boundaries; question anchors use separate targeted creation/nearest-plan reads.
 
+New-core `ThreadPlanView.questionAttention` is always `{total,firstQuestionId}`;
+zero is `{total:0,firstQuestionId:null}`. Absence denotes legacy core only. The
+oldest open identity is ordered by createdAt/id ascending and is distinct from
+native interaction IDs. Consumers must observe summary changes even when plan
+revision is unchanged. The per-thread `/questions/open` view returns pages of
+up to 200 records and readRevision-bound cursors; SDK `threads.questions.open`
+and CLI `bb thread questions list --open` expose the same read. Invalid cursors
+refuse 400; changed open identity/revision or archive state refuses 409. Schema
+and question rows are unchanged; installed consumer verification remains pending.
+
 Core callers: ThreadScreen → ThreadPlanCard → ThreadPlanSteps → useThreadPlans; public SDK `threads.plans` and `bb thread plan` use the same server `readThreadPlan` projection. Questions use UserQuestionAnswerForm, the native draft key and resolveThreadPendingInteractionMutationOptions. One presentation owner per interaction is selected across foreground overlay/panel/native fallback. Unsupported inputs retain native controls. Skip preserves the pending interaction and its draft; Stop remains native chat control. Failure and needs_input come from authoritative own facts, with no historical/descendant failure roll-up.
 
 Stabilization requires independent review, native/plugin custody and focus handoff, complete/error/event batch tests, off-page context/empty-clear and old/new event readback, installed-runtime capability/upgrade verification, then project-wide experimental rename/removal of this entry. Isolated runtime verification belongs to the parent apply direction.

@@ -1,8 +1,20 @@
-import { and, desc, eq, inArray, sql, type SQLWrapper } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  lt,
+  or,
+  sql,
+  type SQLWrapper,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { ConversationQuestionStatus } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { createConversationQuestionId } from "../ids.js";
-import { conversationQuestions, threads } from "../schema.js";
+import { conversationQuestions, threads, projects } from "../schema.js";
 
 export type ConversationQuestionRow = typeof conversationQuestions.$inferSelect;
 
@@ -207,8 +219,103 @@ export function requireQuestionResponseDeliverable(
     throw new QuestionResponseNotDeliverableError(row.id, reason);
 }
 
+const questionOwner = alias(threads, "question_owner");
+const questionProject = alias(projects, "question_project");
+
+function openConversationQuestionPredicate(threadId: string | SQLWrapper) {
+  return and(
+    eq(conversationQuestions.threadId, threadId),
+    eq(conversationQuestions.status, "open"),
+    sql`EXISTS (SELECT 1 FROM ${threads} ${questionOwner}
+      INNER JOIN ${projects} ${questionProject} ON ${questionProject.id} = ${questionOwner.projectId}
+      WHERE ${questionOwner.id} = ${conversationQuestions.threadId}
+        AND ${questionOwner.visibility} = 'visible'
+        AND ${questionOwner.archivedAt} IS NULL
+        AND ${questionOwner.deletedAt} IS NULL
+        AND ${questionProject.deletedAt} IS NULL)`,
+  );
+}
+
+export function getOpenConversationQuestionSummary(
+  db: DbQueryConnection,
+  threadId: string,
+): { total: number; firstQuestionId: string | null } {
+  const predicate = openConversationQuestionPredicate(threadId);
+  const total =
+    db
+      .select({ total: count() })
+      .from(conversationQuestions)
+      .where(predicate)
+      .get()?.total ?? 0;
+  const firstQuestionId =
+    total === 0
+      ? null
+      : (db
+          .select({ id: conversationQuestions.id })
+          .from(conversationQuestions)
+          .where(predicate)
+          .orderBy(
+            asc(conversationQuestions.createdAt),
+            asc(conversationQuestions.id),
+          )
+          .limit(1)
+          .get()?.id ?? null);
+  return { total, firstQuestionId };
+}
+
+export function listOpenConversationQuestionPage(
+  db: DbQueryConnection,
+  args: {
+    threadId: string;
+    limit: number;
+    after?: { createdAt: number; id: string };
+  },
+): ConversationQuestionRow[] {
+  return db
+    .select()
+    .from(conversationQuestions)
+    .where(
+      and(
+        openConversationQuestionPredicate(args.threadId),
+        args.after === undefined
+          ? undefined
+          : or(
+              lt(conversationQuestions.createdAt, args.after.createdAt),
+              and(
+                eq(conversationQuestions.createdAt, args.after.createdAt),
+                lt(conversationQuestions.id, args.after.id),
+              ),
+            ),
+      ),
+    )
+    .orderBy(
+      desc(conversationQuestions.createdAt),
+      desc(conversationQuestions.id),
+    )
+    .limit(args.limit)
+    .all();
+}
+
+export function listOpenConversationQuestionIdentities(
+  db: DbQueryConnection,
+  threadId: string,
+) {
+  return db
+    .select({
+      id: conversationQuestions.id,
+      revision: conversationQuestions.revision,
+    })
+    .from(conversationQuestions)
+    .where(openConversationQuestionPredicate(threadId))
+    .orderBy(
+      desc(conversationQuestions.createdAt),
+      desc(conversationQuestions.id),
+    )
+    .all();
+}
+
 export function openConversationQuestionExists(threadId: string | SQLWrapper) {
-  return sql<number>`EXISTS (SELECT 1 FROM ${conversationQuestions} WHERE ${conversationQuestions.threadId} = ${threadId} AND ${conversationQuestions.status} = 'open')`;
+  return sql<number>`EXISTS (SELECT 1 FROM ${conversationQuestions} WHERE ${openConversationQuestionPredicate(threadId)})`;
 }
 export function hasOpenConversationQuestion(
   db: DbQueryConnection,

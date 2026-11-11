@@ -6,7 +6,7 @@ import {
   listPlanHistoryEventRows,
   getPlanInteractionCreationRow,
   listPlanStalenessEventRows,
-  hasOpenConversationQuestion,
+  getOpenConversationQuestionSummary,
 } from "@bb/db";
 import { projectThreadPlan } from "@bb/thread-view";
 import type { Thread, ThreadPlanView } from "@bb/domain";
@@ -64,32 +64,37 @@ export function readThreadPlan(
           event: plan ? toThreadEventWithMeta(plan) : null,
         };
       });
-    return projectThreadPlan({
-      threadId: thread.id,
-      revision,
-      status:
-        thread.status === "error" && latestServiceTurn(deps.db, thread.id)
-          ? "idle"
-          : thread.status,
-      events: rows.map(toThreadEventWithMeta),
-      turnEvents: rows[0]
-        ? listPlanStalenessEventRows(deps.db, rows[0], revision).map(
-            toThreadEventWithMeta,
-          )
-        : [],
-      sendFailed:
-        thread.status !== "active" &&
-        thread.status !== "starting" &&
-        (listQueuedThreadMessageCountsByThreadIds(deps.db, {
-          threadIds: [thread.id],
-          includeService: false,
-        })[0]?.failedQueuedMessageCount ?? 0) > 0,
-      ownInputRequired:
-        thread.archivedAt === null &&
-        hasOpenConversationQuestion(deps.db, thread.id),
-      anchors,
-      attentionInteractionIds: interactions.map((i) => i.id),
-      historyTruncated,
-    });
+    const questionAttention = getOpenConversationQuestionSummary(
+      deps.db,
+      thread.id,
+    );
+    return {
+      ...projectThreadPlan({
+        threadId: thread.id,
+        revision,
+        status:
+          thread.status === "error" && latestServiceTurn(deps.db, thread.id)
+            ? "idle"
+            : thread.status,
+        events: rows.map(toThreadEventWithMeta),
+        turnEvents: rows[0]
+          ? listPlanStalenessEventRows(deps.db, rows[0], revision).map(
+              toThreadEventWithMeta,
+            )
+          : [],
+        sendFailed:
+          thread.status !== "active" &&
+          thread.status !== "starting" &&
+          (listQueuedThreadMessageCountsByThreadIds(deps.db, {
+            threadIds: [thread.id],
+            includeService: false,
+          })[0]?.failedQueuedMessageCount ?? 0) > 0,
+        ownInputRequired: questionAttention.total > 0,
+        anchors,
+        attentionInteractionIds: interactions.map((i) => i.id),
+        historyTruncated,
+      }),
+      questionAttention,
+    };
   });
 }

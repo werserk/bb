@@ -25,3 +25,16 @@ A Codex turn error whose `codexErrorInfo` this bridge does not know (for example
 The earlier item 1b/1c presentation paragraphs above are historical; the core-plan-needs-input renderer supersedes their age timer, counters and collapse rules. Implementation and compatibility details live in `docs/core-plan-needs-input.md`. The core-plan-needs-input slice adds optional bounded `planId` and stable step IDs plus public failed tool updates, without a table or history rewrite. `packages/thread-view/src/thread-plan.ts` owns the canonical plan/interaction projection; `thread-plans.ts` reads the latest 32 snapshots plus targeted lifecycle/nearest-plan anchors independently of pagination. Context and explicit empty clears bound history; up to three distinct previous identified plans are returned with truncation. The public `threads.plans` batch route, SDK and CLI use that projection. The app batch cache supplies both native ThreadPlanCard and optional experimental SDK hook/component, with revision/coverage, event invalidation and no polling. ThreadPlanSteps owns 340px overlay/panel presentation, four 32px compact rows, container <=640 disclosure, quiet history and native Answer/local Skip. Editor ownership and the existing interaction-keyed native drafts span surfaces; unsupported input retains native recovery. API audit and Plugin Guide document the shared callers. Daemon compatibility evidence and the scope of runtime verification are recorded with the candidate; no release authority is implied.
 
 Persistent question markers survive hidden service turns through the same standalone conversation rows as ordinary questions; surrounding service replies stay hidden. Persistent cards inject the app voice textarea locally, so multiple cards do not register competing global shortcuts. HTML question materials use the shared document bootstrap in `packages/shared-ui/src/lib/html-frame.ts` and theme observer in `use-frame-theme.ts`, also consumed by inline-vis through reexports. Frozen HTML receives theme tokens and bounded content height messages without changing stored snapshots or adding same-origin sandbox access.
+
+
+Open-question reads share `packages/db/src/data/conversation-questions.ts`'s public,
+non-archived open selector. `readThreadPlan` emits `questionAttention` on every
+read (including zero/null), using indexed count and oldest identity queries in
+its transaction; the summary may change at the same timeline revision.
+`GET /threads/:id/questions/open`, SDK `threads.questions.open` and
+`bb thread questions list --open` traverse descending keyset pages. A fingerprint
+of open identity/revision pairs and archive state fences completeness: changed
+sets return 409 and invalid/cross-thread cursors 400. This read view never changes
+stored question status; history listing keeps its existing cap and array shape.
+The native navigator/plugin consumer work and installed acceptance for this
+contract are pending on the visible-owner-questions branch, not released.
