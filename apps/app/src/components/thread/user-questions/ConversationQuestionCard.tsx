@@ -343,7 +343,7 @@ export function ConversationQuestionCard({
       aria-labelledby={question ? headingId : undefined}
       aria-label={question ? undefined : "Question"}
       id={`${questionCardId(threadId, questionId)}${snapshot ? "-snapshot" : ""}`}
-      className={`min-w-0 rounded-xl border border-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent ${question?.status === "open" ? "space-y-4 border-l-2 border-l-attention bg-card p-4" : "space-y-2 bg-transparent p-3"}`}
+      className={`min-w-0 rounded-xl border border-border focus-visible:outline-2 ${question?.status === "open" ? "space-y-4 border-l-2 border-l-attention bg-card p-4 focus-visible:-outline-offset-2 focus-visible:outline-attention" : "space-y-2 bg-transparent p-3 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent"}`}
     >
       {question ? (
         <>

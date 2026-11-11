@@ -943,6 +943,9 @@ describe("QueuedMessagesList", () => {
     );
 
     expect(surface?.style.height).toBe("240px");
+    expect(
+      screen.queryByRole("button", { name: /^(Expand|Reduce) queued messages$/ }),
+    ).toBeNull();
 
     rerender(<QueuedMessagesList {...sharedProps} />);
 
@@ -2291,6 +2294,16 @@ it.each([true, false])(
     }
     expect(screen.queryByText(/secret_option_id/)).toBeNull();
     expect(screen.queryByText(/Original question:/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand queued messages" }),
+    );
+    expect(
+      screen.getByRole("region", { name: "Queued messages" }).style.height,
+    ).toBe("360px");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse queued messages" }),
+    );
+    expandQueue();
     fireEvent.click(
       screen.getByRole("button", { name: "Send queued message 1 now" }),
     );

@@ -1300,6 +1300,19 @@ export function QueuedMessagesList({
   ]);
 
   const listRef = useRef<HTMLUListElement>(null);
+  const [listContentHeight, setListContentHeight] = useState(0);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || inlineEditorActive) return;
+    const measure = () => {
+      setListContentHeight(Math.ceil(list.getBoundingClientRect().height));
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(list);
+    return () => observer?.disconnect();
+  }, [queuedMessages, inlineEditorActive, mode]);
   const wasInlineEditingRef = useRef(false);
   useEffect(() => {
     if (expandedMobileActionsId === null) return;
@@ -1582,6 +1595,7 @@ export function QueuedMessagesList({
         ? getQueuedMessagesDrawerHeight({
             queuedMessages,
             processingMessageId,
+            contentHeight: listContentHeight,
           })
         : QUEUED_MESSAGES_COLLAPSED_HEIGHT;
   const surfaceHeight =
@@ -1681,7 +1695,10 @@ export function QueuedMessagesList({
         "transition-[height,margin,border-radius,padding] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
       )}
     >
-      <header data-queued-messages-mode={mode} className="shrink-0">
+      <header
+        data-queued-messages-mode={mode}
+        className={cn("flex shrink-0", isExpanded && "border-b border-border/35")}
+      >
         <button
           ref={focus.triggerRef}
           type="button"
@@ -1691,8 +1708,7 @@ export function QueuedMessagesList({
           onClick={focus.onTriggerClick}
           className={cn(
             PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-            "hover:bg-state-hover focus-visible:bg-state-hover active:bg-state-hover",
-            isExpanded && "border-b border-border/35",
+            "flex-1 hover:bg-state-hover focus-visible:bg-state-hover active:bg-state-hover",
           )}
         >
           <span className="font-normal">Queue</span>
@@ -1704,6 +1720,21 @@ export function QueuedMessagesList({
             count={queuedMessages.length}
           />
         </button>
+        {isExpanded && !inlineEditor ? (
+          <button
+            type="button"
+            aria-label={
+              mode === "workspace"
+                ? "Reduce queued messages"
+                : "Expand queued messages"
+            }
+            aria-controls={listId}
+            onClick={() => setWorkspaceOpen(mode !== "workspace")}
+            className="shrink-0 px-3 text-xs text-muted-foreground hover:bg-state-hover focus-visible:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            {mode === "workspace" ? "Reduce" : "Expand"}
+          </button>
+        ) : null}
       </header>
       <div
         className="relative min-h-0 flex-1"
