@@ -376,6 +376,9 @@ export function ConversationQuestionCard({
                 <button
                   type="button"
                   className="text-xs underline"
+                  onMouseDown={(event) => {
+                    event.currentTarget.focus({ preventScroll: true });
+                  }}
                   onClick={async () => {
                     if (
                       navigation &&
