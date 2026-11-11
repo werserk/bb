@@ -41,7 +41,13 @@ export function QuestionNavigator({
           legacy: false,
         };
       } catch (error) {
-        if (!(error instanceof BbHttpError) || error.status !== 404)
+        if (
+          !(error instanceof BbHttpError) ||
+          !(
+            error.status === 404 ||
+            (error.status === 400 && error.code === "invalid_request")
+          )
+        )
           throw error;
         const questions = await sdk.threads.questions.list({
           threadId,

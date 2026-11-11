@@ -108,30 +108,36 @@ it("shows an actionable load error and refetches without submitting an answer", 
   expect(api.navigate).not.toHaveBeenCalled();
 });
 
-it("labels a capped recent list instead of implying that older questions are absent", async () => {
-  api.open.mockRejectedValue(
-    new BbHttpError({
-      status: 404,
-      message: "unsupported",
-      code: null,
-      body: null,
-    }),
-  );
-  api.list.mockResolvedValue(
-    Array.from({ length: 200 }, (_, index) =>
-      q(`Closed ${index}`, index, "answered"),
-    ),
-  );
-  render(<QuestionNavigator threadId="thr_test" />, {
-    wrapper: createQueryClientTestHarness().wrapper,
-  });
-  expect(
-    await screen.findByText(
-      "Limited coverage · this core exposes recent history only. Older questions may remain in history.",
-    ),
-  ).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Question · 0/ })).toBeNull();
-});
+it.each([
+  { status: 404, code: null },
+  { status: 400, code: "invalid_request" },
+])(
+  "labels a capped recent list on legacy response $status",
+  async ({ status, code }) => {
+    api.open.mockRejectedValue(
+      new BbHttpError({
+        status,
+        message: "Invalid question id",
+        code,
+        body: null,
+      }),
+    );
+    api.list.mockResolvedValue(
+      Array.from({ length: 200 }, (_, index) =>
+        q(`Closed ${index}`, index, "answered"),
+      ),
+    );
+    render(<QuestionNavigator threadId="thr_test" />, {
+      wrapper: createQueryClientTestHarness().wrapper,
+    });
+    expect(
+      await screen.findByText(
+        "Limited coverage · this core exposes recent history only. Older questions may remain in history.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Question · 0/ })).toBeNull();
+  },
+);
 
 it("uses the same short label as the destination card for direct and list navigation", async () => {
   const labeled = {
@@ -247,4 +253,20 @@ it("shows Retry after two changing cursor snapshots instead of mixing question l
   expect(screen.getByRole("button", { name: "Current" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(api.open).toHaveBeenCalledTimes(5);
+});
+
+it("does not treat an unrelated client error as legacy coverage", async () => {
+  api.open.mockRejectedValue(
+    new BbHttpError({
+      status: 400,
+      message: "Denied",
+      code: "permission_denied",
+      body: null,
+    }),
+  );
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(api.list).not.toHaveBeenCalled();
 });
