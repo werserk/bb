@@ -1,6 +1,6 @@
 import { and, asc, eq, placeholder, sql } from "drizzle-orm";
 import { prepareCachedQuery } from "../connection.js";
-import type { DbConnection } from "../connection.js";
+import type { DbConnection, DbQueryConnection } from "../connection.js";
 import { pluginKv, pluginSettings } from "../schema.js";
 import { likePrefixPattern } from "./sql-like.js";
 
@@ -19,7 +19,7 @@ export interface PluginSettingRow {
 }
 
 
-function prepareGetPluginKvValue(db: DbConnection) {
+function prepareGetPluginKvValue(db: DbQueryConnection) {
   return db.select({ value: pluginKv.value }).from(pluginKv).where(and(
     eq(pluginKv.pluginId, placeholder("pluginId")), eq(pluginKv.key, placeholder("key")),
   )).prepare();
