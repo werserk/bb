@@ -553,6 +553,12 @@ async function runDispatchAttempt(
       admitted.value = await admitPendingThread(deps, {
         claimed,
         payload: resolvedPayload,
+        senderThreadId: author.senderThreadId,
+        dispatchProvenance: {
+          origin: args.origin,
+          originPluginId: args.originPluginId,
+          requestedBy: args.startedOnBehalfOf,
+        },
         respectManualStopPause,
         startContext: args.startContext ?? retryStartContext,
         thread,
@@ -738,6 +744,12 @@ function consumeClaimedRows(
 }
 
 interface AdmitPendingThreadArgs {
+  senderThreadId: string | null;
+  dispatchProvenance: {
+    origin: ThreadCreateOrigin | null;
+    originPluginId: string | null;
+    requestedBy: StartedOnBehalfOf | null;
+  };
   claimed: ClaimedQueuedThreadMessageRow[] | null;
   payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
   respectManualStopPause: boolean;
@@ -824,6 +836,8 @@ async function admitPendingThread(
         if (starting === null) throw new PendingThreadAdmissionLost();
         requestThreadProvision(deps, {
           serviceTurn: args.payload.serviceTurn,
+          senderThreadId: args.senderThreadId,
+          dispatchProvenance: args.dispatchProvenance,
           thread: starting,
           environmentIntent: startContext.environmentIntent,
           execution,

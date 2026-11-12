@@ -501,6 +501,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
         thread,
         payload: {
           input: args.request.input,
+          senderThreadId: args.request.senderThreadId,
           mode: "start",
           model: execution.model,
           reasoningLevel: execution.reasoningLevel,

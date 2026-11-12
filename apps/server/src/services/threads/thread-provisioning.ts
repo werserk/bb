@@ -59,6 +59,8 @@ import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { recordAcceptedPromptHistoryEntry } from "../prompt-history.js";
 
 interface RequestThreadProvisionArgs {
+  senderThreadId?: string | null;
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   serviceTurn?: ServiceTurnDescriptor;
   environmentIntent: ThreadProvisionEnvironmentIntent;
   execution: ResolvedThreadExecutionOptions;
@@ -301,7 +303,8 @@ export function requestThreadProvision(
   return deps.db.transaction(() => {
     const { initiator, senderThreadId } = resolveDispatchAuthor({
       retrying: args.serviceTurn !== undefined,
-      senderThreadId: args.serviceTurn?.origin.senderThreadId ?? null,
+      senderThreadId:
+        args.senderThreadId ?? args.serviceTurn?.origin.senderThreadId ?? null,
       startedOnBehalfOf: args.startedOnBehalfOf,
     });
     const target: TurnRequestTarget = { kind: "thread-start" };
@@ -310,6 +313,9 @@ export function requestThreadProvision(
       environmentId: args.thread.environmentId,
       type: "client/turn/requested",
       serviceTurn: args.serviceTurn,
+      ...(args.dispatchProvenance !== undefined
+        ? { dispatchProvenance: args.dispatchProvenance }
+        : {}),
       input: args.input,
       execution: args.execution,
       initiator,
