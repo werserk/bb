@@ -6,6 +6,7 @@ import {
 } from "../machines/lifecycle.js";
 import {
   deleteClaimedQueuedThreadMessageBatchInTransaction,
+  getQueuedQuestionResponseDeferral,
   getEnvironment,
   getThread,
   isThreadQueueAutoSendPaused,
@@ -657,11 +658,27 @@ async function runDispatchAttempt(
 
   markTurnTraceSpan("dispatch.checkpoint.done");
   const environment = await requireThreadCommandEnvironment(deps, { thread });
+  const questionResponse =
+    claimed?.length === 1 && args.queuePayload.kind === "questionResponse"
+      ? {
+          questionId: args.queuePayload.questionId,
+          revision: args.queuePayload.revision,
+          queuedMessageId: claimed[0]!.id,
+        }
+      : undefined;
+  const deferredFromRequestId =
+    questionResponse === undefined
+      ? null
+      : getQueuedQuestionResponseDeferral(deps.db, {
+          threadId: thread.id,
+          queuedMessageId: questionResponse.queuedMessageId,
+        });
   try {
     await sendThreadMessage(deps, {
       preserveSelfSender:
         args.source.kind === "drain" &&
         args.queuePayload.kind === "questionResponse",
+      questionResponse,
       environment,
       payload: resolvedPayload,
       thread,
@@ -671,6 +688,7 @@ async function runDispatchAttempt(
         originPluginId: args.originPluginId,
         requestedBy: args.startedOnBehalfOf,
       },
+      ...(deferredFromRequestId !== null ? { deferredFromRequestId } : {}),
       ...(args.queuePayload.kind === "deferredSteer"
         ? { deferredFromRequestId: args.queuePayload.sourceRequestId }
         : {}),

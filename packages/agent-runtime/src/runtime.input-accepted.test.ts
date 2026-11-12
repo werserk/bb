@@ -35,7 +35,7 @@ describe("createAgentRuntime input accepted events", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("emits input accepted events only after accepted commands", async () => {
+  it("injects auto input into an inject-capable provider and emits accepted events only after accepted commands", async () => {
     const events: ThreadEvent[] = [];
     const runtime = createScriptedEchoRuntime({
       runtime: {
@@ -68,6 +68,7 @@ describe("createAgentRuntime input accepted events", () => {
     await expect(
       runtime.steerTurn({
         threadId: "t1",
+        injectOnly: true,
         expectedTurnId: turnId,
         clientRequestId: "creq_23456789ae",
         input: [promptTextInput({ text: "accepted steer" })],

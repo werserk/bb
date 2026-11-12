@@ -571,7 +571,10 @@ describe("independent question custody", () => {
         revision: 1,
         answers: { voice: { selected: ["a"] } },
       });
-      expect(accepted.delivery).toMatchObject({ kind: "held" });
+      expect(accepted.delivery).toEqual({
+        kind: "queued",
+        reason: "will be sent after this turn",
+      });
       clearQueuedThreadMessageWaitingOn(h.db, h.hub, {
         threadId: thread.id,
         id: accepted.queuedMessageId!,

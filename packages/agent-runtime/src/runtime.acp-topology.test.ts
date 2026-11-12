@@ -132,4 +132,87 @@ describe("acp process topology", () => {
     });
     expect(runtime.listRunningProviders()).toEqual([]);
   }, 30_000);
+
+  it("keeps queue-mode ACP auto input out of the bridge while explicit steer retains queue/cancel behavior", async () => {
+    const promptLog = join(workspaceDir, "steer-prompts.jsonl");
+    const accepted: string[] = [];
+    const runtime = withBridgeLaunch(
+      createAgentRuntime({
+        workspacePath: workspaceDir,
+        env: {},
+        onEvent: (event) => {
+          if (event.type === "turn/input/accepted")
+            accepted.push(event.clientRequestId);
+        },
+        onProcessExit: () => {},
+        onToolCall: async () => ({ contentItems: [], success: true }),
+      }),
+      createScriptedEchoLaunch({
+        pluginId: "provider-acp",
+        digest: "acp-auto-steer-guard",
+        modulePath: acpBridgeModulePath,
+        capabilities: { fork: "tip" },
+        providerOptions: {
+          acpLaunchSpec: {
+            displayName: "Fake ACP",
+            command: process.execPath,
+            args: [fakeAgentPath],
+            env: { FAKE_ACP_PROMPT_LOG: promptLog },
+          },
+        },
+      }),
+    );
+    runtimes.push(runtime);
+    await runtime.ensureProvider({ providerId: "acp" });
+    await runtime.startThread({
+      environmentId: "env-1",
+      projectId: "p1",
+      providerId: "acp",
+      threadId: "t1",
+      options: fullRuntimeOptions,
+    });
+    await runtime.runTurn({
+      threadId: "t1",
+      clientRequestId: "creq_23456789ab",
+      input: [{ type: "text", text: "hang", mentions: [] }],
+      options: fullRuntimeOptions,
+    });
+    await waitForRuntimeState({
+      label: "real ACP prompt is active",
+      predicate: () =>
+        runtime.getActiveTurnId("t1") !== null && existsSync(promptLog),
+      timeoutMs: 10000,
+    });
+    const expectedTurnId = runtime.getActiveTurnId("t1")!;
+    const before = readFileSync(promptLog, "utf8");
+    await expect(
+      runtime.steerTurn({
+        threadId: "t1",
+        expectedTurnId,
+        clientRequestId: "creq_23456789ac",
+        injectOnly: true,
+        input: [{ type: "text", text: "automatic answer", mentions: [] }],
+        options: fullRuntimeOptions,
+      }),
+    ).resolves.toEqual({ status: "busy", activeTurnId: expectedTurnId });
+    expect(runtime.getActiveTurnId("t1")).toBe(expectedTurnId);
+    expect(readFileSync(promptLog, "utf8")).toBe(before);
+    expect(accepted).not.toContain("creq_23456789ac");
+    await expect(
+      runtime.steerTurn({
+        threadId: "t1",
+        expectedTurnId,
+        clientRequestId: "creq_23456789ad",
+        input: [{ type: "text", text: "explicit steer", mentions: [] }],
+        options: fullRuntimeOptions,
+      }),
+    ).resolves.toEqual({ status: "steered" });
+    await waitForRuntimeState({
+      label: "explicit steer uses real ACP queue/cancel",
+      predicate: () =>
+        readFileSync(promptLog, "utf8").includes("explicit steer"),
+      timeoutMs: 10000,
+    });
+    expect(accepted).toContain("creq_23456789ad");
+  });
 });

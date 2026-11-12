@@ -199,6 +199,7 @@ export interface RunTurnArgs {
 }
 
 export interface SteerTurnArgs {
+  injectOnly?: boolean;
   threadId: string;
   expectedTurnId: string;
   input: PromptInput[];

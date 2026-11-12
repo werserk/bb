@@ -482,6 +482,7 @@ describe("dispatchCommand", () => {
       expect.objectContaining({
         clientRequestId: "creq_turn_submit",
         expectedTurnId: "turn-starting",
+        injectOnly: true,
         threadId: "thread-1",
       }),
     );
@@ -520,7 +521,7 @@ describe("dispatchCommand", () => {
 
     expect(result).toEqual({ trace: { spans: [] } });
     expect(runtime.steerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedTurnId: "turn-new" }),
+      expect.objectContaining({ expectedTurnId: "turn-new", injectOnly: true }),
     );
     expect(runtime.runTurn).not.toHaveBeenCalled();
   });

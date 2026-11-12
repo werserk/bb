@@ -163,3 +163,48 @@ describe("parseStoredThreadEvent", () => {
     expect(systemThreadInterruptedEventDataSchema.parse(data)).toEqual(data);
   });
 });
+
+it.each([
+  undefined,
+  {
+    questionId: "qst_23456789ab",
+    revision: 1,
+    queuedMessageId: "qmsg_23456789ab",
+  },
+])(
+  "reads optional typed question response history without changing legacy requests: %j",
+  (questionResponse) => {
+    const event = parseStoredThreadEvent({
+      type: "client/turn/requested",
+      threadId: "thread-1",
+      scope: threadScope(),
+      data: {
+        direction: "outbound",
+        requestId: "creq_23456789ab",
+        source: "tell",
+        initiator: "user",
+        senderThreadId: null,
+        input: [{ type: "text", text: "owner answer", mentions: [] }],
+        target: { kind: "auto", expectedTurnId: "turn-1" },
+        request: { method: "turn/start", params: {} },
+        execution: {
+          model: "gpt-5",
+          serviceTier: "default",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+          source: "client/turn/requested",
+        },
+        ...(questionResponse === undefined ? {} : { questionResponse }),
+      },
+    });
+    expect(event.type).toBe("client/turn/requested");
+    expect(event).toMatchObject({
+      initiator: "user",
+      senderThreadId: null,
+      input: [{ type: "text", text: "owner answer" }],
+    });
+    if (event.type !== "client/turn/requested")
+      throw new Error("Unexpected event");
+    expect(event.questionResponse).toEqual(questionResponse);
+  },
+);

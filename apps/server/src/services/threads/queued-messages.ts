@@ -1,6 +1,7 @@
 import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
   getLatestThreadSequence,
+  getQueuedQuestionResponseDeferral,
   QuestionResponseNotDeliverableError,
   setQueuedThreadMessageFailureReason,
   claimNextQueuedThreadMessageGroup,
@@ -169,9 +170,21 @@ export function createAutomaticQueuedMessageGroupEligibility(
         case "time":
           return member.sendAt !== null && member.sendAt <= args.now;
         case "thread-busy":
+          if (
+            member.payloadKind === "questionResponse" &&
+            getQueuedQuestionResponseDeferral(deps.db, {
+              threadId: args.thread.id,
+              queuedMessageId: member.id,
+            }) !== null
+          )
+            return (
+              args.thread.status === "idle" || args.thread.status === "pending"
+            );
           return (
             args.thread.status === "idle" ||
             args.thread.status === "pending" ||
+            (member.payloadKind === "questionResponse" &&
+              args.thread.status === "active") ||
             isActiveTurnMainRunIdle(deps, args.thread)
           );
         case "stopping":
@@ -515,6 +528,7 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
     queuedMessages[0]!,
   );
   const queuedMessage = deferred?.message ?? queuedMessages[0]!;
+  if (queuedMessage.payload.kind === "questionResponse") return null;
 
   const senderThreadId = args.queuedMessages[0]!.senderThreadId;
   let inputGroups =

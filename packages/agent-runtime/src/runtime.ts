@@ -2087,6 +2087,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async steerTurn({
+      injectOnly,
       threadId,
       expectedTurnId,
       input,
@@ -2115,6 +2116,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               status: "stale",
               activeTurnId,
             };
+          }
+
+          if (injectOnly && currentProc.adapter.steerMode !== "inject") {
+            return { status: "busy", activeTurnId };
           }
 
           await restartThreadBridgeIfRecommended({

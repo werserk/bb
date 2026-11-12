@@ -131,6 +131,8 @@ function questionDelivery(
     const wait = queuedMessageWaitingOnSchema.parse(
       JSON.parse(queued.waitingOn),
     );
+    if (wait.kind === "thread-busy")
+      return { kind: "queued", reason: "will be sent after this turn" };
     return {
       kind: "held",
       reason:

@@ -77,6 +77,7 @@ export interface TurnRequestRetryMarker {
 }
 
 interface ClientTurnRequestedEventArgs {
+  questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
@@ -207,6 +208,9 @@ function buildClientTurnRequestedEventData(
   return {
     ...buildClientTurnBaseEventData(args),
     requestId,
+    ...(args.questionResponse !== undefined
+      ? { questionResponse: args.questionResponse }
+      : {}),
     ...(args.dispatchProvenance !== undefined
       ? { dispatchProvenance: args.dispatchProvenance }
       : {}),

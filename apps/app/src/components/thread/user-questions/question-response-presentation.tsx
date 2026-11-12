@@ -188,7 +188,7 @@ export const questionDeliveryLabels: Record<
   string
 > = {
   none: "Saved · not sent yet",
-  queued: "Queued · waiting to send",
+  queued: "Queued · will be sent after this turn",
   held: "Held · not sent",
   submitted: "Sent to agent",
   removed: "Queue entry removed; delivery unverified",

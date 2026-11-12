@@ -214,6 +214,24 @@ Thread subscriptions can use `experimental_onReady` to confirm server registrati
 through existing ordered ping/pong before certifying a read; reconnect repeats
 the barrier. No new event or provider wire arm is required. Exact-pair acceptance
 remains incomplete; these primitives are not full-path release evidence.
+A fresh durable answer can use the existing claimed `auto` dispatch while a turn
+is active; that path carries the existing `expectedTurnId` and all dispatch
+policy, interaction, compaction, host and manual-stop guards. The daemon marks
+auto steering as injection-only in its internal runtime call. The adapter exposes
+the negotiated bridge `steerMode`; a non-inject mode returns the existing busy
+result before a provider command or cancellation, reusing refused-steer recovery.
+Explicit user steer retains its existing queue/cancel behavior. Only a claimed
+question response adds optional typed `questionResponse` identity to its stored
+`client/turn/requested` event. Provider refusal (`turn_not_steerable`) or stale
+turn rejection restores a `questionResponse` queue row and relinks the card while
+clearing its submission receipt in the same rejection transaction. Recovery uses
+that typed history identity, never the rendered answer text. The native rejection
+event links the replacement queue ID to its source request; later wakes wait for
+the current turn to end instead of repeating the refused inject. The fallback
+card reads `Queued · will be sent after this turn`. Existing runtimes ignore the
+additive history field and can consume the unchanged question-response queue
+payload after rollback, preserving the native card receipt. No database column,
+command, daemon protocol or SDK input changes.
 
 The app replaces only a complete marker message with `ConversationQuestionCard`.
 The shared thread-view grouping rule keeps that message outside completed work

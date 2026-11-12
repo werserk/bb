@@ -1,5 +1,7 @@
 import {
   createQueuedThreadMessageInTransaction,
+  getConversationQuestion,
+  restoreConversationQuestionDelivery,
   getStoredTurnRequestEventByRequestId,
   type DbQueryConnection,
   type DbTransaction,
@@ -62,6 +64,13 @@ function immutableOwnerInput(request: TurnRequestEventData) {
     input: request.input,
     inputGroups: request.inputGroups ?? [request.input],
     provenance: request.dispatchProvenance,
+    questionResponse:
+      request.questionResponse === undefined
+        ? undefined
+        : {
+            questionId: request.questionResponse.questionId,
+            revision: request.questionResponse.revision,
+          },
     model: request.execution.model,
     reasoningLevel: request.execution.reasoningLevel,
     permissionMode: request.execution.permissionMode,
@@ -74,7 +83,7 @@ export function recoverRefusedOwnerInputInTransaction(args: {
   thread: Thread;
   requestId: ClientTurnRequestId;
   message: string;
-  reason: "turn_not_steerable" | "competing_turn";
+  reason: "turn_not_steerable" | "competing_turn" | "stale_turn";
 }): boolean {
   const row = getStoredTurnRequestEventByRequestId(args.db, {
     threadId: args.thread.id,
@@ -83,6 +92,9 @@ export function recoverRefusedOwnerInputInTransaction(args: {
   if (row === null) return false;
   let request = parseStoredTurnRequestEvent(row);
   let sourceRequestId = args.requestId;
+  const questionResponse = request.questionResponse;
+  if (args.reason === "stale_turn" && questionResponse === undefined)
+    return false;
   if (args.reason === "competing_turn") {
     if (request.deferredFromRequestId === undefined) return false;
     const source = getStoredTurnRequestEventByRequestId(args.db, {
@@ -100,6 +112,20 @@ export function recoverRefusedOwnerInputInTransaction(args: {
     request = original;
   }
   if (!eligibleOwnerRequest(request)) return false;
+  if (questionResponse !== undefined) {
+    const question = getConversationQuestion(args.db, {
+      threadId: args.thread.id,
+      questionId: questionResponse.questionId,
+    });
+    if (
+      question === null ||
+      question.status !== "answered" ||
+      question.revision !== questionResponse.revision ||
+      question.queuedMessageId !== questionResponse.queuedMessageId ||
+      question.dispatchedAt === null
+    )
+      return false;
+  }
   const queued = createQueuedThreadMessageInTransaction(args.db, {
     threadId: args.thread.id,
     content: request.input,
@@ -120,9 +146,27 @@ export function recoverRefusedOwnerInputInTransaction(args: {
           ? { kind: "thread-busy" }
           : null,
     sendAt: null,
-    payload: { kind: "deferredSteer", sourceRequestId },
+    payload:
+      questionResponse === undefined
+        ? { kind: "deferredSteer", sourceRequestId }
+        : {
+            kind: "questionResponse",
+            questionId: questionResponse.questionId,
+            revision: questionResponse.revision,
+          },
     systemNotice: null,
   });
+  if (
+    questionResponse !== undefined &&
+    !restoreConversationQuestionDelivery(args.db, {
+      threadId: args.thread.id,
+      questionId: questionResponse.questionId,
+      revision: questionResponse.revision,
+      previousQueuedMessageId: questionResponse.queuedMessageId,
+      queuedMessageId: queued.id,
+    })
+  )
+    throw new Error("Question response custody changed during recovery");
   appendThreadEventInTransaction(args.db, {
     threadId: args.thread.id,
     environmentId: args.thread.environmentId,

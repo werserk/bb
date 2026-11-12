@@ -53,3 +53,14 @@ persisted `client/turn/requested` retains the dispatch sender and existing
 `dispatchProvenance`, matching later tell events; agent-created first turns no
 longer masquerade as owner turns. Senderless owner starts retain user attribution.
 This changes no daemon wire or schema and rewrites no historical events.
+
+Durable owner question answers now try the shared claimed auto/steer dispatch
+while a turn is running. Optional typed questionResponse metadata in stored turn
+requests preserves card ownership when a non-steerable or stale turn refusal
+requeues the answer. The replacement remains the existing questionResponse
+payload for rollback compatibility; native rejected-request history prevents
+repeated injections before idle. All dispatch guards and transactional claims
+remain shared. See docs/system-overview.md and the instant-question-answer
+OpenSpec delta for the acceptance and stored-data compatibility contract.
+
+Automatic card-answer steering checks the bridge-negotiated steerMode through an internal daemon/runtime injection-only flag. Queue-mode ACP is refused before sending or cancelling a provider command; explicit steer retains queue/cancel behavior. The daemon wire is unchanged.

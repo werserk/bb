@@ -5,17 +5,19 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   lt,
   or,
   sql,
   type SQLWrapper,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import type { ConversationQuestionStatus } from "@bb/domain";
+import { clientTurnRequestIdSchema, turnRequestEventDataSchema, type ClientTurnRequestId, type ConversationQuestionStatus } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { createConversationQuestionId } from "../ids.js";
-import { conversationQuestions, threads, projects } from "../schema.js";
+import { conversationQuestions, threads, projects, events } from "../schema.js";
 import { getQuestionResolutionDelivery } from "./question-resolution-events.js";
+import { getStoredTurnRequestEventByRequestId } from "./events.js";
 
 export type ConversationQuestionRow = typeof conversationQuestions.$inferSelect;
 
@@ -322,6 +324,29 @@ export function listOpenConversationQuestionIdentities(
       desc(conversationQuestions.id),
     )
     .all();
+}
+
+export function restoreConversationQuestionDelivery(
+  db: DbQueryConnection,
+  args: { threadId: string; questionId: string; revision: number; previousQueuedMessageId: string; queuedMessageId: string },
+): boolean {
+  return db.update(conversationQuestions).set({ queuedMessageId: args.queuedMessageId, dispatchedAt: null, updatedAt: Date.now() })
+    .where(and(eq(conversationQuestions.threadId, args.threadId), eq(conversationQuestions.id, args.questionId), eq(conversationQuestions.revision, args.revision), eq(conversationQuestions.status, "answered"), eq(conversationQuestions.queuedMessageId, args.previousQueuedMessageId), isNotNull(conversationQuestions.dispatchedAt)))
+    .returning({ id: conversationQuestions.id }).get() !== undefined;
+}
+
+export function getQueuedQuestionResponseDeferral(
+  db: DbQueryConnection,
+  args: { threadId: string; queuedMessageId: string },
+): ClientTurnRequestId | null {
+  const row = db.select({ requestId: sql<unknown>`json_extract(${events.data}, '$.requestId')` }).from(events)
+    .where(and(eq(events.threadId, args.threadId), eq(events.type, "client/turn/rejected"), sql`json_extract(${events.data}, '$.deferredToQueuedMessageId') = ${args.queuedMessageId}`))
+    .orderBy(desc(events.sequence)).limit(1).get();
+  if (row === undefined) return null;
+  const requestId = clientTurnRequestIdSchema.parse(row.requestId);
+  const request = getStoredTurnRequestEventByRequestId(db, { threadId: args.threadId, requestId });
+  if (request === null) throw new Error("Question response deferral source is missing");
+  return turnRequestEventDataSchema.parse(JSON.parse(request.data)).deferredFromRequestId ?? requestId;
 }
 
 export function openConversationQuestionExists(threadId: string | SQLWrapper) {

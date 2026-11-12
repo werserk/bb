@@ -99,6 +99,7 @@ type SendThreadMessagePayload = SendMessageRequest & {
 
 interface SendThreadMessageArgs {
   preserveSelfSender?: boolean;
+  questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
@@ -158,6 +159,7 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
+  questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
@@ -419,6 +421,7 @@ export function captureUserMessageSentTelemetry(
 }
 
 function appendAndQueueSendThreadMessageInTransaction({
+  questionResponse,
   dispatchProvenance,
   deferredFromRequestId,
   serviceTurn,
@@ -448,6 +451,7 @@ function appendAndQueueSendThreadMessageInTransaction({
             threadId: thread.id,
             environmentId,
             type: "client/turn/requested",
+            ...(questionResponse !== undefined ? { questionResponse } : {}),
             ...(dispatchProvenance !== undefined ? { dispatchProvenance } : {}),
             ...(deferredFromRequestId !== undefined
               ? { deferredFromRequestId }
@@ -720,6 +724,7 @@ async function sendThreadMessageWithoutContextClear(
         }
       : await prepareReadyThreadTurnCommand(deps, commandArgs);
     const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+      questionResponse: args.questionResponse,
       dispatchProvenance: args.dispatchProvenance,
       deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: payload.serviceTurn,
@@ -820,6 +825,7 @@ async function sendThreadMessageWithoutContextClear(
     requestId,
   });
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+    questionResponse: args.questionResponse,
     dispatchProvenance: args.dispatchProvenance,
     deferredFromRequestId: args.deferredFromRequestId,
     serviceTurn: payload.serviceTurn,

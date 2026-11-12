@@ -73,6 +73,13 @@ export const turnRequestEventDataSchema = z.object({
       requestedBy: startedOnBehalfOfSchema.nullable(),
     })
     .optional(),
+  questionResponse: z
+    .object({
+      questionId: z.string().min(1),
+      revision: z.number().int().positive(),
+      queuedMessageId: z.string().min(1),
+    })
+    .optional(),
   deferredFromRequestId: clientTurnRequestIdSchema.optional(),
   // Retry provenance, written only when a `turn.failed` gate's retry row
   // dispatches. Both fields are present together or not at all: absence means

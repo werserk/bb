@@ -823,8 +823,9 @@ function settleThreadCommandFailure(
   const recoveryReason =
     args.command.type === "turn.submit" &&
     args.command.target.mode !== "start" &&
-    args.report.errorCode === "turn_not_steerable"
-      ? "turn_not_steerable"
+    (args.report.errorCode === "turn_not_steerable" ||
+      args.report.errorCode === "stale_turn")
+      ? args.report.errorCode
       : args.report.errorCode === COMPETING_TURN_ERROR_CODE
         ? "competing_turn"
         : null;
