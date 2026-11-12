@@ -100,9 +100,17 @@ export function createRequestTimeoutFetch(
 
   return async (input, init) => {
     const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
-    const requestSignal = init?.signal
-      ? AbortSignal.any([init.signal, timeoutSignal])
+    const callerSignal =
+      init?.signal !== undefined
+        ? init.signal
+        : input instanceof Request
+          ? input.signal
+          : undefined;
+    const requestSignal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutSignal])
       : timeoutSignal;
+    const method =
+      init?.method ?? (input instanceof Request ? input.method : "GET");
     const context: RequestTimeoutContext = {
       requestSignal,
       timeoutSignal,
@@ -110,7 +118,21 @@ export function createRequestTimeoutFetch(
     };
 
     try {
-      const response = await fetch(input, { ...init, signal: requestSignal });
+      const requestInit = { ...init, signal: requestSignal };
+      let response: Response;
+      try {
+        response = await fetch(input, requestInit);
+      } catch (error) {
+        if (
+          method.toUpperCase() !== "GET" ||
+          requestSignal.aborted ||
+          (!isTypeErrorWithCauseCode(error, "ECONNRESET") &&
+            !isTypeErrorWithCauseCode(error, "UND_ERR_SOCKET"))
+        ) {
+          throw error;
+        }
+        response = await fetch(input, requestInit);
+      }
       return wrapRequestTimeoutResponse({ context, response });
     } catch (error) {
       if (isRequestTimeoutError(context, error)) {
