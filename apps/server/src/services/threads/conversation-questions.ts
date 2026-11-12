@@ -39,6 +39,7 @@ import {
   type PendingInteractionUserAnswer,
   serializeQuestionResolutionNotice,
   type QuestionResolutionActor,
+  type QuestionResolutionAttribution,
 } from "@bb/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -139,22 +140,45 @@ function questionDelivery(
   }
   return { kind: "queued", reason: null };
 }
+function resolutionDeliveryForRow(
+  db: DbQueryConnection,
+  row: ConversationQuestionRow,
+  resolution: QuestionResolutionAttribution,
+): ConversationQuestion["delivery"] {
+  const receipt = resolution.deliveryId
+    ? getQuestionResolutionDelivery(db, resolution.deliveryId)
+    : null;
+  return questionDelivery(db, {
+    ...row,
+    status:
+      resolution.action === "withdraw" && row.status === "withdrawn"
+        ? "answered"
+        : row.status,
+    queuedMessageId: resolution.deliveryId,
+    dispatchedAt: receipt?.submittedAt ?? null,
+  });
+}
+
+export function readQuestionResolutionDelivery(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  ref: QuestionRef,
+  resolution: QuestionResolutionAttribution,
+): ConversationQuestion["delivery"] {
+  return resolutionDeliveryForRow(
+    deps.db,
+    questionRow(deps.db, ref),
+    resolution,
+  );
+}
+
 function rowToQuestion(
   db: DbQueryConnection,
   row: ConversationQuestionRow,
 ): ConversationQuestion {
   const resolutionHistory = listQuestionResolutionHistory(db, "qst", row.id);
   const latest = resolutionHistory.at(-1) ?? null;
-  const receipt = latest?.deliveryId
-    ? getQuestionResolutionDelivery(db, latest.deliveryId)
-    : null;
   const resolutionDelivery = latest?.deliveryId
-    ? questionDelivery(db, {
-        ...row,
-        status: "answered",
-        queuedMessageId: latest.deliveryId,
-        dispatchedAt: receipt?.submittedAt ?? null,
-      })
+    ? resolutionDeliveryForRow(db, row, latest)
     : null;
   return conversationQuestionSchema.parse({
     ...row,
@@ -569,7 +593,7 @@ export async function closeConversationQuestion(
           const status = args.action === "dismiss" ? "dismissed" : "withdrawn";
           if (!call && current.status === status)
             return { question: current, created: false };
-          if (call && current.status !== "open")
+          if (call?.invocation && current.status !== "open")
             conflict(`Question is ${current.status}`);
           const row =
             args.action === "withdraw"

@@ -36,7 +36,6 @@ Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
 signals. This introduces no persisted or public contract.
 
-
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and
@@ -196,8 +195,15 @@ transaction as the turn request; it does not claim model consumption. The app
 joins accepted history before showing trusted attribution, keeps old snapshots
 readable without invented authors, and displays closure separately from delivery.
 Both pint agent actions return unsupported without changing their original local
-controls. Managed ancestry registration, public SDK/CLI and exact-pair acceptance
-remain integration work; these primitives are not full-path release evidence.
+controls. Native tools, the backend SDK resolver and local SDK/HTTP/CLI routes
+share the resolver. Only a live native invocation carries verified agent identity.
+The host stages the managed scope policy until plugin activation and revokes it
+on disposal or failed loading. `experimental_questionResolution.version === 1`
+binds the qst actions to the existing complete-open read and notification contract.
+Thread subscriptions can use `experimental_onReady` to confirm server registration
+through existing ordered ping/pong before certifying a read; reconnect repeats
+the barrier. No new event or provider wire arm is required. Exact-pair acceptance
+remains incomplete; these primitives are not full-path release evidence.
 
 The app replaces only a complete marker message with `ConversationQuestionCard`.
 The shared thread-view grouping rule keeps that message outside completed work

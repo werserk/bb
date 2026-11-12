@@ -279,3 +279,50 @@ it("requests open pages and prints total and cursor instead of a capped history 
     output.mockRestore();
   }
 });
+
+it("sends an attributable resolution request unchanged through the shared SDK route", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "bb-cli-resolve-"));
+  const input = {
+    threadId: "thr_23456789ab",
+    questionId: "qst_23456789ab",
+    revision: 1,
+    operationId: "scope-change",
+    action: "withdraw",
+    reason: "No longer needed",
+  };
+  const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      resolution: {
+        actor: { kind: "local-unverified", verification: "unverified-local" },
+      },
+    }),
+  );
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const file = join(root, "request.json");
+    await writeFile(file, JSON.stringify(input));
+    const program = new Command();
+    registerQuestionCommands(program, () => "http://test");
+    await program.parseAsync([
+      "node",
+      "bb",
+      "questions",
+      "resolve",
+      "--file",
+      file,
+      "--json",
+    ]);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      "http://test/api/v1/threads/thr_23456789ab/question-resolution",
+    );
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual(input);
+    expect(output.mock.calls[0]?.[0]).toContain("local-unverified");
+  } finally {
+    fetch.mockRestore();
+    output.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});

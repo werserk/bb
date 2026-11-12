@@ -1750,6 +1750,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     };
     const stopping = new AbortController();
     const handle = createPluginApi({
+      resolveQuestion: deps.resolveQuestion,
       pluginId: row.id,
       logger: deps.logger,
       db: deps.db,

@@ -1,4 +1,6 @@
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
+import { resolveQuestion } from "./services/threads/question-resolution.js";
+import { currentQuestionResolutionInvocation } from "./services/threads/question-resolution-context.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import {
   recheckEnvironmentProvisioning,
@@ -784,6 +786,8 @@ export function createApp(
     return next();
   });
   const pluginService = createPluginService({
+    resolveQuestion: (input) =>
+      resolveQuestion(deps, input, currentQuestionResolutionInvocation()),
     machineEnrollments: getMachineEnrollmentService(deps),
     db: deps.db,
     hub: deps.hub,

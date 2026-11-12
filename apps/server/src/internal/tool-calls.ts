@@ -26,6 +26,8 @@ import {
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
 import {
   BB_RESOLVE_QUESTION_TOOL,
+  BB_LIST_QUESTIONS_TOOL,
+  handleListQuestionsToolCall,
   handleResolveQuestionToolCall,
 } from "../services/threads/question-resolution-tool.js";
 
@@ -94,7 +96,8 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         (payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME ||
           payload.tool === BB_UPDATE_PLAN_TOOL.name ||
           payload.tool === BB_ASK_QUESTION_TOOL.name ||
-          payload.tool === BB_RESOLVE_QUESTION_TOOL.name)
+          payload.tool === BB_RESOLVE_QUESTION_TOOL.name ||
+          payload.tool === BB_LIST_QUESTIONS_TOOL.name)
       ) {
         throw new ApiError(400, "invalid_request", "This tool requires turnId");
       }
@@ -144,6 +147,21 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
       }
 
       if (
+        payload.tool === BB_LIST_QUESTIONS_TOOL.name &&
+        payload.turnId !== undefined
+      ) {
+        return context.json(
+          await handleListQuestionsToolCall(deps, {
+            threadId: thread.id,
+            turnId: payload.turnId,
+            providerThreadId: payload.providerThreadId,
+            signal: context.req.raw.signal,
+            input: payload.arguments,
+          }),
+        );
+      }
+
+      if (
         payload.tool === BB_RESOLVE_QUESTION_TOOL.name &&
         payload.turnId !== undefined
       ) {
@@ -152,6 +170,7 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             threadId: thread.id,
             turnId: payload.turnId,
             providerThreadId: payload.providerThreadId,
+            signal: context.req.raw.signal,
             input: payload.arguments,
           }),
         );
@@ -170,23 +189,34 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             roundTrip.signal,
           ]),
           invoke: async (signal) => {
-            const result = await invokePluginAgentTool(pluginTool, {
-              input: payload.arguments,
-              ctx: {
-                threadId: thread.id,
-                projectId: thread.projectId,
-                ...(payload.turnId !== undefined
-                  ? {
-                      turnId: payload.turnId,
-                      ...(payload.turnOrigin === undefined
-                        ? {}
-                        : { turnOrigin: payload.turnOrigin }),
-                    }
-                  : {}),
-                callId: payload.callId,
-                signal,
-              },
-            });
+            const result = await withQuestionResolutionInvocation(
+              payload.turnId
+                ? {
+                    threadId: thread.id,
+                    turnId: payload.turnId,
+                    providerThreadId: payload.providerThreadId,
+                  }
+                : null,
+              signal,
+              () =>
+                invokePluginAgentTool(pluginTool, {
+                  input: payload.arguments,
+                  ctx: {
+                    threadId: thread.id,
+                    projectId: thread.projectId,
+                    ...(payload.turnId !== undefined
+                      ? {
+                          turnId: payload.turnId,
+                          ...(payload.turnOrigin === undefined
+                            ? {}
+                            : { turnOrigin: payload.turnOrigin }),
+                        }
+                      : {}),
+                    callId: payload.callId,
+                    signal,
+                  },
+                }),
+            );
             if (!signal.aborted) {
               try {
                 raiseOwnerPostAttention(deps, {
@@ -224,3 +254,4 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
     },
   );
 }
+import { withQuestionResolutionInvocation } from "../services/threads/question-resolution-context.js";

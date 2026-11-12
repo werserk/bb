@@ -21,7 +21,7 @@ reports the reload failure in its detail. `bb.pluginId` is the plugin's own id.
 The complete top-level factory API, by reference:
 
 - this file: `pluginId`, `log`, `settings`, `storage`, `server`, `hosts`
-- backend-sdk.md: `sdk`
+- backend-sdk.md: `sdk`, `experimental_questionResolution`, `experimental_questionResolutionScope`
 - backend-events.md: `events`, `experimental_hooks`,
   `experimental_environments`, `http`, `rpc`, `realtime`, `background`
 - backend-machines.md: `experimental_machines`, `experimental_serverAccess`

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { userQuestionPendingInteractionResolutionSchema } from "./pending-interactions.js";
+import type { ConversationQuestion } from "./conversation-questions.js";
+import type { QuestionResolutionAttribution } from "./question-resolution-attribution.js";
 
 export const questionResolutionInputSchema = z
   .strictObject({
@@ -31,3 +33,9 @@ export const questionResolutionInputSchema = z
 export type QuestionResolutionInput = z.infer<
   typeof questionResolutionInputSchema
 >;
+
+export interface QuestionResolutionResult {
+  resolution: QuestionResolutionAttribution;
+  question: ConversationQuestion;
+  delivery: ConversationQuestion["delivery"];
+}

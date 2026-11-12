@@ -190,6 +190,8 @@ const BB_PLUGIN_API_KEYS = [
   "experimental_machines",
   "experimental_serverAccess",
   "experimental_threads",
+  "experimental_questionResolution",
+  "experimental_questionResolutionScope",
   "sdk",
   "onDispose",
   "onInstall",

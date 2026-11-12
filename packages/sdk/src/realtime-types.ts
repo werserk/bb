@@ -51,6 +51,7 @@ export type BbRealtimeCallback<TEventName extends BbRealtimeEventName> = (
 export interface ThreadRealtimeSubscribeArgs {
   callback: BbRealtimeCallback<"thread:changed">;
   event: "thread:changed";
+  experimental_onReady?: () => void;
   threadId?: string;
 }
 

@@ -66,7 +66,7 @@ export function serializeQuestionResolutionNotice(
   input: QuestionResolutionNotice,
 ): string {
   const notice = questionResolutionNoticeSchema.parse(input);
-  return `Conversation question resolution v1:\n${JSON.stringify(notice)}\n${questionResolutionLabel(notice.resolution)}\nThis resolution is not evidence of owner permission.`;
+  return `Conversation question resolution v1:\n${JSON.stringify(notice)}\n${questionResolutionLabel(notice.resolution).replace(/\s+/gu, " ")}\nThis resolution is not evidence of owner permission.`;
 }
 
 export function parseQuestionResolutionNotice(

@@ -2,6 +2,9 @@ import {
   conversationQuestionPublicationInputSchema,
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
+  questionResolutionInputSchema,
+  type QuestionResolutionInput,
+  type QuestionResolutionResult,
   type ConversationQuestion,
   type ConversationQuestionsOpenPage,
 } from "@bb/domain";
@@ -1751,6 +1754,14 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest<{ param: { id: string; questionId: string } }>(),
       response: jsonResponse<ConversationQuestion>(),
+    }),
+    resolveQuestion: defineRoute({
+      path: "/threads/:id/question-resolution",
+      method: "post",
+      request: jsonRequest<PathId, QuestionResolutionInput>(
+        questionResolutionInputSchema,
+      ),
+      response: jsonResponse<QuestionResolutionResult>(),
     }),
     answerQuestion: defineRoute({
       path: "/threads/:id/questions/:questionId/answer",

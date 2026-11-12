@@ -22,6 +22,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
+import { resolveQuestion } from "../../services/threads/question-resolution.js";
 import { requirePublicThread } from "../../services/lib/entity-lookup.js";
 
 const pendingInteractionIdSchema = z
@@ -49,6 +50,15 @@ export function registerThreadInteractionRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
+  post(routes.resolveQuestion, async (context, input) => {
+    if (input.threadId !== context.req.param("id"))
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "Question target does not match its route",
+      );
+    return context.json(await resolveQuestion(deps, input, null));
+  });
 
   const questionTarget = (threadId: string, rawId: string) => {
     requirePublicThread(deps.db, threadId);

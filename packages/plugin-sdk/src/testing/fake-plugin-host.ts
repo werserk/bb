@@ -1700,6 +1700,17 @@ function createFakePluginHostInternal(
     hosts,
     experimental_aiServices,
     experimental_threads,
+    experimental_questionResolution: {
+      version: 1,
+      resolve: (input) => sdk.threads.questions.experimental_resolve(input),
+    },
+    experimental_questionResolutionScope: {
+      register() {
+        throw new Error(
+          "Question scope requires the real host authority service",
+        );
+      },
+    },
     get sdk() {
       assertLive();
       return sdk;

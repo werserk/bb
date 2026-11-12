@@ -16,6 +16,11 @@ import {
   setThreadAttentionPolicy,
 } from "../threads/thread-attention-policy.js";
 import { detachActivePluginToolCallForUserInput } from "./plugin-tool-calls.js";
+import {
+  assertQuestionResolutionScopeAvailable,
+  registerQuestionResolutionScope,
+  type QuestionResolutionScopePolicy,
+} from "../threads/question-resolution-scope.js";
 import { fillPluginPresentation } from "./plugin-presentation.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -494,6 +499,7 @@ function createStagedRegistrations<
 const PLUGIN_HOST_CALL_MAX_TIMEOUT_MS = 30 * 60_000;
 
 export function createPluginApi(options: {
+  resolveQuestion?: import("@get-bb/plugin-sdk").ExperimentalQuestionResolution["resolve"];
   pluginId: string;
   logger: ServerLogger;
   db: DbConnection;
@@ -613,6 +619,15 @@ export function createPluginApi(options: {
   const pendingAgentToolProblems: string[] = [];
   const pendingSharedPorts = new Map<string, readonly number[]>();
   const disposeHooks: Array<() => void | Promise<void>> = [];
+  let questionScope: {
+    policy: QuestionResolutionScopePolicy;
+    disposeLive: (() => void) | null;
+  } | null = null;
+  const disposeQuestionScope = () => {
+    questionScope?.disposeLive?.();
+    questionScope = null;
+  };
+  disposeHooks.push(disposeQuestionScope);
   const openTunnelIngresses = new Set<() => Promise<void>>();
   const installHandlers: Array<() => void | Promise<void>> = [];
   const settingsRecord: PluginApiHandle["settings"] = {
@@ -1481,6 +1496,41 @@ export function createPluginApi(options: {
   disposeHooks.push(() => clearThreadAttentionPoliciesOfPlugin(pluginId));
 
   const api: BbPluginApi = {
+    get experimental_questionResolution() {
+      assertLive();
+      const resolve = options.resolveQuestion;
+      if (!resolve)
+        throw new Error(
+          "Question resolution version 1 is unavailable in this host",
+        );
+      return {
+        version: 1 as const,
+        resolve(input: Parameters<typeof resolve>[0]) {
+          assertLive();
+          return resolve(input);
+        },
+      };
+    },
+    experimental_questionResolutionScope: {
+      register(policy) {
+        assertLive();
+        if (questionScope)
+          throw new Error("Question resolution scope is already declared");
+        assertQuestionResolutionScopeAvailable(pluginId);
+        const declaration = {
+          policy,
+          disposeLive: activated
+            ? registerQuestionResolutionScope(pluginId, policy)
+            : null,
+        };
+        questionScope = declaration;
+        return {
+          dispose() {
+            if (questionScope === declaration) disposeQuestionScope();
+          },
+        };
+      },
+    },
     pluginId,
     log,
     settings,
@@ -1575,6 +1625,11 @@ export function createPluginApi(options: {
       );
       providerRegistrations.flush();
       aiServiceRegistrations.flush();
+      if (questionScope)
+        questionScope.disposeLive = registerQuestionResolutionScope(
+          pluginId,
+          questionScope.policy,
+        );
       activated = true;
       const cliWarning = cliRecord.registration
         ? pluginCliCollisionWarning(pluginId, cliRecord.registration.name)
@@ -1607,6 +1662,7 @@ export function createPluginApi(options: {
     },
     invalidate() {
       invalidated = true;
+      disposeQuestionScope();
       rpcCaller.revoke();
       for (const close of [...openTunnelIngresses]) void close();
     },

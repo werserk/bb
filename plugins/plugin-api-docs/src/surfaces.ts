@@ -1021,7 +1021,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
     sections: [
       {
         title: "Commands & agent capabilities",
-        surfaceIds: ["cli", "agent-tools"],
+        surfaceIds: ["cli", "agent-tools", "question-resolution"],
       },
       {
         title: "Running & reacting",
@@ -1054,6 +1054,31 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
       },
     ],
     surfaces: [
+      {
+        id: "question-resolution",
+        title: "Persistent question resolution",
+        experimental: true,
+        summary:
+          "Observe persistent question cards and settle them with attributable native delivery.",
+        bullets: [
+          "Require bb.experimental_questionResolution.version === 1; missing or unknown versions are unsupported, regardless of SDK version or method presence",
+          "Use bb.sdk.threads.questions.open/get for complete cursor reads and full prompts; list is capped history. Subscribe before reading, repeat after invalidation during a read, and refresh on reconnect or foreground",
+          "Subscribe to thread:changed (interactions-changed and lifecycle changes) and realtime:connection; signals invalidate reads, with no replay or exactly-once promise. Dispose subscriptions and discard late reads on reload",
+          "Use experimental_questionResolution.resolve inside a native plugin tool for host-derived identity; SDK calls outside that context and CLI/HTTP closures are local-unverified. Agent answers never grant owner approval",
+          "A host-registered experimental_questionResolutionScope policy permits current managed ancestors under a live fence and captured host chain; absent policy allows self only. Both pint actions and approvals are unsupported without mutation",
+        ],
+        apiSymbols: [
+          "ExperimentalQuestionResolution",
+          "ExperimentalQuestionResolutionScopeContext",
+          "ExperimentalQuestionResolutionScopeDecision",
+          "ExperimentalQuestionResolutionScopePolicy",
+          "BbPluginApi.experimental_questionResolution",
+          "BbPluginApi.experimental_questionResolutionScope",
+          "ThreadQuestionsArea.experimental_resolve",
+        ],
+        reference: ["docs/api_to_audit.md"],
+      },
+
       {
         id: "cli",
         tagline: "Your own `bb <name>` command",

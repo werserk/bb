@@ -8,30 +8,34 @@ import {
 import { LOCAL_QUESTION_ACTOR, type QuestionResolutionActor } from "@bb/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { ApiError } from "../../errors.js";
+import type {
+  ExperimentalQuestionResolutionScopeContext,
+  ExperimentalQuestionResolutionScopeDecision,
+  ExperimentalQuestionResolutionScopePolicy,
+} from "@get-bb/plugin-sdk";
 
 export interface QuestionResolutionInvocation {
   threadId: string;
   turnId: string;
   providerThreadId: string;
+  signal?: AbortSignal;
 }
-export interface QuestionResolutionScopeContext {
-  caller: { threadId: string; projectId: string };
-  target: { threadId: string; projectId: string };
-}
-export interface QuestionResolutionScopeDecision {
-  relationship: "self" | "ancestor" | "refuse";
-  role: string | null;
-  isCurrent(): boolean;
-}
-export type QuestionResolutionScopePolicy = (
-  context: QuestionResolutionScopeContext,
-  accept: (decision: QuestionResolutionScopeDecision) => void,
-) => void | Promise<void>;
+export type QuestionResolutionScopeContext =
+  ExperimentalQuestionResolutionScopeContext;
+export type QuestionResolutionScopeDecision =
+  ExperimentalQuestionResolutionScopeDecision;
+export type QuestionResolutionScopePolicy =
+  ExperimentalQuestionResolutionScopePolicy;
 
 let policy: {
   pluginId: string;
   handler: QuestionResolutionScopePolicy;
 } | null = null;
+
+export function assertQuestionResolutionScopeAvailable(pluginId: string): void {
+  if (policy && policy.pluginId !== pluginId)
+    throw new Error("Question resolution scope is already registered");
+}
 
 export function registerQuestionResolutionScope(
   pluginId: string,
@@ -69,6 +73,7 @@ function requireCaller(
     .limit(1)
     .get();
   if (
+    invocation.signal?.aborted ||
     !caller ||
     caller.deletedAt !== null ||
     caller.archivedAt !== null ||
@@ -117,6 +122,41 @@ export async function withQuestionResolutionActor<T>(
   const commitDecision = (decision: QuestionResolutionScopeDecision) => {
     const fresh = requireCaller(db, invocation);
     const freshTarget = getThread(db, targetThreadId);
+    const chain = decision.hostChain ?? [];
+    if (
+      decision.relationship === "ancestor" &&
+      (!chain.some((hop) => hop.id === caller.id) ||
+        !chain.some((hop) => hop.id === targetThreadId))
+    )
+      refuse("Managed question ancestry snapshot is missing");
+    if (decision.relationship === "ancestor") {
+      const byId = new Map(chain.map((hop) => [hop.id, hop]));
+      const seen = new Set<string>();
+      let id: string | null = targetThreadId;
+      while (id !== caller.id) {
+        if (!id || seen.has(id))
+          refuse("Question target is not a current host descendant");
+        seen.add(id);
+        const hop = byId.get(id);
+        if (!hop || hop.archived)
+          refuse("Question host ancestry is unavailable");
+        id = hop.parentThreadId;
+      }
+    }
+    if (
+      !chain.every((hop) => {
+        const row = getThread(db, hop.id);
+        return (
+          row &&
+          row.deletedAt === null &&
+          row.projectId === hop.projectId &&
+          row.projectId === fresh.projectId &&
+          row.parentThreadId === hop.parentThreadId &&
+          (row.archivedAt !== null) === hop.archived
+        );
+      })
+    )
+      refuse("Question host ancestry changed before acceptance");
     if (
       !freshTarget ||
       freshTarget.deletedAt !== null ||

@@ -4371,3 +4371,66 @@ Stabilization requires independent review, native/plugin custody and focus hando
 ## Independent question provider routing
 
 `internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME` is exported from the provider-bridge facade solely for the bundled Claude Code and Codex providers. It identifies the common core publication tool; providers replace native ordinary questions only when this tool is offered. Claude aliases the native tool name through the SDK; Codex returns an explicit redirect error without selecting an answer. Existing native requests and approval requests retain their resolution path. Audit requires routing and exclusion-refresh regression tests plus the core publication/response UI acceptance gates.
+
+## Persistent question observation and resolution v1
+
+`BbPluginApi.experimental_questionResolution.version === 1` is the explicit
+runtime declaration, carried by the matching typed plugin SDK. Missing/unknown
+versions are unsupported; method presence, package/runtime versions and opaque
+cursors do not establish capability. This single version binds both the read and
+invalidation semantics below and persistent qst resolution. Both pint agent
+actions return unsupported before any waiter/status/history/attention mutation.
+Existing local provider controls are unchanged; no provider wire/daemon change.
+
+Read through `bb.sdk.threads.questions.open/get`; `list` remains capped history.
+`open` returns the existing per-thread public, nonarchived selector in original
+order, including an open card beyond 200 historical rows. Traverse until null
+nextCursor with one readRevision; a stale cursor refuses with 409. An empty
+complete read, unsupported capability, incomplete traversal and read error are
+different states. Archive returns the existing empty view; unarchive restores
+surviving open cards. Missing/hidden/deleted thread refusals are unchanged.
+`get` returns original identity, revision, status, all prompts and attribution;
+observation is not atomic with a later plugin delivery.
+
+Backend plugins can use typed `bb.sdk.subscribe({event:"thread:changed",threadId,
+callback,experimental_onReady})`, which returns an unsubscribe function. The optional
+readiness callback runs after the server has processed the subscription, using
+the existing ordered WebSocket ping/pong, and repeats after reconnect. Socket
+`connected` alone does not acknowledge a subscription. A complete initial read
+must follow readiness; earlier reads are provisional. Question publication and
+answer/dismiss/withdraw notify `interactions-changed` only after committed state;
+agent resolution uses the same services. Existing thread lifecycle changes also
+invalidate reads. Subscribe before the initial fresh read; readiness or an invalidation during
+that read requires a follow-up read. `realtime:connection` with `reconnected:true`
+and foreground return require a fresh read. Signals may coalesce or duplicate;
+there is no replay across a disconnected interval and no exactly-once event
+promise. Dispose unsubscribes and ignore late results on reload. No polling
+service, new index or dedicated event is required.
+
+`bb.experimental_questionResolution.resolve(input)` uses host-derived invocation
+context only inside a native plugin tool; no input actor field is accepted.
+Ended/cancelled contexts refuse. Calls elsewhere are local-unverified, as are
+`bb.sdk.threads.questions.experimental_resolve`, CLI `thread questions resolve
+--file request.json` and raw HTTP `/threads/:id/question-resolution`; environment
+variables and claimed JSON/header identities cannot upgrade attribution. The
+native `bb_list_questions` and `bb_resolve_question` tools use the same scope and
+resolution services. All operations require revision, operationId and reason;
+identical normalized retries return the original principal-bound resolution and
+delivery receipt. A new resolution never authorizes an owner-reserved action.
+
+`bb.experimental_questionResolutionScope.register(policy)` installs one managed
+policy with a disposer, also disposed when its plugin unloads. It receives
+host-derived caller/target project identities and an acceptance callback. A
+policy calls that callback synchronously while its current metadata/transition
+fence is held, supplying self/ancestor/refuse, role, a captured hostChain and
+isCurrent. Core rechecks the live caller turn, projects, every captured host
+parent/archive tuple, and current registration before the immediate transaction.
+Ancestor grants require caller and target in the snapshot; raw callers cannot
+supply a policy result. Without a policy, only native self resolution is allowed.
+
+Accepted attribution and answer snapshots are immutable; a separate receipt
+records native queue consumption in the same transaction as the turn request.
+Withdrawal has a distinct resolution-bound cancellation row with no answer and
+preserves previous answer custody. Exactly-once here concerns durable native
+submission, not proof that a model read or obeyed the text. UI delivery and
+closure states remain distinct, and old records show Attribution unavailable.

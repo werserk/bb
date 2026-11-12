@@ -5,6 +5,7 @@ import {
   QUESTION_CARD_LIMITS,
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
+  questionResolutionInputSchema,
 } from "@bb/domain";
 import { action } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
@@ -27,6 +28,32 @@ export function registerQuestionCommands(
     .command("questions")
     .description(
       "Publish and answer persistent ordinary questions without blocking chat",
+    );
+  questions
+    .command("resolve")
+    .description(
+      "Resolve a qst revision with an operationId and reason; local CLI attribution is unverified, never owner approval",
+    )
+    .requiredOption(
+      "--file <path>",
+      "JSON resolution request including threadId, questionId, revision, operationId, action, reason and answer data when answering",
+    )
+    .option("--json", "Print JSON")
+    .action(
+      action(async (opts: { file: string }) => {
+        const input = questionResolutionInputSchema.parse(
+          await readJsonFile(opts.file),
+        );
+        console.log(
+          JSON.stringify(
+            await createCliBbSdk(
+              getUrl(),
+            ).threads.questions.experimental_resolve(input),
+            null,
+            2,
+          ),
+        );
+      }),
     );
   targetOptions(
     questions.command("list [id]").description("List persistent questions"),

@@ -25,6 +25,97 @@ const publication = {
 };
 
 describe("native question resolution", () => {
+  it("discovers answerable prompts with bounded coverage and refuses stale cursors", async () => {
+    await withTestHarness(async (h) => {
+      const { thread, session } = seedThreadFixture(h, {
+        thread: { status: "active" },
+      });
+      seedThreadRuntimeState(h.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "p",
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "native",
+        providerThreadId: "p",
+      });
+      for (let i = 0; i < 2; i++)
+        createConversationQuestion(h.db, {
+          threadId: thread.id,
+          sourceTurnId: null,
+          sourceCallId: null,
+          publication: JSON.stringify(publication),
+          materialManifest: JSON.stringify({
+            hostId: null,
+            storageRootPath: null,
+            materials: [],
+            files: [],
+          }),
+        });
+      const list = async (cursor?: string) => {
+        const response = await h.app.request("/internal/session/tool-call", {
+          method: "POST",
+          headers: internalAuthHeaders(h),
+          body: JSON.stringify({
+            sessionId: session.id,
+            threadId: thread.id,
+            turnId: "native",
+            providerThreadId: "p",
+            callId: "list",
+            tool: "bb_list_questions",
+            arguments: {
+              threadId: thread.id,
+              limit: 1,
+              ...(cursor ? { cursor } : {}),
+            },
+          }),
+        });
+        return response.json();
+      };
+      const first = await list();
+      expect(first.success).toBe(true);
+      const page = JSON.parse(first.contentItems[0].text);
+      expect(page).toMatchObject({
+        coverage: "page",
+        total: 2,
+        questions: [
+          {
+            kind: "qst",
+            revision: 1,
+            questions: [
+              {
+                id: "choice",
+                prompt: "Which?",
+                multiSelect: false,
+                allowFreeText: true,
+                required: true,
+                options: [{ value: "a", label: "A" }],
+              },
+            ],
+          },
+        ],
+      });
+      const second = JSON.parse(
+        (await list(page.nextCursor)).contentItems[0].text,
+      );
+      expect(second).toMatchObject({
+        coverage: "page",
+        nextCursor: null,
+        readRevision: page.readRevision,
+      });
+      const closed = await h.app.request(
+        `/api/v1/threads/${thread.id}/questions/${page.questions[0].id}/dismiss`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ revision: 1 }),
+        },
+      );
+      expect(closed.ok).toBe(true);
+      expect((await list(page.nextCursor)).success).toBe(false);
+    });
+  });
   it.each(["answer", "withdraw"] as const)(
     "resolves self with %s and an operation-bound retry receipt",
     async (action) => {
@@ -176,3 +267,131 @@ describe("native question resolution", () => {
     });
   });
 });
+
+it.each(["answer", "withdraw"] as const)(
+  "resolves qst %s through the shared local endpoint without trusting actor headers",
+  async (action) => {
+    await withTestHarness(async (h) => {
+      const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
+      seedThreadRuntimeState(h.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "p",
+      });
+      const question = createConversationQuestion(h.db, {
+        threadId: thread.id,
+        sourceTurnId: null,
+        sourceCallId: null,
+        publication: JSON.stringify(publication),
+        materialManifest: JSON.stringify({
+          hostId: null,
+          storageRootPath: null,
+          materials: [],
+          files: [],
+        }),
+      })!;
+      const input = {
+        threadId: thread.id,
+        questionId: question.id,
+        revision: 1,
+        operationId: "local-op",
+        action,
+        reason: "Settled locally",
+        ...(action === "answer"
+          ? { answers: { choice: { selected: ["a"] } } }
+          : {}),
+      };
+      const invoke = () =>
+        h.app.request(`/api/v1/threads/${thread.id}/question-resolution`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-BB-Thread-ID": "thr_coordinator",
+          },
+          body: JSON.stringify(input),
+        });
+      const first = await invoke();
+      expect(first.status).toBe(200);
+      const receipt = await first.json();
+      expect(receipt.resolution.actor).toEqual({
+        kind: "local-unverified",
+        verification: "unverified-local",
+      });
+      expect((await (await invoke()).json()).resolution).toEqual(
+        receipt.resolution,
+      );
+      expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(1);
+    });
+  },
+);
+
+it.each(["pending", "resolving", "resolved"] as const)(
+  "leaves provider %s questions untouched for both agent actions",
+  async (status) => {
+    const {
+      createPendingInteraction,
+      pendingInteractions,
+      questionResolutionEvents,
+    } = await import("@bb/db");
+    const { eq } = await import("drizzle-orm");
+    const { createUserQuestionPayload } =
+      await import("../helpers/pending-interactions.js");
+    await withTestHarness(async (h) => {
+      const { thread, session } = seedThreadFixture(h, {
+        thread: { status: "active" },
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "native",
+        providerThreadId: "p",
+      });
+      const interaction = createPendingInteraction(h.db, {
+        threadId: thread.id,
+        providerId: "codex",
+        providerRequestId: "request",
+        providerThreadId: "p",
+        turnId: "native",
+        payload: JSON.stringify(createUserQuestionPayload()),
+      });
+      h.db
+        .update(pendingInteractions)
+        .set({ status })
+        .where(eq(pendingInteractions.id, interaction.id))
+        .run();
+      const before = h.db.select().from(pendingInteractions).all();
+      for (const action of ["answer", "withdraw"] as const) {
+        const response = await h.app.request("/internal/session/tool-call", {
+          method: "POST",
+          headers: internalAuthHeaders(h),
+          body: JSON.stringify({
+            sessionId: session.id,
+            threadId: thread.id,
+            turnId: "native",
+            providerThreadId: "p",
+            callId: "unsupported",
+            tool: "bb_resolve_question",
+            arguments: {
+              threadId: thread.id,
+              interactionId: interaction.id,
+              revision: 1,
+              operationId: `provider-${action}`,
+              action,
+              reason: "Settled elsewhere",
+              ...(action === "answer"
+                ? { answers: { choice: { selected: ["a"] } } }
+                : {}),
+            },
+          }),
+        });
+        const result = await response.json();
+        expect(result.success).toBe(false);
+        expect(JSON.stringify(result)).toContain("unsupported");
+        expect(h.db.select().from(pendingInteractions).all()).toEqual(before);
+        expect(h.db.select().from(questionResolutionEvents).all()).toHaveLength(
+          0,
+        );
+        expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(0);
+      }
+    });
+  },
+);

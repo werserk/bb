@@ -395,3 +395,24 @@ or reloaded; failed turns and user turns always raise attention. A
 `thread.idle` event for a silenced turn carries `experimental_attention:
 "skipped"`; notification plugins should send nothing for it. Stock bb has no
 such method: check `typeof bb.experimental_threads?.setAttentionPolicy`.
+
+## Persistent question observation and resolution
+
+Require `bb.experimental_questionResolution.version === 1` before using persistent
+question observation/resolution; missing or unknown versions are unsupported.
+Use typed `bb.sdk.threads.questions.open/get` and `bb.sdk.subscribe` for reads and
+invalidation. For thread subscriptions, `experimental_onReady` confirms server
+registration and repeats after reconnect; certify an initial complete read only
+after that callback. Socket `connected` alone is insufficient. `list` remains capped history; traverse open cursors with one
+readRevision, refresh after reconnect/foreground and after an invalidation during
+a read, and dispose subscriptions. The canonical versioned semantics and recovery
+limits are in docs/api_to_audit.md, Persistent question observation and resolution v1.
+
+`bb.experimental_questionResolution.resolve(input)` derives runtime identity only
+inside a native plugin tool. Calls outside it, CLI, raw HTTP and
+`bb.sdk.threads.questions.experimental_resolve(input)` record local-unverified
+attribution. Supply revision, stable operationId and reason; retry with identical
+content. Both pint agent actions are unsupported without mutation. An agent answer
+is never owner approval. `bb.experimental_questionResolutionScope.register(policy)`
+is the single managed-policy registration, disposed on unload; use its captured
+host chain and live acceptance fence. Without it native resolution permits self only.

@@ -77,3 +77,78 @@ it("reconnects after a first connection fails without a close event", async () =
     vi.useRealTimers();
   }
 });
+
+it("confirms thread subscriptions with ordered existing ping/pong, including reconnect and cancellation", async () => {
+  vi.useFakeTimers();
+  try {
+    const sockets: Array<
+      BbRealtimeSocket & { sent: string[]; readyState: number }
+    > = [];
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        runtime: "node",
+        websocket: () => {
+          const sent: string[] = [];
+          const socket = {
+            sent,
+            close() {},
+            readyState: 0,
+            send: (data: string) => sent.push(data),
+            onopen: null,
+            onclose: null,
+            onerror: null,
+            onmessage: null,
+          } as BbRealtimeSocket & { sent: string[]; readyState: number };
+          sockets.push(socket);
+          return socket;
+        },
+      }),
+    });
+    const ready = vi.fn(),
+      changed = vi.fn();
+    const stop = sdk.subscribe({
+      event: "thread:changed",
+      threadId: "thr_a",
+      callback: changed,
+      experimental_onReady: ready,
+    });
+    const first = sockets[0]!;
+    first.readyState = 1;
+    first.onopen?.();
+    expect(first.sent.map((data) => JSON.parse(data).type)).toEqual([
+      "subscribe",
+      "ping",
+    ]);
+    expect(ready).not.toHaveBeenCalled();
+    first.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+    expect(ready).toHaveBeenCalledTimes(1);
+    first.onclose?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    const second = sockets[1]!;
+    second.readyState = 1;
+    second.onopen?.();
+    expect(second.sent.map((data) => JSON.parse(data).type)).toEqual([
+      "subscribe",
+      "ping",
+    ]);
+    first.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+    expect(ready).toHaveBeenCalledTimes(1);
+    second.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+    expect(ready).toHaveBeenCalledTimes(2);
+    const late = vi.fn(),
+      cancel = sdk.subscribe({
+        event: "thread:changed",
+        threadId: "thr_b",
+        callback: changed,
+        experimental_onReady: late,
+      });
+    cancel();
+    second.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+    expect(late).not.toHaveBeenCalled();
+    stop();
+    expect(changed).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});

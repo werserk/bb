@@ -3,6 +3,8 @@ import type {
   ConversationQuestionsOpenPage,
   ConversationQuestionPublication,
   ConversationQuestionAnswer,
+  QuestionResolutionInput,
+  QuestionResolutionResult,
 } from "@bb/domain";
 import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
@@ -239,8 +241,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
@@ -561,6 +562,9 @@ export interface ThreadQuestionPublishArgs {
   publication: ConversationQuestionPublication;
 }
 export interface ThreadQuestionsArea {
+  experimental_resolve(
+    input: QuestionResolutionInput,
+  ): Promise<QuestionResolutionResult>;
   open(args: {
     threadId: string;
     cursor?: string;
@@ -1119,6 +1123,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
   };
   const questions: ThreadQuestionsArea = {
+    async experimental_resolve(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["question-resolution"].$post({
+          param: { id: input.threadId },
+          json: input,
+        }),
+      );
+    },
     async open(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"].questions.open.$get(

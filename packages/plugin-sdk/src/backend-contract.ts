@@ -16,6 +16,8 @@ import type {
   ThreadQueuedMessage,
   ThreadTurnInitiator,
   WorkspaceProvisionType,
+  QuestionResolutionInput,
+  QuestionResolutionResult,
 } from "@bb/domain";
 import type { MachineBootstrapApi } from "./machine-bootstrap.js";
 import type Database from "better-sqlite3";
@@ -2318,12 +2320,43 @@ export type PluginBbSdk = Omit<BbSdk, "threads"> & {
   };
 };
 
-/**
- * The API object handed to a plugin's factory (design §4). Implemented by
- * the BB server; this contract is what plugin `server.ts` files compile
- * against.
- */
+export interface ExperimentalQuestionResolutionScopeContext {
+  caller: { threadId: string; projectId: string };
+  target: { threadId: string; projectId: string };
+}
+
+export interface ExperimentalQuestionResolutionScopeDecision {
+  relationship: "self" | "ancestor" | "refuse";
+  role: string | null;
+  hostChain?: readonly {
+    id: string;
+    projectId: string;
+    parentThreadId: string | null;
+    archived: boolean;
+  }[];
+  isCurrent(): boolean;
+}
+
+export type ExperimentalQuestionResolutionScopePolicy = (
+  context: ExperimentalQuestionResolutionScopeContext,
+  accept: (decision: ExperimentalQuestionResolutionScopeDecision) => void,
+) => void | Promise<void>;
+
+export interface ExperimentalQuestionResolution {
+  /** Version 1 binds complete questions.open reads, postcommit thread:changed invalidation, reconnect refresh, and qst resolution. Unknown or missing versions are unsupported. */
+  readonly version: 1;
+  /** Host-derived native invocation context is used only inside the invoking plugin tool. Calls elsewhere are local-unverified. Both pint actions are unsupported. */
+  resolve(input: QuestionResolutionInput): Promise<QuestionResolutionResult>;
+}
+
+/** The API handed to a plugin factory, implemented by the BB server. */
 export interface BbPluginApi {
+  readonly experimental_questionResolution: ExperimentalQuestionResolution;
+  readonly experimental_questionResolutionScope: {
+    register(policy: ExperimentalQuestionResolutionScopePolicy): {
+      dispose(): void;
+    };
+  };
   /** The plugin's own id (namespaces storage, routes, commands). */
   readonly pluginId: string;
   /** Leveled, plugin-scoped logger. */

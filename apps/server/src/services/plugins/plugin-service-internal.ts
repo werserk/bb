@@ -67,6 +67,7 @@ export interface PluginHostArtifactSnapshot {
 }
 
 export interface PluginServiceDeps {
+  resolveQuestion?: import("@get-bb/plugin-sdk").ExperimentalQuestionResolution["resolve"];
   machineEnrollments?: MachineEnrollmentService;
   db: DbConnection;
   sharedPorts?: Pick<

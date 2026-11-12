@@ -58,6 +58,7 @@ interface IdScopedChangedListenerRecord<
   active: boolean;
   callback: BbRealtimeCallback<TEventName>;
   event: TEventName;
+  onReady?: () => void;
   selectorId?: string;
   target: RealtimeSubscriptionTarget;
 }
@@ -186,6 +187,10 @@ export class BbRealtimeClient implements BbRealtime {
   private resolveSocketReady: (() => void) | null = null;
   private socket: BbRealtimeSocket | null = null;
   private socketReadyPromise: Promise<void> | null = null;
+  private readonly subscriptionBarriers: Array<{
+    socket: BbRealtimeSocket;
+    listener: ChangedListenerRecord;
+  }> = [];
 
   constructor(args: CreateBbRealtimeClientArgs) {
     this.transport = args.transport;
@@ -206,6 +211,7 @@ export class BbRealtimeClient implements BbRealtime {
           active: true,
           callback: args.callback,
           event: args.event,
+          onReady: args.experimental_onReady,
           selectorId: args.threadId,
           target: threadRealtimeTarget(args.threadId),
         });
@@ -287,6 +293,8 @@ export class BbRealtimeClient implements BbRealtime {
         this.removeListener(listener);
         throw error;
       }
+      if (this.socket?.readyState === SOCKET_OPEN)
+        this.confirmSubscription(listener);
     }
 
     return () => this.removeListener(listener);
@@ -302,6 +310,19 @@ export class BbRealtimeClient implements BbRealtime {
       this.removeTarget(listener.target);
     }
     this.closeSocketIfIdle();
+  }
+
+  private confirmSubscription(listener: ChangedListenerRecord): void {
+    const socket = this.socket;
+    if (
+      !socket ||
+      socket.readyState !== SOCKET_OPEN ||
+      !("onReady" in listener) ||
+      !listener.onReady
+    )
+      return;
+    this.subscriptionBarriers.push({ socket, listener });
+    socket.send(JSON.stringify({ type: "ping" }));
   }
 
   private addTarget(target: RealtimeSubscriptionTarget): void {
@@ -381,6 +402,8 @@ export class BbRealtimeClient implements BbRealtime {
       for (const subscription of this.targetSubscriptions.values()) {
         this.sendTargetMessage("subscribe", subscription.target);
       }
+      for (const listener of this.listeners)
+        if (isTargetedListener(listener)) this.confirmSubscription(listener);
       this.resolveSocketReadyPromise();
       this.closeSocketIfIdle();
       if (this.socket !== socket) {
@@ -394,7 +417,7 @@ export class BbRealtimeClient implements BbRealtime {
     };
 
     socket.onmessage = (event) => {
-      this.handleSocketMessage(event);
+      if (this.socket === socket) this.handleSocketMessage(event);
     };
 
     const handleClosed = () => {
@@ -402,6 +425,7 @@ export class BbRealtimeClient implements BbRealtime {
         return;
       }
       this.socket = null;
+      this.subscriptionBarriers.length = 0;
       this.clearSocketReadyPromise(
         new Error("bb realtime socket closed before it became ready."),
       );
@@ -478,6 +502,7 @@ export class BbRealtimeClient implements BbRealtime {
     ) {
       const socket = this.socket;
       this.socket = null;
+      this.subscriptionBarriers.length = 0;
       this.emitConnection({
         state: "disconnected",
         reconnected: false,
@@ -504,6 +529,24 @@ export class BbRealtimeClient implements BbRealtime {
       parsedMessage = JSON.parse(event.data);
     } catch (error) {
       console.error("bb realtime ignored malformed websocket message", error);
+      return;
+    }
+
+    if (
+      typeof parsedMessage === "object" &&
+      parsedMessage !== null &&
+      "type" in parsedMessage &&
+      parsedMessage.type === "pong"
+    ) {
+      const barrier = this.subscriptionBarriers.shift();
+      if (
+        barrier &&
+        barrier.socket === this.socket &&
+        barrier.listener.active &&
+        "onReady" in barrier.listener &&
+        barrier.listener.onReady
+      )
+        this.callListener(barrier.listener.onReady, undefined);
       return;
     }
 
@@ -651,9 +694,9 @@ export class BbRealtimeClient implements BbRealtime {
     return [...this.listeners];
   }
 
-  private callListener<TEventName extends BbRealtimeEventName>(
-    callback: BbRealtimeCallback<TEventName>,
-    event: Parameters<BbRealtimeCallback<TEventName>>[0],
+  private callListener<TEvent>(
+    callback: (event: TEvent) => void,
+    event: TEvent,
   ): void {
     try {
       callback(event);

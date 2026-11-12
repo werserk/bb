@@ -43,7 +43,10 @@ import { resolveDeprecatedWorkspaceProvisionType } from "../environments/environ
 import { markTurnTraceSpan } from "../system/turn-trace.js";
 
 import { BB_UPDATE_PLAN_TOOL } from "./thread-plan-tool.js";
-import { BB_RESOLVE_QUESTION_TOOL } from "./question-resolution-tool.js";
+import {
+  BB_RESOLVE_QUESTION_TOOL,
+  BB_LIST_QUESTIONS_TOOL,
+} from "./question-resolution-tool.js";
 
 // The single home of the plan-keeping rule for every bb agent; skills and
 // plugins add only what is specific to them and point here.
@@ -125,6 +128,7 @@ function resolveDynamicTools(
       pluginId: null,
     },
     { tool: BB_RESOLVE_QUESTION_TOOL, instructions: null, pluginId: null },
+    { tool: BB_LIST_QUESTIONS_TOOL, instructions: null, pluginId: null },
     ...pluginTools
       .filter((contribution) => contribution.tool.name !== "AskUserQuestion")
       .map((contribution) => ({
