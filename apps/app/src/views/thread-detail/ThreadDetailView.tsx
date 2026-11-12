@@ -1546,12 +1546,14 @@ function ThreadDetailViewInternal(
     [openLiveFilePreview, thread?.environmentId],
   );
 
-  useRetainedThreadTabHostState({
+  const renderRetainedPanel = useRetainedThreadTabHostState({
     threadId,
     ready:
       threadQueryState.status !== "loading" &&
       !!thread &&
       thread.projectId === projectId,
+    loading: threadQueryState.status === "loading",
+    tabsReady: threadFixedTabs.isReady,
     open: isSecondaryPanelOpen,
     activeTabId: activeFixedSecondaryTabId,
     environment: threadTabEnvironment,
@@ -1980,19 +1982,25 @@ function ThreadDetailViewInternal(
             isBoundedPane={isBoundedPane}
             onToggleSecondaryPanel={toggleSecondaryPanel}
             onToggleConversationCollapse={toggleConversationCollapse}
-            renderHostedPanel={(panel) => (
-              <MarkdownLocalFileContextMenuContext.Provider
-                value={getLocalFileContextMenuItems}
-              >
-                <MarkdownLocalFileOpenTargetsContext.Provider
-                  value={fileOpenTargets}
+            renderHostedPanel={(panel) =>
+              renderRetainedPanel(
+                <MarkdownLocalFileContextMenuContext.Provider
+                  value={getLocalFileContextMenuItems}
                 >
-                  <UrlOpenRoutingProvider openInAppBrowser={openBrowser}>
-                    {panel}
-                  </UrlOpenRoutingProvider>
-                </MarkdownLocalFileOpenTargetsContext.Provider>
-              </MarkdownLocalFileContextMenuContext.Provider>
-            )}
+                  <MarkdownLocalFileOpenTargetsContext.Provider
+                    value={fileOpenTargets}
+                  >
+                    <UrlOpenRoutingProvider openInAppBrowser={openBrowser}>
+                      <AppNavigationHostProvider
+                        capabilities={appNavigationCapabilities}
+                      >
+                        {panel}
+                      </AppNavigationHostProvider>
+                    </UrlOpenRoutingProvider>
+                  </MarkdownLocalFileOpenTargetsContext.Provider>
+                </MarkdownLocalFileContextMenuContext.Provider>,
+              )
+            }
             metadata={{
               thread,
               projectId,

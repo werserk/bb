@@ -7,6 +7,7 @@ import {
 import { TabVisibleContext } from "@/components/secondary-panel/tab-visibility";
 import {
   PaneContext,
+  createPaneSecondaryPanelRegistry,
   type PaneContextValue,
 } from "@/views/thread-detail/PaneContext";
 import { createPluginFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
@@ -15,7 +16,7 @@ import {
   useAppNavigationHost,
 } from "@/lib/app-navigation-host";
 import { useTabVisible } from "@/components/secondary-panel/tab-visibility";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   act,
   cleanup,
@@ -44,6 +45,14 @@ import {
   useThreadFixedTabs,
 } from "./PluginThreadFixedTabs";
 
+import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
+import { getThreadSecondaryPanelWidthPercentAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import { SplitWorkspaceSecondaryPanelHost } from "@/views/thread-detail/SplitWorkspaceSecondaryPanelHost";
+vi.mock(
+  "react-resizable-panels",
+  () => import("@/test/react-resizable-panels-stub"),
+);
+const visibilityCommits: boolean[] = [];
 let mounts = 0;
 let disposals = 0;
 let identity: string | null = "coordinator";
@@ -57,6 +66,9 @@ const callbacks = new Map<
 function Board({ threadId }: { threadId: string }) {
   const [expanded, setExpanded] = useState(false);
   const tabVisible = useTabVisible();
+  useLayoutEffect(() => {
+    visibilityCommits.push(tabVisible);
+  });
   const host = useAppNavigationHost();
   useEffect(() => {
     callbacks.set(threadId, host.openUrl);
@@ -107,28 +119,35 @@ type SurfaceProps = {
   threadId: string;
   projectId?: string;
   ready?: boolean;
+  loading?: boolean;
   open?: boolean;
   selected?: boolean;
   pane?: PaneContextValue;
+  hosted?: boolean;
 };
 function Host({
   threadId,
   ready = true,
+  loading = !ready,
   open = true,
   selected = true,
+  hosted = false,
 }: SurfaceProps) {
-  useRetainedThreadTabHostState({
+  const { entries, observers, isReady } = useThreadFixedTabs({
+    threadId,
+    environmentId: null,
+  });
+  const transport = useRetainedThreadTabHostState({
     threadId,
     ready,
+    loading,
+    tabsReady: isReady,
     open,
     activeTabId: selected
       ? createPluginFixedPanelTab({ pluginId: "example", tabId: "tasks" }).id
       : "files",
   });
-  const { entries, observers } = useThreadFixedTabs({
-    threadId,
-    environmentId: null,
-  });
+
   const capabilities = useMemo(
     () => ({
       openUrl: () => {
@@ -138,28 +157,53 @@ function Host({
     }),
     [threadId],
   );
+  const panel = (
+    <TabVisibleContext.Provider value={true}>
+      <section key={threadId}>
+        {open && selected
+          ? entries.map((entry) => (
+              <div key={entry.tab.id}>
+                {createThreadFixedTabDescriptor(
+                  entry,
+                  threadId,
+                  null,
+                  () => {},
+                ).renderContent()}
+              </div>
+            ))
+          : null}
+      </section>
+    </TabVisibleContext.Provider>
+  );
   return (
     <AppNavigationHostProvider capabilities={capabilities}>
       {observers}
       {!ready ? (
         <p>Loading</p>
+      ) : hosted ? (
+        <SecondaryPanelLayout
+          open={open}
+          onToggle={() => {}}
+          onClose={() => {}}
+          panelGroupKey="test"
+          resetKey={threadId}
+          contentKey={threadId}
+          drawerLabel="Panel"
+          drawerFallback={null}
+          composerHost={null}
+          mainPanelId="timeline"
+          main={<p>Timeline</p>}
+          mainHeader={null}
+          widthPercentAtom={getThreadSecondaryPanelWidthPercentAtom(threadId)}
+          renderHostedPanel={(panel) => (
+            <AppNavigationHostProvider capabilities={capabilities}>
+              {transport(panel)}
+            </AppNavigationHostProvider>
+          )}
+          renderPanel={() => panel}
+        />
       ) : (
-        <TabVisibleContext.Provider value={true}>
-          <section key={threadId}>
-            {open && selected
-              ? entries.map((entry) => (
-                  <div key={entry.tab.id}>
-                    {createThreadFixedTabDescriptor(
-                      entry,
-                      threadId,
-                      null,
-                      () => {},
-                    ).renderContent()}
-                  </div>
-                ))
-              : null}
-          </section>
-        </TabVisibleContext.Provider>
+        panel
       )}
     </AppNavigationHostProvider>
   );
@@ -190,6 +234,7 @@ afterEach(() => {
   client.clear();
   resetPluginSlotStoreForTest();
   resetPluginFrontendBootStateForTest();
+  visibilityCommits.length = 0;
   mounts = 0;
   disposals = 0;
   identity = "coordinator";
@@ -402,4 +447,141 @@ it("observes hook-driven identity changes with unchanged host props", async () =
   expect(original.isConnected).toBe(false);
   expect(screen.getByTestId("board")).not.toBe(original);
   expect({ mounts, disposals }).toEqual({ mounts: 2, disposals: 1 });
+});
+
+it("does not toggle read visibility during warm same-coordinator navigation", async () => {
+  install();
+  markPluginFrontendsSettled();
+  const view = render(<Surface threadId="coordinator" />);
+  await screen.findByTestId("board");
+  visibilityCommits.length = 0;
+  await act(async () => view.rerender(<Surface threadId="child" />));
+  expect(visibilityCommits).not.toContain(false);
+});
+
+function HostedSurface({
+  focused = "left",
+  leftThread = "left",
+  leftReady = true,
+}: {
+  focused?: string;
+  leftThread?: string;
+  leftReady?: boolean;
+}) {
+  const registry = useMemo(createPaneSecondaryPanelRegistry, []);
+  const hosts = useMemo(
+    () =>
+      Object.fromEntries(
+        ["left", "right"].map((id) => [
+          id,
+          {
+            clear: () => registry.clear(id),
+            publish: (
+              model: import("@/views/thread-detail/PaneContext").PaneSecondaryPanelViewModel,
+            ) => registry.publish(id, model),
+          },
+        ]),
+      ),
+    [registry],
+  );
+  return (
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <SplitWorkspaceSecondaryPanelHost
+          registry={registry}
+          focusedPaneId={focused}
+          isPaneMaximized={false}
+        >
+          {["left", "right"].map((id) => (
+            <PaneContext.Provider
+              key={id}
+              value={{
+                paneId: id,
+                isFocused: id === focused,
+                isSplitPane: true,
+                secondaryPanelHost: hosts[id],
+                reservesWindowPanelToggle: false,
+                onRequestClose: null,
+                isMaximized: false,
+                onToggleMaximize: null,
+                isBoundedPane: true,
+                isTopRow: true,
+                ownsWindowTopLeft: false,
+                navigateInPane() {},
+              }}
+            >
+              <RetainedThreadFixedTabs
+                projectId="project"
+                threadId={id === "left" ? leftThread : "right"}
+              >
+                <Host
+                  threadId={id === "left" ? leftThread : "right"}
+                  ready={id !== "left" || leftReady}
+                  hosted
+                />
+              </RetainedThreadFixedTabs>
+            </PaneContext.Provider>
+          ))}
+        </SplitWorkspaceSecondaryPanelHost>
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+}
+it("retains each pane through the real external split panel host", async () => {
+  install();
+  markPluginFrontendsSettled();
+  const view = render(<HostedSurface />);
+  const left = await screen.findByTestId("board");
+  const old = callbacks.get("left")!;
+  fireEvent.click(screen.getByText("Collapsed"));
+  left.scrollTop = 317;
+  await act(async () => view.rerender(<HostedSurface leftThread="child" />));
+  expect(screen.getByTestId("board")).toBe(left);
+  expect(left.scrollTop).toBe(317);
+  expect(old({ url: "stale" })).toBe(false);
+  expect(callbacks.get("child")!({ url: "current" })).toBe(true);
+  await act(async () =>
+    view.rerender(<HostedSurface leftThread="cold" leftReady={false} />),
+  );
+  expect(left.isConnected).toBe(true);
+  const container = left.closest<HTMLElement>(
+    "[data-retained-fixed-tab-body]",
+  )!;
+  expect(container.style.position).toBe("fixed");
+  expect(container.inert).toBe(true);
+  expect(callbacks.get("child")!({ url: "loading" })).toBe(false);
+  await act(async () => view.rerender(<HostedSurface leftThread="child" />));
+  expect(screen.getByTestId("board")).toBe(left);
+  await act(async () =>
+    view.rerender(<HostedSurface focused="right" leftThread="child" />),
+  );
+  const right = screen.getAllByTestId("board").find((el) => el !== left)!;
+  expect(right).toBeTruthy();
+  expect(left.isConnected).toBe(true);
+  expect(callbacks.get("child")!({ url: "unfocused" })).toBe(false);
+  await act(async () =>
+    view.rerender(<HostedSurface focused="left" leftThread="child" />),
+  );
+  expect(screen.getAllByTestId("board")).toContain(left);
+  expect(right.isConnected).toBe(true);
+  expect(left.textContent).toContain("Expanded");
+  expect(mounts).toBe(2);
+  expect(disposals).toBe(0);
+});
+
+it("parks rather than paints stale content over a terminal thread error", async () => {
+  install();
+  markPluginFrontendsSettled();
+  const view = render(<Surface threadId="coordinator" />);
+  const board = await screen.findByTestId("board");
+  await act(async () =>
+    view.rerender(<Surface threadId="missing" ready={false} loading={false} />),
+  );
+  const container = board.closest<HTMLElement>(
+    "[data-retained-fixed-tab-body]",
+  )!;
+  expect(board.isConnected).toBe(true);
+  expect(container.style.position).not.toBe("fixed");
+  expect(screen.getByTestId("visible").textContent).toBe("false");
+  expect(callbacks.get("coordinator")!({ url: "error" })).toBe(false);
 });

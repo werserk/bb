@@ -26,7 +26,10 @@ import {
   TabVisibleContext,
   useTabVisible,
 } from "@/components/secondary-panel/tab-visibility";
-import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
+import {
+  PaneContext,
+  useOptionalPaneContext,
+} from "@/views/thread-detail/PaneContext";
 import { PluginTabScope } from "./PluginTabs";
 import { useRetainedThreadTabContainer } from "./RetainedThreadTabContainer";
 import { useRetainedThreadTabFrame } from "./RetainedThreadTabFrame";
@@ -34,6 +37,8 @@ import { useRetainedThreadTabFrame } from "./RetainedThreadTabFrame";
 type HostState = {
   threadId: string;
   ready: boolean;
+  loading: boolean;
+  tabsReady: boolean;
   open: boolean;
   activeTabId: string | null;
   environment?: ExperimentalThreadEnvironment | null;
@@ -140,16 +145,29 @@ export function RetainedThreadFixedTabs({
 
 export function useRetainedThreadTabHostState(state: HostState) {
   const registry = useContext(RetainedTabsContext);
+  const pane = useOptionalPaneContext();
   useLayoutEffect(() => {
     registry?.publishState(state);
   }, [
     registry,
     state.threadId,
     state.ready,
+    state.loading,
+    state.tabsReady,
     state.open,
     state.activeTabId,
     state.environment,
   ]);
+  // The split workspace renders its panel outside the originating pane tree.
+  // Transport the same registry and pane rather than creating another owner.
+  return useCallback(
+    (panel: ReactNode) => (
+      <RetainedTabsContext.Provider value={registry}>
+        <PaneContext.Provider value={pane}>{panel}</PaneContext.Provider>
+      </RetainedTabsContext.Provider>
+    ),
+    [registry, pane],
+  );
 }
 
 function OrdinaryRegistration({
@@ -226,7 +244,7 @@ function Instance({
   identity: string | null;
   scope: string;
 }) {
-  const [outlet, setOutlet] = useState<Outlet | null>(null);
+  const [, setOutlet] = useState<Outlet | null>(null);
   const [lastOutlet, setLastOutlet] = useState<Outlet | null>(null);
   const [demanded, setDemanded] = useState(false);
 
@@ -245,7 +263,11 @@ function Instance({
     pluginId: slot.pluginId,
     tabId: slot.id,
   }).id;
-  const current = state?.threadId === threadId;
+  // Route props render before the layout-published host state. Keep presentation
+  // on that committed state; dispatch still fences against the latest route ref.
+  const bodyThreadId = state?.threadId ?? threadId;
+  const outlet = currentOutlet.current;
+  const current = state !== null;
   const selected =
     current &&
     state.open &&
@@ -254,12 +276,20 @@ function Instance({
   const attached = !!(
     selected &&
     state.ready &&
-    outlet?.threadId === threadId &&
+    outlet?.threadId === bodyThreadId &&
     outlet.visible
+  );
+  // A new thread's visibility observer settles in layout. Preserve the previous
+  // selected body during that handoff, but never authorize old outlet actions.
+  const pendingVisibility = !!(
+    selected &&
+    state.ready &&
+    !state.tabsReady &&
+    demanded
   );
   const placement = useRetainedThreadTabContainer({
     attached,
-    bridge: !!(selected && !state.ready),
+    bridge: !!(selected && state.loading) || pendingVisibility,
     outlet,
     tabId: slot.id,
   });
@@ -298,17 +328,17 @@ function Instance({
     const latest = registry.getState();
     return (
       alive.current &&
-      currentHost.current.threadId === threadId &&
+      currentHost.current.threadId === bodyThreadId &&
       currentHost.current.focused &&
-      latest?.threadId === threadId &&
+      latest?.threadId === bodyThreadId &&
       latest.ready &&
       latest.open &&
       latest.activeTabId === tabId &&
-      currentOutlet.current?.threadId === threadId &&
+      currentOutlet.current?.threadId === bodyThreadId &&
       currentOutlet.current.visible &&
       (pane?.isFocused ?? true)
     );
-  }, [registry, threadId, tabId, pane?.isFocused]);
+  }, [registry, bodyThreadId, tabId, pane?.isFocused]);
   const Component = slot.component;
   const frame = outlet ?? lastOutlet;
   return (
@@ -324,13 +354,15 @@ function Instance({
                 <FixedTabTargetScope
                   ownerId={getThreadFixedTabOwnerId(slot.pluginId)}
                   tabId={slot.id}
-                  targetKey={`${threadId}\0${getThreadFixedTabOwnerId(slot.pluginId)}\0${slot.id}`}
+                  targetKey={`${bodyThreadId}\0${getThreadFixedTabOwnerId(slot.pluginId)}\0${slot.id}`}
                 >
-                  <TabVisibleContext.Provider value={!!attached}>
+                  <TabVisibleContext.Provider
+                    value={attached || pendingVisibility}
+                  >
                     <Component
-                      threadId={threadId}
+                      threadId={bodyThreadId}
                       environment={
-                        outlet?.threadId === threadId
+                        outlet?.threadId === bodyThreadId
                           ? outlet.environment
                           : null
                       }
