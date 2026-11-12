@@ -24,14 +24,15 @@ export function ThreadPlanQuestion({
   placement,
   focused,
   focusRequest,
+  inFlow = false,
 }: {
   interaction: PendingInteraction;
   threadId: string;
   placement: "overlay" | "panel";
+  inFlow?: boolean;
   focused: boolean;
   focusRequest?: ThreadPlanFocusRequest;
 }) {
-  const [skipped, setSkipped] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const visible = usePlanSurfaceVisible(root);
   const [activeRequest, setActiveRequest] = useState<ThreadPlanFocusRequest>();
@@ -62,11 +63,7 @@ export function ThreadPlanQuestion({
     visible === true && interaction.payload.kind === "user_question",
   );
   useEffect(() => {
-    if (requested) setSkipped(false);
-  }, [requested, activeRequest]);
-  useEffect(() => {
-    if (!requested || skipped || !ownsEditor || !activeRequest.consumeFocus())
-      return;
+    if (!requested || !ownsEditor || !activeRequest.consumeFocus()) return;
     const fields = root.current?.querySelectorAll<HTMLElement>(
       'textarea,input,select,[role="radio"],[role="checkbox"]',
     );
@@ -81,20 +78,20 @@ export function ThreadPlanQuestion({
         ) ??
         null,
     );
-  }, [activeRequest, requested, skipped, ownsEditor]);
+  }, [activeRequest, requested, ownsEditor]);
   if (interaction.payload.kind !== "user_question") return null;
   return (
     <div
       ref={root}
-      className="m-2 rounded-md border border-warning bg-warning/5 p-3"
+      className={
+        inFlow
+          ? "min-w-0"
+          : "m-2 rounded-md border border-warning bg-warning/5 p-3"
+      }
       data-plan-interaction={interaction.id}
     >
       {!ownsEditor ? (
         <span className="text-muted-foreground">Answer in the active view</span>
-      ) : skipped ? (
-        <button type="button" onClick={() => setSkipped(false)}>
-          Needs you · Answer
-        </button>
       ) : (
         <ThreadQuestionFormHost
           density="default"
@@ -106,7 +103,7 @@ export function ThreadPlanQuestion({
             interactionId={interaction.id}
             isResolving={interaction.status === "resolving"}
             questions={interaction.payload.questions}
-            plan={{ priority, onSkip: () => setSkipped(true) }}
+            plan={{ priority }}
           />
         </ThreadQuestionFormHost>
       )}
@@ -197,6 +194,7 @@ function Step({ step, executing }: { step: PlanStepView; executing: boolean }) {
 }
 export function ThreadTodoCard({
   snapshot,
+  compact = false,
   earlier,
   narrow,
   executing,
@@ -204,6 +202,7 @@ export function ThreadTodoCard({
   focusRequest,
   ...props
 }: ThreadPlanStepsProps & {
+  compact?: boolean;
   snapshot: PlanSnapshotView;
   earlier: boolean;
   narrow: boolean;
@@ -216,7 +215,7 @@ export function ThreadTodoCard({
     snapshot,
     earlier,
   );
-  const [expanded, setExpanded] = useState(!narrow && !quiet);
+  const [expanded, setExpanded] = useState(!compact && !narrow && !quiet);
   const previous = useRef({ narrow, quiet, waiting });
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -225,9 +224,10 @@ export function ThreadTodoCard({
     const before = previous.current;
     if ((narrow && !before.narrow) || (quiet && !before.quiet))
       setExpanded(false);
-    else if (waiting && !before.waiting && !narrow) setExpanded(true);
+    else if (!compact && waiting && !before.waiting && !narrow)
+      setExpanded(true);
     previous.current = { narrow, quiet, waiting };
-  }, [narrow, quiet, waiting]);
+  }, [compact, narrow, quiet, waiting]);
   useEffect(() => {
     if (!focusRequest) return;
     if (
@@ -281,7 +281,9 @@ export function ThreadTodoCard({
   return (
     <section
       className={cn(
-        "min-w-0 overflow-hidden rounded-xl border bg-background shadow-lg",
+        compact
+          ? "min-w-0 overflow-hidden text-muted-foreground"
+          : "min-w-0 overflow-hidden rounded-xl border bg-background shadow-lg",
         quiet && "text-muted-foreground",
         waiting && "border-warning",
         !quiet && !waiting && failed && "border-destructive-text",
@@ -305,7 +307,9 @@ export function ThreadTodoCard({
         onClick={() => setExpanded((value) => !value)}
       >
         <span className="min-w-0 flex-1 truncate">
-          {title}
+          {compact
+            ? `${earlier ? "Plan from an earlier task" : "Plan"} ${snapshot.items.filter((item) => item.status === "completed").length}/${snapshot.items.length} · ${waiting ? "Waiting for you" : failed ? "Failed" : finished ? "Finished" : executing ? "Running" : "Paused"}`
+            : title}
           {quiet &&
             ` · ${new Date(snapshot.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}
         </span>
@@ -332,19 +336,20 @@ export function ThreadTodoCard({
           {snapshot.items.map((step) => (
             <div key={step.id}>
               <Step step={step} executing={executing && !quiet} />
-              {step.interactionIds.map((id) => {
-                const interaction = interactions.find((i) => i.id === id);
-                return interaction ? (
-                  <ThreadPlanQuestion
-                    key={id}
-                    interaction={interaction}
-                    threadId={props.threadId}
-                    placement={props.placement}
-                    focused={focused}
-                    focusRequest={focusRequest}
-                  />
-                ) : null;
-              })}
+              {!compact &&
+                step.interactionIds.map((id) => {
+                  const interaction = interactions.find((i) => i.id === id);
+                  return interaction ? (
+                    <ThreadPlanQuestion
+                      key={id}
+                      interaction={interaction}
+                      threadId={props.threadId}
+                      placement={props.placement}
+                      focused={focused}
+                      focusRequest={focusRequest}
+                    />
+                  ) : null;
+                })}
             </div>
           ))}
         </div>

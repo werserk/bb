@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export const conversationQuestionIdSchema = z
+  .string()
+  .regex(/^qst_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/u);
+
 const CLIENT_TURN_REQUEST_ID_PREFIX = "creq_";
 export const CLIENT_TURN_REQUEST_ID_SUFFIX_LENGTH = 10;
 export const CLIENT_TURN_REQUEST_ID_ALPHABET =

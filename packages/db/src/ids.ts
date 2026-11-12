@@ -58,6 +58,10 @@ export function createPendingInteractionId(): string {
   return createId("pint");
 }
 
+export function createConversationQuestionId(): string {
+  return createId("qst");
+}
+
 export function createHostDaemonSessionId(): string {
   return createId("hses");
 }

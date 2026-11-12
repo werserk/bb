@@ -1,4 +1,7 @@
 export type {
+  ConversationQuestion,
+  ConversationQuestionPublication,
+  ConversationQuestionAnswer,
   CallerExecutionInputSource,
   ContextSnapshot,
   ContextCategory,

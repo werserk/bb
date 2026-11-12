@@ -327,12 +327,10 @@ function QuestionInputBlock({
     event: KeyboardEvent<HTMLTextAreaElement>,
   ): void => {
     if (
-      isPointerCoarse ||
+      (isPointerCoarse && !event.ctrlKey && !event.metaKey) ||
       event.nativeEvent.isComposing ||
       event.key !== "Enter" ||
       event.shiftKey ||
-      event.metaKey ||
-      event.ctrlKey ||
       event.altKey
     ) {
       return;
@@ -531,10 +529,6 @@ export function QuestionForm({
   };
 
   const handleCancel = async (): Promise<void> => {
-    if (mode === "plan") {
-      await onCancel();
-      return;
-    }
     if (closeInline) {
       closeInline();
       return;
@@ -671,7 +665,15 @@ export function QuestionForm({
           disabled={cancelBlocked}
           onClick={handleCancel}
         >
-          {mode === "plan" ? "Skip" : "Cancel"}
+          <span
+            title={
+              mode === "plan"
+                ? "Cancel question and stop current turn"
+                : undefined
+            }
+          >
+            Cancel
+          </span>
         </Button>
         <div className="flex items-center gap-2">
           {!isFirst && mode !== "plan" ? (

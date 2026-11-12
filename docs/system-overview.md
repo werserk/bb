@@ -142,3 +142,65 @@ branches, non-owner inputs and legacy in-flight requests without provenance are
 outside this recovery. Persisted JSON and public union types change without a SQL
 migration. A .68 downgrade with deferred rows is prohibited; release must prove
 remaining-history compatibility or require the stopped pre-upgrade snapshot.
+
+### Questions in chat
+
+`packages/domain/src/conversation-questions.ts` owns ordinary question publication,
+explicit answers, immutable material manifests and the exact inline marker parser.
+`conversation_questions` stores publications independently of provider callbacks.
+`apps/server/src/services/threads/conversation-questions.ts` is the common service
+for the injected `bb_ask_question` tool, HTTP, SDK and CLI. Publication snapshots
+all declared files before committing the question and its assistant-message marker
+in one transaction. A source turn/call identifies retries; changed content under
+the same source conflicts. Fresh publication requires a live source turn.
+
+`question-materials.ts` uses existing rooted host read/write primitives, verifies
+content hashes, and records snapshot transport revisions separately. The manifest
+retains the original host and storage root. The scoped question-file route serves
+only declared snapshots, checks revision/size before streaming, and supports range
+requests. HTML dependencies retain their relative paths. Missing or changing files
+prevent publication; preview loading remains a separate observable outcome.
+
+Answer acceptance normalizes explicit choices and atomically writes the response
+and a `questionResponse` row into the existing queue. Identical retries return the
+same receipt; conflicting answers fail. The original publication and manifest
+travel with the response. Accepted queue content cannot be edited or grouped with
+ordinary messages. Final queue consumption rechecks question ownership, revision,
+withdrawal and thread eligibility inside the dispatch transaction. It records
+submission time with consumption; submission does not assert model consumption.
+Held/removed responses remain distinguishable from submitted responses.
+
+The app replaces only a complete marker message with `ConversationQuestionCard`.
+The shared thread-view grouping rule keeps that message outside completed work
+summaries. Cards reuse the question form without composer focus or global keyboard
+ownership. Body and materials precede answer controls; answer/dismiss changes are
+read through the same SDK path. Existing interaction-change notifications invalidate
+question data. Multiple cards do not create a provider wait or gate ordinary chat.
+
+Claude aliases native AskUserQuestion to the injected common tool and excludes the
+native tool only when the common tool is present. Codex native question calls receive
+an explicit redirect in those sessions; no answer or permission is manufactured.
+Already pending native interactions, command approvals and generic plugin secret
+forms retain their existing lifecycle. Their composer remains available; cancelling
+an old native question still uses the old stop-turn action. Completed reasoning
+uses the assistant renderer for already-emitted material, but cannot supply files
+that were never published.
+
+### Persistent question publication budget
+
+New `bb_ask_question` cards, HTTP/SDK publication and CLI publication use one
+policy in `packages/domain/src/conversation-question-limits.ts`. The server
+publication service enforces it before material snapshots, persistence and
+notifications; the CLI uses the same publication parser before outgoing requests.
+Stored question decoding remains separate and permissive so old large cards
+remain readable and answerable without migration.
+
+The authored text total is 3,000 Unicode code points: body 1,500, each prompt 500,
+header 80, option label 120, description 300 and material label 120. Russian letters
+and astral emoji count one; joined emoji count their constituent code points.
+The total includes every question, option and material label; metadata IDs/values
+have a separate 128 cap. Existing collection maxima remain 10 questions, 4 options,
+20 materials and 100 dependencies per material. Excess returns one actual/limit
+error directing the agent to shorten the question and put the full report in
+materials. Material file content stays outside this prose budget. No truncation
+or answer selection occurs.

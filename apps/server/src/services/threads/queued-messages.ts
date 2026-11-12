@@ -1,6 +1,8 @@
 import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
   getLatestThreadSequence,
+  QuestionResponseNotDeliverableError,
+  setQueuedThreadMessageFailureReason,
   claimNextQueuedThreadMessageGroup,
   claimQueuedThreadMessageGroup,
   createQueuedThreadMessageInTransaction,
@@ -816,6 +818,27 @@ async function sendClaimedSystemNotice(
  * it inside the dispatch transaction (exactly once) or gives it back.
  */
 async function sendClaimedQueuedMessageForThread(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: SendClaimedQueuedMessageForThreadArgs,
+): Promise<ThreadQueuedMessage> {
+  try {
+    return await sendClaimedQueuedMessageForThreadImpl(deps, args);
+  } catch (error) {
+    if (!(error instanceof QuestionResponseNotDeliverableError)) throw error;
+    releaseQueuedMessageClaims(deps, args.queuedMessages);
+    const row = setQueuedThreadMessageFailureReason(deps.db, deps.hub, {
+      id: error.queuedMessageId,
+      threadId: args.thread.id,
+      failureReason: error.message,
+      now: Date.now(),
+      retryDelaysMs: [],
+    });
+    if (!row) throw error;
+    return toThreadQueuedMessage(row);
+  }
+}
+
+async function sendClaimedQueuedMessageForThreadImpl(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendClaimedQueuedMessageForThreadArgs,
 ): Promise<ThreadQueuedMessage> {

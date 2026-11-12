@@ -22,6 +22,7 @@ function makeChild(
     latestAttentionAt: 10,
     parentThreadId: null,
     hasPendingInteraction: false,
+    hasOpenQuestion: false,
     activity: {
       activeWorkflowCount: 0,
       activeBackgroundAgentCount: 0,
@@ -48,6 +49,7 @@ const unreadErrorChild = makeChild({
 
 const idleIndicatorState: ThreadListIndicatorState = {
   hasPendingInteraction: false,
+  hasOpenQuestion: false,
   hasUnsubmittedDraft: false,
   hasUnreadError: false,
   hasUnreadSuccess: false,
@@ -348,6 +350,7 @@ describe("thread-activity", () => {
 
       expect(threadListIndicatorStateForThread(thread, false)).toEqual({
         hasPendingInteraction: true,
+        hasOpenQuestion: false,
         hasUnsubmittedDraft: false,
         hasUnreadError: false,
         hasUnreadSuccess: false,
@@ -626,4 +629,22 @@ it("retains explicit owner-post attention after a hidden service failure", () =>
     hasUnreadError: false,
     hasUnreadSuccess: true,
   });
+});
+
+it("shows an open persistent question over activity without changing runtime or native waiters", () => {
+  for (const active of [false, true]) {
+    const thread = makeThreadListEntry({
+      hasPendingInteraction: false,
+      hasOpenQuestion: true,
+      status: active ? "active" : "idle",
+      runtime: { displayStatus: active ? "active" : "idle" },
+    });
+    expect(
+      resolveThreadListIndicator(
+        threadListIndicatorStateForThread(thread, false),
+      ),
+    ).toBe("waiting-for-input");
+    expect(getCollapsedChildActivity([thread]).pending).toBe(true);
+    expect(thread.status).toBe(active ? "active" : "idle");
+  }
 });

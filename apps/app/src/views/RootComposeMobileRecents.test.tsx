@@ -211,6 +211,15 @@ describe("mobile recents hierarchy interaction", () => {
       child: makeIdleThread({
         id: "thr_child",
         parentThreadId: "thr_parent",
+        hasPendingInteraction: false,
+        hasOpenQuestion: true,
+      }),
+    },
+    {
+      label: "Thread needs user input",
+      child: makeIdleThread({
+        id: "thr_child",
+        parentThreadId: "thr_parent",
         hasPendingInteraction: true,
       }),
     },

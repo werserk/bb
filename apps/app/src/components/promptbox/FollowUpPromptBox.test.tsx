@@ -596,7 +596,7 @@ describe("FollowUpPromptBox", () => {
     expect(props.composer?.onSubmit).toHaveBeenCalledOnce();
   });
 
-  it("keeps the editor mounted and hidden while a pending interaction takes its place", () => {
+  it("keeps the editor visible and editable alongside a pending interaction", () => {
     const props = createFollowUpPromptBoxProps({ kind: "ready" });
     const { container, rerender } = render(<FollowUpPromptBox {...props} />);
     const promptBox = screen.getByTestId("prompt-box");
@@ -624,7 +624,7 @@ describe("FollowUpPromptBox", () => {
     expect(screen.getByTestId("prompt-box")).toBe(promptBox);
     expect(screen.getByLabelText("Follow-up prompt")).toBe(input);
     expect(input.value).toBe("Draft typed before the approval");
-    expect(composerShell?.hidden).toBe(true);
+    expect(composerShell?.hidden).toBe(false);
     const interaction = screen.getByTestId("pending-interaction");
     const stackItem = screen.getByTestId("pending-stack");
     expect(

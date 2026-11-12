@@ -434,3 +434,5 @@ export {
   type SkillScanRoot as ExperimentalSkillScanRoot,
   type IndexedSkillFile as ExperimentalIndexedSkillFile,
 } from "@bb/skill-index";
+
+export { CONVERSATION_QUESTION_TOOL_NAME as internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME } from "@bb/domain";

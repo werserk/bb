@@ -37,6 +37,7 @@ export interface SdkSessionOptions {
   mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
   allowedTools?: string[];
   disallowedTools?: string[];
+  toolAliases?: Options["toolAliases"];
   canUseTool?: CanUseTool;
   env?: NodeJS.ProcessEnv;
   pathToClaudeCodeExecutable?: Options["pathToClaudeCodeExecutable"];
@@ -274,6 +275,9 @@ export class SdkSession {
         : {}),
       ...(this.options.disallowedTools
         ? { disallowedTools: this.options.disallowedTools }
+        : {}),
+      ...(this.options.toolAliases
+        ? { toolAliases: this.options.toolAliases }
         : {}),
       ...(this.options.canUseTool
         ? { canUseTool: this.options.canUseTool }

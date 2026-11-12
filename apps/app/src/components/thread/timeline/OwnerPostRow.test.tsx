@@ -105,6 +105,16 @@ function renderPost(row: TimelineOwnerPostRow) {
 }
 
 describe("threadCardStatus", () => {
+  it("shows an open persistent question without changing native interaction state", () => {
+    const source = {
+      archivedAt: null,
+      hasPendingInteraction: false,
+      hasOpenQuestion: true,
+      runtime: { displayStatus: "active" as const },
+    };
+    expect(threadCardStatus(source)).toBe("waiting");
+    expect(threadCardStatus({ ...source, archivedAt: 1 })).toBe("archived");
+  });
   it.each([
     [
       "archived",

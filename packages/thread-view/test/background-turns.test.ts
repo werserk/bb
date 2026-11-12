@@ -333,3 +333,43 @@ describe("collapseBackgroundTurns", () => {
     );
   });
 });
+
+it.each(["question", "form"] as const)(
+  "keeps material visible before a pending %s in background turns",
+  (workKind) => {
+    const pending =
+      workKind === "question"
+        ? {
+            ...base("question"),
+            kind: "work" as const,
+            workKind,
+            status: "pending" as const,
+            interactionId: "q",
+            lifecycle: "pending" as const,
+            questions: [],
+            answers: null,
+            statusReason: null,
+          }
+        : {
+            ...base("form"),
+            kind: "work" as const,
+            workKind,
+            status: "pending" as const,
+            interactionId: "q",
+            lifecycle: "pending" as const,
+            pluginId: "provider-codex",
+            rendererId: "async-question",
+            title: "Choose",
+            statusReason: null,
+            presentation: {
+              label: { pending: "Asking", completed: "Asked" },
+              icon: { glyph: "MessageQuestion" },
+            },
+            payload: null,
+          };
+    const rows = [request("wake", "agent"), reply("material"), pending];
+    expect(collapseBackgroundTurns(rows, { threadRunning: false })).toEqual(
+      rows,
+    );
+  },
+);

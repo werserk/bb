@@ -85,6 +85,31 @@ Ownership:
   bb thread unread [id]                    Mark unread
   bb thread reorder-pinned <id> [--after <id>] [--before <id>]
 
+Persistent ordinary questions:
+
+  bb thread questions list [id]
+  bb thread questions show <question-id> [id]
+  bb thread questions publish [id] --file <publication.json> --turn-id <turn> --provider-thread-id <provider> --call-id <call>
+  bb thread questions answer <question-id> [id] --file <answer.json>
+  bb thread questions dismiss <question-id> [id] --revision <number>
+  bb thread questions withdraw <question-id> [id] --revision <number>
+    --self and --json are available on every subcommand. Output is JSON.
+
+  Questions remain at their original conversation position and never hold the
+  provider turn. Publish requires a real live source turn; retrying the same
+  source call returns the original question. The publication file contains
+  `body`, `questions` (id, prompt, options, multiSelect, allowFreeText, required)
+  and `materials` (thread-storage-relative path, label, explicit dependencies).
+  Required files are snapshotted before publication; missing files abort it.
+  The answer file contains `revision` and `answers`, keyed by prompt ID, with
+  `selected` option values and optional `freeText`. An identical answer retry
+  returns the same receipt; a conflicting answer is rejected. Delivery is
+  queued asynchronously with original context. Dismiss creates no answer and
+  stops no thread. Withdraw retains history and fences undelivered answers.
+  Approvals and legacy pending interactions continue through `interactions`.
+  SDK: `threads.questions.publish/list/get/answer/dismiss/withdraw` use the
+  same service; `get` includes immutable material manifests and queue receipt.
+
 Interactions:
 
   bb thread interactions list [id]         List a thread's pending and past interactions
@@ -185,3 +210,13 @@ Application links in messages:
   behavior. Desktop and native mobile clients need application-link support
   (mobile bridge version 3); older clients show an update message. Web browsers
   handle their own OS handoff and cannot reliably report missing applications.
+
+### Keep question cards concise
+
+New question cards allow at most 3,000 Unicode code points across body, prompts,
+headers, option labels/descriptions and material labels. Per-field caps are body
+1,500; prompt 500; header 80; option label 120; description 300; material label 120.
+Russian letters and astral emoji count one each; joined emoji count by their
+constituent code points. Publication rejects excess with actual/limit feedback.
+Put the full report in a declared material with a short label, and ask a short
+actionable question. Existing stored cards remain readable and answerable.

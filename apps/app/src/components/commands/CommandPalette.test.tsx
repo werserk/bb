@@ -314,6 +314,7 @@ function makeThread(
       activeGoalCount: 0,
     },
     hasPendingInteraction: false,
+    hasOpenQuestion: false,
     environmentHostId: null,
     environmentPath: null,
     environmentProviderId: null,

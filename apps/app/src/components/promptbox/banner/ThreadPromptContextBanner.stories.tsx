@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { PROMPT_STACK_TRACK_CLASS } from "@/components/promptbox/banner/PromptStackCard";
-import type {
-  MergeBaseState,
-} from "../../../../../../plugins/git/ui/merge-base";
+import type { MergeBaseState } from "../../../../../../plugins/git/ui/merge-base";
 import {
   ThreadChildThreadsBanner,
   ThreadPromptContextBanner,
@@ -314,7 +312,9 @@ const committedUnmergedStatus: WorkspaceStatus = {
   },
 };
 
-function sectionFor(status: WorkspaceStatus): WorkspaceChangedFilesSection<WorkspaceFileStatus> {
+function sectionFor(
+  status: WorkspaceStatus,
+): WorkspaceChangedFilesSection<WorkspaceFileStatus> {
   const section = selectWorkspaceChangedFilesSection(status);
   if (!section) throw new Error("fixture should produce a section");
   return section;
@@ -333,16 +333,17 @@ const committedManyFiles: WorkspaceFileStatus[] = Array.from(
     deletions: 2,
   }),
 );
-const committedManySection: WorkspaceChangedFilesSection<WorkspaceFileStatus> = {
-  ...committedSection,
-  files: committedManyFiles,
-  stats: {
-    ...committedSection.stats,
+const committedManySection: WorkspaceChangedFilesSection<WorkspaceFileStatus> =
+  {
+    ...committedSection,
     files: committedManyFiles,
-    insertions: 720,
-    deletions: 144,
-  },
-};
+    stats: {
+      ...committedSection.stats,
+      files: committedManyFiles,
+      insertions: 720,
+      deletions: 144,
+    },
+  };
 
 const featureBranchMergeBase = gitSegmentFixtureMergeBase();
 
@@ -364,28 +365,27 @@ const childThreadsFixture: ThreadPromptChildThreadsSection = {
       id: "thr_a",
       title: "Investigate Safari auth flake on staging",
       href: "/projects/proj-1/threads/thr_a",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_b",
       title: "Review PR #4521 reviewer comments",
       href: "/projects/proj-1/threads/thr_b",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_c",
       title: "Refactor email pipeline retry logic",
       href: "/projects/proj-1/threads/thr_c",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
     {
       id: "thr_d",
       title: "Backfill workspace-status invalidation cache",
       href: "/projects/proj-1/threads/thr_d",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
   ],
-  pendingInteractions: [],
 };
 
 const childThreadsPendingFixture: ThreadPromptChildThreadsSection = {
@@ -394,62 +394,10 @@ const childThreadsPendingFixture: ThreadPromptChildThreadsSection = {
       id: "thr_blocked",
       title: "Install workspace tools",
       href: "/projects/proj-1/threads/thr_blocked",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
-  ],
-  pendingInteractions: [
-    childQuestionFixture(
-      "thr_blocked",
-      "Install workspace tools",
-      "Which color should the QA badge use?",
-      [],
-      1,
-    ),
   ],
 };
-
-function childQuestionFixture(
-  childThreadId: string,
-  childTitle: string,
-  prompt: string,
-  options: readonly { label: string; description: string }[],
-  createdAt: number,
-) {
-  return {
-    childThreadId,
-    childTitle,
-    href: `/projects/proj-1/threads/${childThreadId}`,
-    interaction: {
-      id: `pint_${childThreadId}`,
-      threadId: childThreadId,
-      turnId: "turn_story",
-      providerId: "claude-code",
-      providerThreadId: "provider-thread-story",
-      providerRequestId: `request-${childThreadId}`,
-      status: "pending" as const,
-      statusReason: null,
-      createdAt,
-      resolvedAt: null,
-      resolution: null,
-      payload: {
-        kind: "user_question" as const,
-        questions: [
-          {
-            id: "choice",
-            prompt,
-            multiSelect: false,
-            allowFreeText: true,
-            required: true,
-            options: options.map((option) => ({
-              value: option.label.toLowerCase(),
-              ...option,
-            })),
-          },
-        ],
-      },
-    },
-  };
-}
 
 const childThreadsQuestionsFixture: ThreadPromptChildThreadsSection = {
   items: [
@@ -457,58 +405,26 @@ const childThreadsQuestionsFixture: ThreadPromptChildThreadsSection = {
       id: "thr_size",
       title: "Pick a size",
       href: "/projects/proj-1/threads/thr_size",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_shape",
       title: "Pick a shape",
       href: "/projects/proj-1/threads/thr_shape",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_color",
       title: "Pick a color",
       href: "/projects/proj-1/threads/thr_color",
-      hasPendingInteraction: true,
+      needsOwnerAttention: true,
     },
     {
       id: "thr_working",
       title: "Investigate failing checks",
       href: "/projects/proj-1/threads/thr_working",
-      hasPendingInteraction: false,
+      needsOwnerAttention: false,
     },
-  ],
-  pendingInteractions: [
-    childQuestionFixture(
-      "thr_size",
-      "Pick a size",
-      "Which size?",
-      [
-        { label: "Small", description: "Proceed with a small-scale change." },
-        { label: "Large", description: "Proceed with a large-scale change." },
-      ],
-      3,
-    ),
-    childQuestionFixture(
-      "thr_shape",
-      "Pick a shape",
-      "Which shape?",
-      [
-        { label: "Circle", description: "Select the circle shape." },
-        { label: "Square", description: "Select the square shape." },
-      ],
-      2,
-    ),
-    childQuestionFixture(
-      "thr_color",
-      "Pick a color",
-      "Which color?",
-      [
-        { label: "Red", description: "Choose red." },
-        { label: "Blue", description: "Choose blue." },
-      ],
-      1,
-    ),
   ],
 };
 
@@ -517,9 +433,8 @@ const childThreadsLargeFixture: ThreadPromptChildThreadsSection = {
     id: `thr_large_${i}`,
     title: `Child work item ${i + 1} that is busy doing thing-${i}`,
     href: `/projects/proj-1/threads/thr_large_${i}`,
-    hasPendingInteraction: i === 1,
+    needsOwnerAttention: i === 1,
   })),
-  pendingInteractions: [],
 };
 
 interface RowConfig {

@@ -714,7 +714,6 @@ function FollowUpPromptBoxWithComposer({
       data-follow-up-composer-footer-visible={
         isCompactViewport && isEditorExpanded ? "" : undefined
       }
-      hidden={hasPendingInteraction}
       onBlurCapture={scheduleCollapseAfterFocusLoss}
       onFocusCapture={handleComposerFocus}
       onPointerDownCapture={handleComposerPointerDown}

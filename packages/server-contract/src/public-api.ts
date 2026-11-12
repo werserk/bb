@@ -1,3 +1,9 @@
+import {
+  conversationQuestionPublicationInputSchema,
+  conversationQuestionAnswerSchema,
+  conversationQuestionVersionSchema,
+  type ConversationQuestion,
+} from "@bb/domain";
 import { z as planZ } from "zod";
 import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
@@ -1690,6 +1696,76 @@ export const publicApiRoutes = {
           .strict(),
       ),
       response: jsonResponse<ThreadPlansReadResponse>(),
+    }),
+    questionFile: defineRoute({
+      path: "/threads/:id/questions/:questionId/files/:filePath{.+}",
+      method: "get",
+      request: noRequest<{
+        param: { id: string; questionId: string; filePath: string };
+      }>(),
+      response: binaryResponse<Uint8Array>(),
+    }),
+    questions: defineRoute({
+      path: "/threads/:id/questions",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ConversationQuestion[]>(),
+    }),
+    publishQuestion: defineRoute({
+      path: "/threads/:id/questions",
+      method: "post",
+      request: jsonRequest<
+        PathId,
+        {
+          source: { turnId: string; providerThreadId: string; callId: string };
+          publication: planZ.input<
+            typeof conversationQuestionPublicationInputSchema
+          >;
+        }
+      >(
+        planZ.strictObject({
+          source: planZ.strictObject({
+            turnId: planZ.string().min(1),
+            providerThreadId: planZ.string().min(1),
+            callId: planZ.string().min(1),
+          }),
+          publication: conversationQuestionPublicationInputSchema,
+        }),
+      ),
+      response: jsonResponse<ConversationQuestion>(),
+    }),
+    question: defineRoute({
+      path: "/threads/:id/questions/:questionId",
+      method: "get",
+      request: noRequest<{ param: { id: string; questionId: string } }>(),
+      response: jsonResponse<ConversationQuestion>(),
+    }),
+    answerQuestion: defineRoute({
+      path: "/threads/:id/questions/:questionId/answer",
+      method: "post",
+      request: jsonRequest<
+        { param: { id: string; questionId: string } },
+        planZ.infer<typeof conversationQuestionAnswerSchema>
+      >(conversationQuestionAnswerSchema),
+      response: jsonResponse<ConversationQuestion>(),
+    }),
+    dismissQuestion: defineRoute({
+      path: "/threads/:id/questions/:questionId/dismiss",
+      method: "post",
+      request: jsonRequest<
+        { param: { id: string; questionId: string } },
+        planZ.infer<typeof conversationQuestionVersionSchema>
+      >(conversationQuestionVersionSchema),
+      response: jsonResponse<ConversationQuestion>(),
+    }),
+    withdrawQuestion: defineRoute({
+      path: "/threads/:id/questions/:questionId/withdraw",
+      method: "post",
+      request: jsonRequest<
+        { param: { id: string; questionId: string } },
+        planZ.infer<typeof conversationQuestionVersionSchema>
+      >(conversationQuestionVersionSchema),
+      response: jsonResponse<ConversationQuestion>(),
     }),
     interactions: defineRoute({
       path: "/threads/:id/interactions",

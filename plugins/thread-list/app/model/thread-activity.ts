@@ -160,12 +160,16 @@ export function threadListIndicatorStateForThread(
   thread: ThreadStatusShape &
     ThreadRuntimeShape &
     ThreadActivityStateShape &
-    Pick<PluginSidebarThread, "hasPendingInteraction" | "queuedWork">,
+    Pick<
+      PluginSidebarThread,
+      "hasPendingInteraction" | "queuedWork" | "indicator"
+    >,
   hasUnsubmittedDraft: boolean,
 ): ThreadListIndicatorState {
   const unreadDone = isUnreadDoneThread(thread);
   return {
-    hasPendingInteraction: thread.hasPendingInteraction,
+    hasPendingInteraction:
+      thread.hasPendingInteraction || thread.indicator === "waiting-for-input",
     hasUnsubmittedDraft,
     hasUnreadError: unreadDone && thread.status === "error",
     hasUnreadSuccess: unreadDone && thread.status !== "error",
@@ -230,7 +234,10 @@ export const NO_COLLAPSED_CHILD_ACTIVITY: CollapsedChildActivity = {
 
 type ThreadActivityShape = ThreadStatusShape &
   ThreadRuntimeShape &
-  Pick<PluginSidebarThread, "id" | "activity" | "hasPendingInteraction">;
+  Pick<
+    PluginSidebarThread,
+    "id" | "activity" | "hasPendingInteraction" | "indicator"
+  >;
 
 export function getCollapsedChildActivity(
   threads: readonly ThreadActivityShape[],
@@ -255,7 +262,10 @@ export function getCollapsedChildActivity(
       unread = true;
     }
 
-    if (thread.hasPendingInteraction) {
+    if (
+      thread.hasPendingInteraction ||
+      thread.indicator === "waiting-for-input"
+    ) {
       pending = true;
     }
     if (isBusyThread(thread)) working = true;

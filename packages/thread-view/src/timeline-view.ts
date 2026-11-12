@@ -747,6 +747,7 @@ function isSummarizableActivityRow(
   return (
     row.kind === "work" &&
     !isOwnerPostRow(row) &&
+    !isPendingQuestionRow(row) &&
     row.workKind !== "approval" &&
     row.workKind !== "question" &&
     row.workKind !== "workflow" &&
@@ -754,23 +755,14 @@ function isSummarizableActivityRow(
   );
 }
 
-export function isPendingQuestionRow(
-  row: ThreadTimelineViewRow,
-): row is TimelineQuestionViewWorkRow {
+export function isPendingQuestionRow(row: ThreadTimelineViewRow): boolean {
   return (
     row.kind === "work" &&
-    row.workKind === "question" &&
+    (row.workKind === "question" || row.workKind === "form") &&
     row.lifecycle === "pending"
   );
 }
 
-/**
- * A completed thought with text, or one whose text the server deferred
- * (long thoughts arrive with `detail: null, contentDeferred: true` and load
- * when the row is expanded). Directly before a pending question it is
- * shown as its own row instead of being folded into an activity group: it
- * is often the only place the agent wrote what the owner needs to answer.
- */
 export function isQuestionContextReasoningRow(
   row: ThreadTimelineViewRow,
 ): row is TimelineReasoningSummaryChild {
@@ -784,31 +776,20 @@ export function isQuestionContextReasoningRow(
   );
 }
 
-function isReasoningSummaryChild(
-  row: TimelineWorkSummaryChild,
-): row is TimelineReasoningSummaryChild {
-  return (
-    row.kind === "system" &&
-    row.systemKind === "operation" &&
-    row.operationKind === "reasoning"
-  );
-}
-
 function flushOpenStepBeforePendingQuestion(
   work: TimelineWorkSummaryChild[],
 ): ThreadTimelineViewRow[] {
-  let start = work.length;
-  while (start > 0 && isReasoningSummaryChild(work[start - 1]!)) start -= 1;
-  const trailing = work.slice(start);
-  const shown = new Set<TimelineWorkSummaryChild>(
-    trailing.filter(isQuestionContextReasoningRow),
-  );
-  if (shown.size === 0) return flushOpenStepAsBundles(work);
-  const kept = [
-    ...work.slice(0, start),
-    ...trailing.filter((row) => !shown.has(row)),
-  ];
-  return [...flushOpenStepAsBundles(kept), ...shown];
+  const result: ThreadTimelineViewRow[] = [];
+  let chunk: TimelineWorkSummaryChild[] = [];
+  for (const row of work) {
+    if (isQuestionContextReasoningRow(row)) {
+      result.push(...flushOpenStepAsBundles(chunk), row);
+      chunk = [];
+    } else {
+      chunk.push(row);
+    }
+  }
+  return [...result, ...flushOpenStepAsBundles(chunk)];
 }
 
 function isTimelineStepBoundary(row: ThreadTimelineViewRow): boolean {

@@ -1,0 +1,172 @@
+import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  conversationQuestionPublicationSchema,
+  questionMaterialManifestSchema,
+  normalizeConversationQuestionAnswers,
+} from "@bb/domain";
+import { sdk } from "@/lib/sdk";
+import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
+import { ConversationQuestionCard } from "./ConversationQuestionCard";
+import {
+  questionCardId,
+  questionResponseId,
+  QuestionOriginalPrompts,
+  questionDeliveryLabels,
+  type QuestionResponseSnapshot,
+} from "./question-response-presentation";
+
+import {
+  QuestionResponseBody,
+  questionResponseClass,
+} from "./QuestionResponseBody";
+import {
+  QuestionNavigationFeedback,
+  useQuestionLinkState,
+} from "./QuestionNavigationFeedback";
+
+import { useQuestionNavigation } from "./question-navigation";
+
+export function QuestionResponseEvent({
+  response,
+  threadId,
+  timestamp,
+}: {
+  response: QuestionResponseSnapshot;
+  threadId: string;
+  timestamp: number;
+}) {
+  const navigation = useQuestionNavigation();
+  const link = useQuestionLinkState(response.questionId, "question");
+  const root = useRef<HTMLElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const source = useQuery({
+    queryKey: [...conversationQuestionsQueryKey(threadId), response.questionId],
+    queryFn: () =>
+      sdk.threads.questions.get({ threadId, questionId: response.questionId }),
+    retry: false,
+  });
+  const question = source.data;
+  let matches = false;
+  try {
+    matches =
+      !source.isError &&
+      question?.id === response.questionId &&
+      question.threadId === threadId &&
+      question.revision === response.revision &&
+      question.status === "answered" &&
+      JSON.stringify(
+        conversationQuestionPublicationSchema.parse(question.publication),
+      ) === JSON.stringify(response.publication) &&
+      JSON.stringify(
+        questionMaterialManifestSchema.parse(question.materialManifest),
+      ) === JSON.stringify(response.materialManifest) &&
+      JSON.stringify(
+        normalizeConversationQuestionAnswers(
+          question.publication.questions,
+          question.response ?? {},
+        ),
+      ) === JSON.stringify(response.answers);
+  } catch {
+    matches = false;
+  }
+  return (
+    <section
+      ref={root}
+      aria-label="Question response"
+      id={questionResponseId(threadId, response.questionId)}
+      tabIndex={-1}
+      data-question-response=""
+      className={questionResponseClass}
+    >
+      <QuestionResponseBody
+        response={response}
+        timestamp={timestamp}
+        footer={
+          <>
+            <span>
+              {matches && question
+                ? questionDeliveryLabels[question.delivery.kind]
+                : source.isPending
+                  ? "Checking response status…"
+                  : "Source unavailable · delivery unverified"}
+              {matches && question?.delivery.reason
+                ? ` — ${question.delivery.reason}`
+                : ""}
+            </span>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              className="min-h-9 shrink-0 text-xs text-foreground underline pointer-coarse:min-h-11"
+              disabled={link.pending}
+              aria-busy={link.pending}
+              onMouseDown={(event) => {
+                if (event.button === 0) event.preventDefault();
+              }}
+              onClick={async () => {
+                if (expanded) {
+                  setExpanded(false);
+                  return;
+                }
+                if (
+                  navigation &&
+                  (await navigation.navigate(
+                    response.questionId,
+                    "question",
+                    "inline",
+                  ))
+                )
+                  return;
+                navigation?.clear();
+                const scope = root.current?.closest("[data-thread-window]");
+                const original = [
+                  ...(scope?.querySelectorAll<HTMLElement>("[id]") ?? []),
+                ].find(
+                  (element) =>
+                    element.id ===
+                    questionCardId(threadId, response.questionId),
+                );
+                if (original)
+                  original.scrollIntoView({
+                    behavior: window.matchMedia?.(
+                      "(prefers-reduced-motion: reduce)",
+                    ).matches
+                      ? "auto"
+                      : "smooth",
+                    block: "center",
+                  });
+                else setExpanded((value) => !value);
+              }}
+            >
+              Original question
+            </button>
+          </>
+        }
+      />
+      <QuestionNavigationFeedback
+        questionId={response.questionId}
+        kind="question"
+      />
+      {expanded ? (
+        matches ? (
+          <ConversationQuestionCard
+            threadId={threadId}
+            questionId={response.questionId}
+            defaultExpanded
+            snapshot
+          />
+        ) : (
+          <section
+            aria-label="Original question snapshot"
+            className="space-y-3 rounded-lg border border-border p-3"
+          >
+            <p className="whitespace-pre-wrap break-words">
+              {response.publication.body}
+            </p>
+            <QuestionOriginalPrompts publication={response.publication} />
+          </section>
+        )
+      ) : null}
+    </section>
+  );
+}

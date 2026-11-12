@@ -1,3 +1,4 @@
+import { conversationQuestionsQueryKey } from "./queries/conversation-question-query-key";
 import {
   pluginTagScope,
   runTaggedRead,
@@ -3457,4 +3458,57 @@ describe("createRealtimeCacheEffects", () => {
       effects.dispose();
     });
   });
+});
+
+it.each([
+  "interactions-changed",
+  "queue-changed",
+  "status-changed",
+  "archived-changed",
+] as const)(
+  "refreshes durable question cards for their own thread on %s",
+  (change) => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const own = [...conversationQuestionsQueryKey("thr_1"), "qst_23456789ab"];
+    const other = [...conversationQuestionsQueryKey("thr_2"), "qst_23456789ac"];
+    queryClient.setQueryData(own, { status: "open" });
+    queryClient.setQueryData(other, { status: "open" });
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      changes: [change],
+    });
+    vi.advanceTimersByTime(50);
+    expect(queryClient.getQueryState(own)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(other)?.isInvalidated).not.toBe(true);
+    effects.dispose();
+  },
+);
+
+it("refreshes sidebar and project lists for persistent question changes with no native pending metadata", () => {
+  vi.useFakeTimers();
+  const { effects, queryClient } = createRealtimeEffectsTestContext();
+  const project = threadListQueryKey({
+      archived: false,
+      projectId: "project-1",
+    }),
+    sidebar = sidebarNavigationQueryKey();
+  queryClient.setQueryData(project, []);
+  queryClient.setQueryData(sidebar, {
+    projects: [],
+    personalProject: { threads: [] },
+  });
+  effects.handleChanged({
+    type: "changed",
+    entity: "thread",
+    id: "thr_1",
+    metadata: { projectId: "project-1" },
+    changes: ["interactions-changed"],
+  });
+  vi.advanceTimersByTime(100);
+  expect(queryClient.getQueryState(project)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(sidebar)?.isInvalidated).toBe(true);
+  effects.dispose();
 });

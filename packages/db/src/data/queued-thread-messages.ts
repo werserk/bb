@@ -1,3 +1,4 @@
+import { requireQuestionResponseDeliverable } from "./conversation-questions.js";
 import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
 export { parseStoredQueuedMessagePayload } from "./queued-message-payload.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
@@ -52,6 +53,7 @@ import type {
 } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import {
+  conversationQuestions,
   environments,
   events,
   queuedThreadMessages,
@@ -362,7 +364,8 @@ export type UpdateQueuedThreadMessageResult =
     }
   | { kind: "not_found" }
   | { kind: "claimed" }
-  | { kind: "stale" };
+  | { kind: "stale" }
+  | { kind: "immutable" };
 
 export interface QueuedThreadMessageEditHoldArgs {
   id: string;
@@ -505,7 +508,9 @@ function queuedMessageGroupingEnvelopeMatches(
   return (
     firstQueuedMessage !== null &&
     firstQueuedMessage.payloadKind !== "deferredSteer" &&
+    firstQueuedMessage.payloadKind !== "questionResponse" &&
     queuedMessage.payloadKind !== "deferredSteer" &&
+    queuedMessage.payloadKind !== "questionResponse" &&
     JSON.stringify(queuedMessage.serviceTurn) ===
       JSON.stringify(firstQueuedMessage.serviceTurn) &&
     queuedMessage.senderThreadId === firstQueuedMessage.senderThreadId &&
@@ -881,6 +886,8 @@ export function updateQueuedThreadMessage(
       if (!existing || existing.threadId !== input.threadId) {
         return { kind: "not_found" };
       }
+      if (existing.payloadKind === "questionResponse")
+        return { kind: "immutable" };
       if (isQueuedThreadMessageClaimed(existing)) {
         return { kind: "claimed" };
       }
@@ -1681,6 +1688,11 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
     return false;
   }
 
+  for (const row of existingRows) {
+    if (row.payloadKind === "questionResponse")
+      requireQuestionResponseDeliverable(db, row);
+  }
+
   const deletedRows = db
     .delete(queuedThreadMessages)
     .where(
@@ -1693,6 +1705,19 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
     .all();
   if (deletedRows.length !== ids.length) {
     return false;
+  }
+
+  for (const row of existingRows) {
+    if (row.payloadKind === "questionResponse" && row.questionId !== null)
+      db.update(conversationQuestions)
+        .set({ dispatchedAt: Date.now(), updatedAt: Date.now() })
+        .where(
+          and(
+            eq(conversationQuestions.id, row.questionId),
+            eq(conversationQuestions.queuedMessageId, row.id),
+          ),
+        )
+        .run();
   }
 
   const removingIds = new Set(ids);

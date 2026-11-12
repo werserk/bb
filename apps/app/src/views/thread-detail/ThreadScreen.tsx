@@ -1,3 +1,8 @@
+import { threadNeedsOwnerAttention } from "@bb/client-core";
+import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
+import { QuestionNavigator } from "@/components/thread/user-questions/QuestionNavigator";
+import { NativeQuestionFocusProvider } from "./native-question-focus";
+import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
 import { ThreadPlanCard } from "./ThreadPlanCard";
 import {
   useCallback,
@@ -70,10 +75,6 @@ import {
   useThreadPendingInteractions,
 } from "@/hooks/queries/thread-queries";
 import {
-  useChildThreadPendingAttention,
-  type ChildThreadPendingAttentionSource,
-} from "@/hooks/queries/child-thread-pending-interactions";
-import {
   useEditThreadMessage,
   useSendThreadMessage,
 } from "@/hooks/mutations/thread-runtime-mutations";
@@ -84,8 +85,6 @@ import {
 } from "./ThreadDetailPromptArea";
 
 const THREAD_DETAIL_COMPOSER_ID = "thread-detail-follow-up-composer";
-const EMPTY_CHILD_THREAD_ITEMS: readonly ChildThreadPendingAttentionSource[] =
-  [];
 
 export type ThreadScreenPresentation =
   | { kind: "page" }
@@ -210,19 +209,19 @@ function useChildThreadsSection(
     enabled,
     parentThreadId: threadId,
   });
-  const childThreadsSection = useMemo(() => {
+  return useMemo(() => {
     const list = enabled ? (childThreadSubsetQuery.data ?? []) : [];
     const activeItems = list
       .filter(
         (entry) =>
           entry.originKind === null &&
           (isThreadDisplayStatusBannerActive(entry.runtime.displayStatus) ||
-            entry.hasPendingInteraction),
+            threadNeedsOwnerAttention(entry)),
       )
       .sort((left, right) =>
-        left.hasPendingInteraction === right.hasPendingInteraction
+        threadNeedsOwnerAttention(left) === threadNeedsOwnerAttention(right)
           ? right.latestAttentionAt - left.latestAttentionAt
-          : left.hasPendingInteraction
+          : threadNeedsOwnerAttention(left)
             ? -1
             : 1,
       )
@@ -233,31 +232,11 @@ function useChildThreadsSection(
           projectId: entry.projectId,
           threadId: entry.id,
         }),
-        hasPendingInteraction: entry.hasPendingInteraction,
+        needsOwnerAttention: threadNeedsOwnerAttention(entry),
       }));
     if (activeItems.length === 0) return null;
     return { items: activeItems };
   }, [childThreadSubsetQuery.data, enabled]);
-  const childPendingInteractions = useChildThreadPendingAttention(
-    childThreadsSection?.items ?? EMPTY_CHILD_THREAD_ITEMS,
-  );
-  return useMemo((): ThreadPromptChildThreadsSection | null => {
-    if (!childThreadsSection) return null;
-    const pendingInteractions = childPendingInteractions
-      .flatMap((child) =>
-        child.interactions.map((interaction) => ({
-          childThreadId: child.childThreadId,
-          childTitle: child.childTitle,
-          href: child.href,
-          interaction,
-        })),
-      )
-      .sort(
-        (left, right) =>
-          right.interaction.createdAt - left.interaction.createdAt,
-      );
-    return { ...childThreadsSection, pendingInteractions };
-  }, [childThreadsSection, childPendingInteractions]);
 }
 
 interface UseSentMessageEditingArgs {
@@ -500,6 +479,11 @@ export function ThreadScreen({
 
   const isPanelPresentation = presentation.kind !== "page";
   const selectionAddToChat = composer ? handleAddToChat : undefined;
+  const questions =
+    thread.archivedAt === null &&
+    resolveEnvironmentGoneStatus(environment) === null ? (
+      <ThreadPendingQuestions threadId={thread.id} />
+    ) : null;
   const surface = (
     <SelectionAddToChatContext.Provider value={selectionAddToChat}>
       <ThreadTimelineSurface
@@ -627,11 +611,21 @@ export function ThreadScreen({
               scrollAreaClassName="scroll-pt-4"
               contentClassName="gap-2 pt-4"
               footerClassName="chat-prompt-box"
-              footer={promptArea}
+              footer={
+                <>
+                  {plan}
+                  <QuestionNavigator
+                    threadId={thread.id}
+                    onReturnToComposer={() =>
+                      requestComposerFocus(draftStorageKey)
+                    }
+                  />
+                  {promptArea}
+                </>
+              }
               scrollOverlay={
                 <>
                   <div className="pointer-events-none flex min-h-0 max-h-full max-w-full shrink-0 flex-col items-end gap-3 [&>[data-thread-context-card]]:min-h-0 [&>[data-thread-context-card]]:shrink">
-                    {plan}
                     <ThreadContextCard />
                   </div>
                   <div className="pointer-events-auto my-auto">
@@ -648,6 +642,7 @@ export function ThreadScreen({
               }
             >
               {surface}
+              {questions}
             </PageShell>
           </div>
         );
@@ -656,8 +651,24 @@ export function ThreadScreen({
           <WithoutThreadContextCard>
             <ThreadScreenPanelShell
               presentation={presentation}
-              promptArea={promptArea}
-              surface={surface}
+              promptArea={
+                <>
+                  {plan}
+                  <QuestionNavigator
+                    threadId={thread.id}
+                    onReturnToComposer={() =>
+                      requestComposerFocus(draftStorageKey)
+                    }
+                  />
+                  {promptArea}
+                </>
+              }
+              surface={
+                <>
+                  {surface}
+                  {questions}
+                </>
+              }
               threadId={thread.id}
             />
           </WithoutThreadContextCard>
@@ -668,24 +679,38 @@ export function ThreadScreen({
             {presentation.layout === "contained" ? (
               <div className="min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
                 {surface}
+                {questions}
               </div>
             ) : (
-              <div className="bg-background px-2 pb-3 pt-3">{surface}</div>
+              <div className="bg-background px-2 pb-3 pt-3">
+                {surface}
+                {questions}
+              </div>
             )}
           </WithoutThreadContextCard>
         );
     }
   })();
   return (
-    <div
-      className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
-      data-thread-chat=""
+    <QuestionNavigationProvider
+      key={thread.id}
+      threadId={thread.id}
+      readOnly={
+        thread.archivedAt !== null || presentation.kind === "transcript"
+      }
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
-        {presentation.kind !== "page" && plan}
-      </div>
-    </div>
+      <NativeQuestionFocusProvider key={thread.id}>
+        <div
+          className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
+          data-thread-chat=""
+        >
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+            {presentation.kind === "transcript" && plan}
+          </div>
+        </div>
+      </NativeQuestionFocusProvider>
+    </QuestionNavigationProvider>
   );
 }
 

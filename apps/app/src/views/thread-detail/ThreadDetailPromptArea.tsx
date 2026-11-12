@@ -58,7 +58,6 @@ import {
 } from "@/components/plugin/plugin-composer-host";
 import {
   ThreadChildThreadsBanner,
-  ThreadChildQuestionCards,
   ThreadPromptContextBanner,
   type ThreadPromptParentThreadSection,
   type ThreadPromptChildThreadsSection,
@@ -963,7 +962,6 @@ export function ThreadDetailPromptArea({
       };
     }
     return buildFollowUpSubmitMode({
-      hasPendingInteraction,
       isDefaultExecutionOptionsLoading,
       isStopRequested,
       onStop: handleStopThread,
@@ -972,7 +970,6 @@ export function ThreadDetailPromptArea({
   }, [
     effectiveSelectedModel,
     handleStopThread,
-    hasPendingInteraction,
     isDefaultExecutionOptionsLoading,
     isHandoffSelection,
     modelLoadFailed,
@@ -2075,18 +2072,9 @@ export function ThreadDetailPromptArea({
         environmentGoneStatus === null ? (
           <ThreadMachineStatus hostId={environmentHostId} />
         ) : null}
-        <ThreadChildQuestionCards
-          key={`child-questions:${thread.id}`}
-          questions={childThreadsSection?.pendingInteractions ?? []}
-          ownInteractions={orderedPendingInteractions}
-        />
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
-          childThreads={
-            thread.archivedAt === null && environmentGoneStatus === null
-              ? childThreadsSection
-              : null
-          }
+          childThreads={childThreadsSection}
           isExpanded={isChildThreadsExpanded}
           onExpandedChange={setIsChildThreadsExpanded}
         />
@@ -2234,11 +2222,6 @@ export function ThreadDetailPromptArea({
   const pendingInteractionStack = useMemo(
     () => (
       <>
-        <ThreadChildQuestionCards
-          key={`child-questions:${thread.id}`}
-          questions={childThreadsSection?.pendingInteractions ?? []}
-          ownInteractions={orderedPendingInteractions}
-        />
         <ThreadChildThreadsBanner
           key={childThreadsBannerKey}
           childThreads={childThreadsSection}

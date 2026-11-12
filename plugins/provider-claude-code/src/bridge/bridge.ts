@@ -5,6 +5,7 @@ import { ClaudeContextUsageCollector } from "./context-usage.js";
 import { readIsolatedClaudeContextUsage } from "./context-usage-probe.js";
 
 import {
+  internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME as CONVERSATION_QUESTION_TOOL_NAME,
   type PendingInteractionGrantedPermissionProfile,
   type PendingInteractionPayload,
   type PermissionEscalation,
@@ -178,10 +179,13 @@ const CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES = new Set([
 
 function subagentDisallowedTools(
   providerSubagentsEnabled: boolean,
+  independentQuestions: boolean,
 ): string[] | undefined {
-  return providerSubagentsEnabled
-    ? undefined
+  const tools = providerSubagentsEnabled
+    ? []
     : [...CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES];
+  if (independentQuestions) tools.push("AskUserQuestion");
+  return tools.length > 0 ? tools : undefined;
 }
 const CLAUDE_WORKFLOW_TOOL_NAME = "Workflow";
 
@@ -482,7 +486,12 @@ function applySubagentSetting(
   ) {
     return;
   }
-  const disallowedTools = subagentDisallowedTools(enabled);
+  const disallowedTools = subagentDisallowedTools(
+    enabled,
+    attachment.sessionConstructionConfig.dynamicTools?.some(
+      (tool) => tool.name === CONVERSATION_QUESTION_TOOL_NAME,
+    ) === true,
+  );
   if (disallowedTools === undefined) {
     delete attachment.sessionOptions.disallowedTools;
   } else {
@@ -1202,6 +1211,11 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
       ),
     };
     options.allowedTools = getAllowedToolNames(tools);
+    if (tools.some((tool) => tool.name === CONVERSATION_QUESTION_TOOL_NAME)) {
+      options.toolAliases = {
+        AskUserQuestion: `mcp__${BB_BRIDGE_MCP_SERVER_NAME}__${CONVERSATION_QUESTION_TOOL_NAME}`,
+      };
+    }
   }
   const session = new SdkSession(
     options,
@@ -1509,6 +1523,9 @@ function buildTrackedSessionOptions(
   sessionOptions.permissionMode = params.permissionMode;
   const disallowedTools = subagentDisallowedTools(
     params.providerSubagentsEnabled ?? true,
+    params.dynamicTools?.some(
+      (tool) => tool.name === CONVERSATION_QUESTION_TOOL_NAME,
+    ) === true,
   );
   if (disallowedTools !== undefined) {
     sessionOptions.disallowedTools = disallowedTools;

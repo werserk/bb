@@ -13,6 +13,11 @@ import {
 } from "@/test/fixtures/thread-timeline-rows";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { sdk } from "@/lib/sdk";
+import {
+  setPluginSlotRegistrations,
+  resetPluginSlotStoreForTest,
+} from "@/lib/plugin-slots";
+import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
 vi.mock("@/lib/sdk", () => ({
@@ -50,6 +55,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetPluginSlotStoreForTest();
 });
 
 describe("deferred timeline details", () => {
@@ -306,4 +312,45 @@ describe("deferred timeline details", () => {
     expect(await screen.findByText(/LINT OUTPUT FROM SERVER/)).toBeTruthy();
     expect(timelineTurnSummaryDetails).toHaveBeenCalledTimes(1);
   });
+});
+
+it("renders already emitted materials inside a completed thought", () => {
+  setPluginSlotRegistrations(
+    "test",
+    makePluginRegistrationSet({
+      messageDirectives: [
+        {
+          id: "inline-vis",
+          component: (props) => (
+            <div
+              data-testid="thought-preview"
+              data-thread={props.message.threadId}
+              data-file={props.attributes.file}
+            />
+          ),
+        },
+      ],
+    }),
+  );
+  renderExpandedRow(
+    systemRow({
+      id: "thought-material",
+      operationKind: "reasoning",
+      status: "completed",
+      title: "Thought",
+      detail:
+        '[Design](https://example.com/design)\n\n::inline-vis{file="design.html"}',
+      threadId: "thr_main",
+      turnId: "turn_1",
+    }),
+  );
+  expect(
+    screen.getByRole("link", { name: "Design" }).getAttribute("href"),
+  ).toBe("https://example.com/design");
+  expect(
+    screen.getByTestId("thought-preview").getAttribute("data-thread"),
+  ).toBe("thr_main");
+  expect(screen.getByTestId("thought-preview").getAttribute("data-file")).toBe(
+    "design.html",
+  );
 });

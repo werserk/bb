@@ -289,7 +289,7 @@ it.each([
     environmentGoneStatus: "removed" as const,
   },
 ])(
-  "keeps child questions answerable with a hidden composer: $name",
+  "keeps child navigation without answer forms with a hidden composer: $name",
   ({ thread, environmentGoneStatus }) => {
     renderPromptArea({
       thread,
@@ -300,23 +300,16 @@ it.each([
             id: "thr_child",
             title: "Child",
             href: "/threads/thr_child",
-            hasPendingInteraction: true,
-          },
-        ],
-        pendingInteractions: [
-          {
-            childThreadId: "thr_child",
-            childTitle: "Child",
-            href: "/threads/thr_child",
-            interaction: makePendingInteraction(),
+            needsOwnerAttention: true,
           },
         ],
       },
     });
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
+    expect(screen.getByTestId("child-threads-banner")).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Answer child question" }),
-    ).toBeTruthy();
+      screen.queryByRole("button", { name: "Answer child question" }),
+    ).toBeNull();
   },
 );
 
@@ -1487,7 +1480,7 @@ describe("ThreadDetailPromptArea", () => {
           id: "thr_child",
           title: "Install workspace tools",
           href: "/threads/thr_child",
-          hasPendingInteraction: true,
+          needsOwnerAttention: true,
         },
       ],
       pendingInteractions: [],
@@ -1564,9 +1557,7 @@ describe("ThreadDetailPromptArea", () => {
     expect(screen.queryByRole("button", { name: "Prompt actions" })).toBeNull();
     expect(document.querySelector(".pending-rule")).toBeNull();
     expect(screen.getByTestId("composer-hidden").textContent).toBe("true");
-    expect(screen.getByTestId("submit-mode").textContent).toBe(
-      "blocked:pending-interaction",
-    );
+    expect(screen.getByTestId("submit-mode").textContent).toBe("ready:");
     expect(screen.queryByTestId("queued-message-list")).toBeNull();
   });
 

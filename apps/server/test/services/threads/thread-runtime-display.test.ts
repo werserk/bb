@@ -236,6 +236,7 @@ function createThreadListEntry(
     environmentHostId: args.environmentHostId,
     environmentName: null,
     hasPendingInteraction: false,
+    hasOpenQuestion: false,
     // Only a `pending` thread whose first message queued carries one, and
     // these fixtures are all threads that already started.
     startupContext: null,

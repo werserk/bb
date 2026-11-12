@@ -8,8 +8,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ThreadPlanView } from "@bb/domain";
-import { ThreadPlanCard } from "./ThreadPlanCard";
+import { ThreadPlanCard as CompactPlanCard } from "./ThreadPlanCard";
+function ThreadPlanCard({ threadId }: { threadId: string }) {
+  return <ThreadPlanSteps threadId={threadId} placement="overlay" />;
+}
 import { ThreadPlanSteps } from "./ThreadPlanSteps";
+import { focusThreadPlan } from "./thread-plan-focus";
 const facts = vi.hoisted(() => ({
   view: null as ThreadPlanView | null,
   width: 768,
@@ -305,4 +309,59 @@ it("observes an owning pane mounted while hidden and measures it when revealed",
       .querySelector<HTMLElement>("[data-thread-plan]")!
       .style.getPropertyValue("--thread-plan-max-height"),
   ).toBe("480px");
+});
+
+it.each([360, 710])(
+  "keeps the native %i px plan compact and out of the transcript overlay",
+  (width) => {
+    facts.width = width;
+    const { container } = render(<CompactPlanCard threadId="t" />);
+    const toggle = screen.getByRole("button", { name: "Plan 0/1 · Paused" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".absolute")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByLabelText("In progress: Check")).toBeDefined();
+    facts.view = structuredClone(facts.view);
+    facts.view!.current!.items[0]!.status = "completed";
+    publish();
+    expect(
+      screen
+        .getByRole("button", { name: /Plan 1\/1 · Finished/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  },
+);
+
+it("preserves SDK focus on the native compact plan", () => {
+  render(<CompactPlanCard threadId="t" />);
+  const toggle = screen.getByRole("button", { name: "Plan 0/1 · Paused" });
+  act(() => {
+    expect(focusThreadPlan({ threadId: "t" })).toBe(true);
+  });
+  expect(document.activeElement).toBe(toggle);
+});
+
+it("retains expandable earlier plans in the native compact dock", () => {
+  facts.view!.previousPlans = [
+    {
+      ...facts.view!.current!,
+      planId: "older",
+      sourceSeq: 0,
+      items: [
+        {
+          ...facts.view!.current!.items[0]!,
+          id: "old",
+          text: "Earlier work",
+          status: "completed",
+        },
+      ],
+    },
+  ];
+  render(<CompactPlanCard threadId="t" />);
+  const history = screen.getByRole("button", {
+    name: /Plan from an earlier task/,
+  });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(history);
+  expect(screen.getByText("Earlier work")).toBeDefined();
 });

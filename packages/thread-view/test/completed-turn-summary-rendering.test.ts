@@ -779,3 +779,26 @@ describe("flat completed turn display", () => {
     ).toEqual(["conversation:assistant", "work:command"]);
   });
 });
+
+it("keeps an independent question before later tools and the final response after replay", () => {
+  const event = createTimelineEventFactory({ threadId: "thread-1" });
+  const marker = '::question{id="qst_23456789ab"}';
+  const events = [
+    event.turnStarted(),
+    event.assistantCompleted({ itemId: "question", text: marker }),
+    event.commandCompleted({ itemId: "later", command: "pwd" }),
+    event.assistantCompleted({ itemId: "final", text: "Continuing work" }),
+    event.turnCompleted(),
+  ];
+  for (const replay of [events, JSON.parse(JSON.stringify(events))]) {
+    const timeline = renderCompletedTimeline({ events: replay });
+    expect(
+      timeline.rows.some(
+        (row) =>
+          row.kind === "conversation" &&
+          row.role === "assistant" &&
+          row.text === marker,
+      ),
+    ).toBe(true);
+  }
+});

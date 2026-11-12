@@ -123,6 +123,7 @@ interface ClaudeQueryCallOptions {
   settings?: BridgeSessionOptions["settings"];
   sessionId?: string;
   disallowedTools?: string[];
+  toolAliases?: Record<string, string>;
   settingSources?: string[];
   stderr?: (data: string) => void;
 }
@@ -4795,9 +4796,14 @@ describe("bridge", () => {
     }
   });
 
-  it.each([false, true])(
-    "updates subagent tools across turns while preserving the conversation (initially enabled: %s)",
-    async (initiallyEnabled) => {
+  it.each([
+    { initiallyEnabled: false, independentQuestions: false },
+    { initiallyEnabled: true, independentQuestions: false },
+    { initiallyEnabled: false, independentQuestions: true },
+    { initiallyEnabled: true, independentQuestions: true },
+  ])(
+    "updates subagent tools across turns (initially enabled: $initiallyEnabled, independent questions: $independentQuestions)",
+    async ({ initiallyEnabled, independentQuestions }) => {
       const bridge = createBridgeJsonRpcTestHarness(handleLine);
       const queries: ControlledClaudeQuery[] = [];
       queryMock.mockImplementation(() => {
@@ -4813,8 +4819,11 @@ describe("bridge", () => {
         instructions: "test",
         providerOptions: { providerSubagentsEnabled },
       });
-      const expectedTools = (enabled: boolean) =>
-        enabled ? undefined : ["Agent", "Task", "ListAgents"];
+      const expectedTools = (enabled: boolean) => {
+        const tools = enabled ? [] : ["Agent", "Task", "ListAgents"];
+        if (independentQuestions) tools.push("AskUserQuestion");
+        return tools.length ? tools : undefined;
+      };
 
       try {
         const threadId = "thread-subagents-disabled";
@@ -4824,8 +4833,24 @@ describe("bridge", () => {
           cwd: "/tmp/worktree",
           instructionMode: "append",
           options: options(initiallyEnabled),
+          ...(independentQuestions
+            ? {
+                dynamicTools: [
+                  {
+                    name: "bb_ask_question",
+                    description: "Publish an independent question",
+                    inputSchema: { type: "object", properties: {} },
+                  },
+                ],
+              }
+            : {}),
         });
         await bridge.waitForResponse(1);
+        expect(getLatestQueryCall().options.toolAliases).toEqual(
+          independentQuestions
+            ? { AskUserQuestion: "mcp__bb-bridge__bb_ask_question" }
+            : undefined,
+        );
         expect(getLatestQueryCall().options.disallowedTools).toEqual(
           expectedTools(initiallyEnabled),
         );
@@ -4853,6 +4878,11 @@ describe("bridge", () => {
           await bridge.waitForResponse(requestId);
           expect(getLatestQueryCall().options.disallowedTools).toEqual(
             expectedTools(enabled),
+          );
+          expect(getLatestQueryCall().options.toolAliases).toEqual(
+            independentQuestions
+              ? { AskUserQuestion: "mcp__bb-bridge__bb_ask_question" }
+              : undefined,
           );
           if (index > 0) {
             expect(queries[index - 1]?.close).toHaveBeenCalled();

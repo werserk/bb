@@ -1170,8 +1170,14 @@ function TimelineExpandableBodyContent({
   row,
   showAssistantMessageActions,
 }: TimelineExpandableBodyProps) {
-  const { workspaceRootPath, resolveImageViewSrc } =
-    useTimelineRendererStaticContext();
+  const {
+    workspaceRootPath,
+    resolveImageViewSrc,
+    onOpenLink,
+    onOpenLocalFileLink,
+    projectId,
+    resolveUserAttachmentImageSrc,
+  } = useTimelineRendererStaticContext();
 
   switch (row.kind) {
     case "bundle-summary":
@@ -1235,7 +1241,27 @@ function TimelineExpandableBodyContent({
     case "system":
       if (row.systemKind === "operation" && row.operationKind === "reasoning") {
         return row.detail ? (
-          <TimelineReasoningDetail text={row.detail} />
+          row.status === "completed" ? (
+            <ConversationMessageContent
+              attachments={null}
+              id={row.id}
+              onOpenLink={onOpenLink}
+              onOpenLocalFileLink={onOpenLocalFileLink}
+              projectId={projectId}
+              resolveUserAttachmentImageSrc={resolveUserAttachmentImageSrc}
+              role="assistant"
+              showActions={false}
+              mobileActionDisplay="overflow"
+              streaming={false}
+              text={row.detail}
+              timestamp={row.startedAt}
+              threadId={row.threadId}
+              turnId={row.turnId}
+              workspaceRootPath={workspaceRootPath}
+            />
+          ) : (
+            <TimelineReasoningDetail text={row.detail} />
+          )
         ) : null;
       }
       return row.detail ? (

@@ -213,18 +213,18 @@ describe("thread-activity", () => {
       },
     );
 
-    it.each([
-      "isBackgroundAgentActive",
-      "isBackgroundCommandActive",
-    ] as const)("shows the unread success dot over concurrent %s", (flag) => {
-      expect(
-        resolveThreadListIndicator({
-          ...idleIndicatorState,
-          hasUnreadSuccess: true,
-          [flag]: true,
-        }),
-      ).toBe("unread-success");
-    });
+    it.each(["isBackgroundAgentActive", "isBackgroundCommandActive"] as const)(
+      "shows the unread success dot over concurrent %s",
+      (flag) => {
+        expect(
+          resolveThreadListIndicator({
+            ...idleIndicatorState,
+            hasUnreadSuccess: true,
+            [flag]: true,
+          }),
+        ).toBe("unread-success");
+      },
+    );
 
     it("shows a running workflow over unread success and a failed queued send", () => {
       expect(
@@ -614,4 +614,20 @@ describe("thread-activity", () => {
       });
     });
   });
+});
+
+it("retains canonical question attention through the sidebar SDK without native blocking", () => {
+  const thread = makeEntry({
+    hasPendingInteraction: false,
+    indicator: "waiting-for-input",
+    status: "active",
+    runtimeStatus: "active",
+  });
+  expect(
+    resolveThreadListIndicator(
+      threadListIndicatorStateForThread(thread, false),
+    ),
+  ).toBe("waiting-for-input");
+  expect(getCollapsedChildActivity([thread]).pending).toBe(true);
+  expect(thread.hasPendingInteraction).toBe(false);
 });

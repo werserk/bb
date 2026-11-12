@@ -258,6 +258,7 @@ function MobileRecentThreadRow({
   const hasHiddenChildren = hasChildren && isCollapsed;
   const trailingIndicatorState: ThreadListIndicatorState = hasHiddenChildren
     ? {
+        hasOpenQuestion: indicatorState.hasOpenQuestion,
         hasPendingInteraction:
           indicatorState.hasPendingInteraction || childActivity.pending,
         hasUnsubmittedDraft:

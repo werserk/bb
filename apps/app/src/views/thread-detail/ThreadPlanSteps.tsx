@@ -1,5 +1,7 @@
+import { useNativeQuestionFocus } from "./native-question-focus";
 import {
   focusPlanElement,
+  createThreadPlanFocusRequest,
   type ThreadPlanFocusRequest,
 } from "./thread-plan-focus";
 import { useThreadPlanLayout } from "./thread-plan-layout";
@@ -83,7 +85,10 @@ function NativeWaitingRow({
     </section>
   );
 }
-export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
+export function ThreadPlanSteps({
+  compact = false,
+  ...props
+}: ThreadPlanStepsProps & { compact?: boolean }) {
   const result = useThreadPlans({ threadIds: [props.threadId] });
   const pending = useThreadPendingInteractions(props.threadId);
   const interactions = pending.data ?? [];
@@ -105,6 +110,14 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
     focused,
     ready: result.status === "ready" && narrow !== null,
   });
+  const nativeQuestionFocus = useNativeQuestionFocus();
+  const revealQuestion = nativeQuestionFocus?.reveal;
+  const jumpToQuestion = (interactionId: string) => {
+    revealQuestion?.(createThreadPlanFocusRequest(interactionId));
+  };
+  useEffect(() => {
+    if (compact && focusRequest?.interactionId) revealQuestion?.(focusRequest);
+  }, [compact, focusRequest, revealQuestion]);
   const executing =
     thread?.runtime?.displayStatus === "active" &&
     !thread.serviceTurn &&
@@ -120,7 +133,8 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
       ref={root}
       className={cn(
         "pointer-events-auto min-w-0 space-y-1",
-        props.placement === "overlay" &&
+        !compact &&
+          props.placement === "overlay" &&
           "w-[340px] max-w-full max-h-[var(--thread-plan-max-height,60dvh)] overflow-y-auto overscroll-contain",
       )}
       data-thread-plan=""
@@ -142,7 +156,10 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
         <ThreadTodoCard
           key={view.current.planId ?? "current"}
           {...props}
-          focusRequest={focusRequest}
+          focusRequest={
+            compact && focusRequest?.interactionId ? undefined : focusRequest
+          }
+          compact={compact}
           snapshot={view.current}
           earlier={false}
           narrow={narrow}
@@ -156,8 +173,9 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
           <ThreadTodoCard
             key={snapshot.planId ?? snapshot.sourceSeq}
             {...props}
+            compact={compact}
             focusRequest={
-              focusRequest?.interactionId ? focusRequest : undefined
+              !compact && focusRequest?.interactionId ? focusRequest : undefined
             }
             snapshot={snapshot}
             earlier
@@ -166,7 +184,8 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
             interactions={interactions}
           />
         ))}
-      {narrow !== null &&
+      {!compact &&
+        narrow !== null &&
         !hidden &&
         view?.unboundInteractionIds.map((id) => {
           const interaction = interactions.find((i) => i.id === id);
@@ -189,6 +208,20 @@ export function ThreadPlanSteps(props: ThreadPlanStepsProps) {
             </button>
           );
         })}
+      {compact &&
+        !hidden &&
+        interactions
+          .filter((item) => item.payload.kind === "user_question")
+          .map((interaction) => (
+            <button
+              key={interaction.id}
+              type="button"
+              className="flex items-center gap-2 rounded-md px-3 py-1 text-xs text-warning hover:bg-accent focus-visible:outline focus-visible:outline-ring"
+              onClick={() => jumpToQuestion(interaction.id)}
+            >
+              <span aria-hidden>↑</span> Question above
+            </button>
+          ))}
       {view?.historyTruncated && (
         <span className="sr-only">Earlier plan history truncated</span>
       )}

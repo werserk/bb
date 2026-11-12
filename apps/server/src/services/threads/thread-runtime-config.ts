@@ -1,4 +1,8 @@
 import {
+  BB_ASK_QUESTION_TOOL,
+  CONVERSATION_QUESTION_INSTRUCTIONS,
+} from "./conversation-question-tool.js";
+import {
   resolveHostEnvironment,
   mergeHostAndProviderEnvironment,
 } from "../hosts/host-environment.js";
@@ -44,9 +48,9 @@ import { BB_UPDATE_PLAN_TOOL } from "./thread-plan-tool.js";
 // plugins add only what is specific to them and point here.
 const PLAN_INSTRUCTIONS = [
   "Keep a visible progress plan with `bb_update_plan`, or with a native plan/todo tool when one is available. It is the user's window into your work.",
-  "- Post the plan before your first substantial action: 3-8 steps, each one short action phrase in the language the user writes in, in plain words (\"Find where the draft is lost\"), not tool names.",
+  '- Post the plan before your first substantial action: 3-8 steps, each one short action phrase in the language the user writes in, in plain words ("Find where the draft is lost"), not tool names.',
   "- While work remains, exactly one step is in_progress. Update the plan as each step finishes and whenever the plan changes. Send the full plan on each update.",
-  "- Waiting for the user or another agent is a step of its own (\"Waiting for your choice\").",
+  '- Waiting for the user or another agent is a step of its own ("Waiting for your choice").',
   "- A task that outgrows about 8 steps, or has independent results, is several tasks: tell whoever assigned it.",
 ].join("\n");
 
@@ -114,11 +118,18 @@ function resolveDynamicTools(
       instructions: PLAN_INSTRUCTIONS,
       pluginId: null,
     },
-    ...pluginTools.map((contribution) => ({
-      tool: contribution.tool,
-      instructions: contribution.instructions,
-      pluginId: contribution.pluginId,
-    })),
+    {
+      tool: BB_ASK_QUESTION_TOOL,
+      instructions: CONVERSATION_QUESTION_INSTRUCTIONS,
+      pluginId: null,
+    },
+    ...pluginTools
+      .filter((contribution) => contribution.tool.name !== "AskUserQuestion")
+      .map((contribution) => ({
+        tool: contribution.tool,
+        instructions: contribution.instructions,
+        pluginId: contribution.pluginId,
+      })),
   ];
 }
 

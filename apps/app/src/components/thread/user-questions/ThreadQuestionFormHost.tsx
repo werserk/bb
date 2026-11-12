@@ -36,6 +36,7 @@ export function ThreadQuestionFormHost({
   promptShownAbove: string | null;
   closeInline: (() => void) | null;
 }) {
+  const root = useRef<HTMLDivElement>(null);
   const handlerRef = useRef<((index: number) => boolean) | null>(null);
   const actionHandlerRef = useRef<
     ((action: QuestionFormAction) => boolean) | null
@@ -114,7 +115,13 @@ export function ThreadQuestionFormHost({
   );
   useIndexedAppCommandHandlers(
     QUESTION_ACTION_APP_COMMAND_IDS,
-    (index) => {
+    (index, invocation) => {
+      if (
+        isEditableKeyboardTarget(invocation.target) &&
+        invocation.target instanceof Node &&
+        !root.current?.contains(invocation.target)
+      )
+        return false;
       const action = QUESTION_FORM_ACTIONS[index];
       if (!enabled || action === undefined) return false;
       return actionHandlerRef.current?.(action) ?? false;
@@ -125,7 +132,7 @@ export function ThreadQuestionFormHost({
   return (
     <QuestionFormHostProvider value={value}>
       <VoiceInputTextareaProvider value={VoiceInputTextarea}>
-        {children}
+        <div ref={root}>{children}</div>
       </VoiceInputTextareaProvider>
     </QuestionFormHostProvider>
   );

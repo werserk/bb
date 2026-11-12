@@ -12,10 +12,15 @@ const DRAWER_SENDER_PILL_LINE_HEIGHT = 22;
 export function getQueuedMessagesDrawerHeight({
   queuedMessages,
   processingMessageId,
+  contentHeight,
 }: {
   queuedMessages: readonly ThreadQueuedMessage[];
   processingMessageId: string | null;
+  contentHeight?: number;
 }): number {
+  if (contentHeight !== undefined && contentHeight > 0) {
+    return Math.min(DRAWER_HEIGHT, DRAWER_CHROME_HEIGHT + contentHeight);
+  }
   const rowsHeight =
     queuedMessages.length === 0
       ? DRAWER_ROW_HEIGHT

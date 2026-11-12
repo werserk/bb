@@ -1,3 +1,5 @@
+import { NativeQuestionFocusProvider } from "./native-question-focus";
+import { ThreadPendingQuestions } from "./ThreadPendingQuestions";
 // @vitest-environment jsdom
 import {
   act,
@@ -491,4 +493,48 @@ it("prefers a focused eligible pane and unregisters its controller", () => {
   expect(other).toHaveBeenCalledOnce();
   disposeOther();
   expect(focusThreadPlan({ threadId: "preference" })).toBe(false);
+});
+
+it("native compact SDK focus restores a skipped form and reclaims a panel-owned draft", () => {
+  const element = (serial: number) => (
+    <NativeQuestionFocusProvider>
+      <div data-thread-chat>
+        <ThreadPendingQuestions threadId="focus" />
+        <ThreadPlanSteps threadId="focus" placement="overlay" compact />
+      </div>
+      <ThreadPlanSteps
+        threadId="focus"
+        placement="panel"
+        focusSerial={serial}
+        focusInteractionId="input"
+      />
+    </NativeQuestionFocusProvider>
+  );
+  const view = render(element(0));
+  fireEvent.change(screen.getByRole("textbox"), {
+    target: { value: "Retain this draft" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+  act(() => {
+    expect(focusThreadPlan({ threadId: "focus", interactionId: "input" })).toBe(
+      true,
+    );
+  });
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Retain this draft",
+  );
+  view.rerender(element(9));
+  expect(
+    screen.getByRole("textbox").closest("[data-thread-questions]"),
+  ).toBeNull();
+  act(() => {
+    expect(focusThreadPlan({ threadId: "focus", interactionId: "input" })).toBe(
+      true,
+    );
+  });
+  expect(
+    screen.getByRole("textbox").closest("[data-thread-questions]"),
+  ).not.toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
 });

@@ -48,6 +48,7 @@ const LIST_FACET: Record<ListFacetKey, true> = {
   queuedWork: true,
   pinSortKey: true,
   hasPendingInteraction: true,
+  hasOpenQuestion: true,
   environmentHostId: true,
   environmentName: true,
   environmentBranchName: true,

@@ -23,6 +23,7 @@ import { createThreadPlanFocusRequest } from "./thread-plan-focus";
 
 const facts = vi.hoisted(() => ({
   stop: vi.fn(),
+  stopping: false,
   resolve: vi.fn(),
   composerFocus: vi.fn(),
 }));
@@ -75,7 +76,7 @@ vi.mock("@/hooks/mutations/thread-interaction-mutations", () => ({
   }),
 }));
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
-  useStopThread: () => ({ mutateAsync: facts.stop, isPending: false }),
+  useStopThread: () => ({ mutateAsync: facts.stop, isPending: facts.stopping }),
 }));
 const question: PendingInteraction = {
   id: "native-input",
@@ -138,6 +139,7 @@ function ComposerCommand() {
 }
 afterEach(() => {
   cleanup();
+  facts.stopping = false;
   facts.composerFocus.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -389,4 +391,77 @@ it("releases hidden requested custody, preserves real drafts through panels/nati
   ).toBe("Native handoff draft");
   expect(facts.stop).not.toHaveBeenCalled();
   expect(facts.resolve).not.toHaveBeenCalled();
+});
+
+it("cancels an in-flow question through the real stop action instead of hiding it", async () => {
+  facts.stop.mockResolvedValue(undefined);
+  render(
+    custodyHost(
+      <ThreadPlanQuestion
+        interaction={question}
+        threadId="native"
+        placement="overlay"
+        focused
+        inFlow
+      />,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await act(async () => {});
+  expect(facts.stop).toHaveBeenCalledWith("native");
+  expect(facts.resolve).not.toHaveBeenCalled();
+});
+
+it("keeps cancellation retryable after a failed stop", async () => {
+  facts.stop
+    .mockRejectedValueOnce(new Error("stop failed"))
+    .mockResolvedValue(undefined);
+  render(
+    custodyHost(
+      <ThreadPlanQuestion
+        interaction={question}
+        threadId="native"
+        placement="overlay"
+        focused
+        inFlow
+      />,
+    ),
+  );
+  const cancel = screen.getByRole("button", { name: "Cancel" });
+  await act(async () => fireEvent.click(cancel));
+  expect(cancel.hasAttribute("disabled")).toBe(false);
+  await act(async () => fireEvent.click(cancel));
+  expect(facts.stop).toHaveBeenLastCalledWith("native");
+});
+
+it("locks both answer and cancel while the stop mutation is pending", () => {
+  const body = () => (
+    <ThreadPlanQuestion
+      interaction={question}
+      threadId="native"
+      placement="overlay"
+      focused
+      inFlow
+    />
+  );
+  const view = render(custodyHost(body()));
+  fireEvent.change(screen.getByRole("textbox", {name: "Answer answer"}), {
+    target: { value: "An answer" },
+  });
+  expect(
+    screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
+  ).toBe(false);
+  facts.stopping = true;
+  view.rerender(custodyHost(body()));
+  expect(
+    screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(
+    screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled"),
+  ).toBe(true);
+  facts.stopping = false;
+  view.rerender(custodyHost(body()));
+  expect(
+    screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
+  ).toBe(false);
 });

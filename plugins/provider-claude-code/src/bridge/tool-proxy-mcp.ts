@@ -1,4 +1,5 @@
 import {
+  internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME as CONVERSATION_QUESTION_TOOL_NAME,
   type DynamicTool,
   experimental_buildBridgeToolCallContent,
 } from "@get-bb/plugin-sdk/provider-bridge";
@@ -39,7 +40,8 @@ export function buildBridgeMcpServer(
       name: def.name,
       description: def.description,
       inputSchema: normalizeInputSchema(def.inputSchema),
-      ...(def.name === "bb_update_plan"
+      ...(def.name === "bb_update_plan" ||
+      def.name === CONVERSATION_QUESTION_TOOL_NAME
         ? { _meta: { "anthropic/alwaysLoad": true } }
         : {}),
     })),
