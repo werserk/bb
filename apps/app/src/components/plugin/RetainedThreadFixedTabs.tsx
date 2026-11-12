@@ -277,6 +277,7 @@ function Instance({
     selected &&
     state.ready &&
     outlet?.threadId === bodyThreadId &&
+    outlet.element.isConnected &&
     outlet.visible
   );
   // A new thread's visibility observer settles in layout. Preserve the previous
@@ -335,6 +336,7 @@ function Instance({
       latest.open &&
       latest.activeTabId === tabId &&
       currentOutlet.current?.threadId === bodyThreadId &&
+      currentOutlet.current.element.isConnected &&
       currentOutlet.current.visible &&
       (pane?.isFocused ?? true)
     );

@@ -3,6 +3,11 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { useRetainedThreadTabContainer } from "./RetainedThreadTabContainer";
 afterEach(cleanup);
+// jsdom has no layout; connectivity remains real, rectangles model visible bodies.
+const laidOut = (element: HTMLElement) => {
+  element.getClientRects = () =>
+    [new DOMRect(0, 0, 300, 800)] as unknown as DOMRectList;
+};
 it("restores the same visible content across a transient block above it", () => {
   const first = document.createElement("div"),
     second = document.createElement("div");
@@ -17,6 +22,7 @@ it("restores the same visible content across a transient block above it", () => 
       }),
     { initialProps: { outlet: first } },
   );
+  laidOut(hook.result.current.container);
   const scroller = document.createElement("div"),
     row = document.createElement("span");
   row.textContent = "Visible row";
@@ -59,6 +65,7 @@ it("falls back to the saved offset when the visible node was removed", () => {
       }),
     { initialProps: { outlet: first } },
   );
+  laidOut(hook.result.current.container);
   const scroller = document.createElement("div"),
     row = document.createElement("span");
   scroller.append(row);
@@ -93,6 +100,7 @@ it("captures the last visible position before parking hides the scroller", () =>
     { initialProps: { attached: true } },
   );
   hook.result.current.parking.current = parking;
+  laidOut(hook.result.current.container);
   const scroller = document.createElement("div"),
     row = document.createElement("span");
   scroller.append(row);
@@ -126,6 +134,7 @@ it("restores the visible offset while the cold-loading bridge is painted", () =>
   );
   hook.result.current.parking.current = parking;
   outlet.getBoundingClientRect = () => new DOMRect(500, 50, 300, 800);
+  laidOut(hook.result.current.container);
   const scroller = document.createElement("div"),
     row = document.createElement("span");
   scroller.append(row);
@@ -143,5 +152,84 @@ it("restores the visible offset while the cold-loading bridge is painted", () =>
   expect(hook.result.current.container.style.position).toBe("fixed");
   expect(scroller.scrollTop).toBe(317);
   outlet.remove();
+  parking.remove();
+});
+
+it("does not attach to or capture from a removed outlet before host publication catches up", () => {
+  const first = document.createElement("div"),
+    second = document.createElement("div"),
+    parking = document.createElement("div");
+  document.body.append(first, second, parking);
+  const hook = renderHook(
+    ({ outlet }) =>
+      useRetainedThreadTabContainer({
+        attached: true,
+        bridge: false,
+        outlet: { element: outlet },
+        tabId: "test",
+      }),
+    { initialProps: { outlet: first } },
+  );
+  const { container } = hook.result.current;
+  laidOut(container);
+  hook.result.current.parking.current = parking;
+  const scroller = document.createElement("div");
+  container.append(scroller);
+  scroller.scrollTop = 317;
+  act(() => hook.result.current.capture(first));
+  first.remove();
+  scroller.scrollTop = 0;
+  hook.rerender({ outlet: first });
+  expect(container.parentElement).toBe(parking);
+  act(() => hook.result.current.capture(first));
+  const append = second.append.bind(second);
+  second.append = (...nodes) => {
+    append(...nodes);
+    scroller.scrollTop = 0;
+  };
+  hook.rerender({ outlet: second });
+  expect(container.isConnected).toBe(true);
+  expect(scroller.scrollTop).toBe(317);
+  first.remove();
+  second.remove();
+  parking.remove();
+});
+it("ignores parking and layoutless captures but records a real zero offset", () => {
+  const first = document.createElement("div"),
+    second = document.createElement("div"),
+    parking = document.createElement("div");
+  document.body.append(first, second, parking);
+  const hook = renderHook(
+    ({ outlet }) =>
+      useRetainedThreadTabContainer({
+        attached: true,
+        bridge: false,
+        outlet: { element: outlet },
+        tabId: "test",
+      }),
+    { initialProps: { outlet: first } },
+  );
+  const { container } = hook.result.current;
+  laidOut(container);
+  hook.result.current.parking.current = parking;
+  const scroller = document.createElement("div");
+  container.append(scroller);
+  scroller.scrollTop = 317;
+  act(() => hook.result.current.capture(first));
+  container.getClientRects = () => [] as unknown as DOMRectList;
+  scroller.scrollTop = 0;
+  act(() => hook.result.current.capture(first));
+  act(() => hook.result.current.park());
+  act(() => hook.result.current.capture(first));
+  laidOut(container);
+  hook.rerender({ outlet: second });
+  expect(scroller.scrollTop).toBe(317);
+  scroller.scrollTop = 0;
+  act(() => hook.result.current.capture(second));
+  act(() => hook.result.current.park());
+  hook.rerender({ outlet: first });
+  expect(scroller.scrollTop).toBe(0);
+  first.remove();
+  second.remove();
   parking.remove();
 });

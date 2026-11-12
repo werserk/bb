@@ -31,7 +31,17 @@ export function useRetainedThreadTabContainer({
   const anchor = useRef<Anchor | null>(null);
   const scroll = useRef<ScrollPosition[]>([]);
   const capture = (element: HTMLDivElement) => {
-    if (container.hidden || container.style.display === "none") return;
+    // Late layout cleanup can still name the removed outlet. Its zero geometry
+    // must never replace the last visible snapshot (including a real zero offset).
+    if (
+      !element.isConnected ||
+      container.parentElement !== element ||
+      !container.isConnected ||
+      container.getClientRects().length === 0 ||
+      container.hidden ||
+      container.style.display === "none"
+    )
+      return;
     const parent = element.closest<HTMLElement>("[data-split-pane-id]");
     anchor.current = {
       element: parent,
@@ -92,13 +102,15 @@ export function useRetainedThreadTabContainer({
       parking.current.append(container);
   };
   useLayoutEffect(() => {
+    // Connectivity can change after render, before this layout effect runs.
+    const live = attached && outlet?.element.isConnected;
     container.dataset.retainedFixedTabBody = tabId;
     container.className =
       "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background";
-    container.hidden = !attached && !bridge;
-    container.inert = !attached;
-    container.setAttribute("aria-hidden", String(!attached));
-    if (attached && outlet) {
+    container.hidden = !live && !bridge;
+    container.inert = !live;
+    container.setAttribute("aria-hidden", String(!live));
+    if (live && outlet) {
       container.style.cssText = "";
       if (container.parentElement !== outlet.element) {
         outlet.element.append(container);

@@ -92,6 +92,14 @@ function Board({ threadId }: { threadId: string }) {
 }
 
 function install(optIn = true, useIdentity = () => identity) {
+  // jsdom provides real connectivity but no layout; model a connected body.
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+    function (this: HTMLElement) {
+      return (this.isConnected
+        ? [new DOMRect(0, 0, 300, 800)]
+        : []) as unknown as DOMRectList;
+    },
+  );
   setPluginSlotRegistrations(
     "example",
     collectPluginAppRegistrations(
