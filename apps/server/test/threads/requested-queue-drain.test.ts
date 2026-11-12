@@ -133,6 +133,7 @@ describe("the requested queue drain", () => {
         hostId: "host-ready-during-drain",
         status: "idle",
       });
+      const turnsBefore = turnRequests(harness, thread.id).length;
       let release!: () => void;
       const barrier = new Promise<void>((resolve) => { release = resolve; });
       const inFlight = harness.deps.lifecycleDedupers.queuedMessageDispatch.run(
@@ -150,7 +151,7 @@ describe("the requested queue drain", () => {
       });
       release();
       await Promise.all([inFlight, wake]);
-      expect(turnRequests(harness, thread.id)).toHaveLength(1);
+      expect(turnRequests(harness, thread.id)).toHaveLength(turnsBefore + 1);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
     });
   });
