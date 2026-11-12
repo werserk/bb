@@ -31,6 +31,7 @@ export function useRetainedThreadTabContainer({
   const anchor = useRef<Anchor | null>(null);
   const scroll = useRef<ScrollPosition[]>([]);
   const capture = (element: HTMLDivElement) => {
+    if (container.hidden || container.style.display === "none") return;
     const parent = element.closest<HTMLElement>("[data-split-pane-id]");
     anchor.current = {
       element: parent,
@@ -101,7 +102,11 @@ export function useRetainedThreadTabContainer({
           }
         }
       }
-      return;
+      return () => {
+        // Capture before the next layout effect hides/parks the body. A late
+        // outlet cleanup may run after it is hidden and must keep this record.
+        if (container.parentElement === outlet.element) capture(outlet.element);
+      };
     }
     park();
     const positionBridge = () => {
