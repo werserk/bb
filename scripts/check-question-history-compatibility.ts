@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  hostDaemonCommandSchema as candidateCommandSchema,
+  HOST_DAEMON_PROTOCOL_VERSION,
+  isCompatibleHostDaemonProtocolVersion,
+} from "../packages/host-daemon-contract/src/index.js";
 import * as candidate from "../packages/db/src/index.js";
 import { createMigratedConnection } from "../packages/db/src/testing.js";
 import {
@@ -28,6 +33,7 @@ git([
   "--",
   "packages/db",
   "packages/domain",
+  "packages/host-daemon-contract",
 ]);
 git(["diff", "--exit-code", "HEAD", "--", "packages/db", "packages/domain"]);
 const old = await import(
@@ -35,6 +41,78 @@ const old = await import(
 );
 const oldDomain = await import(
   pathToFileURL(resolve(previous, "packages/domain/src/index.ts")).href
+);
+const oldHost = await import(
+  pathToFileURL(resolve(previous, "packages/host-daemon-contract/src/index.ts"))
+    .href
+);
+const launch = {
+  pluginId: "provider-pi",
+  source: { kind: "artifact", digest: "a".repeat(64), byteLength: 4096 },
+  providerOptions: {},
+  envPassthrough: [],
+  capabilities: {
+    providerInstallation: false,
+    supportsServiceTier: false,
+    permissionModes: ["full"],
+    supportsThreadArchive: false,
+    supportsThreadRename: false,
+    fork: "none",
+  },
+};
+const legacyCommand = {
+  type: "turn.submit",
+  bridgeLaunch: launch,
+  environmentId: "env_compat",
+  threadId: "thr_compat",
+  requestId: "creq_23456789ab",
+  input: [{ type: "text", text: "legacy auto input", mentions: [] }],
+  options: {
+    model: "gpt-5",
+    serviceTier: "default",
+    reasoningLevel: "medium",
+    providerOptions: {},
+    permissionMode: "full",
+    permissionScope: "full",
+    approvalReviewer: null,
+    permissionEscalation: null,
+  },
+  resumeContext: {
+    bridgeLaunch: launch,
+    workspaceContext: { workspacePath: "/tmp/compat" },
+    projectId: "proj_compat",
+    providerId: "pi",
+    providerThreadId: "provider_compat",
+    instructions: "Help",
+    dynamicTools: [],
+    contributedEnv: [],
+    injectedSkillSources: [],
+    instructionMode: "append",
+  },
+  target: { mode: "auto", expectedTurnId: "turn_before" },
+};
+assert.deepEqual(
+  candidateCommandSchema.parse(legacyCommand),
+  oldHost.hostDaemonCommandSchema.parse(legacyCommand),
+);
+for (const injectOnly of [false, true]) {
+  assert.deepEqual(
+    candidateCommandSchema.parse({ ...legacyCommand, injectOnly }),
+    { ...legacyCommand, injectOnly },
+  );
+  assert.equal(
+    oldHost.hostDaemonCommandSchema.safeParse({ ...legacyCommand, injectOnly })
+      .success,
+    false,
+  );
+}
+assert.equal(
+  HOST_DAEMON_PROTOCOL_VERSION,
+  oldHost.HOST_DAEMON_PROTOCOL_VERSION + 1,
+);
+assert.equal(
+  isCompatibleHostDaemonProtocolVersion(oldHost.HOST_DAEMON_PROTOCOL_VERSION),
+  false,
 );
 const event = {
   type: "client/turn/requested" as const,
@@ -220,7 +298,11 @@ try {
       baseline,
       sourceCheckout: oldHead,
       sourceEquivalence:
-        "packages/db and packages/domain unchanged against baseline",
+        "packages/db, packages/domain and host-daemon-contract unchanged against baseline",
+      legacyCommandOmissionUnchanged: true,
+      explicitFalsePreserved: true,
+      oldDaemonRejectsNewField: true,
+      oldDaemonRequiresProtocolUpdate: true,
       legacyEventUnchanged: true,
       oldReaderIgnoresNewMetadata: true,
       upgradePreservesQueue: true,

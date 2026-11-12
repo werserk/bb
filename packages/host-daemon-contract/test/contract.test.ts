@@ -726,6 +726,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "thread.start omits fork unless the new thread should clone an existing provider session; absent means a normal start.",
   "hostDaemonCommandSchema.fork.sourceProviderCheckpointId":
     "thread.start.fork names a checkpoint only when the clone should stop at an earlier source turn; absent means clone the session tip.",
+  "hostDaemonCommandSchema.injectOnly":
+    "turn.submit sets this only for a claimed native questionResponse; omission retains legacy steering behavior.",
   "hostDaemonCommandSchema.inputGroups":
     "thread.start and turn.submit omit inputGroups for ordinary single user-message turns; presence preserves grouped user messages within one turn.",
   "hostDaemonOnlineRpcCommandSchema.selectedModel":
@@ -1066,11 +1068,11 @@ describe("host-daemon command schemas", () => {
   });
 
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(259);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(260);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 
-  it("accepts only daemons with busy-steer custody semantics", () => {
+  it("accepts only daemons with scoped card-injection semantics", () => {
     expect(contract.isCompatibleHostDaemonProtocolVersion(245)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(246)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(247)).toBe(false);
@@ -1085,7 +1087,8 @@ describe("host-daemon command schemas", () => {
     expect(contract.isCompatibleHostDaemonProtocolVersion(256)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(257)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(258)).toBe(false);
-    expect(contract.isCompatibleHostDaemonProtocolVersion(259)).toBe(true);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(259)).toBe(false);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(260)).toBe(true);
     expect(contract.hostDaemonSupportsConnectNext(246)).toBe(false);
     expect(contract.hostDaemonSupportsConnectNext(247)).toBe(true);
     expect(contract.hostDaemonSupportsDesktopBrokerProof(247)).toBe(false);
@@ -2313,6 +2316,50 @@ describe("host-daemon command schemas", () => {
         (reason) => reason.trim().length > 0,
       ),
     ).toBe(true);
+  });
+
+  it("preserves legacy turn.submit omission and accepts only explicit boolean injection policy", () => {
+    const legacy = {
+      type: "turn.submit",
+      bridgeLaunch: BRIDGE_LAUNCH,
+      environmentId: "env_123",
+      threadId: "thr_123",
+      requestId: CLIENT_REQUEST_ID,
+      input: [{ type: "text", text: "hello", mentions: [] }],
+      options: {
+        model: "gpt-5",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        providerOptions: {},
+        permissionMode: "full",
+        permissionScope: "full",
+        approvalReviewer: null,
+        permissionEscalation: null,
+      },
+      resumeContext: {
+        bridgeLaunch: BRIDGE_LAUNCH,
+        workspaceContext: { workspacePath: "/tmp/workspace" },
+        projectId: "proj_123",
+        providerId: "pi",
+        providerThreadId: "provider_123",
+        instructions: "Help",
+        dynamicTools: [],
+        contributedEnv: [],
+        injectedSkillSources: [],
+        instructionMode: "append",
+      },
+      target: { mode: "auto", expectedTurnId: "turn_123" },
+    };
+    expect(hostDaemonCommandSchema.parse(legacy)).toEqual(legacy);
+    for (const injectOnly of [false, true])
+      expect(hostDaemonCommandSchema.parse({ ...legacy, injectOnly })).toEqual({
+        ...legacy,
+        injectOnly,
+      });
+    expect(
+      hostDaemonCommandSchema.safeParse({ ...legacy, injectOnly: "true" })
+        .success,
+    ).toBe(false);
   });
 
   it("requires requestId, resumeContext, and target for turn.submit", () => {

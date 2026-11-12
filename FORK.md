@@ -63,4 +63,4 @@ repeated injections before idle. All dispatch guards and transactional claims
 remain shared. See docs/system-overview.md and the instant-question-answer
 OpenSpec delta for the acceptance and stored-data compatibility contract.
 
-Automatic card-answer steering checks the bridge-negotiated steerMode through an internal daemon/runtime injection-only flag. Queue-mode ACP is refused before sending or cancelling a provider command; explicit steer retains queue/cancel behavior. The daemon wire is unchanged.
+Claimed card answers alone set optional internal host turn.submit.injectOnly. Protocol260 requires the matching daemon through existing protocol self-update. The runtime checks bridge-negotiated steerMode; queue-mode ACP is refused before sending/cancelling. Legacy, system, agent and plugin commands omit the marker and keep their previous steering behavior. A withdrawn-before-refusal response is settled without requeueing or failing its active thread.

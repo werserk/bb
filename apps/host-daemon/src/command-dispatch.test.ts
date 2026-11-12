@@ -482,12 +482,55 @@ describe("dispatchCommand", () => {
       expect.objectContaining({
         clientRequestId: "creq_turn_submit",
         expectedTurnId: "turn-starting",
-        injectOnly: true,
+        injectOnly: false,
         threadId: "thread-1",
       }),
     );
     expect(runtime.runTurn).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, false, true])(
+    "passes the explicit card injection policy %s without inferring it from auto mode",
+    async (injectOnly) => {
+      const runtime = createRuntime();
+      const manager = new RuntimeManager({
+        createRuntime: () => runtime,
+        provisionWorkspace: async () => createWorkspace(),
+      });
+      await manager.ensureEnvironment({
+        environmentId: "env-1",
+        workspacePath: WORKSPACE_PATH,
+      });
+      runtime.setActiveTurn("thread-1", "turn-current");
+      await dispatchCommand(
+        {
+          ...createTurnSubmitCommand({
+            mode: "auto",
+            expectedTurnId: "turn-current",
+          }),
+          ...(injectOnly === undefined ? {} : { injectOnly }),
+        },
+        {
+          dataDir: "/tmp/bb-data",
+          logger: silentLogger,
+          eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
+          fetchProjectAttachment: async () => {
+            throw new Error("Unexpected project attachment fetch");
+          },
+          ...unexpectedProviderMaintenance,
+          runtimeManager: manager,
+          threadStorageRootPath: "/tmp/bb-thread-storage",
+        },
+      );
+      expect(runtime.steerTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedTurnId: "turn-current",
+          injectOnly: injectOnly === true,
+        }),
+      );
+      expect(runtime.runTurn).not.toHaveBeenCalled();
+    },
+  );
 
   it("rebases auto input onto the daemon's newer active turn", async () => {
     const runtime = createRuntime();
@@ -521,7 +564,10 @@ describe("dispatchCommand", () => {
 
     expect(result).toEqual({ trace: { spans: [] } });
     expect(runtime.steerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedTurnId: "turn-new", injectOnly: true }),
+      expect.objectContaining({
+        expectedTurnId: "turn-new",
+        injectOnly: false,
+      }),
     );
     expect(runtime.runTurn).not.toHaveBeenCalled();
   });

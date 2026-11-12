@@ -2,12 +2,17 @@
 
 ### Requirement: Durable card answers use active-turn injection when possible
 
-The core SHALL attempt a fresh durable questionResponse through the existing claimed auto/steer path with expectedTurnId. Automatic steering SHALL send a provider command only when the negotiated steerMode is inject; other modes SHALL return the existing non-steerable result without interrupting the active turn. Explicit user steer SHALL retain its existing behavior. It SHALL retain policy, interaction, compaction, host, manual-stop and transactional claim guards.
+The core SHALL attempt a fresh durable questionResponse through the existing claimed auto/steer path with expectedTurnId. Automatic steering of claimed card answers SHALL send a provider command only when the negotiated steerMode is inject; other modes SHALL return the existing non-steerable result without interrupting the active turn. Explicit user steer SHALL retain its existing behavior. It SHALL retain policy, interaction, compaction, host, manual-stop and transactional claim guards.
 
 #### Scenario: Idle answer
 
 - **WHEN** an owner submits an answer while its thread is idle
 - **THEN** the answer is dispatched now through the shared queue and recorded once
+
+#### Scenario: Other auto inputs retain legacy behavior
+
+- **WHEN** a legacy, system, agent or plugin input is submitted automatically
+- **THEN** it omits injectOnly and retains its previous bridge behavior without entering card recovery
 
 #### Scenario: Queue-mode ACP provider
 
@@ -39,6 +44,11 @@ The core SHALL record optional typed questionResponse questionId/revision/queued
 - **WHEN** the same answer or command rejection is delivered again
 - **THEN** the current durable answer receipt is returned without another queued copy or request
 
+#### Scenario: Withdrawn before refused injection settles
+
+- **WHEN** an owner withdraws a submitted card response before the daemon refuses injection
+- **THEN** core clears its false submission receipt, does not requeue it and does not fail the still-running thread
+
 #### Scenario: Withdrawn response
 
 - **WHEN** a restored card answer is withdrawn before its next input
@@ -62,3 +72,18 @@ An event without questionResponse SHALL retain its existing read semantics. Olde
 
 - **WHEN** a queued answer crosses .124 or .139 and candidate runtimes in either direction
 - **THEN** the same card remains linked to the queued answer and consumption records its submission receipt
+
+### Requirement: Scoped host injection policy upgrades safely
+
+Only a claimed native questionResponse SHALL set optional internal host turn.submit.injectOnly. Omission or false SHALL retain existing steering behavior. Protocol260 SHALL require the matching daemon through the existing mismatch/self-update path; no marked command SHALL be sent to a protocol259 daemon.
+
+#### Scenario: Legacy command omission
+
+- **WHEN** a new daemon reads a legacy command without injectOnly
+- **THEN** it parses unchanged and runtime injection-only defaults to false
+
+#### Scenario: Marked command and older daemon
+
+- **WHEN** a protocol259 daemon attempts to connect to the new server
+- **THEN** it is rejected for update before receiving a marked command
+- **AND** its old strict parser rejects new fields, while new commands explicitly accept true or false

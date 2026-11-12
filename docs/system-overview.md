@@ -123,7 +123,7 @@ Completed service history stays hidden; owner replies after a steer stay visible
 ### Deferred owner steers
 
 A provider `turnBusy` rejection keeps the active turn alive. The host reports
-`turn_not_steerable` under daemon protocol 259; it does not start another run.
+`turn_not_steerable` under daemon protocol 260; it does not start another run.
 Server settlement fences accepted/rejected request IDs, then atomically transfers
 an eligible owner request into a native `deferredSteer` queue row and records the
 rejection's `deferredToQueuedMessageId`. This linkage hides the failed-copy
@@ -216,8 +216,9 @@ the barrier. No new event or provider wire arm is required. Exact-pair acceptanc
 remains incomplete; these primitives are not full-path release evidence.
 A fresh durable answer can use the existing claimed `auto` dispatch while a turn
 is active; that path carries the existing `expectedTurnId` and all dispatch
-policy, interaction, compaction, host and manual-stop guards. The daemon marks
-auto steering as injection-only in its internal runtime call. The adapter exposes
+policy, interaction, compaction, host and manual-stop guards. Only the claimed response sets optional
+`turn.submit.injectOnly`; legacy/system/agent/plugin commands omit it and retain
+their previous behavior. The daemon defaults omission to false. The adapter exposes
 the negotiated bridge `steerMode`; a non-inject mode returns the existing busy
 result before a provider command or cancellation, reusing refused-steer recovery.
 Explicit user steer retains its existing queue/cancel behavior. Only a claimed
@@ -230,8 +231,16 @@ event links the replacement queue ID to its source request; later wakes wait for
 the current turn to end instead of repeating the refused inject. The fallback
 card reads `Queued · will be sent after this turn`. Existing runtimes ignore the
 additive history field and can consume the unchanged question-response queue
-payload after rollback, preserving the native card receipt. No database column,
-command, daemon protocol or SDK input changes.
+payload after rollback, preserving the native card receipt. A response withdrawn
+before refusal is settled without requeueing; the false submission receipt is
+cleared and the active turn remains live. No database column or SDK/CLI changes.
+
+Internal host protocol 260 adds optional `turn.submit.injectOnly`, set only from
+claimed response identity. Protocol259 is rejected before dispatch; the existing
+protocol mismatch/self-update path installs the matching daemon and reconnects.
+Old commands without the marker parse unchanged on the new daemon, while old
+strict parsers reject marked commands and therefore must update before receiving
+them. This wire change does not add persisted history fields beyond questionResponse.
 
 The app replaces only a complete marker message with `ConversationQuestionCard`.
 The shared thread-view grouping rule keeps that message outside completed work

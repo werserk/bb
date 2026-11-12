@@ -360,7 +360,7 @@ async function steerSubmittedTurn(
     const result = await entry.runtime.steerTurn({
       threadId: command.threadId,
       expectedTurnId: targetTurnId,
-      injectOnly: command.target.mode === "auto",
+      injectOnly: command.injectOnly === true,
       input: command.input,
       clientRequestId: command.requestId,
       options: command.options,

@@ -335,6 +335,15 @@ export function restoreConversationQuestionDelivery(
     .returning({ id: conversationQuestions.id }).get() !== undefined;
 }
 
+export function clearWithdrawnQuestionResponseReceipt(
+  db: DbQueryConnection,
+  args: { threadId: string; questionId: string; revision: number; queuedMessageId: string },
+): boolean {
+  return db.update(conversationQuestions).set({ dispatchedAt: null, updatedAt: Date.now() })
+    .where(and(eq(conversationQuestions.threadId, args.threadId), eq(conversationQuestions.id, args.questionId), eq(conversationQuestions.revision, args.revision), eq(conversationQuestions.status, "withdrawn"), eq(conversationQuestions.queuedMessageId, args.queuedMessageId), isNotNull(conversationQuestions.dispatchedAt)))
+    .returning({ id: conversationQuestions.id }).get() !== undefined;
+}
+
 export function getQueuedQuestionResponseDeferral(
   db: DbQueryConnection,
   args: { threadId: string; queuedMessageId: string },

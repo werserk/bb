@@ -769,7 +769,13 @@ async function sendThreadMessageWithoutContextClear(
       queuedRequest.request.notificationMetadata,
     );
     startLiveHostCommand(deps, {
-      command: command.command,
+      command: {
+        ...command.command,
+        ...(args.questionResponse !== undefined &&
+        command.command.type === "turn.submit"
+          ? { injectOnly: true }
+          : {}),
+      },
       hostId: readyEnvironment.hostId,
       timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
       ...(args.historyReplacement?.onCommandSettled !== undefined
@@ -821,7 +827,10 @@ async function sendThreadMessageWithoutContextClear(
     },
   });
   const command = addRequestIdToTurnSubmitCommandPayload({
-    preparedCommand,
+    preparedCommand: {
+      ...preparedCommand,
+      ...(args.questionResponse !== undefined ? { injectOnly: true } : {}),
+    },
     requestId,
   });
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({

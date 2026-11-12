@@ -339,6 +339,7 @@ export type TurnSubmitTarget = z.infer<typeof turnSubmitTargetSchema>;
 const turnSubmitCommandSchema = hostDaemonThreadTargetSchema
   .extend({
     type: z.literal("turn.submit"),
+    injectOnly: z.boolean().optional(),
     requestId: clientTurnRequestIdSchema,
     input: z.array(promptInputSchema).min(1),
     inputGroups: z.array(z.array(promptInputSchema).min(1)).min(1).optional(),
@@ -1954,7 +1955,9 @@ type HostDaemonRetryableOnlineRpcCommandSchema =
 type HostDaemonResultSchemaMapForTransport<
   Transport extends HostDaemonCommandTransport,
 > = {
-  [Descriptor in HostDaemonCommandDescriptorForTransport<Transport> as Descriptor["type"]]: Descriptor["resultSchema"];
+  [
+    Descriptor in HostDaemonCommandDescriptorForTransport<Transport> as Descriptor["type"]
+  ]: Descriptor["resultSchema"];
 };
 
 type HostDaemonCommandResultSchemaMap =

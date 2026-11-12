@@ -34,6 +34,7 @@ import {
   closeConversationQuestion,
   readConversationQuestion,
 } from "../../src/services/threads/conversation-questions.js";
+import { deliverParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import { readDeferredSteerRequest } from "../../src/services/threads/deferred-steer.js";
 import { attemptDispatch } from "../../src/services/threads/dispatch-attempt.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
@@ -111,14 +112,17 @@ function fixture(
   registerHostRpcResponder(harness, {
     hostId: host.id,
     sessionId: session.id,
-    handle: ({ command }) => {
+    handle: async ({ command }) => {
       if (command.type === "host.read_workspace_agent_context")
         return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
       if (command.type === "turn.submit") {
         commands.push(command);
-        return commands.length === 1
+        const result = await (commands.length === 1
           ? refuse()
-          : (afterFirst?.() ?? { ok: true, result: {} });
+          : (afterFirst?.() ?? { ok: true, result: {} }));
+        return result.ok
+          ? { ok: true, result: { trace: { spans: [] }, ...result.result } }
+          : result;
       }
       return { ok: true, result: {} };
     },
@@ -930,6 +934,7 @@ it("injects a busy question response using the expected active turn and deduplic
       threadId: thread.id,
     });
     expect(commands).toHaveLength(1);
+    expect(commands[0]!.injectOnly).toBe(true);
     expect(commands[0]!.target).toEqual({
       mode: "auto",
       expectedTurnId: turnId,
@@ -1129,3 +1134,113 @@ it("keeps question response custody across repeated competing next inputs", asyn
     expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
   });
 });
+
+it("does not fail the active turn or redeliver a question response withdrawn before refusal", async () => {
+  await withTestHarness(async (harness) => {
+    const entered = createDeferredPromise<void>();
+    const released = createDeferredPromise<HostRpcHandlerResult>();
+    const { thread, environment, commands } = fixture(harness, () => {
+      entered.resolve();
+      return released.promise;
+    });
+    const answer = questionResponseFixture(harness, thread.id);
+    await answerConversationQuestion(harness.deps, answer);
+    await entered.promise;
+    closeConversationQuestion(harness.deps, { ...answer, action: "withdraw" });
+    released.resolve(refusal());
+    await runQueuedMessageDispatch(harness.deps, {
+      kind: "thread-ready",
+      threadId: thread.id,
+    });
+    await expect
+      .poll(
+        () =>
+          listEvents(harness.db, { threadId: thread.id }).filter(
+            (e) => e.type === "client/turn/rejected",
+          ).length,
+      )
+      .toBe(1);
+    expect(getThread(harness.db, thread.id)?.status).toBe("active");
+    expect(readConversationQuestion(harness.deps, answer)).toMatchObject({
+      status: "withdrawn",
+      dispatchedAt: null,
+    });
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+    complete(harness, thread.id, environment.id);
+    await runQueuedMessageDispatch(harness.deps, {
+      kind: "thread-ready",
+      threadId: thread.id,
+    });
+    expect(commands).toHaveLength(1);
+    expect(
+      listEvents(harness.db, { threadId: thread.id }).some(
+        (e) => e.type === "system/error",
+      ),
+    ).toBe(false);
+  });
+});
+
+it.each(["system", "agent", "plugin", "owner"] as const)(
+  "omits the card-only injection guard for %s auto input",
+  async (kind) => {
+    await withTestHarness(async (harness) => {
+      const { thread, environment, commands } = fixture(harness, () => ({
+        ok: true,
+        result: {},
+      }));
+      if (kind === "system") {
+        await deliverParentSystemMessage(harness.deps, {
+          parentThread: thread,
+          input: [{ type: "text", text: "child result", mentions: [] }],
+          systemMessageKind: "child-completed",
+          systemMessageSubject: null,
+        });
+      } else {
+        const sender =
+          kind === "agent"
+            ? seedThread(harness.deps, {
+                projectId: thread.projectId,
+                environmentId: environment.id,
+              })
+            : null;
+        await attemptDispatch(harness.deps, {
+          thread,
+          payload: {
+            mode: "auto",
+            input: inputGroups.flat(),
+            inputGroups,
+            ...(sender ? { senderThreadId: sender.id } : {}),
+            model: "gpt-5",
+            reasoningLevel: "medium",
+            permissionMode: "accept-edits",
+            serviceTier: "default",
+          },
+          source: { kind: "inline" },
+          queuePayload: { kind: "inline" },
+          pluginSubmission: null,
+          origin: kind === "plugin" ? "plugin" : null,
+          originPluginId: kind === "plugin" ? "test-plugin" : null,
+          startedOnBehalfOf: null,
+          trigger: "user",
+        });
+      }
+      await expect.poll(() => commands.length).toBe(1);
+      expect(commands[0]!.injectOnly).toBeUndefined();
+      expect(commands[0]!.target.mode).toBe("auto");
+      expect(getThread(harness.db, thread.id)?.status).toBe("active");
+      expect(
+        requests(harness, thread.id).at(-1)!.questionResponse,
+      ).toBeUndefined();
+      expect(requests(harness, thread.id).at(-1)!.initiator).toBe(
+        kind === "system" ? "system" : kind === "agent" ? "agent" : "user",
+      );
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+      complete(harness, thread.id, environment.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      expect(commands).toHaveLength(1);
+    });
+  },
+);

@@ -1,5 +1,6 @@
 import {
   createQueuedThreadMessageInTransaction,
+  clearWithdrawnQuestionResponseReceipt,
   getConversationQuestion,
   restoreConversationQuestionDelivery,
   getStoredTurnRequestEventByRequestId,
@@ -117,6 +118,26 @@ export function recoverRefusedOwnerInputInTransaction(args: {
       threadId: args.thread.id,
       questionId: questionResponse.questionId,
     });
+    if (
+      question?.status === "withdrawn" &&
+      clearWithdrawnQuestionResponseReceipt(args.db, {
+        threadId: args.thread.id,
+        ...questionResponse,
+      })
+    ) {
+      appendThreadEventInTransaction(args.db, {
+        threadId: args.thread.id,
+        environmentId: args.thread.environmentId,
+        type: "client/turn/rejected",
+        scope: threadScope(),
+        data: {
+          requestId: args.requestId,
+          reason: args.reason,
+          message: args.message,
+        },
+      });
+      return true;
+    }
     if (
       question === null ||
       question.status !== "answered" ||
