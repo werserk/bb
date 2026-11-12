@@ -553,7 +553,8 @@ async function runDispatchAttempt(
       admitted.value = await admitPendingThread(deps, {
         claimed,
         payload: resolvedPayload,
-        senderThreadId: author.senderThreadId,
+        author,
+        ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
         dispatchProvenance: {
           origin: args.origin,
           originPluginId: args.originPluginId,
@@ -744,7 +745,8 @@ function consumeClaimedRows(
 }
 
 interface AdmitPendingThreadArgs {
-  senderThreadId: string | null;
+  author: ReturnType<typeof resolveDispatchAuthor>;
+  retryOf?: TurnRequestRetryMarker;
   dispatchProvenance: {
     origin: ThreadCreateOrigin | null;
     originPluginId: string | null;
@@ -836,7 +838,8 @@ async function admitPendingThread(
         if (starting === null) throw new PendingThreadAdmissionLost();
         requestThreadProvision(deps, {
           serviceTurn: args.payload.serviceTurn,
-          senderThreadId: args.senderThreadId,
+          author: args.author,
+          ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
           dispatchProvenance: args.dispatchProvenance,
           thread: starting,
           environmentIntent: startContext.environmentIntent,
