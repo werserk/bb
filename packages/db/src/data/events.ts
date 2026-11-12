@@ -21,9 +21,11 @@ import {
   notExists,
   notInArray,
   or,
+  placeholder,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { prepareCachedQuery } from "../connection.js";
 import type {
   ClientTurnRequestId,
   PromptInput,
@@ -3862,27 +3864,31 @@ export function isStoredTurnProviderCompactionRunning(
   return !acceptedInput;
 }
 
+function prepareContextClearSequence(db: DbQueryConnection) {
+  return db.select({ sequence: events.sequence }).from(events).where(and(
+    eq(events.threadId, placeholder("threadId")),
+    eq(events.type, "system/operation"),
+    sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
+    sql`json_extract(${events.data}, '$.status') = 'completed'`,
+  )).orderBy(desc(events.sequence)).limit(1).prepare();
+}
+
+function prepareBoundedContextClearSequence(db: DbQueryConnection) {
+  return db.select({ sequence: events.sequence }).from(events).where(and(
+    eq(events.threadId, placeholder("threadId")),
+    eq(events.type, "system/operation"),
+    sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
+    sql`json_extract(${events.data}, '$.status') = 'completed'`,
+    lte(events.sequence, placeholder("atOrBeforeSequence")),
+  )).orderBy(desc(events.sequence)).limit(1).prepare();
+}
+
 export function getLatestCompletedThreadContextClearSequence(
   db: DbQueryConnection,
   args: GetLatestCompletedThreadContextClearSequenceArgs,
 ): number | null {
-  const conditions: SQL[] = [
-    eq(events.threadId, args.threadId),
-    eq(events.type, "system/operation"),
-    sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
-    sql`json_extract(${events.data}, '$.status') = 'completed'`,
-  ];
-  if (args.atOrBeforeSequence !== undefined) {
-    conditions.push(lte(events.sequence, args.atOrBeforeSequence));
-  }
-  const row = db
-    .select({ sequence: events.sequence })
-    .from(events)
-    .where(and(...conditions))
-    .orderBy(desc(events.sequence))
-    .limit(1)
-    .get();
-  return row?.sequence ?? null;
+  const build = args.atOrBeforeSequence === undefined ? prepareContextClearSequence : prepareBoundedContextClearSequence;
+  return prepareCachedQuery(db, build).get({ ...args })?.sequence ?? null;
 }
 
 interface StoredProviderThreadIdentityScope {
@@ -4699,12 +4705,24 @@ export function getLatestTurnRequestEventRow(
     .get();
 }
 
-export function listPlanHistoryEventRows(db: DbConnection, args: {threadId: string; boundary: number; atOrBeforeSequence?: number; limit: number}): StoredEventRow[] {
+function preparePlanHistory(db: DbQueryConnection) {
   return db.select(storedEventRowFields).from(events).where(and(
-    eq(events.threadId, args.threadId), gte(events.sequence, args.boundary),
-    args.atOrBeforeSequence === undefined ? undefined : lte(events.sequence, args.atOrBeforeSequence),
+    eq(events.threadId, placeholder("threadId")), gte(events.sequence, placeholder("boundary")),
     sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
-  )).orderBy(desc(events.sequence)).limit(args.limit).all();
+  )).orderBy(desc(events.sequence)).limit(placeholder("limit")).prepare();
+}
+
+function prepareBoundedPlanHistory(db: DbQueryConnection) {
+  return db.select(storedEventRowFields).from(events).where(and(
+    eq(events.threadId, placeholder("threadId")), gte(events.sequence, placeholder("boundary")),
+    lte(events.sequence, placeholder("atOrBeforeSequence")),
+    sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
+  )).orderBy(desc(events.sequence)).limit(placeholder("limit")).prepare();
+}
+
+export function listPlanHistoryEventRows(db: DbConnection, args: {threadId: string; boundary: number; atOrBeforeSequence?: number; limit: number}): StoredEventRow[] {
+  const build = args.atOrBeforeSequence === undefined ? preparePlanHistory : prepareBoundedPlanHistory;
+  return prepareCachedQuery(db, build).all(args);
 }
 
 export function getPlanInteractionCreationRow(
