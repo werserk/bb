@@ -4438,8 +4438,11 @@ closure states remain distinct, and old records show Attribution unavailable.
 
 
 Question resolution conflicts carry `details.current` when a question snapshot is
-available (revision, closure and immutable winning attribution); the native tool
-preserves that structured ApiError body. Receipt replay still requires current
+available to the authorized caller (revision, closure and immutable winning
+attribution); the native tool preserves that structured ApiError body. Target
+reads and answer-validation errors run inside the scope grant before execution
+preparation; acceptance obtains a fresh grant afterward. A refused native caller
+gets no target snapshot, including for a stale revision. Receipt replay still requires current
 authority: losing ancestry or a live caller turn refuses rather than leaking a
 previous receipt. Background async work inherited during a native invocation is
 within that trusted plugin call; it loses the context on settlement or abort.

@@ -6,6 +6,9 @@ import {
   seedThreadFixture,
   seedTurnStarted,
   seedThreadRuntimeState,
+  seedThread,
+  seedProjectWithSource,
+  seedEnvironment,
 } from "../helpers/seed.js";
 import {
   answerConversationQuestion,
@@ -28,6 +31,119 @@ const publication = {
 };
 
 describe("native question resolution", () => {
+  it.each([
+    ["foreign", "answer"],
+    ["foreign", "withdraw"],
+    ["sibling", "answer"],
+    ["sibling", "withdraw"],
+  ] as const)(
+    "refuses %s %s before exposing revision or answer-validation details",
+    async (relationship, action) => {
+      await withTestHarness(async (h) => {
+        const target = seedThreadFixture(h, { thread: { status: "active" } });
+        seedThreadRuntimeState(h.deps, {
+          threadId: target.thread.id,
+          environmentId: target.environment.id,
+          providerThreadId: "target-provider",
+        });
+        const callerProject =
+          relationship === "foreign"
+            ? seedProjectWithSource(h.deps, { hostId: target.host.id }).project
+            : target.project;
+        const callerEnvironment =
+          relationship === "foreign"
+            ? seedEnvironment(h.deps, {
+                hostId: target.host.id,
+                projectId: callerProject.id,
+              })
+            : target.environment;
+        const caller = seedThread(h.deps, {
+          projectId: callerProject.id,
+          environmentId: callerEnvironment.id,
+          status: "active",
+        });
+        const session = target.session;
+        seedTurnStarted(h.deps, {
+          threadId: caller.id,
+          turnId: "native",
+          providerThreadId: "caller-provider",
+        });
+        const question = createConversationQuestion(h.db, {
+          threadId: target.thread.id,
+          sourceTurnId: null,
+          sourceCallId: null,
+          publication: JSON.stringify(publication),
+          materialManifest: JSON.stringify({
+            hostId: null,
+            storageRootPath: null,
+            materials: [],
+            files: [],
+          }),
+        })!;
+        await answerConversationQuestion(h.deps, {
+          threadId: target.thread.id,
+          questionId: question.id,
+          revision: 1,
+          answers: {
+            choice: { selected: [], freeText: "PRIVATE_OWNER_ANSWER" },
+          },
+        });
+        const before = readConversationQuestion(h.deps, {
+          threadId: target.thread.id,
+          questionId: question.id,
+        });
+        for (const revision of [2, 1]) {
+          for (const answers of action === "answer"
+            ? [{ choice: { selected: ["a"] } }, {}]
+            : [undefined]) {
+            const response = await h.app.request(
+              "/internal/session/tool-call",
+              {
+                method: "POST",
+                headers: internalAuthHeaders(h),
+                body: JSON.stringify({
+                  sessionId: session.id,
+                  threadId: caller.id,
+                  turnId: "native",
+                  providerThreadId: "caller-provider",
+                  callId: "resolve",
+                  tool: "bb_resolve_question",
+                  arguments: {
+                    threadId: target.thread.id,
+                    questionId: question.id,
+                    revision,
+                    operationId: "not-authorized",
+                    action,
+                    reason: "Must not disclose the target",
+                    ...(answers ? { answers } : {}),
+                  },
+                }),
+              },
+            );
+            const result = await response.json();
+            expect(result.success, JSON.stringify(result)).toBe(false);
+            const error = JSON.parse(result.contentItems[0].text).error;
+            expect(error.code).toBe("question_resolution_refused");
+            expect(error.details).toBeUndefined();
+            expect(JSON.stringify(result)).not.toContain(
+              "PRIVATE_OWNER_ANSWER",
+            );
+            expect(JSON.stringify(result)).not.toContain(publication.body);
+          }
+        }
+        expect(
+          readConversationQuestion(h.deps, {
+            threadId: target.thread.id,
+            questionId: question.id,
+          }),
+        ).toEqual(before);
+        expect(listQueuedThreadMessages(h.db, target.thread.id)).toHaveLength(
+          1,
+        );
+      });
+    },
+  );
+
   it("discovers answerable prompts with bounded coverage and refuses stale cursors", async () => {
     await withTestHarness(async (h) => {
       const { thread, session } = seedThreadFixture(h, {
@@ -177,6 +293,11 @@ describe("native question resolution", () => {
         };
         const first = await call(input);
         expect(first.success).toBe(true);
+        const stale = await call({ ...input, revision: 2 });
+        expect(JSON.parse(stale.contentItems[0].text).error).toMatchObject({
+          code: "conversation_question_conflict",
+          details: { current: { id: question.id, revision: 1 } },
+        });
         const accepted = readConversationQuestion(h.deps, {
           threadId: thread.id,
           questionId: question.id,

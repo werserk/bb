@@ -187,7 +187,9 @@ without rewriting legacy cards. Local HTTP/UI/CLI actions are explicitly
 attribution. Native `bb_resolve_question` uses a live source turn and the common
 answer/withdraw transactions, binding retries to the actor and normalized operation content.
 The scope service runs the acceptance callback synchronously while its current
-policy grant is held and rechecks caller liveness/project before writing. An
+policy grant is held. Scope also gates target reads, revision conflicts and
+answer-validation errors before asynchronous execution preparation; acceptance
+rechecks fresh caller liveness/project after that preparation. An
 absent managed policy permits self only. Withdrawal atomically appends a separate
 resolution-bound cancellation queue row without changing an accepted answer's
 custody. Consuming either native row records its submission receipt in the same

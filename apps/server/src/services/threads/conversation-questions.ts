@@ -415,22 +415,33 @@ export async function answerConversationQuestion(
   args: AnswerArgs,
   call?: QuestionResolutionCall,
 ): Promise<ConversationQuestion> {
-  publicThread(deps.db, args.threadId, true);
-  const question = rowToQuestion(deps.db, questionRow(deps.db, args));
-  requireRevision(question, args.revision);
-  let normalized: Record<string, PendingInteractionUserAnswer>;
-  try {
-    normalized = normalizeConversationQuestionAnswers(
-      question.publication.questions,
-      args.answers,
-    );
-  } catch (error) {
-    throw new ApiError(
-      400,
-      "invalid_question_answer",
-      error instanceof Error ? error.message : "Invalid question answer",
-    );
-  }
+  // Target-derived conflicts and validation are reads subject to the same scope
+  // as acceptance. Reauthorize below after asynchronous execution preparation.
+  const { question, normalized } = await withQuestionResolutionActor(
+    deps.db,
+    args.threadId,
+    call?.invocation ?? null,
+    () => {
+      publicThread(deps.db, args.threadId, true);
+      const question = rowToQuestion(deps.db, questionRow(deps.db, args));
+      requireRevision(question, args.revision);
+      try {
+        return {
+          question,
+          normalized: normalizeConversationQuestionAnswers(
+            question.publication.questions,
+            args.answers,
+          ),
+        };
+      } catch (error) {
+        throw new ApiError(
+          400,
+          "invalid_question_answer",
+          error instanceof Error ? error.message : "Invalid question answer",
+        );
+      }
+    },
+  );
   const execution =
     question.status === "open"
       ? await buildExecutionOptions(deps, {}, { threadId: args.threadId })
@@ -564,9 +575,17 @@ export async function closeConversationQuestion(
 ): Promise<ConversationQuestion> {
   if (call && args.action !== "withdraw")
     conflict("Agent dismissal is unsupported");
-  publicThread(deps.db, args.threadId, true);
-  const before = rowToQuestion(deps.db, questionRow(deps.db, args));
-  requireRevision(before, args.revision);
+  const before = await withQuestionResolutionActor(
+    deps.db,
+    args.threadId,
+    call?.invocation ?? null,
+    () => {
+      publicThread(deps.db, args.threadId, true);
+      const question = rowToQuestion(deps.db, questionRow(deps.db, args));
+      requireRevision(question, args.revision);
+      return question;
+    },
+  );
   const execution =
     args.action === "withdraw" &&
     (before.status === "open" || before.status === "answered")
