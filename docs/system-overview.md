@@ -25,6 +25,18 @@ The core entities and how they relate:
 
 ## Contracts and boundaries
 
+### Queue readiness scheduling
+
+The server coalesces concurrent queue-readiness wakes per thread with
+`createAsyncRerunner` in `lifecycle-dedupers.ts`. A wake received during an
+in-flight drain schedules a fresh pass after it settles instead of joining and
+losing the new readiness signal. Queue claims and dispatch admission remain the
+authority for exactly-once delivery, manual-stop pauses and plugin waits.
+Answer acceptance and native idle transitions request this same drain; the
+existing periodic idle recovery remains a fallback for missed process-local
+signals. This introduces no persisted or public contract.
+
+
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and

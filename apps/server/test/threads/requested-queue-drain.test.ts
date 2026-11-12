@@ -127,6 +127,34 @@ async function stopThread(harness: TestAppHarness, threadId: string) {
 }
 
 describe("the requested queue drain", () => {
+  it("retains a thread-ready wake received while a dispatch pass is in flight", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-ready-during-drain",
+        status: "idle",
+      });
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      const inFlight = harness.deps.lifecycleDedupers.queuedMessageDispatch.run(
+        thread.id,
+        () => barrier,
+      );
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("owner answer arriving during a drain"),
+        waitingOn: { kind: "thread-busy" },
+      });
+      const wake = runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      release();
+      await Promise.all([inFlight, wake]);
+      expect(turnRequests(harness, thread.id)).toHaveLength(1);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+    });
+  });
+
   it.each([
     { finish: "save", sentText: "SAVED EDIT" },
     { finish: "cancel", sentText: "ORIGINAL" },
