@@ -19,6 +19,9 @@ import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { ConversationMessageContent } from "../timeline/ConversationMessageContent";
 import { QuestionNavigationProvider } from "./question-navigation";
 import { QuestionResponseEvent } from "./QuestionResponseEvent";
+vi.mock("@/hooks/queries/thread-queries", () => ({
+  useThread: () => ({ error: null }),
+}));
 const api = vi.hoisted(() => ({ get: vi.fn(), list: vi.fn() }));
 vi.mock("@/lib/sdk", () => ({
   sdk: { threads: { questions: api, events: { list: api.list } } },

@@ -1700,10 +1700,7 @@ function createFakePluginHostInternal(
     hosts,
     experimental_aiServices,
     experimental_threads,
-    experimental_questionResolution: {
-      version: 1,
-      resolve: (input) => sdk.threads.questions.experimental_resolve(input),
-    },
+    experimental_questionResolution: undefined,
     experimental_questionResolutionScope: {
       register() {
         throw new Error(

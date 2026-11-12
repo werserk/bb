@@ -155,7 +155,7 @@ it.each(["overlay", "panel"] as const)(
     const view = render(element(2));
     const field = screen.getByRole("textbox");
     fireEvent.change(field, { target: { value: "Serial draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     view.rerender(element(3));
     expect(document.activeElement).toBe(screen.getByRole("textbox"));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
@@ -395,7 +395,7 @@ it.each([
   ["core", focusThreadPlan],
   ["SDK", experimental_focusThreadPlan!],
 ] as const)(
-  "%s reveals the exact native editor repeatedly without remounting or losing its draft and reopens local Skip",
+  "%s reveals the exact native editor repeatedly without remounting or losing its draft and reopens a locally collapsed plan",
   (_surface, focus) => {
     render(<ThreadPlanSteps threadId="focus" placement="overlay" />);
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -405,13 +405,13 @@ it.each([
     const field = screen.getByRole("textbox");
     expect(document.activeElement).toBe(field);
     fireEvent.change(field, { target: { value: "Preserved draft" } });
-    screen.getByRole("button", { name: "Skip" }).focus();
+    screen.getByRole("button", { name: "Cancel" }).focus();
     act(() =>
       expect(focus({ threadId: "focus", interactionId: "input" })).toBe(true),
     );
     expect(screen.getByRole("textbox")).toBe(field);
     expect(document.activeElement).toBe(field);
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     act(() =>
       expect(focus({ threadId: "focus", interactionId: "input" })).toBe(true),
     );
@@ -499,7 +499,7 @@ it("prefers a focused eligible pane and unregisters its controller", () => {
   expect(focusThreadPlan({ threadId: "preference" })).toBe(false);
 });
 
-it("native compact SDK focus restores a skipped form and reclaims a panel-owned draft", () => {
+it("native compact SDK focus reclaims a panel-owned draft without cancelling the question", () => {
   const element = (serial: number) => (
     <NativeQuestionFocusProvider>
       <div data-thread-chat>
@@ -518,7 +518,6 @@ it("native compact SDK focus restores a skipped form and reclaims a panel-owned 
   fireEvent.change(screen.getByRole("textbox"), {
     target: { value: "Retain this draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
   act(() => {
     expect(focusThreadPlan({ threadId: "focus", interactionId: "input" })).toBe(
       true,

@@ -2351,7 +2351,10 @@ export interface ExperimentalQuestionResolution {
 
 /** The API handed to a plugin factory, implemented by the BB server. */
 export interface BbPluginApi {
-  readonly experimental_questionResolution: ExperimentalQuestionResolution;
+  /** Undefined when the host cannot provide the complete versioned contract. */
+  readonly experimental_questionResolution:
+    | ExperimentalQuestionResolution
+    | undefined;
   readonly experimental_questionResolutionScope: {
     register(policy: ExperimentalQuestionResolutionScopePolicy): {
       dispose(): void;

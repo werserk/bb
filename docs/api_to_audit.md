@@ -4374,9 +4374,10 @@ Stabilization requires independent review, native/plugin custody and focus hando
 
 ## Persistent question observation and resolution v1
 
-`BbPluginApi.experimental_questionResolution.version === 1` is the explicit
+`BbPluginApi.experimental_questionResolution?.version === 1` is the explicit
 runtime declaration, carried by the matching typed plugin SDK. Missing/unknown
-versions are unsupported; method presence, package/runtime versions and opaque
+versions are unsupported. Hosts without the full service and the SDK fake host
+return an undefined capability; the fake does not simulate host authority. Method presence, package/runtime versions and opaque
 cursors do not establish capability. This single version binds both the read and
 invalidation semantics below and persistent qst resolution. Both pint agent
 actions return unsupported before any waiter/status/history/attention mutation.

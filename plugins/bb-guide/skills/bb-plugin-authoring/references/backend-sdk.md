@@ -398,7 +398,7 @@ such method: check `typeof bb.experimental_threads?.setAttentionPolicy`.
 
 ## Persistent question observation and resolution
 
-Require `bb.experimental_questionResolution.version === 1` before using persistent
+Require `bb.experimental_questionResolution?.version === 1` before using persistent
 question observation/resolution; missing or unknown versions are unsupported.
 Use typed `bb.sdk.threads.questions.open/get` and `bb.sdk.subscribe` for reads and
 invalidation. For thread subscriptions, `experimental_onReady` confirms server

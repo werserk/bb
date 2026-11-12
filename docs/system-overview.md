@@ -194,11 +194,13 @@ custody. Consuming either native row records its submission receipt in the same
 transaction as the turn request; it does not claim model consumption. The app
 joins accepted history before showing trusted attribution, keeps old snapshots
 readable without invented authors, and displays closure separately from delivery.
+Recorded actor links use the native thread query; a confirmed 404 removes navigation
+without rewriting frozen identity, while read failures do not imply deletion.
 Both pint agent actions return unsupported without changing their original local
 controls. Native tools, the backend SDK resolver and local SDK/HTTP/CLI routes
 share the resolver. Only a live native invocation carries verified agent identity.
 The host stages the managed scope policy until plugin activation and revokes it
-on disposal or failed loading. `experimental_questionResolution.version === 1`
+on disposal or failed loading. `experimental_questionResolution?.version === 1`
 binds the qst actions to the existing complete-open read and notification contract.
 Thread subscriptions can use `experimental_onReady` to confirm server registration
 through existing ordered ping/pong before certifying a read; reconnect repeats

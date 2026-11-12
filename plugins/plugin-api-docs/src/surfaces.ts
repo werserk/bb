@@ -1061,7 +1061,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         summary:
           "Observe persistent question cards and settle them with attributable native delivery.",
         bullets: [
-          "Require bb.experimental_questionResolution.version === 1; missing or unknown versions are unsupported, regardless of SDK version or method presence",
+          "Require bb.experimental_questionResolution?.version === 1; missing or unknown versions are unsupported, regardless of SDK version or method presence",
           "Use bb.sdk.threads.questions.open/get for complete cursor reads and full prompts; list is capped history. Subscribe before reading, repeat after invalidation during a read, and refresh on reconnect or foreground",
           "Subscribe to thread:changed (interactions-changed and lifecycle changes) and realtime:connection; signals invalidate reads, with no replay or exactly-once promise. Dispose subscriptions and discard late reads on reload",
           "Use experimental_questionResolution.resolve inside a native plugin tool for host-derived identity; SDK calls outside that context and CLI/HTTP closures are local-unverified. Agent answers never grant owner approval",

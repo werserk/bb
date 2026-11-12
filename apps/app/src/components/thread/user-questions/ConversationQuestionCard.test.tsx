@@ -9,6 +9,9 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { ConversationQuestionCard } from "./ConversationQuestionCard";
+vi.mock("@/hooks/queries/thread-queries", () => ({
+  useThread: () => ({ error: null }),
+}));
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   answer: vi.fn(),

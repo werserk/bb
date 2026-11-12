@@ -1499,10 +1499,7 @@ export function createPluginApi(options: {
     get experimental_questionResolution() {
       assertLive();
       const resolve = options.resolveQuestion;
-      if (!resolve)
-        throw new Error(
-          "Question resolution version 1 is unavailable in this host",
-        );
+      if (!resolve) return undefined;
       return {
         version: 1 as const,
         resolve(input: Parameters<typeof resolve>[0]) {

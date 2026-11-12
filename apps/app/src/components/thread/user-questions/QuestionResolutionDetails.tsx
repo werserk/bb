@@ -1,10 +1,41 @@
 import {
   questionResolutionLabel,
   type QuestionResolutionAttribution,
+  type QuestionResolutionActor,
 } from "@bb/domain";
 import { RouteAnchor } from "@/components/ui/app-route-anchor";
+import { useThread } from "@/hooks/queries/thread-queries";
+import { asHttpError } from "@/lib/http-error";
 import { getThreadRoutePath } from "@/lib/route-paths";
 import { questionTime } from "./question-response-presentation";
+
+function RecordedActorLink({
+  actor,
+  label,
+}: {
+  actor: Extract<QuestionResolutionActor, { kind: "agent" }>;
+  label: string;
+}) {
+  const current = useThread(actor.threadId);
+  if (asHttpError(current.error)?.status === 404)
+    return (
+      <span className="font-medium">
+        {label}{" "}
+        <span className="text-muted-foreground">· Link unavailable</span>
+      </span>
+    );
+  return (
+    <RouteAnchor
+      href={getThreadRoutePath({
+        projectId: actor.projectId,
+        threadId: actor.threadId,
+      })}
+      className="min-w-0 break-words font-medium underline decoration-muted-foreground/40 underline-offset-2"
+    >
+      {label}
+    </RouteAnchor>
+  );
+}
 
 export function QuestionResolutionDetails({
   resolution,
@@ -23,15 +54,7 @@ export function QuestionResolutionDetails({
     <div className="min-w-0 space-y-1 text-xs">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         {actor.kind === "agent" ? (
-          <RouteAnchor
-            href={getThreadRoutePath({
-              projectId: actor.projectId,
-              threadId: actor.threadId,
-            })}
-            className="min-w-0 break-words font-medium underline decoration-muted-foreground/40 underline-offset-2"
-          >
-            {label}
-          </RouteAnchor>
+          <RecordedActorLink actor={actor} label={label} />
         ) : (
           <span className="font-medium">{label}</span>
         )}

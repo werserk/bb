@@ -92,6 +92,11 @@ describe("fixtures", () => {
 });
 
 describe("server", () => {
+  it("does not advertise question resolution without the host authority service", () => {
+    const host = createFakePluginHost();
+    expect(host.bb.experimental_questionResolution).toBeUndefined();
+  });
+
   it("serves the configured public app URL and defaults to null", () => {
     const configured = createFakePluginHost({
       appUrl: "https://bb.example.test",

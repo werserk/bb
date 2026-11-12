@@ -58,7 +58,9 @@ it("declares observation/resolution v1 to a real backend plugin and preserves na
       "running",
     );
     const api = server.pluginService.getApi("question-probe")!;
-    expect(api.experimental_questionResolution.version).toBe(1);
+    const capability = api.experimental_questionResolution;
+    if (!capability) throw new Error("Question resolution unavailable");
+    expect(capability.version).toBe(1);
     const connected = createDeferredPromise<void>();
     const stopConnection = api.sdk.subscribe({
       event: "realtime:connection",
@@ -211,7 +213,7 @@ it("declares observation/resolution v1 to a real backend plugin and preserves na
     stopConnection();
     server.hub.notifyThread(thread.id, ["interactions-changed"]);
     expect(observed).toHaveLength(7);
-    const local = await api.experimental_questionResolution.resolve({
+    const local = await capability.resolve({
       ...input,
       operationId: "local-withdraw",
       action: "withdraw",
