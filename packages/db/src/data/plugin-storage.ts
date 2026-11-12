@@ -1,4 +1,5 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, placeholder, sql } from "drizzle-orm";
+import { prepareCachedQuery } from "../connection.js";
 import type { DbConnection } from "../connection.js";
 import { pluginKv, pluginSettings } from "../schema.js";
 import { likePrefixPattern } from "./sql-like.js";
@@ -18,16 +19,18 @@ export interface PluginSettingRow {
 }
 
 
+function prepareGetPluginKvValue(db: DbConnection) {
+  return db.select({ value: pluginKv.value }).from(pluginKv).where(and(
+    eq(pluginKv.pluginId, placeholder("pluginId")), eq(pluginKv.key, placeholder("key")),
+  )).prepare();
+}
+
 export function getPluginKvValue(
   db: DbConnection,
   pluginId: string,
   key: string,
 ): string | undefined {
-  return db
-    .select({ value: pluginKv.value })
-    .from(pluginKv)
-    .where(and(eq(pluginKv.pluginId, pluginId), eq(pluginKv.key, key)))
-    .get()?.value;
+  return prepareCachedQuery(db, prepareGetPluginKvValue).get({ pluginId, key })?.value;
 }
 
 export function setPluginKvValue(
