@@ -110,3 +110,38 @@ it("captures the last visible position before parking hides the scroller", () =>
   outlet.remove();
   parking.remove();
 });
+it("restores the visible offset while the cold-loading bridge is painted", () => {
+  const outlet = document.createElement("div"),
+    parking = document.createElement("div");
+  document.body.append(outlet, parking);
+  const hook = renderHook(
+    ({ attached, bridge }) =>
+      useRetainedThreadTabContainer({
+        attached,
+        bridge,
+        outlet: { element: outlet },
+        tabId: "test",
+      }),
+    { initialProps: { attached: true, bridge: false } },
+  );
+  hook.result.current.parking.current = parking;
+  outlet.getBoundingClientRect = () => new DOMRect(500, 50, 300, 800);
+  const scroller = document.createElement("div"),
+    row = document.createElement("span");
+  scroller.append(row);
+  hook.result.current.container.append(scroller);
+  scroller.scrollTop = 317;
+  scroller.getBoundingClientRect = () => new DOMRect(500, 50, 300, 800);
+  row.getBoundingClientRect = () =>
+    new DOMRect(500, 387 - scroller.scrollTop, 100, 20);
+  const append = parking.append.bind(parking);
+  parking.append = (...nodes) => {
+    append(...nodes);
+    scroller.scrollTop = 0;
+  };
+  hook.rerender({ attached: false, bridge: true });
+  expect(hook.result.current.container.style.position).toBe("fixed");
+  expect(scroller.scrollTop).toBe(317);
+  outlet.remove();
+  parking.remove();
+});

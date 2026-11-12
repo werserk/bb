@@ -73,6 +73,20 @@ export function useRetainedThreadTabContainer({
         };
       });
   };
+  const restoreScroll = () => {
+    for (const position of scroll.current) {
+      const { element, node } = position;
+      if (node?.isConnected && element.contains(node)) {
+        const viewport = element.getBoundingClientRect();
+        const rect = node.getBoundingClientRect();
+        element.scrollTop += rect.top - viewport.top - position.offsetTop;
+        element.scrollLeft += rect.left - viewport.left - position.offsetLeft;
+      } else {
+        element.scrollTop = position.top;
+        element.scrollLeft = position.left;
+      }
+    }
+  };
   const park = () => {
     if (parking.current && container.parentElement !== parking.current)
       parking.current.append(container);
@@ -88,19 +102,7 @@ export function useRetainedThreadTabContainer({
       container.style.cssText = "";
       if (container.parentElement !== outlet.element) {
         outlet.element.append(container);
-        for (const position of scroll.current) {
-          const { element, node } = position;
-          if (node?.isConnected && element.contains(node)) {
-            const viewport = element.getBoundingClientRect();
-            const rect = node.getBoundingClientRect();
-            element.scrollTop += rect.top - viewport.top - position.offsetTop;
-            element.scrollLeft +=
-              rect.left - viewport.left - position.offsetLeft;
-          } else {
-            element.scrollTop = position.top;
-            element.scrollLeft = position.left;
-          }
-        }
+        restoreScroll();
       }
       return () => {
         // Capture before the next layout effect hides/parks the body. A late
@@ -135,6 +137,9 @@ export function useRetainedThreadTabContainer({
     };
     positionBridge();
     if (!bridge) return;
+    // Moving into the painted bridge resets descendant offsets just like an
+    // outlet move. Restore after its geometry exists, before the browser paints.
+    restoreScroll();
     window.addEventListener("resize", positionBridge);
     const observer =
       typeof ResizeObserver === "undefined"
