@@ -264,3 +264,100 @@ describe("turn trace", () => {
     );
   });
 });
+
+describe("send numeric diagnostic boundaries", () => {
+  it.each([false, true])(
+    "traces native send through detached ack (service=%s) without diagnostics opt-in",
+    async (service) => {
+      await withTestHarness(async (harness) => {
+        const info = vi.spyOn(harness.deps.logger, "info");
+        const { thread } = seedIdleThread(harness);
+        const sensitive = "private-prompt-env-provider-body";
+        const result = await acceptThreadSendRequest(harness.deps, {
+          thread,
+          payload: {
+            input: textInput(sensitive),
+            mode: "start",
+            model: "gpt-5",
+            permissionMode: "full",
+            reasoningLevel: "medium",
+            serviceTier: "default",
+            ...(service
+              ? {
+                  serviceTurn: {
+                    version: 1 as const,
+                    visibility: "hidden" as const,
+                    reason: "child-result" as const,
+                    deliveryId: "delivery-test",
+                    automaticRedelivery: false,
+                    origin: { pluginId: "test-plugin", senderThreadId: null },
+                  },
+                }
+              : {}),
+          },
+        });
+        expect(result.delivery).toBe("sent");
+        const logs = () =>
+          info.mock.calls
+            .filter((call) => call[1] === "Send diagnostic")
+            .map((call) => call[0]);
+        expect(logs()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              sendDiagnostic: expect.objectContaining({
+                stage: "request",
+                status: 1,
+              }),
+            }),
+          ]),
+        );
+        const submit = await waitForQueuedCommand(
+          harness,
+          ({ command }) => command.type === "turn.submit",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await reportQueuedCommandSuccess(harness, submit, {
+          trace: { spans: [] },
+        });
+        await vi.waitFor(() =>
+          expect(logs()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                sendDiagnostic: expect.objectContaining({
+                  stage: "daemon.ack",
+                  status: 1,
+                }),
+              }),
+            ]),
+          ),
+        );
+        for (const stage of [
+          "execution",
+          "context",
+          "runtime.config",
+          "host.ready",
+          "environment.ready",
+          "enqueue.done",
+          "daemon.send",
+        ])
+          expect(logs()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                sendDiagnostic: expect.objectContaining({ stage, status: 1 }),
+              }),
+            ]),
+          );
+        expect(
+          new Set(
+            logs().map(
+              (entry) =>
+                (entry as { sendDiagnostic: { correlationId: string } })
+                  .sendDiagnostic.correlationId,
+            ),
+          ).size,
+        ).toBe(1);
+        expect(JSON.stringify(logs())).not.toContain(sensitive);
+      });
+    },
+  );
+});

@@ -2,6 +2,11 @@ import {
   classifyLocalQuestionAnswer,
   QuestionResponseNotDeliverableError,
 } from "@bb/db";
+import {
+  runWithSendDiagnostics,
+  traceSendStage,
+  markSendDiagnostic,
+} from "../system/send-diagnostics.js";
 import { latestServiceTurn } from "./service-turns.js";
 import {
   requestQueuedMachineReadiness,
@@ -334,10 +339,17 @@ export function attemptDispatch(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: DispatchAttemptArgs,
 ): Promise<DispatchAttemptOutcome> {
-  return runDispatchAttempt(deps, args, {
-    deliveryMode: deliveryModeForSendMode(args.payload.mode),
-    reattempted: false,
-  });
+  return runWithSendDiagnostics(
+    deps,
+    { threadId: args.thread.id, service: args.payload.serviceTurn ? 1 : 0 },
+    () =>
+      traceSendStage("dispatch", () =>
+        runDispatchAttempt(deps, args, {
+          deliveryMode: deliveryModeForSendMode(args.payload.mode),
+          reattempted: false,
+        }),
+      ),
+  );
 }
 
 function deliveryModeForSendMode(
@@ -507,6 +519,7 @@ async function runDispatchAttempt(
       // drain stops rather than looping on a row that no longer exists.
       return { kind: "dispatched" };
     }
+    markSendDiagnostic("enqueue.done", entry.id);
     return { kind: "queued", entry };
   };
 
@@ -773,6 +786,7 @@ async function runDispatchAttempt(
       return reattemptDispatchForThreadChange(deps, args, current, run, waitOn);
     }
     await launchAdmittedThread(deps, admission);
+    markSendDiagnostic("enqueue.done");
     return { kind: "dispatched" };
   }
 

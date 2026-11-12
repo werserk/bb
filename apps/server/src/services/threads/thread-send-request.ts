@@ -1,3 +1,4 @@
+import { runWithSendDiagnostics } from "../system/send-diagnostics.js";
 import {
   findRequestedSubmission,
   guardSubmission,
@@ -25,6 +26,17 @@ interface AcceptThreadSendRequestArgs {
 }
 
 async function acceptThreadSendRequestOnce(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: AcceptThreadSendRequestArgs,
+): Promise<SendMessageResponse> {
+  return runWithSendDiagnostics(
+    deps,
+    { threadId: args.thread.id, service: args.payload.serviceTurn ? 1 : 0 },
+    () => acceptThreadSendRequestImpl(deps, args),
+  );
+}
+
+async function acceptThreadSendRequestImpl(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
