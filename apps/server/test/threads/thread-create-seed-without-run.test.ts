@@ -74,7 +74,7 @@ describe("thread creation telemetry", () => {
         path: "/tmp/thread-create-telemetry",
       });
 
-      await createThreadFromRequest(harness.deps, {
+      const owner = await createThreadFromRequest(harness.deps, {
         environment: {
           type: "host",
           hostId: host.id,
@@ -88,6 +88,16 @@ describe("thread creation telemetry", () => {
         projectId: project.id,
         providerId: "codex",
         startedOnBehalfOf: null,
+      });
+
+      expect(threadStartTurnRequest(harness, owner.id)).toMatchObject({
+        initiator: "user",
+        senderThreadId: null,
+        dispatchProvenance: {
+          origin: "app",
+          originPluginId: null,
+          requestedBy: null,
+        },
       });
 
       expect(capture).toHaveBeenCalledWith({
@@ -208,7 +218,7 @@ describe("thread creation initiator for CLI spawns from a thread", () => {
           });
         }
 
-        await createThreadFromRequest(harness.deps, {
+        const child = await createThreadFromRequest(harness.deps, {
           environment: {
             type: "host",
             hostId: host.id,
@@ -220,6 +230,16 @@ describe("thread creation initiator for CLI spawns from a thread", () => {
           providerId: "codex",
           senderThreadId: sender.id,
           startedOnBehalfOf: null,
+        });
+
+        expect(threadStartTurnRequest(harness, child.id)).toMatchObject({
+          initiator: "agent",
+          senderThreadId: sender.id,
+          dispatchProvenance: {
+            origin: "cli",
+            originPluginId: null,
+            requestedBy: null,
+          },
         });
 
         expect(capture).toHaveBeenCalledWith({

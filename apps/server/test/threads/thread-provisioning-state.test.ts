@@ -3,6 +3,7 @@ import {
   createEnvironment,
   createProject,
   createThread,
+  listEvents,
   noopNotifier,
   upsertHost,
 } from "@bb/db";
@@ -39,46 +40,67 @@ function setup() {
 }
 
 describe("thread provisioning state", () => {
-  it("stores provisioning progress in the durable thread startup context", () => {
-    const { db, host, hub, thread } = setup();
-    const input = textInput("start this workspace");
+  it.each(["user", "system", "agent"] as const)(
+    "retains resolved %s author and provisioning progress",
+    (initiator) => {
+      const { db, host, hub, thread } = setup();
+      const input = textInput("start this workspace");
 
-    const context = requestThreadProvision(
-      { db, hub },
-      {
-        thread,
-        environmentIntent: {
-          type: "provider",
-          environmentProviderId: "project-checkout",
-          machine: { type: "existing", hostId: host.id },
-          inputs: {},
-          selectionResolved: true,
+      const context = requestThreadProvision(
+        { db, hub },
+        {
+          thread,
+          author: {
+            initiator,
+            senderThreadId: initiator === "agent" ? thread.id : null,
+          },
+          ...(initiator === "system"
+            ? { retryOf: { requestId: "creq_abcdefghij", attempt: 2 } }
+            : {}),
+          environmentIntent: {
+            type: "provider",
+            environmentProviderId: "project-checkout",
+            machine: { type: "existing", hostId: host.id },
+            inputs: {},
+            selectionResolved: true,
+          },
+          input,
+          execution: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            source: "client/turn/requested",
+          },
+          fork: null,
+          startedOnBehalfOf: null,
+          titleProvided: true,
         },
-        input,
-        execution: {
-          model: "gpt-5",
-          serviceTier: "default",
-          reasoningLevel: "medium",
-          permissionMode: "full",
-          source: "client/turn/requested",
-        },
-        fork: null,
-        startedOnBehalfOf: null,
-        titleProvided: true,
-      },
-    );
+      );
 
-    expect(context.state.provisioningId).toMatch(/^tpv_/);
-    expect(context.state.environmentId).toBeNull();
-    expect(context.state.environmentId).toBeNull();
-    expect(context.state.provisionEventSequence).toBeNull();
-    expect(context.state.workspaceReadyEventSequence).toBeNull();
-    expect(getThreadProvisionContext(db, thread.id)).toEqual(context);
-    assertPromptHistoryForTurnRequest({
-      db,
-      threadId: thread.id,
-      scope: "project",
-      input,
-    });
-  });
+      const event = listEvents(db, { threadId: thread.id }).find(
+        (e) => e.type === "client/turn/requested",
+      )!;
+      expect(JSON.parse(event.data)).toMatchObject({
+        initiator,
+        senderThreadId: initiator === "agent" ? thread.id : null,
+        ...(initiator === "system"
+          ? { retryOfRequestId: "creq_abcdefghij", retryAttempt: 2 }
+          : {}),
+      });
+      expect(context.state.provisioningId).toMatch(/^tpv_/);
+      expect(context.state.environmentId).toBeNull();
+      expect(context.state.environmentId).toBeNull();
+      expect(context.state.provisionEventSequence).toBeNull();
+      expect(context.state.workspaceReadyEventSequence).toBeNull();
+      expect(getThreadProvisionContext(db, thread.id)).toEqual(context);
+      if (initiator === "user")
+        assertPromptHistoryForTurnRequest({
+          db,
+          threadId: thread.id,
+          scope: "project",
+          input,
+        });
+    },
+  );
 });

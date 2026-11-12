@@ -23,6 +23,7 @@ import type { StartedOnBehalfOf } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 import {
+  type TurnRequestRetryMarker,
   appendClientTurnEvent,
   appendPreparedClientTurnRequestedEventWithNotificationInTransaction,
   appendThreadProvisioningEventInTransaction,
@@ -59,6 +60,9 @@ import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { recordAcceptedPromptHistoryEntry } from "../prompt-history.js";
 
 interface RequestThreadProvisionArgs {
+  author?: ReturnType<typeof resolveDispatchAuthor>;
+  retryOf?: TurnRequestRetryMarker;
+  dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   serviceTurn?: ServiceTurnDescriptor;
   environmentIntent: ThreadProvisionEnvironmentIntent;
   execution: ResolvedThreadExecutionOptions;
@@ -299,17 +303,23 @@ export function requestThreadProvision(
   args: RequestThreadProvisionArgs,
 ): ThreadProvisionContext {
   return deps.db.transaction(() => {
-    const { initiator, senderThreadId } = resolveDispatchAuthor({
-      retrying: args.serviceTurn !== undefined,
-      senderThreadId: args.serviceTurn?.origin.senderThreadId ?? null,
-      startedOnBehalfOf: args.startedOnBehalfOf,
-    });
+    const { initiator, senderThreadId } =
+      args.author ??
+      resolveDispatchAuthor({
+        retrying: args.retryOf !== undefined || args.serviceTurn !== undefined,
+        senderThreadId: args.serviceTurn?.origin.senderThreadId ?? null,
+        startedOnBehalfOf: args.startedOnBehalfOf,
+      });
     const target: TurnRequestTarget = { kind: "thread-start" };
     const request = appendClientTurnEvent(deps, {
       threadId: args.thread.id,
       environmentId: args.thread.environmentId,
       type: "client/turn/requested",
       serviceTurn: args.serviceTurn,
+      ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      ...(args.dispatchProvenance !== undefined
+        ? { dispatchProvenance: args.dispatchProvenance }
+        : {}),
       input: args.input,
       execution: args.execution,
       initiator,

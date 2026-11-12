@@ -36,6 +36,8 @@ Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
 signals. This introduces no persisted or public contract.
 
+
+
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and

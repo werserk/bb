@@ -46,3 +46,10 @@ focus and removal when the original marker becomes loaded. The existing optional
 focusThreadPlan capability accepts a separate questionId, with native interaction
 precedence, through the same navigation controller. The plugin consumer and
 installed acceptance remain pending; this branch is not released.
+
+Initial managed spawn attribution flows through `thread-create.ts` into the shared
+`dispatch-attempt.ts` admission and `thread-provisioning.ts` request event. The
+persisted `client/turn/requested` retains the dispatch sender and existing
+`dispatchProvenance`, matching later tell events; agent-created first turns no
+longer masquerade as owner turns. Senderless owner starts retain user attribution.
+This changes no daemon wire or schema and rewrites no historical events.
