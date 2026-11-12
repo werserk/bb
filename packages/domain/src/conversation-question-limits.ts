@@ -4,13 +4,13 @@ import {
 } from "./pending-interactions.js";
 
 export const QUESTION_CARD_LIMITS = {
-  total: 3000,
-  body: 1500,
-  prompt: 500,
-  shortLabel: 80,
-  optionLabel: 120,
-  description: 300,
-  materialLabel: 120,
+  total: 1000,
+  body: 400,
+  prompt: 200,
+  shortLabel: 48,
+  optionLabel: 80,
+  description: 120,
+  materialLabel: 80,
   metadata: 128,
   materials: 20,
   dependencies: 100,

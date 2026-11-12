@@ -220,9 +220,9 @@ Application links in messages:
 
 ### Keep question cards concise
 
-New question cards allow at most 3,000 Unicode code points across body, prompts,
+New question cards allow at most 1,000 Unicode code points across body, prompts,
 headers, option labels/descriptions and material labels. Per-field caps are body
-1,500; prompt 500; header 80; option label 120; description 300; material label 120.
+400; prompt 200; header 48; option label 80; description 120; material label 80.
 Russian letters and astral emoji count one each; joined emoji count by their
 constituent code points. Publication rejects excess with actual/limit feedback.
 Put the full report in a declared material with a short label, and ask a short

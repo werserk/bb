@@ -102,6 +102,10 @@ it("renders materials before an independent form and saves the exact revision", 
   );
   await screen.findByTestId("form");
   expect(screen.getByTestId("form").getAttribute("data-mode")).toBe("plan");
+  expect(fetch).not.toHaveBeenCalled();
+  expect(view.container.querySelector("audio, iframe")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Sample" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Preview" }));
   const audio = (await screen.findByLabelText("Sample")) as HTMLAudioElement;
   expect(audio.controls).toBe(true);
   expect(audio.src).toContain(
@@ -140,7 +144,8 @@ it("dismisses only its own question and shows errors without hiding materials", 
     questionId: question.id,
     revision: 1,
   });
-  expect(screen.getByLabelText("Sample")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open Sample" }));
+  await screen.findByLabelText("Sample");
   fireEvent.error(screen.getByLabelText("Sample"));
   await screen.findByText("Unable to load Sample: Media unavailable");
 });
@@ -164,6 +169,7 @@ it.each([404, 409])(
       <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
       { wrapper: harness.wrapper },
     );
+    fireEvent.click(await screen.findByRole("button", { name: "Open Preview" }));
     await screen.findByText(`Unable to load Preview: HTTP ${status}`);
     expect(view.container.querySelector("iframe")).toBeNull();
   },
@@ -192,7 +198,10 @@ it("renders a bounded Markdown snapshot in the normal renderer", async () => {
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Open Notes" }));
   await screen.findByText("# Snapshot body");
+  fireEvent.click(screen.getByRole("button", { name: "Hide Notes" }));
+  expect(screen.queryByText("# Snapshot body")).toBeNull();
   expect(view.container.querySelector("iframe")).toBeNull();
 });
 it.each(["queued", "held", "submitted", "removed"])(
@@ -257,6 +266,7 @@ it("bounds Markdown reads and leaves download available", async () => {
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Open Large notes" }));
   await screen.findByText(
     "Unable to load Large notes: Preview exceeds its byte limit; download the snapshot to read it",
   );
@@ -279,6 +289,7 @@ it("retains access to the accepted response and held reason after withdrawal wit
   expect(screen.getByText("View answer")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Which voice?" }));
   expect(screen.getByText("A")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Open Sample" }));
   expect(await screen.findByLabelText("Sample")).toBeTruthy();
   expect(screen.queryByText("Send now")).toBeNull();
 });
@@ -308,6 +319,7 @@ it("settles compactly without duplicating answers and keeps original options and
   fireEvent.click(screen.getByRole("button", { name: "Which voice?" }));
   expect(screen.getByText("Listen before choosing")).toBeTruthy();
   expect(screen.getByText("A")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Open Sample" }));
   expect(await screen.findByLabelText("Sample")).toBeTruthy();
   expect(screen.queryByText("Owner detail")).toBeNull();
   expect(screen.getByText("Send now")).toBeTruthy();
@@ -330,6 +342,7 @@ it("themes frozen HTML and fits only messages from its own frame", async () => {
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Open Preview" }));
   await waitFor(() =>
     expect(
       view.container.querySelector("iframe")?.getAttribute("srcdoc"),
@@ -415,6 +428,7 @@ it("preserves HTML material previews larger than the markdown limit", async () =
     <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
     { wrapper: harness.wrapper },
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Open Preview" }));
   await waitFor(() =>
     expect(
       view.container.querySelector("iframe")?.getAttribute("srcdoc"),

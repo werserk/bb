@@ -780,7 +780,7 @@ describe("publication budget at authoritative entrypoints", () => {
               publication: oversized,
             }),
           ).rejects.toThrow(
-            "65537/1500 code points. Shorten the question and put the full report in materials.",
+            "65537/400 code points. Shorten the question and put the full report in materials.",
           );
         } else if (surface === "http") {
           const response = await h.app.request(
@@ -792,7 +792,7 @@ describe("publication budget at authoritative entrypoints", () => {
             },
           );
           expect(response.status).toBe(400);
-          expect(await response.text()).toContain("65537/1500");
+          expect(await response.text()).toContain("65537/400");
         } else if (surface === "sdk") {
           const sdk = createNodeBbSdk({
             baseUrl: "http://localhost",
@@ -805,7 +805,7 @@ describe("publication budget at authoritative entrypoints", () => {
               source,
               publication: oversized,
             }),
-          ).rejects.toThrow(/65537\/1500/);
+          ).rejects.toThrow(/65537\/400/);
         } else {
           const input =
             surface === "legacy-tool"
@@ -830,7 +830,7 @@ describe("publication budget at authoritative entrypoints", () => {
             contentItems: [
               {
                 type: "inputText",
-                text: "Question was not published: Question card body: 65537/1500 code points. Shorten the question and put the full report in materials.",
+                text: "Question was not published: Question card body: 65537/400 code points. Shorten the question and put the full report in materials.",
               },
             ],
           });
@@ -948,7 +948,7 @@ describe("publication budget at authoritative entrypoints", () => {
           ...args,
           publication: { ...args.publication, body: report },
         }),
-      ).rejects.toThrow("65537/1500");
+      ).rejects.toThrow("65537/400");
       expect(rpc.requests).toHaveLength(0);
       const question = await publishConversationQuestion(h.deps, args);
       expect(question.status).toBe("open");

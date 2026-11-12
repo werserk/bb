@@ -23,42 +23,42 @@ describe("new question publication size", () => {
   const fields = [
     [
       "body",
-      1500,
+      400,
       (c: ReturnType<typeof card>, s: string) => {
         c.body = s;
       },
     ],
     [
       "prompt",
-      500,
+      200,
       (c: ReturnType<typeof card>, s: string) => {
         c.questions[0]!.prompt = s;
       },
     ],
     [
       "shortLabel",
-      80,
+      48,
       (c: ReturnType<typeof card>, s: string) => {
         c.questions[0]!.shortLabel = s;
       },
     ],
     [
       "label",
-      120,
+      80,
       (c: ReturnType<typeof card>, s: string) => {
         c.questions[0]!.options[0]!.label = s;
       },
     ],
     [
       "description",
-      300,
+      120,
       (c: ReturnType<typeof card>, s: string) => {
         c.questions[0]!.options[0]!.description = s;
       },
     ],
     [
       "material",
-      120,
+      80,
       (c: ReturnType<typeof card>, s: string) => {
         c.materials[0]!.label = s;
       },
@@ -92,40 +92,40 @@ describe("new question publication size", () => {
   });
   it("counts astral emoji as one and joined emoji by code point", () => {
     const c = card();
-    c.body = "😀".repeat(1500);
+    c.body = "😀".repeat(400);
     expect(() => normalizeConversationQuestionPublication(c)).not.toThrow();
     c.body += "я";
     expect(() => normalizeConversationQuestionPublication(c)).toThrow(
-      "1501/1500",
+      "401/400",
     );
-    c.body = "👨‍👩‍👧‍👦".repeat(214) + "я".repeat(2);
+    c.body = "👨‍👩‍👧‍👦".repeat(57) + "я";
     expect(() => normalizeConversationQuestionPublication(c)).not.toThrow();
     c.body += "я";
     expect(() => normalizeConversationQuestionPublication(c)).toThrow(
-      "1501/1500",
+      "401/400",
     );
   });
   it("bounds combined small fields across questions and material labels", () => {
     const c = card();
     c.questions[0]!.shortLabel = "H";
-    c.body = "b".repeat(1500);
-    c.questions[0]!.prompt = "p".repeat(500);
-    c.questions[0]!.options[0]!.description = "d".repeat(300);
+    c.body = "b".repeat(400);
+    c.questions[0]!.prompt = "p".repeat(200);
+    c.questions[0]!.options[0]!.description = "d".repeat(120);
     c.questions.push({
       ...c.questions[0]!,
       id: "q2",
-      prompt: "p".repeat(500),
+      prompt: "p".repeat(200),
       shortLabel: "h",
       options: [],
     });
     c.materials = [
-      { path: "report.md", label: "m".repeat(120) },
-      { path: "other.md", label: "m".repeat(77) },
+      { path: "report.md", label: "m".repeat(40) },
+      { path: "other.md", label: "m".repeat(37) },
     ];
     expect(() => normalizeConversationQuestionPublication(c)).not.toThrow();
     c.materials[1]!.label += "m";
     expect(() => normalizeConversationQuestionPublication(c)).toThrow(
-      "3001/3000",
+      "1001/1000",
     );
   });
   it("normalizes legacy preview with description before checking the shared limit", () => {
@@ -134,22 +134,22 @@ describe("new question publication size", () => {
         {
           question: "Proceed?",
           header: "Choice",
-          options: [{ label: "A", description: "d".repeat(298), preview: "p" }],
+          options: [{ label: "A", description: "d".repeat(118), preview: "p" }],
         },
       ],
     };
     expect(() => normalizeConversationQuestionPublication(c)).toThrow(
-      "301/300",
+      "121/120",
     );
-    c.questions[0]!.options[0]!.description = "d".repeat(297);
+    c.questions[0]!.options[0]!.description = "d".repeat(117);
     expect(() => normalizeConversationQuestionPublication(c)).not.toThrow();
   });
   it("reports one useful violation even beyond the old cap, without echoing input", () => {
     const c = card();
     c.body = "x".repeat(65537);
-    c.questions[0]!.prompt = "p".repeat(501);
+    c.questions[0]!.prompt = "p".repeat(201);
     expect(() => normalizeConversationQuestionPublication(c)).toThrow(
-      "Question card body: 65537/1500 code points. Shorten the question and put the full report in materials.",
+      "Question card body: 65537/400 code points. Shorten the question and put the full report in materials.",
     );
   });
   it("keeps stored decoding permissive", () => {
@@ -163,15 +163,15 @@ it.each(["header", "label", "preview"])(
   "cannot move oversized legacy text to %s",
   (field) => {
     const option = {
-      label: field === "label" ? "я".repeat(121) : "A",
-      preview: field === "preview" ? "я".repeat(301) : "",
+      label: field === "label" ? "я".repeat(81) : "A",
+      preview: field === "preview" ? "я".repeat(121) : "",
     };
     expect(() =>
       normalizeConversationQuestionPublication({
         questions: [
           {
             question: "Proceed?",
-            header: field === "header" ? "я".repeat(81) : "Choice",
+            header: field === "header" ? "я".repeat(49) : "Choice",
             options: [option],
           },
         ],
@@ -220,3 +220,10 @@ it.each(["questions", "options", "materials", "dependencies"])(
     );
   },
 );
+
+it("rejects the observed 878-character release body but keeps its stored record readable", () => {
+  const c = card();
+  c.body = "я".repeat(878);
+  expect(() => normalizeConversationQuestionPublication(c)).toThrow("878/400");
+  expect(() => conversationQuestionPublicationSchema.parse(c)).not.toThrow();
+});

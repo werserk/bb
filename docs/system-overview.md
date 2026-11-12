@@ -240,12 +240,14 @@ notifications; the CLI uses the same publication parser before outgoing requests
 Stored question decoding remains separate and permissive so old large cards
 remain readable and answerable without migration.
 
-The authored text total is 3,000 Unicode code points: body 1,500, each prompt 500,
-header 80, option label 120, description 300 and material label 120. Russian letters
+The authored text total is 1,000 Unicode code points: body 400, each prompt 200,
+header 48, option label 80, description 120 and material label 80. Russian letters
 and astral emoji count one; joined emoji count their constituent code points.
 The total includes every question, option and material label; metadata IDs/values
 have a separate 128 cap. Existing collection maxima remain 10 questions, 4 options,
 20 materials and 100 dependencies per material. Excess returns one actual/limit
 error directing the agent to shorten the question and put the full report in
-materials. Material file content stays outside this prose budget. No truncation
+materials. Material file content stays outside this prose budget.
+Frozen material previews are closed initially and fetched only after Open;
+closing a preview removes its content while retaining download access. No truncation
 or answer selection occurs.

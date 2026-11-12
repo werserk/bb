@@ -74,6 +74,7 @@ function QuestionMaterial({
   threadId: string;
   questionId: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const [failed, setFailed] = useState(false);
   const url = `/api/v1/threads/${encodeURIComponent(threadId)}/questions/${encodeURIComponent(questionId)}/files/${material.snapshotPath.split("/").map(encodeURIComponent).join("/")}`;
   const mime = material.mimeType ?? "";
@@ -87,6 +88,7 @@ function QuestionMaterial({
       material.snapshotPath,
       material.snapshotRevision,
     ],
+    enabled: expanded,
     staleTime: Infinity,
     retry: false,
     queryFn: async ({ signal }) => {
@@ -109,8 +111,17 @@ function QuestionMaterial({
   const error = preview.error?.message ?? (failed ? "Media unavailable" : null);
   return (
     <figure className="space-y-2">
-      <figcaption className="text-sm font-medium">{material.label}</figcaption>
-      {preview.isSuccess && !error ? (
+      <figcaption>
+        <button
+          type="button"
+          className="text-sm font-medium underline"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Hide" : "Open"} {material.label}
+        </button>
+      </figcaption>
+      {expanded && preview.isSuccess && !error ? (
         markdown ? (
           <MarkdownPreview
             content={preview.data ?? ""}
@@ -178,13 +189,13 @@ function QuestionMaterial({
           />
         )
       ) : null}
-      {preview.isPending ? (
+      {expanded && preview.isPending ? (
         <p className="text-xs text-muted-foreground">
           Loading {material.label}…
         </p>
       ) : null}
       <QuestionNavigationFeedback questionId={questionId} kind="answer" />
-      {error ? (
+      {expanded && error ? (
         <p role="alert" className="text-sm text-destructive-text">
           Unable to load {material.label}: {error}
         </p>
