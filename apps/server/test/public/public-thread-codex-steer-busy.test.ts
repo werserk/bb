@@ -1080,105 +1080,125 @@ it("does not infer question response identity from refused owner answer text", a
   });
 });
 
-it("keeps question response custody across repeated competing next inputs", async () => {
-  await withTestHarness(async (harness) => {
-    let retries = 0;
-    const { thread, environment, commands } = fixture(
-      harness,
-      () => refusal(),
-      () =>
-        ++retries < 3
-          ? {
-              ok: false,
-              errorCode: "competing_turn",
-              errorMessage: "another turn won",
-            }
-          : { ok: true, result: {} },
-    );
-    const answer = questionResponseFixture(harness, thread.id);
-    await answerConversationQuestion(harness.deps, answer);
-    await runQueuedMessageDispatch(harness.deps, {
-      kind: "thread-ready",
-      threadId: thread.id,
-    });
-    await expect
-      .poll(() => readConversationQuestion(harness.deps, answer).delivery.kind)
-      .toBe("queued");
-    const original = requests(harness, thread.id).at(-1)!;
-    for (let expected = 2; expected <= 3; expected++) {
-      complete(harness, thread.id, environment.id);
+it.each(["turn_not_steerable", "competing_turn"])(
+  "keeps question response custody across repeated competing inputs after initial %s",
+  async (initialReason) => {
+    await withTestHarness(async (harness) => {
+      let retries = 0;
+      const { thread, environment, commands } = fixture(
+        harness,
+        () => ({
+          ok: false,
+          errorCode: initialReason,
+          errorMessage: "initial answer refused before acceptance",
+        }),
+        () =>
+          ++retries < 3
+            ? {
+                ok: false,
+                errorCode: "competing_turn",
+                errorMessage: "another turn won",
+              }
+            : { ok: true, result: {} },
+      );
+      const answer = questionResponseFixture(harness, thread.id);
+      await answerConversationQuestion(harness.deps, answer);
       await runQueuedMessageDispatch(harness.deps, {
         kind: "thread-ready",
         threadId: thread.id,
       });
-      await expect.poll(() => commands.length).toBe(expected);
       await expect
         .poll(
           () => readConversationQuestion(harness.deps, answer).delivery.kind,
         )
         .toBe("queued");
-      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
-    }
-    complete(harness, thread.id, environment.id);
-    await runQueuedMessageDispatch(harness.deps, {
-      kind: "thread-ready",
-      threadId: thread.id,
+      const original = requests(harness, thread.id).at(-1)!;
+      expect(original.deferredFromRequestId).toBeUndefined();
+      for (let expected = 2; expected <= 3; expected++) {
+        complete(harness, thread.id, environment.id);
+        await runQueuedMessageDispatch(harness.deps, {
+          kind: "thread-ready",
+          threadId: thread.id,
+        });
+        await expect.poll(() => commands.length).toBe(expected);
+        await expect
+          .poll(
+            () => readConversationQuestion(harness.deps, answer).delivery.kind,
+          )
+          .toBe("queued");
+        expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+      }
+      complete(harness, thread.id, environment.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      await expect.poll(() => commands.length).toBe(4);
+      expect(requests(harness, thread.id).at(-1)?.deferredFromRequestId).toBe(
+        original.requestId,
+      );
+      expect(readConversationQuestion(harness.deps, answer).delivery.kind).toBe(
+        "submitted",
+      );
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
     });
-    await expect.poll(() => commands.length).toBe(4);
-    expect(requests(harness, thread.id).at(-1)?.deferredFromRequestId).toBe(
-      original.requestId,
-    );
-    expect(readConversationQuestion(harness.deps, answer).delivery.kind).toBe(
-      "submitted",
-    );
-    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
-  });
-});
+  },
+);
 
-it("does not fail the active turn or redeliver a question response withdrawn before refusal", async () => {
-  await withTestHarness(async (harness) => {
-    const entered = createDeferredPromise<void>();
-    const released = createDeferredPromise<HostRpcHandlerResult>();
-    const { thread, environment, commands } = fixture(harness, () => {
-      entered.resolve();
-      return released.promise;
+it.each(["turn_not_steerable", "competing_turn"])(
+  "does not fail the active turn or redeliver a question response withdrawn before refusal %s",
+  async (reason) => {
+    await withTestHarness(async (harness) => {
+      const entered = createDeferredPromise<void>();
+      const released = createDeferredPromise<HostRpcHandlerResult>();
+      const { thread, environment, commands } = fixture(harness, () => {
+        entered.resolve();
+        return released.promise;
+      });
+      const answer = questionResponseFixture(harness, thread.id);
+      await answerConversationQuestion(harness.deps, answer);
+      await entered.promise;
+      closeConversationQuestion(harness.deps, {
+        ...answer,
+        action: "withdraw",
+      });
+      released.resolve({
+        ok: false,
+        errorCode: reason,
+        errorMessage: "refused after card withdrawal",
+      });
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      await expect
+        .poll(
+          () =>
+            listEvents(harness.db, { threadId: thread.id }).filter(
+              (e) => e.type === "client/turn/rejected",
+            ).length,
+        )
+        .toBe(1);
+      expect(getThread(harness.db, thread.id)?.status).toBe("active");
+      expect(readConversationQuestion(harness.deps, answer)).toMatchObject({
+        status: "withdrawn",
+        dispatchedAt: null,
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+      complete(harness, thread.id, environment.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      expect(commands).toHaveLength(1);
+      expect(
+        listEvents(harness.db, { threadId: thread.id }).some(
+          (e) => e.type === "system/error",
+        ),
+      ).toBe(false);
     });
-    const answer = questionResponseFixture(harness, thread.id);
-    await answerConversationQuestion(harness.deps, answer);
-    await entered.promise;
-    closeConversationQuestion(harness.deps, { ...answer, action: "withdraw" });
-    released.resolve(refusal());
-    await runQueuedMessageDispatch(harness.deps, {
-      kind: "thread-ready",
-      threadId: thread.id,
-    });
-    await expect
-      .poll(
-        () =>
-          listEvents(harness.db, { threadId: thread.id }).filter(
-            (e) => e.type === "client/turn/rejected",
-          ).length,
-      )
-      .toBe(1);
-    expect(getThread(harness.db, thread.id)?.status).toBe("active");
-    expect(readConversationQuestion(harness.deps, answer)).toMatchObject({
-      status: "withdrawn",
-      dispatchedAt: null,
-    });
-    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
-    complete(harness, thread.id, environment.id);
-    await runQueuedMessageDispatch(harness.deps, {
-      kind: "thread-ready",
-      threadId: thread.id,
-    });
-    expect(commands).toHaveLength(1);
-    expect(
-      listEvents(harness.db, { threadId: thread.id }).some(
-        (e) => e.type === "system/error",
-      ),
-    ).toBe(false);
-  });
-});
+  },
+);
 
 it.each(["system", "agent", "plugin", "owner"] as const)(
   "omits the card-only injection guard for %s auto input",
@@ -1244,3 +1264,27 @@ it.each(["system", "agent", "plugin", "owner"] as const)(
     });
   },
 );
+
+it("keeps first non-card competing rejection behavior unchanged", async () => {
+  await withTestHarness(async (harness) => {
+    const { thread } = fixture(harness, () => ({
+      ok: false,
+      errorCode: "competing_turn",
+      errorMessage: "another turn is starting",
+    }));
+    await send(harness, thread.id);
+    await expect
+      .poll(
+        () =>
+          listEvents(harness.db, { threadId: thread.id }).filter(
+            (e) => e.type === "client/turn/rejected",
+          ).length,
+      )
+      .toBe(1);
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+    expect(
+      requests(harness, thread.id).at(-1)?.questionResponse,
+    ).toBeUndefined();
+    expect(getThread(harness.db, thread.id)?.status).toBe("active");
+  });
+});

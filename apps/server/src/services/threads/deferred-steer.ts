@@ -96,8 +96,16 @@ export function recoverRefusedOwnerInputInTransaction(args: {
   const questionResponse = request.questionResponse;
   if (args.reason === "stale_turn" && questionResponse === undefined)
     return false;
-  if (args.reason === "competing_turn") {
-    if (request.deferredFromRequestId === undefined) return false;
+  if (
+    args.reason === "competing_turn" &&
+    request.deferredFromRequestId === undefined &&
+    questionResponse === undefined
+  )
+    return false;
+  if (
+    args.reason === "competing_turn" &&
+    request.deferredFromRequestId !== undefined
+  ) {
     const source = getStoredTurnRequestEventByRequestId(args.db, {
       threadId: args.thread.id,
       requestId: request.deferredFromRequestId,

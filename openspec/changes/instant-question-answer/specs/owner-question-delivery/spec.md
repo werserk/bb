@@ -39,6 +39,13 @@ The core SHALL record optional typed questionResponse questionId/revision/queued
 - **WHEN** the provider rejects the answer request because expectedTurnId is stale
 - **THEN** the answer remains queued with the same original card custody and is not lost
 
+#### Scenario: First fresh answer meets a competing turn
+
+- **WHEN** a fresh typed card-answer request is refused as competing_turn before acceptance and has no prior deferredFromRequestId
+- **THEN** the same card custody is restored exactly once with its submission receipt cleared
+- **AND** later competing attempts retain the original request identity
+- **AND** a withdrawn answer is settled without requeue, while non-card input keeps its existing recovery rules
+
 #### Scenario: Duplicate submit or rejection
 
 - **WHEN** the same answer or command rejection is delivered again

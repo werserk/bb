@@ -223,8 +223,8 @@ the negotiated bridge `steerMode`; a non-inject mode returns the existing busy
 result before a provider command or cancellation, reusing refused-steer recovery.
 Explicit user steer retains its existing queue/cancel behavior. Only a claimed
 question response adds optional typed `questionResponse` identity to its stored
-`client/turn/requested` event. Provider refusal (`turn_not_steerable`) or stale
-turn rejection restores a `questionResponse` queue row and relinks the card while
+`client/turn/requested` event. Provider refusal (`turn_not_steerable`), stale
+turn rejection or a first/repeated `competing_turn` restores a `questionResponse` queue row and relinks the card while
 clearing its submission receipt in the same rejection transaction. Recovery uses
 that typed history identity, never the rendered answer text. The native rejection
 event links the replacement queue ID to its source request; later wakes wait for
