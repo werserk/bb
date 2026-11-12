@@ -8,6 +8,7 @@ import {
   type ConversationQuestionPublication,
   type ConversationQuestion,
 } from "@bb/domain";
+import { parseAgentMessageEnvelope } from "@bb/thread-view";
 
 function keepsEveryKey(raw: unknown, parsed: unknown): boolean {
   if (Array.isArray(raw))
@@ -104,7 +105,16 @@ export function questionResponseForHistory(row: {
   attachments: object | null;
 }) {
   if (row.mentions.length > 0) return null;
-  const response = parseQuestionResponse(row.text);
+  const envelope = parseAgentMessageEnvelope(row.text);
+  if (
+    envelope &&
+    (row.initiator !== "agent" ||
+      row.senderThreadId !== envelope.senderThreadId)
+  )
+    return null;
+  const response = parseQuestionResponse(
+    envelope ? row.text.slice(envelope.bodyStart) : row.text,
+  );
   if (!response) return null;
   const actor = response.resolution?.actor;
   if (actor?.kind === "agent") {

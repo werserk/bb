@@ -3,12 +3,21 @@ import {
   getThread,
   listEvents,
   listQueuedThreadMessages,
+  updateThread,
 } from "@bb/db";
 import {
   conversationQuestionPublicationSchema,
   parseQuestionResolutionNotice,
   turnScope,
+  turnRequestEventDataSchema,
 } from "@bb/domain";
+import { parseAgentMessageEnvelope } from "@bb/thread-view";
+import type { PluginHookName } from "@get-bb/plugin-sdk";
+import {
+  setPluginHookProvider,
+  type PluginHookRegistration,
+} from "../../src/services/plugins/plugin-hook-registry.js";
+import { registerQuestionResolutionScope } from "../../src/services/threads/question-resolution-scope.js";
 import { createDeferredPromise } from "@bb/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -28,6 +37,7 @@ import { listQueuedCommands } from "../helpers/commands.js";
 import { textInput } from "../helpers/prompt-input.js";
 import {
   seedEvent,
+  seedThread,
   seedThreadFixture,
   seedThreadRuntimeState,
   seedTurnStarted,
@@ -48,6 +58,7 @@ const publication = conversationQuestionPublicationSchema.parse({
 });
 
 afterEach(() => {
+  setPluginHookProvider(undefined);
   vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -375,3 +386,139 @@ describe("independent question response dispatch", () => {
     });
   });
 });
+
+it.each([
+  { relationship: "self", action: "answer", hooked: false },
+  { relationship: "self", action: "withdraw", hooked: false },
+  { relationship: "ancestor", action: "answer", hooked: false },
+  { relationship: "ancestor", action: "withdraw", hooked: false },
+  { relationship: "self", action: "answer", hooked: true },
+  { relationship: "self", action: "withdraw", hooked: true },
+  { relationship: "ancestor", action: "answer", hooked: true },
+  { relationship: "ancestor", action: "withdraw", hooked: true },
+] as const)(
+  "preserves $relationship $action provenance through dispatch (hooked=$hooked)",
+  async ({ relationship, action, hooked }) => {
+    await withTestHarness(async (h) => {
+      vi.useFakeTimers();
+      const fixture = await prepareQuestion(h);
+      const actor =
+        relationship === "self"
+          ? fixture.thread
+          : seedThread(h.deps, {
+              projectId: fixture.thread.projectId,
+              environmentId: fixture.environment.id,
+              status: "active",
+            });
+      let dispose = () => {};
+      if (relationship === "ancestor") {
+        updateThread(h.db, h.hub, fixture.thread.id, {
+          parentThreadId: actor.id,
+        });
+        seedTurnStarted(h.deps, {
+          threadId: actor.id,
+          environmentId: fixture.environment.id,
+          turnId: "actor",
+          providerThreadId: "actor-provider",
+        });
+        const child = getThread(h.db, fixture.thread.id)!;
+        dispose = registerQuestionResolutionScope(
+          "wprojects",
+          (_context, accept) =>
+            accept({
+              relationship: "ancestor",
+              role: "coordinator",
+              isCurrent: () => true,
+              hostChain: [child, actor].map((row) => ({
+                id: row.id,
+                projectId: row.projectId,
+                parentThreadId: row.parentThreadId,
+                archived: false,
+              })),
+            }),
+        );
+      }
+      try {
+        if (hooked) {
+          const registry: {
+            [K in PluginHookName]: PluginHookRegistration<K>[];
+          } = {
+            "message.dispatch": [
+              {
+                pluginId: "probe",
+                handler: async () => ({ action: "proceed" }),
+              },
+            ],
+          };
+          setPluginHookProvider({
+            listHooks: (hook) => registry[hook],
+            invokeHook: async (_registration, _label, run) => ({
+              ok: true,
+              value: await run(),
+            }),
+            decisionTimeoutMs: 10000,
+          });
+        }
+        const call = {
+          operationId: "dispatch-actor",
+          reason: "Settled by the responsible agent",
+          invocation: {
+            threadId: actor.id,
+            turnId: relationship === "self" ? fixture.source.turnId : "actor",
+            providerThreadId:
+              relationship === "self"
+                ? fixture.source.providerThreadId
+                : "actor-provider",
+          },
+        };
+        const ref = {
+          threadId: fixture.thread.id,
+          questionId: fixture.question.id,
+          revision: 1,
+        };
+        const accepted =
+          action === "answer"
+            ? await answerConversationQuestion(
+                h.deps,
+                { ...ref, answers: { voice: { selected: ["a"] } } },
+                call,
+              )
+            : await closeConversationQuestion(h.deps, { ...ref, action }, call);
+        finishSource(h, fixture);
+        const before = requests(h, fixture.thread.id).length;
+        await sendQueuedMessageNow(h.deps, {
+          threadId: fixture.thread.id,
+          queuedMessageId: accepted.resolutionAttribution!.deliveryId!,
+          mode: "auto",
+        });
+        expect(requests(h, fixture.thread.id)).toHaveLength(before + 1);
+        const request = turnRequestEventDataSchema.parse(
+          JSON.parse(requests(h, fixture.thread.id).at(-1)!.data),
+        );
+        expect(request.initiator).toBe("agent");
+        expect(request.senderThreadId).toBe(actor.id);
+        const text = request.input.find((part) => part.type === "text");
+        if (text?.type !== "text")
+          throw new Error("Missing native resolution text");
+        const envelope = parseAgentMessageEnvelope(text.text);
+        expect(envelope?.senderThreadId).toBe(actor.id);
+        expect(
+          parseQuestionResolutionNotice(text.text.slice(envelope!.bodyStart))
+            ?.resolution,
+        ).toMatchObject({
+          id: accepted.resolutionAttribution!.id,
+          action,
+          actor: { kind: "agent", threadId: actor.id },
+        });
+        expect(
+          readConversationQuestion(h.deps, ref).resolutionDelivery?.kind,
+        ).toBe("submitted");
+        expect(listQueuedThreadMessages(h.db, fixture.thread.id)).toHaveLength(
+          0,
+        );
+      } finally {
+        dispose();
+      }
+    });
+  },
+);

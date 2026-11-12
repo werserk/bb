@@ -1,4 +1,5 @@
 import {
+  parseQuestionResolutionNotice,
   type PromptInput,
   type PromptTextMention,
   type ThreadEvent,
@@ -308,8 +309,15 @@ function buildClientUserMessage({
       ? acceptedClientRequest.meta
       : meta;
   const agentEnvelope = parseAgentMessageEnvelope(parsedInput.text);
+  const resolutionEnvelope =
+    agentEnvelope !== null &&
+    parseQuestionResolutionNotice(
+      parsedInput.text.slice(agentEnvelope.bodyStart),
+    ) !== null;
   const initiator =
-    decoded.initiator === "user" && agentEnvelope !== null
+    decoded.initiator === "user" &&
+    agentEnvelope !== null &&
+    !resolutionEnvelope
       ? "agent"
       : decoded.initiator;
   const senderThreadId =

@@ -341,6 +341,9 @@ async function runDispatchAttempt(
     args = { ...args, payload };
   }
   const senderThreadId = resolveMessageSenderThreadId(deps, {
+    preserveSelfSender:
+      args.source.kind === "drain" &&
+      args.queuePayload.kind === "questionResponse",
     ...(payload.senderThreadId !== undefined
       ? { senderThreadId: payload.senderThreadId }
       : {}),
@@ -649,6 +652,9 @@ async function runDispatchAttempt(
   const environment = await requireThreadCommandEnvironment(deps, { thread });
   try {
     await sendThreadMessage(deps, {
+      preserveSelfSender:
+        args.source.kind === "drain" &&
+        args.queuePayload.kind === "questionResponse",
       environment,
       payload: resolvedPayload,
       thread,

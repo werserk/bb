@@ -98,6 +98,7 @@ type SendThreadMessagePayload = SendMessageRequest & {
 };
 
 interface SendThreadMessageArgs {
+  preserveSelfSender?: boolean;
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
@@ -118,6 +119,7 @@ interface SendThreadMessageArgs {
 }
 
 interface ResolveMessageSenderArgs {
+  preserveSelfSender?: boolean;
   senderThreadId?: string;
   targetThread: Thread;
 }
@@ -299,7 +301,10 @@ export function resolveMessageSenderThreadId(
   deps: Pick<AppDeps, "db">,
   args: ResolveMessageSenderArgs,
 ): string | null {
-  if (!args.senderThreadId || args.senderThreadId === args.targetThread.id) {
+  if (
+    !args.senderThreadId ||
+    (args.senderThreadId === args.targetThread.id && !args.preserveSelfSender)
+  ) {
     return null;
   }
 
@@ -517,6 +522,7 @@ async function sendThreadMessageWithoutContextClear(
     ensureThreadCanStartRequest(thread);
   }
   const senderThreadId = resolveMessageSenderThreadId(deps, {
+    preserveSelfSender: args.preserveSelfSender,
     senderThreadId: payload.senderThreadId,
     targetThread: thread,
   });

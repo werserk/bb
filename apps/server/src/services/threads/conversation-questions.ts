@@ -75,8 +75,11 @@ export interface QuestionResolutionCall {
   invocation: QuestionResolutionInvocation | null;
 }
 
-function conflict(message: string): never {
-  throw new ApiError(409, "conversation_question_conflict", message, false);
+function conflict(message: string, current?: ConversationQuestion): never {
+  throw new ApiError(409, "conversation_question_conflict", message, {
+    retryable: false,
+    ...(current ? { details: { current } } : {}),
+  });
 }
 function publicThread(
   db: DbQueryConnection,
@@ -205,7 +208,8 @@ function questionRow(
   return row;
 }
 function requireRevision(question: ConversationQuestion, revision: number) {
-  if (question.revision !== revision) conflict("Question revision is stale");
+  if (question.revision !== revision)
+    conflict("Question revision is stale", question);
 }
 function requireSource(
   db: DbQueryConnection,
@@ -391,12 +395,19 @@ function responseReceipt(
         (event) => event.actor.kind !== "local-unverified",
       )
     )
-      conflict("Question is already answered by another resolution operation");
+      conflict(
+        "Question is already answered by another resolution operation",
+        question,
+      );
     if (JSON.stringify(question.response) !== JSON.stringify(normalized))
-      conflict("Question is already answered with a different response");
+      conflict(
+        "Question is already answered with a different response",
+        question,
+      );
     return question;
   }
-  if (question.status !== "open") conflict(`Question is ${question.status}`);
+  if (question.status !== "open")
+    conflict(`Question is ${question.status}`, question);
   return null;
 }
 export async function answerConversationQuestion(
@@ -454,12 +465,13 @@ export async function answerConversationQuestion(
           );
           if (previous) {
             if (!call && current.status !== "answered")
-              conflict(`Question is ${current.status}`);
+              conflict(`Question is ${current.status}`, current);
             if (previous.request !== request)
               conflict(
                 call
                   ? "Question resolution operationId was reused with different content"
                   : "Question is already answered with a different response",
+                current,
               );
             return { question: current, created: false };
           }
@@ -472,7 +484,7 @@ export async function answerConversationQuestion(
           );
           if (receipt) return { question: receipt, created: false };
           if (!execution)
-            conflict("Question changed before answer preparation");
+            conflict("Question changed before answer preparation", current);
           const attribution = {
             id: `qres_${randomUUID()}`,
             targetKind: "qst" as const,
@@ -520,7 +532,8 @@ export async function answerConversationQuestion(
             response: JSON.stringify(normalized),
             queuedMessageId: queued.id,
           });
-          if (!row) conflict("Question changed before answer acceptance");
+          if (!row)
+            conflict("Question changed before answer acceptance", current);
           appendQuestionResolutionEvent(tx, {
             initial: true,
             request,
@@ -587,6 +600,7 @@ export async function closeConversationQuestion(
             if (previous.request !== request)
               conflict(
                 "Question resolution operationId was reused with different content",
+                current,
               );
             return { question: current, created: false };
           }
@@ -594,7 +608,7 @@ export async function closeConversationQuestion(
           if (!call && current.status === status)
             return { question: current, created: false };
           if (call?.invocation && current.status !== "open")
-            conflict(`Question is ${current.status}`);
+            conflict(`Question is ${current.status}`, current);
           const row =
             args.action === "withdraw"
               ? withdrawConversationQuestion(tx, args)
@@ -604,7 +618,7 @@ export async function closeConversationQuestion(
                   response: null,
                   queuedMessageId: null,
                 });
-          if (!row) conflict(`Question is ${current.status}`);
+          if (!row) conflict(`Question is ${current.status}`, current);
           const attribution = {
             id: `qres_${randomUUID()}`,
             targetKind: "qst" as const,
@@ -622,7 +636,10 @@ export async function closeConversationQuestion(
           if (args.action === "withdraw") {
             ensureThreadQueueIsWritable(thread);
             if (!execution)
-              conflict("Question changed before withdrawal preparation");
+              conflict(
+                "Question changed before withdrawal preparation",
+                current,
+              );
             const content = serializeQuestionResolutionNotice({
               version: 1,
               questionId: current.id,

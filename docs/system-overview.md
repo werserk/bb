@@ -194,6 +194,10 @@ custody. Consuming either native row records its submission receipt in the same
 transaction as the turn request; it does not claim model consumption. The app
 joins accepted history before showing trusted attribution, keeps old snapshots
 readable without invented authors, and displays closure separately from delivery.
+The response renderer verifies and unwraps the existing inter-thread envelope;
+claimed qst drains preserve self agent provenance through checkpoint and final send.
+Timeline projection does not recover agent attribution from a user-pasted typed
+resolution envelope. Legacy ordinary inter-thread envelope recovery is unchanged.
 Recorded actor links use the native thread query; a confirmed 404 removes navigation
 without rewriting frozen identity, while read failures do not imply deletion.
 Both pint agent actions return unsupported without changing their original local

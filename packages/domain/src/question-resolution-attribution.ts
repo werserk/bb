@@ -53,7 +53,7 @@ export function questionResolutionActorLabel(
   actor: QuestionResolutionActor,
 ): string {
   return actor.kind === "agent"
-    ? `${actor.role === "coordinator" ? "Coordinator" : actor.name || "Agent"} (${actor.threadId})`
+    ? `${actor.role === "coordinator" ? "Coordinator" : actor.name ? `Agent: ${actor.name}` : "Agent"} (${actor.threadId})`
     : "locally · identity unverified";
 }
 
@@ -67,6 +67,6 @@ export function questionResolutionLabel(
   }[resolution.action];
   const actor = resolution.actor;
   return actor.kind === "agent"
-    ? `${action} by ${actor.role === "coordinator" ? "Coordinator" : actor.name || "Agent"}`
+    ? `${action} by ${actor.role === "coordinator" ? "Coordinator" : actor.name ? `Agent: ${actor.name}` : "Agent"}`
     : `${action} locally · identity unverified`;
 }

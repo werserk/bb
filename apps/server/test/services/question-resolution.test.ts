@@ -7,7 +7,10 @@ import {
   seedTurnStarted,
   seedThreadRuntimeState,
 } from "../helpers/seed.js";
-import { readConversationQuestion } from "../../src/services/threads/conversation-questions.js";
+import {
+  answerConversationQuestion,
+  readConversationQuestion,
+} from "../../src/services/threads/conversation-questions.js";
 
 const publication = {
   body: "A choice for the asker",
@@ -190,9 +193,32 @@ describe("native question resolution", () => {
           reason: input.reason,
         });
         expect((await call(input)).success).toBe(true);
-        expect(
-          (await call({ ...input, reason: "Changed retry" })).success,
-        ).toBe(false);
+        if (action === "answer") {
+          const withdrawal = await call({
+            ...input,
+            action: "withdraw",
+            answers: undefined,
+            operationId: "withdraw-closed",
+          });
+          expect(withdrawal.success).toBe(false);
+          expect(
+            JSON.parse(withdrawal.contentItems[0].text).error.details.current
+              .status,
+          ).toBe("answered");
+        }
+        const conflict = await call({ ...input, reason: "Changed retry" });
+        expect(conflict.success).toBe(false);
+        expect(JSON.parse(conflict.contentItems[0].text).error).toMatchObject({
+          code: "conversation_question_conflict",
+          details: {
+            current: {
+              id: question.id,
+              revision: 1,
+              status: accepted.status,
+              resolutionAttribution: { id: accepted.resolutionAttribution!.id },
+            },
+          },
+        });
         expect(
           (await call({ ...input, operationId: "another-operation" })).success,
         ).toBe(false);
@@ -395,3 +421,64 @@ it.each(["pending", "resolving", "resolved"] as const)(
     });
   },
 );
+
+it("accepts one winner when a live self agent and a local answer race", async () => {
+  await withTestHarness(async (h) => {
+    const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
+    seedThreadRuntimeState(h.deps, {
+      threadId: thread.id,
+      environmentId: thread.environmentId,
+      providerThreadId: "race-provider",
+    });
+    seedTurnStarted(h.deps, {
+      threadId: thread.id,
+      turnId: "race",
+      providerThreadId: "race-provider",
+    });
+    const question = createConversationQuestion(h.db, {
+      threadId: thread.id,
+      sourceTurnId: null,
+      sourceCallId: null,
+      publication: JSON.stringify(publication),
+      materialManifest: JSON.stringify({
+        hostId: null,
+        storageRootPath: null,
+        materials: [],
+        files: [],
+      }),
+    });
+    if (!question) throw new Error("Question fixture missing");
+    const args = {
+      threadId: thread.id,
+      questionId: question.id,
+      revision: 1,
+      answers: { choice: { selected: ["a"] } },
+    };
+    const outcomes = await Promise.allSettled([
+      answerConversationQuestion(h.deps, args, {
+        operationId: "race-agent",
+        reason: "Agent settled",
+        invocation: {
+          threadId: thread.id,
+          turnId: "race",
+          providerThreadId: "race-provider",
+        },
+      }),
+      answerConversationQuestion(h.deps, args),
+    ]);
+    expect(
+      outcomes.filter((outcome) => outcome.status === "fulfilled"),
+    ).toHaveLength(1);
+    const loser = outcomes.find((outcome) => outcome.status === "rejected");
+    if (loser?.status !== "rejected") throw new Error("Missing race loser");
+    expect(loser.reason.body).toMatchObject({
+      code: "conversation_question_conflict",
+      details: { current: { status: "answered" } },
+    });
+    const current = readConversationQuestion(h.deps, args);
+    expect(current.resolutionHistory).toHaveLength(1);
+    const queue = listQueuedThreadMessages(h.db, thread.id);
+    expect(queue).toHaveLength(1);
+    expect(current.resolutionAttribution?.deliveryId).toBe(queue[0]!.id);
+  });
+});

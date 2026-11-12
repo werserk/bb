@@ -4435,3 +4435,19 @@ Withdrawal has a distinct resolution-bound cancellation row with no answer and
 preserves previous answer custody. Exactly-once here concerns durable native
 submission, not proof that a model read or obeyed the text. UI delivery and
 closure states remain distinct, and old records show Attribution unavailable.
+
+
+Question resolution conflicts carry `details.current` when a question snapshot is
+available (revision, closure and immutable winning attribution); the native tool
+preserves that structured ApiError body. Receipt replay still requires current
+authority: losing ancestry or a live caller turn refuses rather than leaking a
+previous receipt. Background async work inherited during a native invocation is
+within that trusted plugin call; it loses the context on settlement or abort.
+Plugins must call the resolver outside their own admission lock because the
+registered scope policy obtains its own authority keys.
+
+Native resolution delivery retains the existing inter-thread envelope. The
+presentation removes it only with matching event sender and recorded agent;
+canonical history/publication/material checks still gate attribution. Internal
+claimed questionResponse drains preserve a self agent sender at the checkpoint
+and final send. Ordinary self sends retain their existing local semantics.

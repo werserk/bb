@@ -479,12 +479,18 @@ it.each(["answer", "withdraw"] as const)(
       resolution,
     });
     const row = {
-      text,
+      text: `[bb message from thread:thr_coordinator]\n\n${text}`,
       initiator: "agent",
       senderThreadId: "thr_coordinator",
       mentions: [],
       attachments: null,
     };
+    expect(
+      questionResponseForHistory({
+        ...row,
+        text: row.text.replace("thread:thr_coordinator", "thread:thr_forged"),
+      }),
+    ).toBeNull();
     const response = questionResponseForHistory(row)!;
     expect(response?.resolution).toEqual(resolution);
     expect(

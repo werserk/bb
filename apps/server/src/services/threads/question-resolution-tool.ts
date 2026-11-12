@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApiError } from "../../errors.js";
 import {
   questionResolutionInputSchema,
   type DynamicTool,
@@ -126,7 +127,10 @@ export async function handleResolveQuestionToolCall(
       contentItems: [
         {
           type: "inputText",
-          text: `Question was not resolved: ${error instanceof Error ? error.message : String(error)}`,
+          text:
+            error instanceof ApiError
+              ? JSON.stringify({ error: error.body })
+              : `Question was not resolved: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
     };
