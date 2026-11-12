@@ -360,3 +360,44 @@ it("keeps persistent-question attention independent of native waiters and newest
     db.$client.close();
   }
 });
+
+it("recovers cancellation acceptance and consumption across database reopen without a second receipt", async () => {
+  const { appendQuestionResolutionEvent, getQuestionResolutionDelivery, listQuestionResolutionHistory } = await import("../../src/data/question-resolution-events.js");
+  const root = mkdtempSync(join(tmpdir(), "bb-question-cancel-"));
+  const file = join(root, "questions.sqlite");
+  const db = createMigratedConnection();
+  try {
+    const thread = createThread(db, noopNotifier, { projectId: PERSONAL_PROJECT_ID, providerId: "codex", status: "idle" });
+    const question = createConversationQuestion(db, { threadId: thread.id, sourceTurnId: null, sourceCallId: null, publication: JSON.stringify(publication), materialManifest: "[]" })!;
+    const accept = (crash: boolean) => db.transaction(tx => {
+      withdrawConversationQuestion(tx, { threadId: thread.id, questionId: question.id, revision: 1 });
+      const queue = createQueuedThreadMessageInTransaction(tx, { threadId: thread.id, content: [{ type: "text", text: "Cancellation notice", mentions: [] }], model: "gpt-5", reasoningLevel: "medium", permissionMode: "full", serviceTier: "default", waitingOn: null, sendAt: null, payload: { kind: "questionResponse", questionId: question.id, revision: 1 }, systemNotice: null });
+      appendQuestionResolutionEvent(tx, { initial: true, request: "normalized-request", attribution: { id: "qres_cancel", targetKind: "qst", targetId: question.id, threadId: thread.id, revision: 1, operationId: "cancel-1", action: "withdraw", actor: { kind: "local-unverified", verification: "unverified-local" }, reason: "Superseded", acceptedAt: 1, answers: null, deliveryId: queue.id } });
+      if (crash) throw new Error("Crash before acceptance commit");
+      return queue.id;
+    });
+    expect(() => accept(true)).toThrow("Crash before acceptance commit");
+    expect(getConversationQuestion(db, { threadId: thread.id, questionId: question.id })?.status).toBe("open");
+    expect(listQuestionResolutionHistory(db, "qst", question.id)).toHaveLength(0);
+    const deliveryId = accept(false);
+    await db.$client.backup(file);
+    let reopened = createConnection(file);
+    try {
+      expect(getQuestionResolutionDelivery(reopened, deliveryId)?.submittedAt).toBeNull();
+      const claims = claimQueuedThreadMessageGroup(reopened, noopNotifier, deliveryId, { kind: "explicit-send" })!;
+      expect(() => reopened.transaction(tx => {
+        expect(deleteClaimedQueuedThreadMessageBatchInTransaction(tx, { queuedMessages: claims })).toBe(true);
+        throw new Error("Crash before submission commit");
+      })).toThrow("Crash before submission commit");
+      expect(getQueuedThreadMessage(reopened, deliveryId)).not.toBeNull();
+      expect(getQuestionResolutionDelivery(reopened, deliveryId)?.submittedAt).toBeNull();
+      expect(reopened.transaction(tx => deleteClaimedQueuedThreadMessageBatchInTransaction(tx, { queuedMessages: claims }))).toBe(true);
+      reopened.$client.close();
+      reopened = createConnection(file);
+      expect(getQuestionResolutionDelivery(reopened, deliveryId)?.submittedAt).toEqual(expect.any(Number));
+      expect(getQueuedThreadMessage(reopened, deliveryId)).toBeNull();
+      expect(reopened.transaction(tx => deleteClaimedQueuedThreadMessageBatchInTransaction(tx, { queuedMessages: claims }))).toBe(false);
+      expect(listQuestionResolutionHistory(reopened, "qst", question.id)).toHaveLength(1);
+    } finally { reopened.$client.close(); }
+  } finally { db.$client.close(); rmSync(root, { recursive: true, force: true }); }
+});

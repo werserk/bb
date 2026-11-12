@@ -15,6 +15,7 @@ import type { ConversationQuestionStatus } from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { createConversationQuestionId } from "../ids.js";
 import { conversationQuestions, threads, projects } from "../schema.js";
+import { getQuestionResolutionDelivery } from "./question-resolution-events.js";
 
 export type ConversationQuestionRow = typeof conversationQuestions.$inferSelect;
 
@@ -200,6 +201,13 @@ export function requireQuestionResponseDeliverable(
           threadId: row.threadId,
           questionId: row.questionId,
         });
+  const resolution = getQuestionResolutionDelivery(db, row.id);
+  const cancellation = resolution?.submittedAt === null &&
+    resolution.attribution.action === "withdraw" &&
+    resolution.attribution.targetKind === "qst" &&
+    resolution.attribution.targetId === row.questionId &&
+    resolution.attribution.threadId === row.threadId &&
+    resolution.attribution.revision === row.questionRevision;
   const reason =
     !thread || thread.deletedAt !== null
       ? "thread deleted"
@@ -209,7 +217,9 @@ export function requireQuestionResponseDeliverable(
           ? "question missing"
           : question.revision !== row.questionRevision
             ? "question revision changed"
-            : question.status !== "answered"
+            : question.status === "withdrawn" && cancellation
+              ? null
+              : question.status !== "answered"
               ? `question ${question.status}`
               : question.queuedMessageId !== row.id ||
                   question.response === null

@@ -5,7 +5,10 @@ import {
   type ToolCallResponse,
 } from "@bb/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
-import { answerConversationQuestion } from "./conversation-questions.js";
+import {
+  answerConversationQuestion,
+  closeConversationQuestion,
+} from "./conversation-questions.js";
 import type { QuestionResolutionInvocation } from "./question-resolution-scope.js";
 
 const inputSchema = z.toJSONSchema(questionResolutionInputSchema, {
@@ -16,7 +19,7 @@ delete inputSchema.$schema;
 export const BB_RESOLVE_QUESTION_TOOL: DynamicTool = {
   name: "bb_resolve_question",
   description:
-    "Answer an own or current managed descendant native question, or withdraw an open persistent qst question, with its revision, a stable operationId and a reason. Provider pint withdrawal and command/permission approvals are unsupported. Reuse operationId only for an identical retry. Actor identity comes from the runtime; an agent answer is never owner permission. A receipt distinguishes accepted resolution from delivery.",
+    "Answer or withdraw an own or current managed descendant persistent qst question, with its revision, a stable operationId and a reason. Both answer and withdrawal of provider pint questions, arbitrary plugin forms and command/permission approvals are unsupported and nonmutating. Reuse operationId only for an identical retry. Actor identity comes from the runtime; an agent answer is never owner permission. A receipt distinguishes accepted resolution from delivery.",
   inputSchema,
 };
 
@@ -26,26 +29,34 @@ export async function handleResolveQuestionToolCall(
 ): Promise<ToolCallResponse> {
   try {
     const request = questionResolutionInputSchema.parse(args.input);
-    if (!request.questionId || request.action !== "answer" || !request.answers)
+    if (!request.questionId)
       throw new Error("This question action is unsupported");
-    const question = await answerConversationQuestion(
-      deps,
-      {
-        threadId: request.threadId,
-        questionId: request.questionId,
-        revision: request.revision,
-        answers: request.answers,
+    const ref = {
+      threadId: request.threadId,
+      questionId: request.questionId,
+      revision: request.revision,
+    };
+    const call = {
+      operationId: request.operationId,
+      reason: request.reason,
+      invocation: {
+        threadId: args.threadId,
+        turnId: args.turnId,
+        providerThreadId: args.providerThreadId,
       },
-      {
-        operationId: request.operationId,
-        reason: request.reason,
-        invocation: {
-          threadId: args.threadId,
-          turnId: args.turnId,
-          providerThreadId: args.providerThreadId,
-        },
-      },
-    );
+    };
+    const question =
+      request.action === "answer" && request.answers
+        ? await answerConversationQuestion(
+            deps,
+            { ...ref, answers: request.answers },
+            call,
+          )
+        : await closeConversationQuestion(
+            deps,
+            { ...ref, action: "withdraw" },
+            call,
+          );
     return {
       success: true,
       contentItems: [
@@ -56,7 +67,7 @@ export async function handleResolveQuestionToolCall(
               (event) => event.operationId === request.operationId,
             ),
             question,
-            delivery: question.delivery,
+            delivery: question.resolutionDelivery ?? question.delivery,
           }),
         },
       ],

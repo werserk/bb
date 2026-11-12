@@ -4,7 +4,11 @@ import {
   listEvents,
   listQueuedThreadMessages,
 } from "@bb/db";
-import { conversationQuestionPublicationSchema, turnScope } from "@bb/domain";
+import {
+  conversationQuestionPublicationSchema,
+  parseQuestionResolutionNotice,
+  turnScope,
+} from "@bb/domain";
 import { createDeferredPromise } from "@bb/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -127,7 +131,17 @@ function assertHeld(
   expect(row?.content).toContain(publication.body);
   expect(
     listQueuedThreadMessages(h.db, fixture.thread.id).map((row) => row.id),
-  ).toEqual([queuedMessageId]);
+  ).toContain(queuedMessageId);
+  const cancellation = listQueuedThreadMessages(h.db, fixture.thread.id).find(
+    (row) => row.id !== queuedMessageId,
+  );
+  const notice = parseQuestionResolutionNotice(
+    JSON.parse(cancellation!.content)[0].text,
+  );
+  expect(notice?.resolution).toMatchObject({
+    action: "withdraw",
+    answers: null,
+  });
   expect(requests(h, fixture.thread.id)).toHaveLength(requestsBefore);
   expect(providerSends(h)).toHaveLength(0);
   expect(
@@ -144,6 +158,69 @@ function assertHeld(
 }
 
 describe("independent question response dispatch", () => {
+  it("submits one attributed cancellation using its own durable queue receipt", async () => {
+    await withTestHarness(async (h) => {
+      vi.useFakeTimers();
+      const fixture = await prepareQuestion(h);
+      const ref = {
+        threadId: fixture.thread.id,
+        questionId: fixture.question.id,
+        revision: 1,
+        action: "withdraw" as const,
+      };
+      const call = {
+        operationId: "cancel-scope",
+        reason: "The accepted scope no longer needs the answer",
+        invocation: {
+          threadId: fixture.thread.id,
+          turnId: fixture.source.turnId,
+          providerThreadId: fixture.source.providerThreadId,
+        },
+      };
+      const accepted = await closeConversationQuestion(h.deps, ref, call);
+      const retry = await closeConversationQuestion(h.deps, ref, call);
+      expect(retry.resolutionAttribution?.id).toBe(
+        accepted.resolutionAttribution?.id,
+      );
+      expect(retry.resolutionAttribution?.deliveryId).toBe(
+        accepted.resolutionAttribution?.deliveryId,
+      );
+      const deliveryId = accepted.resolutionAttribution!.deliveryId!;
+      expect(accepted.response).toBeNull();
+      expect(accepted.queuedMessageId).toBeNull();
+      expect(accepted.resolutionDelivery?.kind).toBe("held");
+      finishSource(h, fixture);
+      const before = requests(h, fixture.thread.id).length;
+      expect(
+        (
+          await sendQueuedMessageNow(h.deps, {
+            threadId: fixture.thread.id,
+            queuedMessageId: deliveryId,
+            mode: "auto",
+          })
+        ).delivery,
+      ).toBe("sent");
+      expect(requests(h, fixture.thread.id)).toHaveLength(before + 1);
+      expect(providerSends(h)).toHaveLength(1);
+      expect(getQueuedThreadMessage(h.db, deliveryId)).toBeNull();
+      const current = readConversationQuestion(h.deps, ref);
+      expect(current).toMatchObject({
+        status: "withdrawn",
+        response: null,
+        resolutionDelivery: { kind: "submitted" },
+        resolutionAttribution: accepted.resolutionAttribution,
+      });
+      await expect(
+        sendQueuedMessageNow(h.deps, {
+          threadId: fixture.thread.id,
+          queuedMessageId: deliveryId,
+          mode: "auto",
+        }),
+      ).rejects.toThrow();
+      expect(requests(h, fixture.thread.id)).toHaveLength(before + 1);
+      expect(providerSends(h)).toHaveLength(1);
+    });
+  });
   it("retains a withdrawn accepted response as a visible exhausted row without sending", async () => {
     await withTestHarness(async (h) => {
       vi.useFakeTimers();
@@ -154,7 +231,7 @@ describe("independent question response dispatch", () => {
         revision: 1,
         answers: { voice: { selected: ["a"] } },
       });
-      closeConversationQuestion(h.deps, {
+      await closeConversationQuestion(h.deps, {
         threadId: fixture.thread.id,
         questionId: fixture.question.id,
         revision: 1,
@@ -211,7 +288,7 @@ describe("independent question response dispatch", () => {
           );
         }),
       ]);
-      closeConversationQuestion(h.deps, {
+      await closeConversationQuestion(h.deps, {
         threadId: fixture.thread.id,
         questionId: fixture.question.id,
         revision: 1,

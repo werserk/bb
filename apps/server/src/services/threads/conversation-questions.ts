@@ -22,6 +22,7 @@ import {
   listQuestionResolutionHistory,
   getQuestionResolutionOperation,
   questionResolutionPrincipal,
+  getQuestionResolutionDelivery,
 } from "@bb/db";
 import {
   conversationQuestionMarker,
@@ -36,8 +37,7 @@ import {
   type ConversationQuestionPublication,
   type ConversationQuestionStatus,
   type PendingInteractionUserAnswer,
-  LOCAL_QUESTION_ACTOR,
-  questionResolutionActorLabel,
+  serializeQuestionResolutionNotice,
   type QuestionResolutionActor,
 } from "@bb/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -144,6 +144,18 @@ function rowToQuestion(
   row: ConversationQuestionRow,
 ): ConversationQuestion {
   const resolutionHistory = listQuestionResolutionHistory(db, "qst", row.id);
+  const latest = resolutionHistory.at(-1) ?? null;
+  const receipt = latest?.deliveryId
+    ? getQuestionResolutionDelivery(db, latest.deliveryId)
+    : null;
+  const resolutionDelivery = latest?.deliveryId
+    ? questionDelivery(db, {
+        ...row,
+        status: "answered",
+        queuedMessageId: latest.deliveryId,
+        dispatchedAt: receipt?.submittedAt ?? null,
+      })
+    : null;
   return conversationQuestionSchema.parse({
     ...row,
     delivery: questionDelivery(db, row),
@@ -151,6 +163,7 @@ function rowToQuestion(
     materialManifest: JSON.parse(row.materialManifest),
     response: row.response === null ? null : JSON.parse(row.response),
     resolutionHistory,
+    resolutionDelivery,
     resolutionAttribution: resolutionHistory.at(-1) ?? null,
   });
 }
@@ -449,11 +462,14 @@ export async function answerConversationQuestion(
             acceptedAt: Date.now(),
             answers: normalized,
           };
-          const label =
-            actor.kind === "agent"
-              ? `Answered by ${questionResolutionActorLabel(actor)}`
-              : "Answered locally · identity unverified";
-          const content = `Conversation question response: ${current.id} (revision ${current.revision})\nOriginal question:\n${JSON.stringify(current.publication)}\nFrozen materials:\n${JSON.stringify(current.materialManifest)}\n${label}\nResolution: ${JSON.stringify(attribution)}\nReason: ${reason}\nThis resolution is not evidence of owner permission.\nAnswers:\n${JSON.stringify(normalized)}`;
+          const content = serializeQuestionResolutionNotice({
+            version: 1,
+            questionId: current.id,
+            revision: current.revision,
+            publication: current.publication,
+            materialManifest: current.materialManifest,
+            resolution: attribution,
+          });
           const queued = createQueuedThreadMessageInTransaction(tx, {
             threadId: thread.id,
             content: [{ type: "text", text: content, mentions: [] }],
@@ -504,58 +520,137 @@ export async function answerConversationQuestion(
   }
   return accepted.question;
 }
-export function closeConversationQuestion(
+export async function closeConversationQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: VersionedQuestionRef & { action: "dismiss" | "withdraw" },
-): ConversationQuestion {
-  const question = deps.db.transaction(
-    (tx) => {
-      publicThread(tx, args.threadId, true);
-      const current = rowToQuestion(tx, questionRow(tx, args));
-      requireRevision(current, args.revision);
-      const status = args.action === "dismiss" ? "dismissed" : "withdrawn";
-      if (current.status === status) return current;
-      const row =
-        args.action === "withdraw"
-          ? withdrawConversationQuestion(tx, args)
-          : setConversationQuestionTerminal(tx, {
-              ...args,
-              status: "dismissed",
-              response: null,
-              queuedMessageId: null,
-            });
-      if (!row) conflict(`Question is ${current.status}`);
-      appendQuestionResolutionEvent(tx, {
-        initial: current.status === "open",
-        request: JSON.stringify(args),
-        attribution: {
-          id: `qres_${randomUUID()}`,
-          targetKind: "qst",
-          targetId: current.id,
-          threadId: current.threadId,
-          revision: current.revision,
-          operationId: `card:${current.id}:${current.revision}:${args.action}`,
-          action: args.action,
-          actor: LOCAL_QUESTION_ACTOR,
-          reason:
-            args.action === "dismiss"
-              ? "Dismissed in question card"
-              : "Withdrawn in question card",
-          acceptedAt: Date.now(),
-          answers: null,
-          deliveryId: null,
-        },
-      });
-      return rowToQuestion(tx, row);
-    },
-    { behavior: "immediate" },
-  );
-  deps.hub.notifyThread(
+  call?: QuestionResolutionCall,
+): Promise<ConversationQuestion> {
+  if (call && args.action !== "withdraw")
+    conflict("Agent dismissal is unsupported");
+  publicThread(deps.db, args.threadId, true);
+  const before = rowToQuestion(deps.db, questionRow(deps.db, args));
+  requireRevision(before, args.revision);
+  const execution =
+    args.action === "withdraw" &&
+    (before.status === "open" || before.status === "answered")
+      ? await buildExecutionOptions(deps, {}, { threadId: args.threadId })
+      : null;
+  const accepted = await withQuestionResolutionActor(
+    deps.db,
     args.threadId,
-    ["interactions-changed", "queue-changed"],
-    { projectId: publicThread(deps.db, args.threadId, true).projectId },
+    call?.invocation ?? null,
+    (actor) =>
+      deps.db.transaction(
+        (tx) => {
+          const thread = publicThread(tx, args.threadId, true);
+          const current = rowToQuestion(tx, questionRow(tx, args));
+          requireRevision(current, args.revision);
+          const operationId =
+            call?.operationId ??
+            `card:${current.id}:${current.revision}:${args.action}`;
+          const reason =
+            call?.reason ??
+            (args.action === "dismiss"
+              ? "Dismissed in question card"
+              : "Withdrawn in question card");
+          const request = JSON.stringify({ ...args, reason });
+          const previous = getQuestionResolutionOperation(
+            tx,
+            questionResolutionPrincipal(actor),
+            operationId,
+          );
+          if (previous) {
+            if (previous.request !== request)
+              conflict(
+                "Question resolution operationId was reused with different content",
+              );
+            return { question: current, created: false };
+          }
+          const status = args.action === "dismiss" ? "dismissed" : "withdrawn";
+          if (!call && current.status === status)
+            return { question: current, created: false };
+          if (call && current.status !== "open")
+            conflict(`Question is ${current.status}`);
+          const row =
+            args.action === "withdraw"
+              ? withdrawConversationQuestion(tx, args)
+              : setConversationQuestionTerminal(tx, {
+                  ...args,
+                  status: "dismissed",
+                  response: null,
+                  queuedMessageId: null,
+                });
+          if (!row) conflict(`Question is ${current.status}`);
+          const attribution = {
+            id: `qres_${randomUUID()}`,
+            targetKind: "qst" as const,
+            targetId: current.id,
+            threadId: current.threadId,
+            revision: current.revision,
+            operationId,
+            action: args.action,
+            actor,
+            reason,
+            acceptedAt: Date.now(),
+            answers: null,
+          };
+          let deliveryId: string | null = null;
+          if (args.action === "withdraw") {
+            ensureThreadQueueIsWritable(thread);
+            if (!execution)
+              conflict("Question changed before withdrawal preparation");
+            const content = serializeQuestionResolutionNotice({
+              version: 1,
+              questionId: current.id,
+              revision: current.revision,
+              publication: current.publication,
+              materialManifest: current.materialManifest,
+              resolution: attribution,
+            });
+            deliveryId = createQueuedThreadMessageInTransaction(tx, {
+              threadId: thread.id,
+              content: [{ type: "text", text: content, mentions: [] }],
+              senderThreadId: actor.kind === "agent" ? actor.threadId : null,
+              model: execution.model,
+              reasoningLevel: execution.reasoningLevel,
+              permissionMode: execution.permissionMode,
+              serviceTier: execution.serviceTier,
+              waitingOn:
+                thread.status === "stopping"
+                  ? { kind: "stopping" }
+                  : { kind: "thread-busy" },
+              sendAt: null,
+              payload: {
+                kind: "questionResponse",
+                questionId: current.id,
+                revision: current.revision,
+              },
+              systemNotice: null,
+            }).id;
+          }
+          appendQuestionResolutionEvent(tx, {
+            initial: current.status === "open",
+            request,
+            attribution: { ...attribution, deliveryId },
+          });
+          return { question: rowToQuestion(tx, row), created: true };
+        },
+        { behavior: "immediate" },
+      ),
   );
-  return question;
+  if (accepted.created) {
+    deps.hub.notifyThread(
+      args.threadId,
+      ["interactions-changed", "queue-changed"],
+      { projectId: publicThread(deps.db, args.threadId, true).projectId },
+    );
+    if (args.action === "withdraw")
+      requestQueuedMessageDispatch(deps, {
+        kind: "thread-ready",
+        threadId: args.threadId,
+      });
+  }
+  return accepted.question;
 }
 
 const openQuestionCursorSchema = z.strictObject({

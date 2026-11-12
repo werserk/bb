@@ -67,7 +67,7 @@ afterEach(() => {
 });
 it("validates the entire current envelope and normalizes answers without losing optional questions or long free text", () => {
   const parsed = parseQuestionResponse(envelope)!;
-  expect(parsed.answers.choice?.selected).toEqual(["one", "two"]);
+  expect(parsed.answers!.choice?.selected).toEqual(["one", "two"]);
   const view = render(
     <QuestionAnswers
       publication={parsed.publication}
@@ -156,7 +156,7 @@ it("retains readable snapshot when source is missing, with timestamp and inline 
     />,
     { wrapper: harness.wrapper },
   );
-  expect(screen.getByText("You answered")).toBeTruthy();
+  expect(screen.getByText("Attribution unavailable")).toBeTruthy();
   expect(screen.getByText("First label")).toBeTruthy();
   await screen.findByText("Source unavailable · delivery unverified");
   expect(document.querySelector("time")?.getAttribute("dateTime")).toBe(
@@ -394,7 +394,7 @@ it("identifies the owner answer and anchors a concise original quote without mov
     </>,
     { wrapper: harness.wrapper },
   );
-  expect(screen.getByText("You answered")).toBeTruthy();
+  expect(screen.getByText("Attribution unavailable")).toBeTruthy();
   expect(view.container.querySelector("blockquote")).toBeNull();
   expect(screen.getAllByText("Choose carefully")).toHaveLength(1);
   expect(screen.getByRole("region", { name: "Question response" }).id).toBe(
@@ -436,3 +436,93 @@ it("shows link-local progress and clears a failed lookup when the retained snaps
   await waitFor(() => expect(screen.queryByText("Lookup offline")).toBeNull());
   expect(screen.queryByText("Opening message…")).toBeNull();
 });
+
+it.each(["answer", "withdraw"] as const)(
+  "recognizes a typed %s notice only with matching runtime sender provenance",
+  async (action) => {
+    const {
+      serializeQuestionResolutionNotice,
+      normalizeConversationQuestionAnswers,
+    } = await import("@bb/domain");
+    const resolution = {
+      id: "qres_notice",
+      targetKind: "qst" as const,
+      targetId: "qst_23456789ab",
+      threadId: "thr_test",
+      revision: 1,
+      operationId: "op-1",
+      action,
+      actor: {
+        kind: "agent" as const,
+        verification: "runtime" as const,
+        threadId: "thr_coordinator",
+        projectId: "proj_test",
+        name: "Frozen coordinator name",
+        role: "coordinator",
+      },
+      reason: "Scope changed\nwith Unicode ✓",
+      acceptedAt: 1000,
+      answers:
+        action === "answer"
+          ? normalizeConversationQuestionAnswers(publication.questions, answers)
+          : null,
+    };
+    const text = serializeQuestionResolutionNotice({
+      version: 1,
+      questionId: "qst_23456789ab",
+      revision: 1,
+      publication,
+      materialManifest: manifest,
+      resolution,
+    });
+    const row = {
+      text,
+      initiator: "agent",
+      senderThreadId: "thr_coordinator",
+      mentions: [],
+      attachments: null,
+    };
+    const response = questionResponseForHistory(row)!;
+    expect(response?.resolution).toEqual(resolution);
+    expect(
+      questionResponseForHistory({ ...row, senderThreadId: "thr_sibling" }),
+    ).toBeNull();
+    expect(
+      questionResponseForHistory({ ...row, initiator: "user" }),
+    ).toBeNull();
+    api.get.mockResolvedValue({
+      id: "qst_23456789ab",
+      threadId: "thr_test",
+      revision: 1,
+      status: action === "answer" ? "answered" : "withdrawn",
+      publication,
+      materialManifest: manifest,
+      response: resolution.answers,
+      delivery: {
+        kind: action === "answer" ? "submitted" : "none",
+        reason: null,
+      },
+      resolutionDelivery: { kind: "submitted", reason: null },
+      resolutionAttribution: { ...resolution, deliveryId: "qmsg_notice" },
+      resolutionHistory: [{ ...resolution, deliveryId: "qmsg_notice" }],
+    });
+    const harness = createQueryClientTestHarness();
+    render(
+      <QuestionResponseEvent
+        response={response}
+        threadId="thr_test"
+        timestamp={1000}
+      />,
+      { wrapper: harness.wrapper },
+    );
+    await screen.findByText(
+      action === "answer"
+        ? "Answered by Coordinator"
+        : "Withdrawn by Coordinator",
+    );
+    expect(document.body.textContent).toContain(resolution.reason);
+    expect(screen.queryByText("You answered")).toBeNull();
+    if (action === "withdraw")
+      expect(screen.queryByText("First label")).toBeNull();
+  },
+);

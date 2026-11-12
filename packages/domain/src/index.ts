@@ -88,3 +88,4 @@ export * from "./environment-removal.js";
 export const ARCHIVE_UNDO_GRACE_MS = 30_000;
 
 export * from "./thread-plan.js";
+export * from "./question-resolution-notice.js";

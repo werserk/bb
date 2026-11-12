@@ -56,3 +56,17 @@ export function questionResolutionActorLabel(
     ? `${actor.role === "coordinator" ? "Coordinator" : actor.name || "Agent"} (${actor.threadId})`
     : "locally · identity unverified";
 }
+
+export function questionResolutionLabel(
+  resolution: Pick<QuestionResolutionAttribution, "action" | "actor">,
+): string {
+  const action = {
+    answer: "Answered",
+    withdraw: "Withdrawn",
+    dismiss: "Dismissed",
+  }[resolution.action];
+  const actor = resolution.actor;
+  return actor.kind === "agent"
+    ? `${action} by ${actor.role === "coordinator" ? "Coordinator" : actor.name || "Agent"}`
+    : `${action} locally · identity unverified`;
+}

@@ -29,5 +29,15 @@ export function appendQuestionResolutionEvent(db: DbQueryConnection, args: { att
     operationId: attribution.operationId,
     request: args.request,
     attribution: JSON.stringify(attribution),
+    deliveryId: attribution.deliveryId,
   }).run();
+}
+
+export function getQuestionResolutionDelivery(db: DbQueryConnection, deliveryId: string) {
+  const row = db.select().from(questionResolutionEvents).where(eq(questionResolutionEvents.deliveryId, deliveryId)).get();
+  return row ? { attribution: questionResolutionAttributionSchema.parse(JSON.parse(row.attribution)), submittedAt: row.submittedAt } : null;
+}
+
+export function markQuestionResolutionSubmitted(db: DbQueryConnection, deliveryId: string): void {
+  db.update(questionResolutionEvents).set({ submittedAt: Date.now() }).where(and(eq(questionResolutionEvents.deliveryId, deliveryId), sql`${questionResolutionEvents.submittedAt} IS NULL`)).run();
 }

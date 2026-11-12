@@ -1,4 +1,5 @@
 import { requireQuestionResponseDeliverable } from "./conversation-questions.js";
+import { markQuestionResolutionSubmitted } from "./question-resolution-events.js";
 import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
 export { parseStoredQueuedMessagePayload } from "./queued-message-payload.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
@@ -1708,6 +1709,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
   }
 
   for (const row of existingRows) {
+    if (row.payloadKind === "questionResponse") markQuestionResolutionSubmitted(db, row.id);
     if (row.payloadKind === "questionResponse" && row.questionId !== null)
       db.update(conversationQuestions)
         .set({ dispatchedAt: Date.now(), updatedAt: Date.now() })

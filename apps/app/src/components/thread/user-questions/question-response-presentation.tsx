@@ -1,5 +1,7 @@
 import {
   conversationQuestionPublicationSchema,
+  parseQuestionResolutionNotice,
+  type QuestionResolutionNotice,
   questionMaterialManifestSchema,
   normalizeConversationQuestionAnswers,
   userQuestionPendingInteractionResolutionSchema,
@@ -25,7 +27,34 @@ function keepsEveryKey(raw: unknown, parsed: unknown): boolean {
   return true;
 }
 
-export function parseQuestionResponse(text: string) {
+export interface QuestionResponseSnapshot {
+  questionId: string;
+  revision: number;
+  publication: ConversationQuestionPublication;
+  materialManifest: ReturnType<typeof questionMaterialManifestSchema.parse>;
+  answers: ConversationQuestion["response"];
+  resolution: QuestionResolutionNotice["resolution"] | null;
+}
+
+export function parseQuestionResponse(
+  text: string,
+): QuestionResponseSnapshot | null {
+  const notice = parseQuestionResolutionNotice(text);
+  if (notice)
+    return {
+      questionId: notice.questionId,
+      revision: notice.revision,
+      publication: notice.publication,
+      materialManifest: notice.materialManifest,
+      answers:
+        notice.resolution.action === "answer"
+          ? userQuestionPendingInteractionResolutionSchema.shape.answers.parse(
+              notice.resolution.answers,
+            )
+          : null,
+      resolution: notice.resolution,
+    };
+
   const match =
     /^Conversation question response: (qst_[23456789abcdefghijkmnpqrstuvwxyz]{10}) \(revision ([1-9][0-9]*)\)\nOriginal question:\n([^\n]+)\nFrozen materials:\n([^\n]+)\nOwner answers:\n([^\n]+)$/u.exec(
       text,
@@ -60,15 +89,12 @@ export function parseQuestionResponse(text: string) {
       publication,
       materialManifest,
       answers,
+      resolution: null,
     };
   } catch {
     return null;
   }
 }
-
-export type QuestionResponseSnapshot = NonNullable<
-  ReturnType<typeof parseQuestionResponse>
->;
 
 export function questionResponseForHistory(row: {
   text: string;
@@ -77,11 +103,14 @@ export function questionResponseForHistory(row: {
   mentions: readonly unknown[];
   attachments: object | null;
 }) {
-  if (
-    row.initiator !== "user" ||
-    row.senderThreadId !== null ||
-    row.mentions.length > 0
-  )
+  if (row.mentions.length > 0) return null;
+  const response = parseQuestionResponse(row.text);
+  if (!response) return null;
+  const actor = response.resolution?.actor;
+  if (actor?.kind === "agent") {
+    if (row.initiator !== "agent" || row.senderThreadId !== actor.threadId)
+      return null;
+  } else if (row.initiator !== "user" || row.senderThreadId !== null)
     return null;
   if (
     row.attachments &&
@@ -94,7 +123,7 @@ export function questionResponseForHistory(row: {
     )
   )
     return null;
-  return parseQuestionResponse(row.text);
+  return response;
 }
 
 export function queuedQuestionResponse(

@@ -1,3 +1,5 @@
+import { type QuestionResolutionAttribution } from "@bb/domain";
+import { QuestionResolutionDetails } from "./QuestionResolutionDetails";
 import type { ReactNode } from "react";
 import { Icon } from "@bb/shared-ui/icon";
 import {
@@ -14,10 +16,12 @@ export function QuestionResponseBody({
   response,
   timestamp,
   footer,
+  resolution,
 }: {
   response: QuestionResponseSnapshot;
   timestamp?: number;
   footer?: ReactNode;
+  resolution?: QuestionResolutionAttribution | null;
 }) {
   const single = response.publication.questions.length === 1;
   const prompt = response.publication.questions[0]?.prompt
@@ -31,7 +35,11 @@ export function QuestionResponseBody({
           className="size-3.5 shrink-0 text-timeline-accent"
           aria-hidden="true"
         />
-        <span className="font-semibold text-foreground">You answered</span>
+        <span className="font-semibold text-foreground">
+          {response.resolution?.action === "withdraw"
+            ? "Question withdrawn"
+            : "Question response"}
+        </span>
         {timestamp !== undefined && Number.isFinite(timestamp) ? (
           <time
             className="ml-auto tabular-nums"
@@ -55,11 +63,22 @@ export function QuestionResponseBody({
           {response.publication.questions.length} questions
         </p>
       )}
-      <QuestionAnswers
-        publication={response.publication}
-        answers={response.answers}
-        showPrompts={!single}
-      />
+      {resolution ? (
+        <QuestionResolutionDetails resolution={resolution} />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {response.resolution
+            ? "Snapshot · attribution unverified"
+            : "Attribution unavailable"}
+        </p>
+      )}
+      {response.resolution?.action !== "withdraw" ? (
+        <QuestionAnswers
+          publication={response.publication}
+          answers={response.answers}
+          showPrompts={!single}
+        />
+      ) : null}
       {footer ? (
         <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-3 border-t border-timeline-accent/18 text-xs text-muted-foreground pointer-coarse:min-h-11">
           {footer}

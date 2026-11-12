@@ -418,3 +418,61 @@ it("preserves HTML material previews larger than the markdown limit", async () =
     ).toContain(content),
   );
 });
+
+it.each(["agent", "local-unverified", "legacy"])(
+  "keeps %s attribution visible on the collapsed original card",
+  async (kind) => {
+    const actor =
+      kind === "agent"
+        ? {
+            kind: "agent",
+            verification: "runtime",
+            threadId: "thr_coordinator",
+            projectId: "proj_test",
+            name: "Project coordinator",
+            role: "coordinator",
+          }
+        : { kind: "local-unverified", verification: "unverified-local" };
+    const attribution =
+      kind === "legacy"
+        ? null
+        : {
+            id: "qres_test",
+            targetKind: "qst",
+            targetId: question.id,
+            threadId: "thr_test",
+            revision: 1,
+            operationId: "answer-1",
+            action: "answer",
+            actor,
+            reason: "The approved scope settles this choice",
+            acceptedAt: 2000,
+            answers: { voice: { selected: ["a"] } },
+            deliveryId: "qmsg_test",
+          };
+    api.get.mockResolvedValue({
+      ...question,
+      status: "answered",
+      updatedAt: 2000,
+      response: { voice: { selected: ["a"] } },
+      delivery: { kind: "held", reason: "Thread archived" },
+      resolutionAttribution: attribution,
+      resolutionHistory: attribution ? [attribution] : [],
+    });
+    const harness = createQueryClientTestHarness();
+    render(
+      <ConversationQuestionCard threadId="thr_test" questionId={question.id} />,
+      { wrapper: harness.wrapper },
+    );
+    await screen.findByText(
+      kind === "agent"
+        ? "Answered by Coordinator"
+        : kind === "legacy"
+          ? "Attribution unavailable"
+          : "Answered locally · identity unverified",
+    );
+    if (attribution) expect(screen.getByText(attribution.reason)).toBeTruthy();
+    expect(screen.queryByTestId("form")).toBeNull();
+    expect(screen.getByText("Held · not sent")).toBeTruthy();
+  },
+);

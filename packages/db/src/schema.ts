@@ -1280,12 +1280,15 @@ export const questionResolutionEvents = sqliteTable(
     operationId: text("operation_id").notNull(),
     request: text("request").notNull(),
     attribution: text("attribution").notNull(),
+    deliveryId: text("delivery_id"),
+    submittedAt: integer("submitted_at"),
   },
   (table) => [
     uniqueIndex("question_resolution_operation_idx").on(
       table.principal,
       table.operationId,
     ),
+    uniqueIndex("question_resolution_delivery_idx").on(table.deliveryId),
     uniqueIndex("question_resolution_initial_idx")
       .on(table.targetKind, table.targetId, table.revision)
       .where(sql`${table.initial} = 1`),

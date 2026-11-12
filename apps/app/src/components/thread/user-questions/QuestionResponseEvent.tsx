@@ -4,6 +4,7 @@ import {
   conversationQuestionPublicationSchema,
   questionMaterialManifestSchema,
   normalizeConversationQuestionAnswers,
+  questionResolutionAttributionSchema,
 } from "@bb/domain";
 import { sdk } from "@/lib/sdk";
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
@@ -47,6 +48,14 @@ export function QuestionResponseEvent({
     retry: false,
   });
   const question = source.data;
+  const acceptedResolution = response.resolution
+    ? (question?.resolutionHistory?.find(
+        (event) => event.id === response.resolution?.id,
+      ) ?? null)
+    : null;
+  const acceptedNotice = acceptedResolution
+    ? (({ deliveryId: _deliveryId, ...notice }) => notice)(acceptedResolution)
+    : null;
   let matches = false;
   try {
     matches =
@@ -54,22 +63,34 @@ export function QuestionResponseEvent({
       question?.id === response.questionId &&
       question.threadId === threadId &&
       question.revision === response.revision &&
-      question.status === "answered" &&
+      (response.resolution
+        ? acceptedResolution !== null
+        : question.status === "answered") &&
       JSON.stringify(
         conversationQuestionPublicationSchema.parse(question.publication),
       ) === JSON.stringify(response.publication) &&
       JSON.stringify(
         questionMaterialManifestSchema.parse(question.materialManifest),
       ) === JSON.stringify(response.materialManifest) &&
-      JSON.stringify(
-        normalizeConversationQuestionAnswers(
-          question.publication.questions,
-          question.response ?? {},
-        ),
-      ) === JSON.stringify(response.answers);
+      (response.resolution
+        ? JSON.stringify(
+            questionResolutionAttributionSchema
+              .omit({ deliveryId: true })
+              .parse(acceptedNotice),
+          ) === JSON.stringify(response.resolution)
+        : JSON.stringify(
+            normalizeConversationQuestionAnswers(
+              question.publication.questions,
+              question.response ?? {},
+            ),
+          ) === JSON.stringify(response.answers));
   } catch {
     matches = false;
   }
+  const delivery =
+    response.resolution?.action === "withdraw"
+      ? question?.resolutionDelivery
+      : question?.delivery;
   return (
     <section
       ref={root}
@@ -82,17 +103,16 @@ export function QuestionResponseEvent({
       <QuestionResponseBody
         response={response}
         timestamp={timestamp}
+        resolution={matches ? acceptedResolution : null}
         footer={
           <>
             <span>
-              {matches && question
-                ? questionDeliveryLabels[question.delivery.kind]
+              {matches && delivery
+                ? questionDeliveryLabels[delivery.kind]
                 : source.isPending
                   ? "Checking response status…"
                   : "Source unavailable · delivery unverified"}
-              {matches && question?.delivery.reason
-                ? ` — ${question.delivery.reason}`
-                : ""}
+              {matches && delivery?.reason ? ` — ${delivery.reason}` : ""}
             </span>
             <button
               type="button"

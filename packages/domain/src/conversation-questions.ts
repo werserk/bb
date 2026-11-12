@@ -225,6 +225,13 @@ export const conversationQuestionSchema = z.object({
     kind: z.enum(["none", "queued", "held", "submitted", "removed"]),
     reason: z.string().nullable(),
   }),
+  resolutionDelivery: z
+    .object({
+      kind: z.enum(["none", "queued", "held", "submitted", "removed"]),
+      reason: z.string().nullable(),
+    })
+    .nullable()
+    .default(null),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

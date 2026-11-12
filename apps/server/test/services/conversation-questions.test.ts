@@ -182,11 +182,13 @@ describe("independent question custody", () => {
         answerConversationQuestion(h.deps, { ...answer, threadId: "wrong" }),
       ).rejects.toThrow("not found");
       expect(
-        closeConversationQuestion(h.deps, {
-          ...answer,
-          revision: 1,
-          action: "dismiss",
-        }).status,
+        (
+          await closeConversationQuestion(h.deps, {
+            ...answer,
+            revision: 1,
+            action: "dismiss",
+          })
+        ).status,
       ).toBe("dismissed");
       await expect(
         answerConversationQuestion(h.deps, { ...answer, revision: 1 }),
@@ -396,7 +398,7 @@ describe("independent question custody", () => {
         answers: { voice: { selected: ["a"] } },
       };
       const accepted = await answerConversationQuestion(h.deps, answer);
-      const withdrawn = closeConversationQuestion(h.deps, {
+      const withdrawn = await closeConversationQuestion(h.deps, {
         ...answer,
         action: "withdraw",
       });
@@ -405,7 +407,7 @@ describe("independent question custody", () => {
         response: answer.answers,
         queuedMessageId: accepted.queuedMessageId,
       });
-      expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(1);
+      expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(2);
       await expect(answerConversationQuestion(h.deps, answer)).rejects.toThrow(
         /withdrawn/,
       );
@@ -698,7 +700,7 @@ it("projects persistent-question attention across publish, multiple questions, a
         )
         .at(-1)?.[2],
     ).toMatchObject({ projectId: thread.projectId });
-    closeConversationQuestion(h.deps, {
+    await closeConversationQuestion(h.deps, {
       threadId: thread.id,
       questionId: second.id,
       revision: 1,
@@ -717,7 +719,7 @@ it("projects persistent-question attention across publish, multiple questions, a
       h.deps.pendingInteractions.listPendingThreadInteractions(thread.id),
     ).toHaveLength(0);
     const third = await make("three");
-    closeConversationQuestion(h.deps, {
+    await closeConversationQuestion(h.deps, {
       threadId: thread.id,
       questionId: third.id,
       revision: 1,
@@ -725,6 +727,11 @@ it("projects persistent-question attention across publish, multiple questions, a
     });
     expect(read().ownAttention).toBe("none");
     const fourth = await make("four");
+    h.db
+      .update(threads)
+      .set({ archivedAt: Date.now() })
+      .where(eq(threads.id, thread.id))
+      .run();
     expect(
       readThreadPlan(h.deps, { ...thread, archivedAt: Date.now() })
         .ownAttention,

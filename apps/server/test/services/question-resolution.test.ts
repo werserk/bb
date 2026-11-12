@@ -25,103 +25,118 @@ const publication = {
 };
 
 describe("native question resolution", () => {
-  it("answers self with runtime attribution and an operation-bound retry receipt", async () => {
-    await withTestHarness(async (h) => {
-      const { thread, session } = seedThreadFixture(h, {
-        thread: { status: "active" },
+  it.each(["answer", "withdraw"] as const)(
+    "resolves self with %s and an operation-bound retry receipt",
+    async (action) => {
+      await withTestHarness(async (h) => {
+        const { thread, session } = seedThreadFixture(h, {
+          thread: { status: "active" },
+        });
+        seedThreadRuntimeState(h.deps, {
+          threadId: thread.id,
+          environmentId: thread.environmentId,
+          providerThreadId: "p",
+        });
+        seedTurnStarted(h.deps, {
+          threadId: thread.id,
+          turnId: "native",
+          providerThreadId: "p",
+        });
+        const question = createConversationQuestion(h.db, {
+          threadId: thread.id,
+          sourceTurnId: null,
+          sourceCallId: null,
+          publication: JSON.stringify(publication),
+          materialManifest: JSON.stringify({
+            hostId: null,
+            storageRootPath: null,
+            materials: [],
+            files: [],
+          }),
+        })!;
+        const input = {
+          threadId: thread.id,
+          questionId: question.id,
+          revision: 1,
+          operationId: "answer-1",
+          action,
+          reason: "The accepted scope settles this choice",
+          ...(action === "answer"
+            ? { answers: { choice: { selected: ["a"] } } }
+            : {}),
+        };
+        const call = async (arguments_: unknown) => {
+          const response = await h.app.request("/internal/session/tool-call", {
+            method: "POST",
+            headers: internalAuthHeaders(h),
+            body: JSON.stringify({
+              sessionId: session.id,
+              threadId: thread.id,
+              turnId: "native",
+              providerThreadId: "p",
+              callId: "resolve",
+              tool: "bb_resolve_question",
+              arguments: arguments_,
+            }),
+          });
+          return response.json();
+        };
+        const first = await call(input);
+        expect(first.success).toBe(true);
+        const accepted = readConversationQuestion(h.deps, {
+          threadId: thread.id,
+          questionId: question.id,
+        });
+        expect(accepted.resolutionAttribution).toMatchObject({
+          actor: {
+            kind: "agent",
+            verification: "runtime",
+            threadId: thread.id,
+            projectId: thread.projectId,
+            name: thread.title,
+          },
+          operationId: "answer-1",
+          reason: input.reason,
+        });
+        expect((await call(input)).success).toBe(true);
+        expect(
+          (await call({ ...input, reason: "Changed retry" })).success,
+        ).toBe(false);
+        expect(
+          (await call({ ...input, operationId: "another-operation" })).success,
+        ).toBe(false);
+        expect(
+          readConversationQuestion(h.deps, {
+            threadId: thread.id,
+            questionId: question.id,
+          }).resolutionHistory,
+        ).toHaveLength(1);
+        const queue = listQueuedThreadMessages(h.db, thread.id);
+        expect(queue).toHaveLength(1);
+        expect(queue[0]!.senderThreadId).toBe(thread.id);
+        expect(queue[0]!.content).toContain(
+          action === "answer" ? "Answered by" : "Withdrawn by",
+        );
+        expect(accepted.status).toBe(
+          action === "answer" ? "answered" : "withdrawn",
+        );
+        if (action === "withdraw") expect(accepted.response).toBeNull();
+        expect(queue[0]!.content).toContain(input.reason);
+        expect(
+          (await call({ ...input, actor: { kind: "owner" } })).success,
+        ).toBe(false);
       });
+    },
+  );
+
+  it("records unauthenticated local answers without trusting a claimed native thread", async () => {
+    await withTestHarness(async (h) => {
+      const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
       seedThreadRuntimeState(h.deps, {
         threadId: thread.id,
         environmentId: thread.environmentId,
         providerThreadId: "p",
       });
-      seedTurnStarted(h.deps, {
-        threadId: thread.id,
-        turnId: "native",
-        providerThreadId: "p",
-      });
-      const question = createConversationQuestion(h.db, {
-        threadId: thread.id,
-        sourceTurnId: null,
-        sourceCallId: null,
-        publication: JSON.stringify(publication),
-        materialManifest: JSON.stringify({
-          hostId: null,
-          storageRootPath: null,
-          materials: [],
-          files: [],
-        }),
-      })!;
-      const input = {
-        threadId: thread.id,
-        questionId: question.id,
-        revision: 1,
-        operationId: "answer-1",
-        action: "answer",
-        reason: "The accepted scope settles this choice",
-        answers: { choice: { selected: ["a"] } },
-      };
-      const call = async (arguments_: unknown) => {
-        const response = await h.app.request("/internal/session/tool-call", {
-          method: "POST",
-          headers: internalAuthHeaders(h),
-          body: JSON.stringify({
-            sessionId: session.id,
-            threadId: thread.id,
-            turnId: "native",
-            providerThreadId: "p",
-            callId: "resolve",
-            tool: "bb_resolve_question",
-            arguments: arguments_,
-          }),
-        });
-        return response.json();
-      };
-      const first = await call(input);
-      expect(first.success).toBe(true);
-      const accepted = readConversationQuestion(h.deps, {
-        threadId: thread.id,
-        questionId: question.id,
-      });
-      expect(accepted.resolutionAttribution).toMatchObject({
-        actor: {
-          kind: "agent",
-          verification: "runtime",
-          threadId: thread.id,
-          projectId: thread.projectId,
-          name: thread.title,
-        },
-        operationId: "answer-1",
-        reason: input.reason,
-      });
-      expect((await call(input)).success).toBe(true);
-      expect((await call({ ...input, reason: "Changed retry" })).success).toBe(
-        false,
-      );
-      expect(
-        (await call({ ...input, operationId: "another-operation" })).success,
-      ).toBe(false);
-      expect(
-        readConversationQuestion(h.deps, {
-          threadId: thread.id,
-          questionId: question.id,
-        }).resolutionHistory,
-      ).toHaveLength(1);
-      const queue = listQueuedThreadMessages(h.db, thread.id);
-      expect(queue).toHaveLength(1);
-      expect(queue[0]!.senderThreadId).toBe(thread.id);
-      expect(queue[0]!.content).toContain("Answered by");
-      expect(queue[0]!.content).toContain(input.reason);
-      expect((await call({ ...input, actor: { kind: "owner" } })).success).toBe(
-        false,
-      );
-    });
-  });
-
-  it("records unauthenticated local answers without trusting a claimed native thread", async () => {
-    await withTestHarness(async (h) => {
-      const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
-      seedThreadRuntimeState(h.deps, { threadId: thread.id, environmentId: thread.environmentId, providerThreadId: "p" });
       const question = createConversationQuestion(h.db, {
         threadId: thread.id,
         sourceTurnId: null,

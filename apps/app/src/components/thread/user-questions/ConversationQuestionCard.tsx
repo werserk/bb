@@ -24,6 +24,7 @@ import {
   useQuestionLinkState,
 } from "./QuestionNavigationFeedback";
 import { useQuestionNavigation } from "./question-navigation";
+import { QuestionResolutionDetails } from "./QuestionResolutionDetails";
 
 const formHost = {
   density: "default" as const,
@@ -407,6 +408,12 @@ export function ConversationQuestionCard({
               {answerLink}
             </div>
           )}
+          {question.status !== "open" ? (
+            <QuestionResolutionDetails
+              resolution={question.resolutionAttribution ?? null}
+              showIdentity={expanded}
+            />
+          ) : null}
           {question.status === "open" || expanded ? (
             <div className="space-y-4">
               {question.publication.body ? (
@@ -427,6 +434,30 @@ export function ConversationQuestionCard({
               </div>
               {question.status !== "open" ? (
                 <QuestionOriginalPrompts publication={question.publication} />
+              ) : null}
+              {question.status !== "open" &&
+              (question.resolutionHistory?.length ?? 0) > 1 ? (
+                <details className="space-y-2 text-xs">
+                  <summary className="cursor-pointer">
+                    Earlier resolutions
+                  </summary>
+                  {question.resolutionHistory.slice(0, -1).map((resolution) => (
+                    <div
+                      key={resolution.id}
+                      className="space-y-2 border-l border-border pl-3"
+                    >
+                      <QuestionResolutionDetails
+                        resolution={resolution}
+                        showIdentity
+                      />
+                      {resolution.answers !== null ? (
+                        <pre className="whitespace-pre-wrap break-words">
+                          {JSON.stringify(resolution.answers, null, 2)}
+                        </pre>
+                      ) : null}
+                    </div>
+                  ))}
+                </details>
               ) : null}
             </div>
           ) : null}
@@ -462,6 +493,16 @@ export function ConversationQuestionCard({
             </VoiceInputTextareaProvider>
           ) : (
             <>
+              {question.resolutionAttribution?.action === "withdraw" &&
+              question.resolutionDelivery ? (
+                <p className="text-xs text-muted-foreground">
+                  Cancellation ·{" "}
+                  {questionDeliveryLabels[question.resolutionDelivery.kind]}
+                  {question.resolutionDelivery.reason
+                    ? ` — ${question.resolutionDelivery.reason}`
+                    : ""}
+                </p>
+              ) : null}
               {(question.status === "answered" || question.response != null) &&
               question.delivery.kind !== "submitted" ? (
                 <QuestionDelivery question={question} />

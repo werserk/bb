@@ -186,13 +186,18 @@ Held/removed responses remain distinguishable from submitted responses.
 without rewriting legacy cards. Local HTTP/UI/CLI actions are explicitly
 `local-unverified`; claimed client thread identities cannot supply runtime
 attribution. Native `bb_resolve_question` uses a live source turn and the common
-answer transaction, binding retries to the actor and normalized operation content.
+answer/withdraw transactions, binding retries to the actor and normalized operation content.
 The scope service runs the acceptance callback synchronously while its current
 policy grant is held and rechecks caller liveness/project before writing. An
-absent managed policy permits self only. Managed ancestry registration, withdrawal
-delivery, provider resolution recovery, public SDK/CLI and attributed UI are still
-integration work in the agent-question-resolution slice; these partial primitives
-are not full-path acceptance or release evidence.
+absent managed policy permits self only. Withdrawal atomically appends a separate
+resolution-bound cancellation queue row without changing an accepted answer's
+custody. Consuming either native row records its submission receipt in the same
+transaction as the turn request; it does not claim model consumption. The app
+joins accepted history before showing trusted attribution, keeps old snapshots
+readable without invented authors, and displays closure separately from delivery.
+Both pint agent actions return unsupported without changing their original local
+controls. Managed ancestry registration, public SDK/CLI and exact-pair acceptance
+remain integration work; these primitives are not full-path release evidence.
 
 The app replaces only a complete marker message with `ConversationQuestionCard`.
 The shared thread-view grouping rule keeps that message outside completed work
