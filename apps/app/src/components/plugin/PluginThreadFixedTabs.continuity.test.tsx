@@ -79,7 +79,7 @@ function Board({ threadId }: { threadId: string }) {
   );
 }
 
-function install(optIn = true) {
+function install(optIn = true, useIdentity = () => identity) {
   setPluginSlotRegistrations(
     "example",
     collectPluginAppRegistrations(
@@ -95,7 +95,7 @@ function install(optIn = true) {
               component: Board,
               useVisible: () => visible,
             },
-            optIn ? { experimental_useContinuityKey: () => identity } : {},
+            optIn ? { experimental_useContinuityKey: useIdentity } : {},
           ),
         );
       }),
@@ -385,4 +385,21 @@ it("revokes a captured controller when a pane loses focus without changing threa
   );
   expect(screen.getByTestId("visible").textContent).toBe("true");
   expect(callbacks.get("coordinator")!({ url: "test" })).toBe(true);
+});
+
+it("observes hook-driven identity changes with unchanged host props", async () => {
+  let update: (next: string) => void = () => {};
+  function useIdentity() {
+    const [value, setValue] = useState("coordinator");
+    update = setValue;
+    return value;
+  }
+  install(true, useIdentity);
+  markPluginFrontendsSettled();
+  render(<Surface threadId="coordinator" />);
+  const original = await screen.findByTestId("board");
+  await act(async () => update("replacement"));
+  expect(original.isConnected).toBe(false);
+  expect(screen.getByTestId("board")).not.toBe(original);
+  expect({ mounts, disposals }).toEqual({ mounts: 2, disposals: 1 });
 });

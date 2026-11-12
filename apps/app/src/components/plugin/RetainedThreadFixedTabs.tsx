@@ -189,13 +189,13 @@ function Registration({
     registry.getState,
     registry.getState,
   );
-  const key =
-    slot.experimental_useContinuityKey?.({
-      projectId,
-      threadId,
-      environment:
-        state?.threadId === threadId ? (state.environment ?? null) : null,
-    }) ?? null;
+  const useContinuityKey = slot.experimental_useContinuityKey!;
+  const key = useContinuityKey({
+    projectId,
+    threadId,
+    environment:
+      state?.threadId === threadId ? (state.environment ?? null) : null,
+  });
   if (
     key !== null &&
     (typeof key !== "string" || key.length === 0 || key.length > 256)
