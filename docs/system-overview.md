@@ -278,3 +278,27 @@ materials. Material file content stays outside this prose budget.
 Frozen material previews are closed initially and fetched only after Open;
 closing a preview removes its content while retaining download access. No truncation
 or answer selection occurs.
+
+### Combined local answer delivery custody
+
+`classifyLocalQuestionAnswer` in the DB question module is the shared singleton
+verdict for active queue eligibility, the idle provider fast-path bypass, manual
+Send now dispatch identity, the consumption transaction recheck, and refusal
+recovery. It joins typed queue identity with the current question revision and
+queue ID and the resolution event's action, actor and delivery ID. Text and null
+sender never establish authority. The local actor remains unverified. Dispatch
+rechecks the verdict after asynchronous preparation, before consuming rows; the
+same admitted identity supplies stored history and the daemon injection marker.
+Agent answers and every owed withdrawal retain legacy routing, including active
+main-run-idle delivery, their original sender, groups and one existing envelope.
+
+Refusal recovery CAS updates question custody and the exact answer audit delivery
+ID, attribution delivery ID and both submission receipts in one transaction. It
+preserves operation/event/principal/request identity; fresh SDK/backend reads and
+operation replay follow mutable delivery custody, so a cached old delivery ID may
+change. Inconsistent receipts abort. Obsolete submitted answers after withdrawal
+clear only their answer submission receipt and retain a removed old-ID tombstone;
+the distinct withdrawal event and queue remain owed. No schema or SDK repin is
+introduced. Existing idle/start/reprovision and bounded recovery limitations remain;
+queue submission is not evidence of model consumption. Protocol 260 rollback needs
+matching old server and daemon, and installed acceptance is an integrator gate.

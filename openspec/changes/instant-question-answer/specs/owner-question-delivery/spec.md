@@ -94,3 +94,22 @@ Only a claimed native questionResponse SHALL set optional internal host turn.sub
 - **WHEN** a protocol259 daemon attempts to connect to the new server
 - **THEN** it is rejected for update before receiving a marked command
 - **AND** its old strict parser rejects new fields, while new commands explicitly accept true or false
+
+## ADDED Requirements
+
+### Requirement: Combined answer delivery custody
+The system SHALL authorize active injection only for a singleton typed local answer whose question revision, current queued identity and resolution action, actor and delivery identity agree. It SHALL recheck this verdict in the consumption transaction after preparation and use the same verdict for stored identity and command marker. Agent answers and all owed withdrawals SHALL retain legacy routing and attribution, including main-run-idle delivery.
+
+#### Scenario: Refused local answer changes delivery custody
+- **WHEN** an admitted local answer is refused before input acceptance
+- **THEN** one transaction CAS restores question queue custody and the exact answer audit deliveryId and attribution.deliveryId, clears both submission receipts and preserves immutable operation identity
+- **AND** fresh reads and operation replay expose the new delivery identity
+
+#### Scenario: Inconsistent receipt rejects recovery
+- **WHEN** only one of question dispatchedAt and answer audit submittedAt is cleared
+- **THEN** recovery aborts without any partial mutation
+
+#### Scenario: Answer becomes obsolete while withdrawal remains owed
+- **WHEN** a submitted answer is withdrawn before its refusal settles
+- **THEN** retirement clears only its obsolete answer submission receipt and keeps its old delivery ID as a removed tombstone
+- **AND** the separately owed withdrawal remains queued and delivers once on legacy eligibility

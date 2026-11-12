@@ -1,3 +1,7 @@
+import {
+  classifyLocalQuestionAnswer,
+  QuestionResponseNotDeliverableError,
+} from "@bb/db";
 import { latestServiceTurn } from "./service-turns.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
 import {
@@ -659,13 +663,9 @@ async function runDispatchAttempt(
   markTurnTraceSpan("dispatch.checkpoint.done");
   const environment = await requireThreadCommandEnvironment(deps, { thread });
   const questionResponse =
-    claimed?.length === 1 && args.queuePayload.kind === "questionResponse"
-      ? {
-          questionId: args.queuePayload.questionId,
-          revision: args.queuePayload.revision,
-          queuedMessageId: claimed[0]!.id,
-        }
-      : undefined;
+    claimed === null
+      ? undefined
+      : classifyLocalQuestionAnswer(deps.db, claimed);
   const deferredFromRequestId =
     questionResponse === undefined
       ? null
@@ -698,6 +698,14 @@ async function runDispatchAttempt(
           throw new DispatchThreadStatusChangedError();
         }
         if (claimed !== null) {
+          const currentVerdict = classifyLocalQuestionAnswer(tx, claimed);
+          if (
+            JSON.stringify(currentVerdict) !== JSON.stringify(questionResponse)
+          )
+            throw new QuestionResponseNotDeliverableError(
+              claimed[0]!.id,
+              "question withdrawn or answer custody changed during preparation",
+            );
           consumeClaimedRows(
             claimed,
             thread.id,

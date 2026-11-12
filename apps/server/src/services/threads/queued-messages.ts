@@ -1,3 +1,4 @@
+import { classifyLocalQuestionAnswer } from "@bb/db";
 import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
   getLatestThreadSequence,
@@ -183,7 +184,7 @@ export function createAutomaticQueuedMessageGroupEligibility(
           return (
             args.thread.status === "idle" ||
             args.thread.status === "pending" ||
-            (member.payloadKind === "questionResponse" &&
+            (classifyLocalQuestionAnswer(deps.db, group) !== undefined &&
               args.thread.status === "active") ||
             isActiveTurnMainRunIdle(deps, args.thread)
           );
@@ -528,7 +529,8 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
     queuedMessages[0]!,
   );
   const queuedMessage = deferred?.message ?? queuedMessages[0]!;
-  if (queuedMessage.payload.kind === "questionResponse") return null;
+  if (classifyLocalQuestionAnswer(deps.db, args.queuedMessages) !== undefined)
+    return null;
 
   const senderThreadId = args.queuedMessages[0]!.senderThreadId;
   let inputGroups =

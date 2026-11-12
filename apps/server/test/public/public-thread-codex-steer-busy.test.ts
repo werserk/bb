@@ -1,8 +1,12 @@
+import { createNodeBbSdk } from "@bb/sdk/node";
+import { resolveQuestion } from "../../src/services/threads/question-resolution.js";
 import { afterEach, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { installFakeEnvironmentProvider } from "../helpers/environment-provider.js";
 import {
   createConversationQuestion,
+  getQuestionResolutionDelivery,
+  getQuestionResolutionOperation,
   getLatestThreadSequence,
   environments,
   projectAttachmentThreads,
@@ -967,7 +971,7 @@ it.each(["provider has no inject support", "expected turn is stale"])(
         errorMessage: reason,
       }));
       const answer = questionResponseFixture(harness, thread.id);
-      await answerConversationQuestion(harness.deps, answer);
+      const cached = await answerConversationQuestion(harness.deps, answer);
       await runQueuedMessageDispatch(harness.deps, {
         kind: "thread-ready",
         threadId: thread.id,
@@ -978,6 +982,55 @@ it.each(["provider has no inject support", "expected turn is stale"])(
           () => readConversationQuestion(harness.deps, answer).delivery.kind,
         )
         .toBe("queued");
+      const fresh = readConversationQuestion(harness.deps, answer);
+      const restoredId = fresh.resolutionAttribution!.deliveryId!;
+      expect(restoredId).not.toBe(cached.resolutionAttribution!.deliveryId);
+      expect(fresh.resolutionDelivery?.kind).toBe("queued");
+      const sdk = createNodeBbSdk({
+        baseUrl: "http://localhost",
+        fetch: async (input, init) =>
+          harness.app.request(new Request(input, init)),
+      });
+      expect(
+        (await sdk.threads.questions.get(answer)).resolutionAttribution
+          ?.deliveryId,
+      ).toBe(restoredId);
+      const backendReplay = await resolveQuestion(
+        harness.deps,
+        {
+          ...answer,
+          operationId: fresh.resolutionAttribution!.operationId,
+          reason: fresh.resolutionAttribution!.reason,
+          action: "answer",
+        },
+        null,
+      );
+      expect(backendReplay.resolution.deliveryId).toBe(restoredId);
+      expect(backendReplay.delivery.kind).toBe("queued");
+
+      expect(fresh.resolutionAttribution?.actor).toEqual(
+        cached.resolutionAttribution!.actor,
+      );
+      expect(
+        getQuestionResolutionDelivery(
+          harness.db,
+          cached.resolutionAttribution!.deliveryId!,
+        ),
+      ).toBeNull();
+      expect(
+        getQuestionResolutionOperation(
+          harness.db,
+          "local-unverified",
+          fresh.resolutionAttribution!.operationId,
+        )?.attribution.deliveryId,
+      ).toBe(restoredId);
+      expect(
+        harness.db.$client
+          .prepare(
+            "select delivery_id, submitted_at from question_resolution_events where id = ?",
+          )
+          .get(fresh.resolutionAttribution!.id),
+      ).toEqual({ delivery_id: restoredId, submitted_at: null });
       expect(
         listQueuedThreadMessages(harness.db, thread.id)[0]?.payloadKind,
       ).toBe("questionResponse");
@@ -1033,13 +1086,16 @@ it("does not deliver a restored question response after withdrawal", async () =>
     await expect
       .poll(() => readConversationQuestion(harness.deps, answer).delivery.kind)
       .toBe("queued");
-    closeConversationQuestion(harness.deps, { ...answer, action: "withdraw" });
+    await closeConversationQuestion(harness.deps, {
+      ...answer,
+      action: "withdraw",
+    });
     complete(harness, thread.id, environment.id);
     await runQueuedMessageDispatch(harness.deps, {
       kind: "thread-ready",
       threadId: thread.id,
     });
-    expect(commands).toHaveLength(1);
+    expect(commands).toHaveLength(2);
     expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
     expect(readConversationQuestion(harness.deps, answer).delivery.kind).toBe(
       "held",
@@ -1156,9 +1212,12 @@ it.each(["turn_not_steerable", "competing_turn"])(
         return released.promise;
       });
       const answer = questionResponseFixture(harness, thread.id);
-      await answerConversationQuestion(harness.deps, answer);
+      const acceptedAnswer = await answerConversationQuestion(
+        harness.deps,
+        answer,
+      );
       await entered.promise;
-      closeConversationQuestion(harness.deps, {
+      const owedWithdraw = await closeConversationQuestion(harness.deps, {
         ...answer,
         action: "withdraw",
       });
@@ -1180,17 +1239,53 @@ it.each(["turn_not_steerable", "competing_turn"])(
         )
         .toBe(1);
       expect(getThread(harness.db, thread.id)?.status).toBe("active");
+      const oldAnswerId = acceptedAnswer.resolutionAttribution!.deliveryId!;
+      expect(
+        getQuestionResolutionDelivery(harness.db, oldAnswerId),
+      ).toMatchObject({
+        submittedAt: null,
+        attribution: {
+          id: acceptedAnswer.resolutionAttribution!.id,
+          deliveryId: oldAnswerId,
+          action: "answer",
+        },
+      });
+      expect(
+        harness.db.$client
+          .prepare(
+            "select submitted_at from question_resolution_events where delivery_id = ?",
+          )
+          .get(oldAnswerId),
+      ).toEqual({ submitted_at: null });
+      expect(
+        getQuestionResolutionDelivery(
+          harness.db,
+          owedWithdraw.resolutionAttribution!.deliveryId!,
+        ),
+      ).toMatchObject({
+        submittedAt: null,
+        attribution: { action: "withdraw" },
+      });
+
       expect(readConversationQuestion(harness.deps, answer)).toMatchObject({
         status: "withdrawn",
         dispatchedAt: null,
       });
-      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
       complete(harness, thread.id, environment.id);
       await runQueuedMessageDispatch(harness.deps, {
         kind: "thread-ready",
         threadId: thread.id,
       });
-      expect(commands).toHaveLength(1);
+      expect(commands).toHaveLength(2);
+      expect(
+        readConversationQuestion(harness.deps, answer).resolutionDelivery?.kind,
+      ).toBe("submitted");
+      expect(
+        getQuestionResolutionDelivery(harness.db, oldAnswerId)?.submittedAt,
+      ).toBeNull();
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+
       expect(
         listEvents(harness.db, { threadId: thread.id }).some(
           (e) => e.type === "system/error",

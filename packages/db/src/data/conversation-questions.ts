@@ -12,10 +12,21 @@ import {
   type SQLWrapper,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { clientTurnRequestIdSchema, turnRequestEventDataSchema, type ClientTurnRequestId, type ConversationQuestionStatus } from "@bb/domain";
-import type { DbQueryConnection } from "../connection.js";
+import {
+  clientTurnRequestIdSchema,
+  turnRequestEventDataSchema,
+  type ClientTurnRequestId,
+  type ConversationQuestionStatus,
+} from "@bb/domain";
+import type { DbQueryConnection, DbTransaction } from "../connection.js";
 import { createConversationQuestionId } from "../ids.js";
-import { conversationQuestions, threads, projects, events } from "../schema.js";
+import {
+  conversationQuestions,
+  threads,
+  projects,
+  events,
+  questionResolutionEvents,
+} from "../schema.js";
 import { getQuestionResolutionDelivery } from "./question-resolution-events.js";
 import { getStoredTurnRequestEventByRequestId } from "./events.js";
 
@@ -204,7 +215,8 @@ export function requireQuestionResponseDeliverable(
           questionId: row.questionId,
         });
   const resolution = getQuestionResolutionDelivery(db, row.id);
-  const cancellation = resolution?.submittedAt === null &&
+  const cancellation =
+    resolution?.submittedAt === null &&
     resolution.attribution.action === "withdraw" &&
     resolution.attribution.targetKind === "qst" &&
     resolution.attribution.targetId === row.questionId &&
@@ -222,11 +234,11 @@ export function requireQuestionResponseDeliverable(
             : question.status === "withdrawn" && cancellation
               ? null
               : question.status !== "answered"
-              ? `question ${question.status}`
-              : question.queuedMessageId !== row.id ||
-                  question.response === null
-                ? "response ownership changed"
-                : null;
+                ? `question ${question.status}`
+                : question.queuedMessageId !== row.id ||
+                    question.response === null
+                  ? "response ownership changed"
+                  : null;
   if (reason !== null)
     throw new QuestionResponseNotDeliverableError(row.id, reason);
 }
@@ -326,36 +338,229 @@ export function listOpenConversationQuestionIdentities(
     .all();
 }
 
-export function restoreConversationQuestionDelivery(
+export function classifyLocalQuestionAnswer(
   db: DbQueryConnection,
-  args: { threadId: string; questionId: string; revision: number; previousQueuedMessageId: string; queuedMessageId: string },
+  group: readonly {
+    id: string;
+    threadId: string;
+    senderThreadId: string | null;
+    payloadKind: string;
+    questionId: string | null;
+    questionRevision: number | null;
+  }[],
+  phase: "queued" | "submitted" = "queued",
+) {
+  const row = group.length === 1 ? group[0] : undefined;
+  if (
+    !row ||
+    row.payloadKind !== "questionResponse" ||
+    row.senderThreadId !== null ||
+    row.questionId === null ||
+    row.questionRevision === null
+  )
+    return undefined;
+  const question = getConversationQuestion(db, {
+    threadId: row.threadId,
+    questionId: row.questionId,
+  });
+  const receipt = getQuestionResolutionDelivery(db, row.id);
+  const attribution = receipt?.attribution;
+  if (
+    !question ||
+    !receipt ||
+    !attribution ||
+    attribution.action !== "answer" ||
+    attribution.actor.kind !== "local-unverified" ||
+    attribution.targetKind !== "qst" ||
+    attribution.targetId !== row.questionId ||
+    attribution.threadId !== row.threadId ||
+    attribution.revision !== row.questionRevision ||
+    attribution.deliveryId !== row.id ||
+    question.revision !== row.questionRevision ||
+    question.queuedMessageId !== row.id
+  )
+    return undefined;
+  if ((question.dispatchedAt === null) !== (receipt.submittedAt === null))
+    throw new Error("Question response receipts disagree");
+  if (
+    phase === "queued"
+      ? question.status !== "answered" || receipt.submittedAt !== null
+      : !["answered", "withdrawn"].includes(question.status) ||
+        receipt.submittedAt === null
+  )
+    return undefined;
+  return {
+    questionId: row.questionId,
+    revision: row.questionRevision,
+    queuedMessageId: row.id,
+  };
+}
+
+function requireSubmittedLocalAnswer(
+  db: DbQueryConnection,
+  args: {
+    threadId: string;
+    questionId: string;
+    revision: number;
+    queuedMessageId: string;
+  },
+) {
+  const identity = classifyLocalQuestionAnswer(
+    db,
+    [
+      {
+        id: args.queuedMessageId,
+        threadId: args.threadId,
+        senderThreadId: null,
+        payloadKind: "questionResponse",
+        questionId: args.questionId,
+        questionRevision: args.revision,
+      },
+    ],
+    "submitted",
+  );
+  if (!identity)
+    throw new Error("Question response custody changed during recovery");
+  return getQuestionResolutionDelivery(db, args.queuedMessageId)!;
+}
+
+export function restoreConversationQuestionDelivery(
+  db: DbTransaction,
+  args: {
+    threadId: string;
+    questionId: string;
+    revision: number;
+    previousQueuedMessageId: string;
+    queuedMessageId: string;
+  },
 ): boolean {
-  return db.update(conversationQuestions).set({ queuedMessageId: args.queuedMessageId, dispatchedAt: null, updatedAt: Date.now() })
-    .where(and(eq(conversationQuestions.threadId, args.threadId), eq(conversationQuestions.id, args.questionId), eq(conversationQuestions.revision, args.revision), eq(conversationQuestions.status, "answered"), eq(conversationQuestions.queuedMessageId, args.previousQueuedMessageId), isNotNull(conversationQuestions.dispatchedAt)))
-    .returning({ id: conversationQuestions.id }).get() !== undefined;
+  const receipt = requireSubmittedLocalAnswer(db, {
+    ...args,
+    queuedMessageId: args.previousQueuedMessageId,
+  });
+  const changed =
+    db
+      .update(conversationQuestions)
+      .set({
+        queuedMessageId: args.queuedMessageId,
+        dispatchedAt: null,
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(conversationQuestions.threadId, args.threadId),
+          eq(conversationQuestions.id, args.questionId),
+          eq(conversationQuestions.revision, args.revision),
+          eq(conversationQuestions.status, "answered"),
+          eq(
+            conversationQuestions.queuedMessageId,
+            args.previousQueuedMessageId,
+          ),
+          isNotNull(conversationQuestions.dispatchedAt),
+        ),
+      )
+      .returning({ id: conversationQuestions.id })
+      .get() !== undefined;
+  if (!changed) return false;
+  const audit = db
+    .update(questionResolutionEvents)
+    .set({
+      deliveryId: args.queuedMessageId,
+      submittedAt: null,
+      attribution: JSON.stringify({
+        ...receipt.attribution,
+        deliveryId: args.queuedMessageId,
+      }),
+    })
+    .where(
+      and(
+        eq(questionResolutionEvents.id, receipt.attribution.id),
+        eq(questionResolutionEvents.deliveryId, args.previousQueuedMessageId),
+        eq(questionResolutionEvents.submittedAt, receipt.submittedAt!),
+      ),
+    )
+    .returning({ id: questionResolutionEvents.id })
+    .get();
+  if (!audit)
+    throw new Error("Question answer audit custody changed during recovery");
+  return true;
 }
 
 export function clearWithdrawnQuestionResponseReceipt(
-  db: DbQueryConnection,
-  args: { threadId: string; questionId: string; revision: number; queuedMessageId: string },
+  db: DbTransaction,
+  args: {
+    threadId: string;
+    questionId: string;
+    revision: number;
+    queuedMessageId: string;
+  },
 ): boolean {
-  return db.update(conversationQuestions).set({ dispatchedAt: null, updatedAt: Date.now() })
-    .where(and(eq(conversationQuestions.threadId, args.threadId), eq(conversationQuestions.id, args.questionId), eq(conversationQuestions.revision, args.revision), eq(conversationQuestions.status, "withdrawn"), eq(conversationQuestions.queuedMessageId, args.queuedMessageId), isNotNull(conversationQuestions.dispatchedAt)))
-    .returning({ id: conversationQuestions.id }).get() !== undefined;
+  const receipt = requireSubmittedLocalAnswer(db, args);
+  const changed =
+    db
+      .update(conversationQuestions)
+      .set({ dispatchedAt: null, updatedAt: Date.now() })
+      .where(
+        and(
+          eq(conversationQuestions.threadId, args.threadId),
+          eq(conversationQuestions.id, args.questionId),
+          eq(conversationQuestions.revision, args.revision),
+          eq(conversationQuestions.status, "withdrawn"),
+          eq(conversationQuestions.queuedMessageId, args.queuedMessageId),
+          isNotNull(conversationQuestions.dispatchedAt),
+        ),
+      )
+      .returning({ id: conversationQuestions.id })
+      .get() !== undefined;
+  if (!changed) return false;
+  const audit = db
+    .update(questionResolutionEvents)
+    .set({ submittedAt: null })
+    .where(
+      and(
+        eq(questionResolutionEvents.id, receipt.attribution.id),
+        eq(questionResolutionEvents.deliveryId, args.queuedMessageId),
+        eq(questionResolutionEvents.submittedAt, receipt.submittedAt!),
+      ),
+    )
+    .returning({ id: questionResolutionEvents.id })
+    .get();
+  if (!audit)
+    throw new Error("Question answer audit custody changed during retirement");
+  return true;
 }
 
 export function getQueuedQuestionResponseDeferral(
   db: DbQueryConnection,
   args: { threadId: string; queuedMessageId: string },
 ): ClientTurnRequestId | null {
-  const row = db.select({ requestId: sql<unknown>`json_extract(${events.data}, '$.requestId')` }).from(events)
-    .where(and(eq(events.threadId, args.threadId), eq(events.type, "client/turn/rejected"), sql`json_extract(${events.data}, '$.deferredToQueuedMessageId') = ${args.queuedMessageId}`))
-    .orderBy(desc(events.sequence)).limit(1).get();
+  const row = db
+    .select({
+      requestId: sql<unknown>`json_extract(${events.data}, '$.requestId')`,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        eq(events.type, "client/turn/rejected"),
+        sql`json_extract(${events.data}, '$.deferredToQueuedMessageId') = ${args.queuedMessageId}`,
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .get();
   if (row === undefined) return null;
   const requestId = clientTurnRequestIdSchema.parse(row.requestId);
-  const request = getStoredTurnRequestEventByRequestId(db, { threadId: args.threadId, requestId });
-  if (request === null) throw new Error("Question response deferral source is missing");
-  return turnRequestEventDataSchema.parse(JSON.parse(request.data)).deferredFromRequestId ?? requestId;
+  const request = getStoredTurnRequestEventByRequestId(db, {
+    threadId: args.threadId,
+    requestId,
+  });
+  if (request === null)
+    throw new Error("Question response deferral source is missing");
+  return (
+    turnRequestEventDataSchema.parse(JSON.parse(request.data))
+      .deferredFromRequestId ?? requestId
+  );
 }
 
 export function openConversationQuestionExists(threadId: string | SQLWrapper) {

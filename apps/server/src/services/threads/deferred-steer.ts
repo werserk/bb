@@ -1,3 +1,4 @@
+import { classifyLocalQuestionAnswer } from "@bb/db";
 import {
   createQueuedThreadMessageInTransaction,
   clearWithdrawnQuestionResponseReceipt,
@@ -122,6 +123,21 @@ export function recoverRefusedOwnerInputInTransaction(args: {
   }
   if (!eligibleOwnerRequest(request)) return false;
   if (questionResponse !== undefined) {
+    const verdict = classifyLocalQuestionAnswer(
+      args.db,
+      [
+        {
+          id: questionResponse.queuedMessageId,
+          threadId: args.thread.id,
+          senderThreadId: request.senderThreadId,
+          payloadKind: "questionResponse",
+          questionId: questionResponse.questionId,
+          questionRevision: questionResponse.revision,
+        },
+      ],
+      "submitted",
+    );
+    if (!verdict) return false;
     const question = getConversationQuestion(args.db, {
       threadId: args.thread.id,
       questionId: questionResponse.questionId,

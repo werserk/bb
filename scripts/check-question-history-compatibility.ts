@@ -196,6 +196,24 @@ try {
     response: "{}",
     queuedMessageId: first.id,
   });
+  old.appendQuestionResolutionEvent(db, {
+    initial: true,
+    request: "compat-answer",
+    attribution: {
+      id: "qres_compat",
+      targetKind: "qst",
+      targetId: question.id,
+      threadId: thread.id,
+      revision: 1,
+      operationId: "compat-answer",
+      action: "answer",
+      actor: { kind: "local-unverified", verification: "unverified-local" },
+      reason: "compat",
+      acceptedAt: Date.now(),
+      answers: {},
+      deliveryId: first.id,
+    },
+  });
   const upgraded = candidate.createConnection(db.$client.serialize());
   try {
     assert.equal(
@@ -230,13 +248,15 @@ try {
       input,
     );
     assert(
-      candidate.restoreConversationQuestionDelivery(upgraded, {
-        threadId: thread.id,
-        questionId: question.id,
-        revision: 1,
-        previousQueuedMessageId: first.id,
-        queuedMessageId: replacement.id,
-      }),
+      upgraded.transaction((tx) =>
+        candidate.restoreConversationQuestionDelivery(tx, {
+          threadId: thread.id,
+          questionId: question.id,
+          revision: 1,
+          previousQueuedMessageId: first.id,
+          queuedMessageId: replacement.id,
+        }),
+      ),
     );
     const rolledBack = old.createConnection(upgraded.$client.serialize());
     try {
