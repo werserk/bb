@@ -1,6 +1,14 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 type Placement = { element: HTMLDivElement };
+type ScrollPosition = {
+  element: HTMLElement;
+  top: number;
+  left: number;
+  node?: HTMLElement;
+  offsetTop: number;
+  offsetLeft: number;
+};
 type Anchor = { element: HTMLElement | null; bounds: DOMRect; rect: DOMRect };
 
 function viewportRect() {
@@ -21,9 +29,7 @@ export function useRetainedThreadTabContainer({
   const [container] = useState(() => document.createElement("div"));
   const parking = useRef<HTMLDivElement>(null);
   const anchor = useRef<Anchor | null>(null);
-  const scroll = useRef<{ element: HTMLElement; top: number; left: number }[]>(
-    [],
-  );
+  const scroll = useRef<ScrollPosition[]>([]);
   const capture = (element: HTMLDivElement) => {
     const parent = element.closest<HTMLElement>("[data-split-pane-id]");
     anchor.current = {
@@ -32,12 +38,39 @@ export function useRetainedThreadTabContainer({
       rect: element.getBoundingClientRect(),
     };
     scroll.current = [...container.querySelectorAll<HTMLElement>("*")]
-      .filter((element) => element.scrollTop !== 0 || element.scrollLeft !== 0)
-      .map((element) => ({
-        element,
-        top: element.scrollTop,
-        left: element.scrollLeft,
-      }));
+      .filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          (element.scrollTop !== 0 || element.scrollLeft !== 0),
+      )
+      .map((element) => {
+        const viewport = element.getBoundingClientRect();
+        // A leaf anchors content rather than the group's outer box, whose top
+        // does not move when a temporary block above the visible row disappears.
+        const node = [...element.querySelectorAll<HTMLElement>("*")].find(
+          (child) => {
+            if (child.childElementCount !== 0) return false;
+            const rect = child.getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.bottom > viewport.top &&
+              rect.top < viewport.bottom &&
+              rect.right > viewport.left &&
+              rect.left < viewport.right
+            );
+          },
+        );
+        const rect = node?.getBoundingClientRect();
+        return {
+          element,
+          top: element.scrollTop,
+          left: element.scrollLeft,
+          node,
+          offsetTop: rect ? rect.top - viewport.top : 0,
+          offsetLeft: rect ? rect.left - viewport.left : 0,
+        };
+      });
   };
   const park = () => {
     if (parking.current && container.parentElement !== parking.current)
@@ -55,11 +88,19 @@ export function useRetainedThreadTabContainer({
       if (container.parentElement !== outlet.element) {
         outlet.element.append(container);
         for (const position of scroll.current) {
-          position.element.scrollTop = position.top;
-          position.element.scrollLeft = position.left;
+          const { element, node } = position;
+          if (node?.isConnected && element.contains(node)) {
+            const viewport = element.getBoundingClientRect();
+            const rect = node.getBoundingClientRect();
+            element.scrollTop += rect.top - viewport.top - position.offsetTop;
+            element.scrollLeft +=
+              rect.left - viewport.left - position.offsetLeft;
+          } else {
+            element.scrollTop = position.top;
+            element.scrollLeft = position.left;
+          }
         }
       }
-      capture(outlet.element);
       return;
     }
     park();
