@@ -31,6 +31,7 @@ export default defineWorkspaceTestConfig({
       name: "@bb/app:compiled",
       include: [
         "src/components/modal/*.test.tsx",
+        "src/components/plugin/PluginThreadFixedTabs.continuity.test.tsx",
         "src/HashNavigationScroll.modal.test.tsx",
         "src/lib/app-route-history.test.tsx",
         "src/hooks/queries/thread-plans.test.tsx",
