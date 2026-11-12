@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { QUESTION_CARD_LIMITS } from "@bb/domain";
 import { it, expect, vi } from "vitest";
 import { registerQuestionCommands } from "./questions.js";
 
@@ -109,7 +110,7 @@ it("preserves publication materials, source identity and exact answer content fr
   }
 });
 
-it.each([1501, 65537])(
+it.each([QUESTION_CARD_LIMITS.body + 1, 65537])(
   "rejects body length %i before any outgoing request with one policy error",
   async (length) => {
     const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
@@ -124,7 +125,7 @@ it.each([1501, 65537])(
         questions: [
           {
             id: "q",
-            prompt: "p".repeat(501),
+            prompt: "p".repeat(QUESTION_CARD_LIMITS.prompt + 1),
             multiSelect: false,
             allowFreeText: true,
           },
@@ -160,7 +161,7 @@ it.each([1501, 65537])(
       ).rejects.toThrow("process.exit:1");
       expect(fetch).not.toHaveBeenCalled();
       expect(error).toHaveBeenCalledExactlyOnceWith(
-        `Error: Question card body: ${length}/1500 code points. Shorten the question and put the full report in materials.`,
+        `Error: Question card body: ${length}/${QUESTION_CARD_LIMITS.body} code points. Shorten the question and put the full report in materials.`,
       );
     } finally {
       fetch.mockRestore();
@@ -171,7 +172,7 @@ it.each([1501, 65537])(
   },
 );
 
-it.each([3000, 3001])(
+it.each([QUESTION_CARD_LIMITS.total, QUESTION_CARD_LIMITS.total + 1])(
   "checks combined CLI total %i before request",
   async (total) => {
     const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
@@ -182,16 +183,22 @@ it.each([3000, 3001])(
     await writeFile(
       file,
       JSON.stringify({
-        body: "b".repeat(1500),
+        body: "b".repeat(QUESTION_CARD_LIMITS.body),
         questions: ["a", "b"].map((id) => ({
           id,
-          prompt: "p".repeat(500),
+          prompt: "p".repeat(QUESTION_CARD_LIMITS.prompt),
           multiSelect: false,
           allowFreeText: true,
         })),
         materials: Array.from({ length: 5 }, (_, i) => ({
           path: `report${i}.md`,
-          label: "m".repeat(100 + (i === 0 ? total - 3000 : 0)),
+          label: "m".repeat(
+            (QUESTION_CARD_LIMITS.total -
+              QUESTION_CARD_LIMITS.body -
+              2 * QUESTION_CARD_LIMITS.prompt) /
+              5 +
+              (i === 0 ? total - QUESTION_CARD_LIMITS.total : 0),
+          ),
         })),
       }),
     );
@@ -221,7 +228,7 @@ it.each([3000, 3001])(
         "--call-id",
         "c",
       ]);
-      if (total === 3000) {
+      if (total === QUESTION_CARD_LIMITS.total) {
         await run;
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(error).not.toHaveBeenCalled();
@@ -229,7 +236,7 @@ it.each([3000, 3001])(
         await expect(run).rejects.toThrow("process.exit:1");
         expect(fetch).not.toHaveBeenCalled();
         expect(error).toHaveBeenCalledExactlyOnceWith(
-          "Error: Question card total: 3001/3000 code points. Shorten the question and put the full report in materials.",
+          `Error: Question card total: ${total}/${QUESTION_CARD_LIMITS.total} code points. Shorten the question and put the full report in materials.`,
         );
       }
     } finally {
