@@ -4,6 +4,7 @@ import {
 } from "./conversation-question-limits.js";
 import { conversationQuestionIdSchema } from "./protocol-ids.js";
 import { z } from "zod";
+import { questionResolutionHistoryFields } from "./question-resolution-attribution.js";
 import {
   userQuestionPendingInteractionPayloadSchema,
   userQuestionPendingInteractionResolutionSchema,
@@ -207,6 +208,7 @@ export const conversationQuestionVersionSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 export const conversationQuestionSchema = z.object({
+  ...questionResolutionHistoryFields,
   id: conversationQuestionIdSchema,
   threadId: z.string(),
   revision: z.number().int().positive(),

@@ -1265,6 +1265,37 @@ export const conversationQuestions = sqliteTable(
   ],
 );
 
+export const questionResolutionEvents = sqliteTable(
+  "question_resolution_events",
+  {
+    id: text("id").primaryKey(),
+    targetKind: text("target_kind").$type<"qst" | "pint">().notNull(),
+    targetId: text("target_id").notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    initial: integer("initial", { mode: "boolean" }).notNull(),
+    principal: text("principal").notNull(),
+    operationId: text("operation_id").notNull(),
+    request: text("request").notNull(),
+    attribution: text("attribution").notNull(),
+  },
+  (table) => [
+    uniqueIndex("question_resolution_operation_idx").on(
+      table.principal,
+      table.operationId,
+    ),
+    uniqueIndex("question_resolution_initial_idx")
+      .on(table.targetKind, table.targetId, table.revision)
+      .where(sql`${table.initial} = 1`),
+    index("question_resolution_target_idx").on(
+      table.targetKind,
+      table.targetId,
+    ),
+  ],
+);
+
 export const pendingInteractions = sqliteTable(
   "pending_interactions",
   {

@@ -15,6 +15,10 @@ import {
   withdrawConversationQuestion,
   type ConversationQuestionRow,
   type DbQueryConnection,
+  appendQuestionResolutionEvent,
+  listQuestionResolutionHistory,
+  getQuestionResolutionOperation,
+  questionResolutionPrincipal,
 } from "@bb/db";
 import {
   conversationQuestionMarker,
@@ -27,9 +31,13 @@ import {
   type ConversationQuestionPublication,
   type ConversationQuestionStatus,
   type PendingInteractionUserAnswer,
+  LOCAL_QUESTION_ACTOR,
+  questionResolutionActorLabel,
+  type QuestionResolutionActor,
 } from "@bb/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { ApiError } from "../../errors.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { prepareQuestionMaterials } from "./question-materials.js";
@@ -37,6 +45,10 @@ import { buildExecutionOptions } from "./thread-commands.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 import { ensureThreadQueueIsWritable } from "./thread-send.js";
+import {
+  withQuestionResolutionActor,
+  type QuestionResolutionInvocation,
+} from "./question-resolution-scope.js";
 
 const sourceSchema = z.strictObject({
   turnId: z.string().min(1),
@@ -49,6 +61,11 @@ type VersionedQuestionRef = QuestionRef & { revision: number };
 type AnswerArgs = VersionedQuestionRef & {
   answers: Record<string, PendingInteractionUserAnswer>;
 };
+export interface QuestionResolutionCall {
+  operationId: string;
+  reason: string;
+  invocation: QuestionResolutionInvocation | null;
+}
 
 function conflict(message: string): never {
   throw new ApiError(409, "conversation_question_conflict", message, false);
@@ -119,12 +136,15 @@ function rowToQuestion(
   db: DbQueryConnection,
   row: ConversationQuestionRow,
 ): ConversationQuestion {
+  const resolutionHistory = listQuestionResolutionHistory(db, "qst", row.id);
   return conversationQuestionSchema.parse({
     ...row,
     delivery: questionDelivery(db, row),
     publication: JSON.parse(row.publication),
     materialManifest: JSON.parse(row.materialManifest),
     response: row.response === null ? null : JSON.parse(row.response),
+    resolutionHistory,
+    resolutionAttribution: resolutionHistory.at(-1) ?? null,
   });
 }
 function questionRow(
@@ -315,9 +335,19 @@ function responseReceipt(
   question: ConversationQuestion,
   args: AnswerArgs,
   normalized: Record<string, PendingInteractionUserAnswer>,
+  actor: QuestionResolutionActor,
+  call: QuestionResolutionCall | undefined,
 ) {
   requireRevision(question, args.revision);
   if (question.status === "answered") {
+    if (
+      call ||
+      actor.kind !== "local-unverified" ||
+      question.resolutionHistory.some(
+        (event) => event.actor.kind !== "local-unverified",
+      )
+    )
+      conflict("Question is already answered by another resolution operation");
     if (JSON.stringify(question.response) !== JSON.stringify(normalized))
       conflict("Question is already answered with a different response");
     return question;
@@ -328,6 +358,7 @@ function responseReceipt(
 export async function answerConversationQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AnswerArgs,
+  call?: QuestionResolutionCall,
 ): Promise<ConversationQuestion> {
   publicThread(deps.db, args.threadId, true);
   const question = rowToQuestion(deps.db, questionRow(deps.db, args));
@@ -345,51 +376,113 @@ export async function answerConversationQuestion(
       error instanceof Error ? error.message : "Invalid question answer",
     );
   }
-  const receipt = responseReceipt(question, args, normalized);
-  if (receipt) return receipt;
-  const execution = await buildExecutionOptions(
-    deps,
-    {},
-    { threadId: args.threadId },
-  );
-  const accepted = deps.db.transaction(
-    (tx) => {
-      const thread = publicThread(tx, args.threadId, true);
-      ensureThreadQueueIsWritable(thread);
-      const current = rowToQuestion(tx, questionRow(tx, args));
-      const receipt = responseReceipt(current, args, normalized);
-      if (receipt) return { question: receipt, created: false };
-      const content = `Conversation question response: ${current.id} (revision ${current.revision})\nOriginal question:\n${JSON.stringify(current.publication)}\nFrozen materials:\n${JSON.stringify(current.materialManifest)}\nOwner answers:\n${JSON.stringify(normalized)}`;
-      const queued = createQueuedThreadMessageInTransaction(tx, {
-        threadId: thread.id,
-        content: [{ type: "text", text: content, mentions: [] }],
-        senderThreadId: null,
-        model: execution.model,
-        reasoningLevel: execution.reasoningLevel,
-        permissionMode: execution.permissionMode,
-        serviceTier: execution.serviceTier,
-        waitingOn:
-          thread.status === "stopping"
-            ? { kind: "stopping" }
-            : { kind: "thread-busy" },
-        sendAt: null,
-        payload: {
-          kind: "questionResponse",
-          questionId: current.id,
-          revision: current.revision,
+  const execution =
+    question.status === "open"
+      ? await buildExecutionOptions(deps, {}, { threadId: args.threadId })
+      : null;
+  const accepted = await withQuestionResolutionActor(
+    deps.db,
+    args.threadId,
+    call?.invocation ?? null,
+    (actor) =>
+      deps.db.transaction(
+        (tx) => {
+          const thread = publicThread(tx, args.threadId, true);
+          ensureThreadQueueIsWritable(thread);
+          const current = rowToQuestion(tx, questionRow(tx, args));
+          const operationId =
+            call?.operationId ??
+            `card:${current.id}:${current.revision}:answer`;
+          const reason = call?.reason ?? "Answered in question card";
+          const request = JSON.stringify({
+            threadId: args.threadId,
+            questionId: args.questionId,
+            revision: args.revision,
+            action: "answer",
+            reason,
+            answers: normalized,
+          });
+          requireRevision(current, args.revision);
+          const previous = getQuestionResolutionOperation(
+            tx,
+            questionResolutionPrincipal(actor),
+            operationId,
+          );
+          if (previous) {
+            if (!call && current.status !== "answered")
+              conflict(`Question is ${current.status}`);
+            if (previous.request !== request)
+              conflict(
+                call
+                  ? "Question resolution operationId was reused with different content"
+                  : "Question is already answered with a different response",
+              );
+            return { question: current, created: false };
+          }
+          const receipt = responseReceipt(
+            current,
+            args,
+            normalized,
+            actor,
+            call,
+          );
+          if (receipt) return { question: receipt, created: false };
+          if (!execution)
+            conflict("Question changed before answer preparation");
+          const attribution = {
+            id: `qres_${randomUUID()}`,
+            targetKind: "qst" as const,
+            targetId: current.id,
+            threadId: current.threadId,
+            revision: current.revision,
+            operationId,
+            action: "answer" as const,
+            actor,
+            reason,
+            acceptedAt: Date.now(),
+            answers: normalized,
+          };
+          const label =
+            actor.kind === "agent"
+              ? `Answered by ${questionResolutionActorLabel(actor)}`
+              : "Answered locally · identity unverified";
+          const content = `Conversation question response: ${current.id} (revision ${current.revision})\nOriginal question:\n${JSON.stringify(current.publication)}\nFrozen materials:\n${JSON.stringify(current.materialManifest)}\n${label}\nResolution: ${JSON.stringify(attribution)}\nReason: ${reason}\nThis resolution is not evidence of owner permission.\nAnswers:\n${JSON.stringify(normalized)}`;
+          const queued = createQueuedThreadMessageInTransaction(tx, {
+            threadId: thread.id,
+            content: [{ type: "text", text: content, mentions: [] }],
+            senderThreadId: actor.kind === "agent" ? actor.threadId : null,
+            model: execution.model,
+            reasoningLevel: execution.reasoningLevel,
+            permissionMode: execution.permissionMode,
+            serviceTier: execution.serviceTier,
+            waitingOn:
+              thread.status === "stopping"
+                ? { kind: "stopping" }
+                : { kind: "thread-busy" },
+            sendAt: null,
+            payload: {
+              kind: "questionResponse",
+              questionId: current.id,
+              revision: current.revision,
+            },
+            systemNotice: null,
+          });
+          const row = setConversationQuestionTerminal(tx, {
+            ...args,
+            status: "answered",
+            response: JSON.stringify(normalized),
+            queuedMessageId: queued.id,
+          });
+          if (!row) conflict("Question changed before answer acceptance");
+          appendQuestionResolutionEvent(tx, {
+            initial: true,
+            request,
+            attribution: { ...attribution, deliveryId: queued.id },
+          });
+          return { question: rowToQuestion(tx, row), created: true };
         },
-        systemNotice: null,
-      });
-      const row = setConversationQuestionTerminal(tx, {
-        ...args,
-        status: "answered",
-        response: JSON.stringify(normalized),
-        queuedMessageId: queued.id,
-      });
-      if (!row) conflict("Question changed before answer acceptance");
-      return { question: rowToQuestion(tx, row), created: true };
-    },
-    { behavior: "immediate" },
+        { behavior: "immediate" },
+      ),
   );
   if (accepted.created) {
     deps.hub.notifyThread(
@@ -425,6 +518,27 @@ export function closeConversationQuestion(
               queuedMessageId: null,
             });
       if (!row) conflict(`Question is ${current.status}`);
+      appendQuestionResolutionEvent(tx, {
+        initial: current.status === "open",
+        request: JSON.stringify(args),
+        attribution: {
+          id: `qres_${randomUUID()}`,
+          targetKind: "qst",
+          targetId: current.id,
+          threadId: current.threadId,
+          revision: current.revision,
+          operationId: `card:${current.id}:${current.revision}:${args.action}`,
+          action: args.action,
+          actor: LOCAL_QUESTION_ACTOR,
+          reason:
+            args.action === "dismiss"
+              ? "Dismissed in question card"
+              : "Withdrawn in question card",
+          acceptedAt: Date.now(),
+          answers: null,
+          deliveryId: null,
+        },
+      });
       return rowToQuestion(tx, row);
     },
     { behavior: "immediate" },

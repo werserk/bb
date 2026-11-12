@@ -94,6 +94,17 @@ describe("independent question custody", () => {
       };
       const accepted = await answerConversationQuestion(h.deps, answer);
       expect(accepted.status).toBe("answered");
+      expect(accepted.resolutionAttribution).toMatchObject({
+        action: "answer",
+        actor: {
+          kind: "local-unverified",
+          verification: "unverified-local",
+        },
+        reason: "Answered in question card",
+        answers: answer.answers,
+        deliveryId: accepted.queuedMessageId,
+      });
+      expect(accepted.resolutionHistory).toHaveLength(1);
       expect(
         (await answerConversationQuestion(h.deps, answer)).queuedMessageId,
       ).toBe(accepted.queuedMessageId);
@@ -116,6 +127,10 @@ describe("independent question custody", () => {
       const queued = getQueuedThreadMessage(h.db, accepted.queuedMessageId!)!;
       expect(queued.content).toContain("Original context");
       expect(queued.content).toContain("Which voice?");
+      expect(queued.content).toContain(
+        "Answered locally · identity unverified",
+      );
+      expect(queued.content).not.toContain("Owner answers");
       expect(queued.permissionMode).toBe("accept-edits");
       expect(queued.payloadKind).toBe("questionResponse");
       expect(

@@ -182,6 +182,18 @@ withdrawal and thread eligibility inside the dispatch transaction. It records
 submission time with consumption; submission does not assert model consumption.
 Held/removed responses remain distinguishable from submitted responses.
 
+`question_resolution_events` adds immutable accepted actor/reason/answer snapshots
+without rewriting legacy cards. Local HTTP/UI/CLI actions are explicitly
+`local-unverified`; claimed client thread identities cannot supply runtime
+attribution. Native `bb_resolve_question` uses a live source turn and the common
+answer transaction, binding retries to the actor and normalized operation content.
+The scope service runs the acceptance callback synchronously while its current
+policy grant is held and rechecks caller liveness/project before writing. An
+absent managed policy permits self only. Managed ancestry registration, withdrawal
+delivery, provider resolution recovery, public SDK/CLI and attributed UI are still
+integration work in the agent-question-resolution slice; these partial primitives
+are not full-path acceptance or release evidence.
+
 The app replaces only a complete marker message with `ConversationQuestionCard`.
 The shared thread-view grouping rule keeps that message outside completed work
 summaries. Cards reuse the question form without composer focus or global keyboard

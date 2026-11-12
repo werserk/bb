@@ -24,6 +24,10 @@ import {
   UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
 } from "../services/threads/thread-environment-directory.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
+import {
+  BB_RESOLVE_QUESTION_TOOL,
+  handleResolveQuestionToolCall,
+} from "../services/threads/question-resolution-tool.js";
 
 import {
   BB_UPDATE_PLAN_TOOL,
@@ -89,7 +93,8 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         payload.turnId === undefined &&
         (payload.tool === UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME ||
           payload.tool === BB_UPDATE_PLAN_TOOL.name ||
-          payload.tool === BB_ASK_QUESTION_TOOL.name)
+          payload.tool === BB_ASK_QUESTION_TOOL.name ||
+          payload.tool === BB_RESOLVE_QUESTION_TOOL.name)
       ) {
         throw new ApiError(400, "invalid_request", "This tool requires turnId");
       }
@@ -133,6 +138,20 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             turnId: payload.turnId,
             providerThreadId: payload.providerThreadId,
             callId: payload.callId,
+            input: payload.arguments,
+          }),
+        );
+      }
+
+      if (
+        payload.tool === BB_RESOLVE_QUESTION_TOOL.name &&
+        payload.turnId !== undefined
+      ) {
+        return context.json(
+          await handleResolveQuestionToolCall(deps, {
+            threadId: thread.id,
+            turnId: payload.turnId,
+            providerThreadId: payload.providerThreadId,
             input: payload.arguments,
           }),
         );
