@@ -27,9 +27,8 @@ type UrlAnchorClickHandler = (
   event: ReactMouseEvent<HTMLAnchorElement>,
 ) => void;
 
-const InAppBrowserUrlOpenContext = createContext<OpenInAppBrowserUrl | null>(
-  null,
-);
+export const InAppBrowserUrlOpenContext =
+  createContext<OpenInAppBrowserUrl | null>(null);
 
 export function openUrlInExternalBrowser(url: string): void {
   if (parseApplicationUrl(url) !== null) {

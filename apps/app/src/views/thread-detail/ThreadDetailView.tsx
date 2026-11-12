@@ -1,3 +1,7 @@
+import {
+  RetainedThreadFixedTabs,
+  useRetainedThreadTabHostState,
+} from "@/components/plugin/RetainedThreadFixedTabs";
 import { AppPanelTabsPublisher } from "@/lib/app-panel-tabs";
 import {
   getThreadFixedTabOwnerId,
@@ -346,11 +350,13 @@ function RoutedThreadDetailView() {
   }
 
   return (
-    <ThreadDetailViewInternal
-      projectId={projectId}
-      threadId={threadId}
-      timelineEnabled
-    />
+    <RetainedThreadFixedTabs projectId={projectId} threadId={threadId}>
+      <ThreadDetailViewInternal
+        projectId={projectId}
+        threadId={threadId}
+        timelineEnabled
+      />
+    </RetainedThreadFixedTabs>
   );
 }
 
@@ -360,7 +366,14 @@ const THREAD_TAB_CONTEXT = { kind: "thread" } as const;
 
 export function ThreadDetailView(props: ThreadDetailViewProps) {
   if (props.surface === "pane") {
-    return <ThreadDetailViewInternal {...props} />;
+    return (
+      <RetainedThreadFixedTabs
+        projectId={props.projectId}
+        threadId={props.threadId}
+      >
+        <ThreadDetailViewInternal {...props} />
+      </RetainedThreadFixedTabs>
+    );
   }
   return <RoutedThreadDetailView />;
 }
@@ -1533,6 +1546,17 @@ function ThreadDetailViewInternal(
     [openLiveFilePreview, thread?.environmentId],
   );
 
+  useRetainedThreadTabHostState({
+    threadId,
+    ready:
+      threadQueryState.status !== "loading" &&
+      !!thread &&
+      thread.projectId === projectId,
+    open: isSecondaryPanelOpen,
+    activeTabId: activeFixedSecondaryTabId,
+    environment: threadTabEnvironment,
+  });
+
   if (threadQueryState.status === "loading") {
     return (
       <RouteLoadingSkeleton isBoundedPane={isBoundedPane}>
@@ -1913,21 +1937,19 @@ function ThreadDetailViewInternal(
     }
   };
   const panelTabs: readonly SecondaryPanelRenderableTab[] =
-    syncedOrderedSecondaryFileTabs.map(
-      (tab): SecondaryPanelRenderableTab => ({
-        ...presentPanelTab(tab),
-        tab,
-        renderContent: () => renderSecondaryTabContent(tab),
-        onSelect:
-          tab.kind === "terminal"
-            ? () => terminals.select(tab.terminalId)
-            : () => handleActivateFileTab(tab.id),
-        onClose:
-          tab.kind === "terminal"
-            ? () => terminals.close(tab.terminalId)
-            : () => closeTab(tab.id),
-      }),
-    );
+    syncedOrderedSecondaryFileTabs.map((tab): SecondaryPanelRenderableTab => ({
+      ...presentPanelTab(tab),
+      tab,
+      renderContent: () => renderSecondaryTabContent(tab),
+      onSelect:
+        tab.kind === "terminal"
+          ? () => terminals.select(tab.terminalId)
+          : () => handleActivateFileTab(tab.id),
+      onClose:
+        tab.kind === "terminal"
+          ? () => terminals.close(tab.terminalId)
+          : () => closeTab(tab.id),
+    }));
   const threadDetailContent = (
     <MarkdownLocalFileContextMenuContext.Provider
       value={getLocalFileContextMenuItems}

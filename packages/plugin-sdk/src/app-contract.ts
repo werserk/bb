@@ -1126,6 +1126,12 @@ type ExperimentalTabInput<
       run?: never;
       params?: never;
       experimental_target?: ExperimentalFixedTabTargetContract<JsonValue>;
+      /** Opt in to pane/project-scoped DOM continuity for a logical thread surface. */
+      experimental_useContinuityKey?: C extends { kind: "thread" }
+        ? (
+            props: ExperimentalThreadTabProps & { projectId: string },
+          ) => string | null
+        : never;
     }
   : {
       component: ComponentType<
@@ -1160,6 +1166,10 @@ export type ExperimentalTabRegistration = ExperimentalTabCommon &
           > & {
             availability: "fixed";
             experimental_target?: ExperimentalFixedTabTargetContract<JsonValue>;
+            /** Same non-empty key retains this body within its native project/pane. */
+            experimental_useContinuityKey?(
+              props: ExperimentalThreadTabProps & { projectId: string },
+            ): string | null;
           })
       ))
     | ({

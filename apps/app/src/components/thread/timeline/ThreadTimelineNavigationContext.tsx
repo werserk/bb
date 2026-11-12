@@ -14,7 +14,7 @@ interface ThreadTimelineNavigation {
   workspaceRootPath: string | undefined;
 }
 
-const ThreadTimelineNavigationContext =
+export const ThreadTimelineNavigationContext =
   createContext<ThreadTimelineNavigation | null>(null);
 
 export function ThreadTimelineNavigationProvider({

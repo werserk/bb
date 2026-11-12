@@ -1,5 +1,6 @@
 import { hasThreadId } from "@/lib/thread-id";
 import type { SecondaryPanelFixedTab } from "@/components/secondary-panel/ThreadSecondaryPanel";
+import { RetainedThreadFixedTabOutlet } from "./RetainedThreadFixedTabs";
 import { PluginItemIcon } from "./PluginIcon";
 import { useMemo } from "react";
 import {
@@ -47,15 +48,21 @@ export function createThreadFixedTabDescriptor(
     title: tooltip,
     contentFillsRegion: entry.slot.layout === "flush",
     renderContent: () => (
-      <PluginTabScope slot={entry.slot} instanceId={threadId}>
-        <FixedTabTargetScope
-          ownerId={entry.reference.ownerId}
-          tabId={entry.reference.tabId}
-          targetKey={getThreadFixedTabTargetKey(threadId, entry.reference)}
-        >
-          <Component threadId={threadId} environment={environment} />
-        </FixedTabTargetScope>
-      </PluginTabScope>
+      <RetainedThreadFixedTabOutlet
+        slot={entry.slot}
+        threadId={threadId}
+        environment={environment}
+      >
+        <PluginTabScope slot={entry.slot} instanceId={threadId}>
+          <FixedTabTargetScope
+            ownerId={entry.reference.ownerId}
+            tabId={entry.reference.tabId}
+            targetKey={getThreadFixedTabTargetKey(threadId, entry.reference)}
+          >
+            <Component threadId={threadId} environment={environment} />
+          </FixedTabTargetScope>
+        </PluginTabScope>
+      </RetainedThreadFixedTabOutlet>
     ),
   } satisfies SecondaryPanelFixedTab;
 }
