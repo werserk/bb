@@ -1586,7 +1586,9 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     return `service ${[...hung].join(", ")} did not stop`;
   }
 
-  function discardCandidate(candidate: LoadedPlugin): void {
+  async function discardCandidate(candidate: LoadedPlugin): Promise<void> {
+    const hooks = candidate.handle.disposeHooks.splice(0).reverse();
+    candidate.handle.invalidate();
     candidate.stopping.abort();
     try {
       deps.pendingInteractions?.interruptOwnedPluginInteractions(candidate);
@@ -1595,13 +1597,28 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         `plugin ${candidate.pluginId} interaction cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    const cleanup = Promise.all(
+      hooks.map(async (hook) => {
+        try {
+          await hook();
+        } catch (error) {
+          logger.warn(
+            `plugin ${candidate.pluginId} candidate dispose hook failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    );
+    if (!(await settledWithin(cleanup, serviceStopTimeoutMs))) {
+      logger.warn(
+        `plugin ${candidate.pluginId} candidate dispose hooks did not settle within ${serviceStopTimeoutMs}ms; cleanup may still be running`,
+      );
+    }
     for (const database of candidate.handle.databaseHandles.splice(0)) {
       try {
         database.close();
       } catch {}
     }
     candidate.released.abort();
-    candidate.handle.invalidate();
   }
 
   function setLoadHold(hold: PluginLoadHold | null): void {
@@ -2013,7 +2030,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
       );
     } catch (error) {
       for (const rollback of rollbackGenerations.reverse()) rollback();
-      discardCandidate(plugin);
+      await discardCandidate(plugin);
       let message = error instanceof Error ? error.message : String(error);
       if (/ERR_DLOPEN_FAILED|\.node/.test(message)) {
         message += " (native dependencies are not supported in BB plugins)";
@@ -2044,7 +2061,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
           error instanceof Error ? error.message : String(error)
         }`;
       }
-      discardCandidate(plugin);
+      await discardCandidate(plugin);
       setStatus(row.id, "error", hostArtifactProblem);
       logger.warn(`plugin ${row.id} failed to load: ${hostArtifactProblem}`);
       return hostArtifactProblem;
@@ -2066,7 +2083,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         for (const rollback of rollbackGenerations.reverse()) rollback();
         loaded.delete(row.id);
         deps.sharedPorts?.clearDeclarationsForOwner(row.id);
-        discardCandidate(plugin);
+        await discardCandidate(plugin);
         return hungServicesDetail(hungAfterDispose);
       }
       releaseMutableRoots(

@@ -25,6 +25,19 @@ The core entities and how they relate:
 
 ## Contracts and boundaries
 
+### Plugin candidate disposal
+
+Failed or timed-out factories retain the previous running instance. The rejected
+candidate's API is invalidated before cleanup waits, preventing late factory
+continuations from registering more resources through that API. Registered dispose
+hooks are invoked in reverse order and awaited together for at most the service
+stop timeout (5 seconds by default); failures are logged without skipping other
+hooks, and owned databases are then closed. A cleanup timeout reports that work
+may still be running. JavaScript promises and synchronous blocking code cannot be
+cancelled by this mechanism; plugins remain responsible for direct external work.
+Candidate attention-policy writes are staged until activation so discarded
+candidates cannot clear the previous instance's policies.
+
 ### Queue readiness scheduling
 
 The server coalesces concurrent queue-readiness wakes per thread with

@@ -617,6 +617,10 @@ export function createPluginApi(options: {
   let wrappedSdk: PluginBbSdk | undefined;
   let pendingNeedsConfiguration: string | null = null;
   const pendingAgentToolProblems: string[] = [];
+  const pendingAttentionPolicies = new Map<
+    string,
+    Parameters<typeof setThreadAttentionPolicy>[0]["policy"]
+  >();
   const pendingSharedPorts = new Map<string, readonly number[]>();
   const disposeHooks: Array<() => void | Promise<void>> = [];
   let questionScope: {
@@ -1111,14 +1115,14 @@ export function createPluginApi(options: {
         );
       }
       const lease = await openTunnelIngress(audience);
-      let closed = false;
-      const close = async (): Promise<void> => {
-        if (closed) return;
-        closed = true;
+      let closing: Promise<void> | null = null;
+      const close = (): Promise<void> => {
+        if (closing !== null) return closing;
         openTunnelIngresses.delete(close);
         const index = disposeHooks.indexOf(close);
         if (index !== -1) disposeHooks.splice(index, 1);
-        await lease.close();
+        closing = Promise.resolve().then(() => lease.close());
+        return closing;
       };
       if (invalidated) {
         await lease.close();
@@ -1490,10 +1494,14 @@ export function createPluginApi(options: {
           'setAttentionPolicy: policy must be null or { backgroundTurns: "silent" }',
         );
       }
-      setThreadAttentionPolicy({ pluginId, policy, threadId });
+      if (activated) setThreadAttentionPolicy({ pluginId, policy, threadId });
+      else pendingAttentionPolicies.set(threadId, policy);
     },
   };
-  disposeHooks.push(() => clearThreadAttentionPoliciesOfPlugin(pluginId));
+  disposeHooks.push(() => {
+    pendingAttentionPolicies.clear();
+    if (activated) clearThreadAttentionPoliciesOfPlugin(pluginId);
+  });
 
   const api: BbPluginApi = {
     get experimental_questionResolution() {
@@ -1627,6 +1635,10 @@ export function createPluginApi(options: {
           pluginId,
           questionScope.policy,
         );
+      for (const [threadId, policy] of pendingAttentionPolicies) {
+        setThreadAttentionPolicy({ pluginId, policy, threadId });
+      }
+      pendingAttentionPolicies.clear();
       activated = true;
       const cliWarning = cliRecord.registration
         ? pluginCliCollisionWarning(pluginId, cliRecord.registration.name)
@@ -1661,7 +1673,14 @@ export function createPluginApi(options: {
       invalidated = true;
       disposeQuestionScope();
       rpcCaller.revoke();
-      for (const close of [...openTunnelIngresses]) void close();
+      for (const close of [...openTunnelIngresses]) {
+        void close().catch((error) => {
+          emitLog(
+            "warn",
+            `tunnel ingress close failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      }
     },
   };
 }
