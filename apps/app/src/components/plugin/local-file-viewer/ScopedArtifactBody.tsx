@@ -1,8 +1,12 @@
+import { joinHostPath } from "@bb/domain";
+import { decodeArtifactHtml } from "./artifact-html";
+import { ScopedHtmlFrame } from "./ScopedHtmlFrame";
 import { useState } from "react";
 import { useCoreModalToken } from "@/lib/core-modal-context";
 import {
   withArtifactAdmission,
   getArtifactAdmissionIntent,
+  requireArtifactRelativePath,
 } from "@/lib/artifact-admission";
 import { Button } from "@bb/shared-ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -31,12 +35,17 @@ export async function readScopedArtifact(
     signal,
     async (signal, assertActive) => {
       const root = target.experimental_artifact!.readRoot;
+      const expectedSource = getArtifactAdmissionIntent(
+        token,
+        target,
+      )!.physicalSource;
       const lease = await sdk.files.createPreview(
         target.kind === "host"
           ? {
               hostId: target.hostId,
               rootPath: root,
               policy: "artifact-v1",
+              expectedSource,
               signal,
             }
           : {
@@ -49,34 +58,40 @@ export async function readScopedArtifact(
                     }
                   : { kind: "thread-storage", threadId: target.threadId, root },
               policy: "artifact-v1",
+              expectedSource,
               signal,
             },
       );
       assertActive();
-      if (lease.policy !== "artifact-v1")
-        throw new Error("Restricted artifact preview unavailable");
-      const candidatePath = toArtifactFileTarget(target).path;
-      const relative =
-        root === ""
-          ? candidatePath
-          : candidatePath
-              .replace(/\\/gu, "/")
-              .slice(root.replace(/\\/gu, "/").replace(/\/+$/u, "").length + 1);
       if (
-        !relative ||
-        relative
-          .split("/")
-          .some((segment) => segment === ".." || segment === ".")
+        lease.policy !== "artifact-v1" ||
+        lease.expectedSource?.hostId !== expectedSource.hostId ||
+        lease.expectedSource?.canonicalReadRoot !==
+          expectedSource.canonicalReadRoot
       )
-        throw new Error("Artifact outside its read root");
+        throw new Error("Restricted artifact preview unavailable");
+      const relative = requireArtifactRelativePath(
+        toArtifactFileTarget(target),
+        root,
+      );
       const url = `${lease.baseUrl}/${relative.split("/").map(encodeURIComponent).join("/")}`;
-      const response = await fetchWithAppSurface(url, { signal });
+      const response = await fetchWithAppSurface(url, {
+        signal,
+        redirect: "error",
+      });
       assertActive();
       if (!response.ok)
         throw new Error(`Artifact unavailable (${response.status})`);
-      const text = /\.(md|markdown|html?)$/iu.test(target.path)
-        ? await response.text()
-        : null;
+      let text: string | null = null;
+      if (/\.(md|markdown|html?)$/iu.test(target.path)) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        assertActive();
+        if (bytes.byteLength > 1_000_000)
+          throw new Error("Artifact is too large");
+        text = /\.html?$/iu.test(target.path)
+          ? decodeArtifactHtml(bytes, response.headers.get("content-type"))
+          : new TextDecoder().decode(bytes);
+      }
       if (text === null) await response.body?.cancel();
       return { url, text, lease };
     },
@@ -128,6 +143,18 @@ export function ScopedArtifactBody({
         <PdfViewerFrame title={target.path} url={data.url} onRetry={refresh} />
       </>
     );
+  if (data && /\.html?$/iu.test(target.path))
+    return (
+      <>
+        {actions}
+        <ScopedHtmlFrame
+          content={data.text!}
+          url={data.url}
+          baseUrl={data.lease.baseUrl}
+          title={target.path}
+        />
+      </>
+    );
   const file = {
     name: target.path,
     contents: data?.text ?? "",
@@ -139,23 +166,12 @@ export function ScopedArtifactBody({
       ? { kind: "loading" }
       : data.text === null
         ? { kind: "image", url: data.url }
-        : /\.html?$/iu.test(target.path)
-          ? {
-              kind: "html",
-              file,
-              iframe: {
-                sandbox: "allow-scripts",
-                title: target.path,
-                url: data.url,
-              },
-              lineRange: null,
-            }
-          : {
-              kind: "ready",
-              file,
-              lineRange: null,
-              textPreviewKind: "markdown",
-            };
+        : {
+            kind: "ready",
+            file,
+            lineRange: null,
+            textPreviewKind: "markdown",
+          };
   const root = "/__bb_markdown_file_root__";
   const leaseRelative = data
     ? decodeURIComponent(data.url.slice(data.lease.baseUrl.length + 1))
@@ -187,9 +203,15 @@ export function ScopedArtifactBody({
             onOpenLink: (link) => {
               const relative = link.path.slice(root.length + 1);
               const readRoot = target.experimental_artifact!.readRoot;
-              const path = readRoot
-                ? `${readRoot.replace(/[\\/]+$/u, "")}/${relative}`
-                : relative;
+              const path =
+                target.kind === "host"
+                  ? joinHostPath({
+                      rootPath: readRoot,
+                      relativePath: relative,
+                    })!
+                  : readRoot
+                    ? `${readRoot}/${relative}`
+                    : relative;
               const next =
                 target.kind === "host"
                   ? { kind: "host" as const, hostId: target.hostId, path }

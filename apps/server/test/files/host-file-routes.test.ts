@@ -2,7 +2,12 @@ import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract
 import { describe, expect, it } from "vitest";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { readJson } from "../helpers/json.js";
-import { seedHostSession, seedPrimaryHost } from "../helpers/seed.js";
+import {
+  seedHostSession,
+  seedPrimaryHost,
+  seedEnvironment,
+  seedProjectWithSource,
+} from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 import { DEFAULT_PATH_LIST_EXCLUDE_NAMES } from "../../src/routes/path-list-policy.js";
 
@@ -470,7 +475,15 @@ it("acknowledges artifact policy and forwards it on every byte read while legacy
       const response = await harness.app.request(
         ...postJson("/api/v1/files/previews", {
           rootPath: "/notes",
-          ...(strict ? { policy: "artifact-v1" } : {}),
+          ...(strict
+            ? {
+                policy: "artifact-v1",
+                expectedSource: {
+                  hostId: host.id,
+                  canonicalReadRoot: "/notes",
+                },
+              }
+            : {}),
         }),
       );
       const lease = await response.json();
@@ -494,8 +507,19 @@ it("serves the real differential tree natively and refuses strict lease bytes", 
   const fs = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const reader: unknown = await import(new URL("../../../host-daemon/src/command-handlers/host-files.ts", import.meta.url).href);
-  if (typeof reader !== "object" || reader === null || !("readHostFileChunk" in reader) || typeof reader.readHostFileChunk !== "function") throw new Error("Missing daemon reader fixture");
+  const reader: unknown = await import(
+    new URL(
+      "../../../host-daemon/src/command-handlers/host-files.ts",
+      import.meta.url,
+    ).href
+  );
+  if (
+    typeof reader !== "object" ||
+    reader === null ||
+    !("readHostFileChunk" in reader) ||
+    typeof reader.readHostFileChunk !== "function"
+  )
+    throw new Error("Missing daemon reader fixture");
   const readHostFileChunk = reader.readHostFileChunk;
   const root = await fs.mkdtemp(join(tmpdir(), "artifact-lease-"));
   try {
@@ -521,7 +545,11 @@ it("serves the real differential tree natively and refuses strict lease bytes", 
           try {
             return { ok: true, result: await readHostFileChunk(command) };
           } catch (error) {
-            if (error instanceof Error && "code" in error && typeof error.code === "string")
+            if (
+              error instanceof Error &&
+              "code" in error &&
+              typeof error.code === "string"
+            )
               return {
                 ok: false,
                 errorCode: error.code,
@@ -536,6 +564,7 @@ it("serves the real differential tree natively and refuses strict lease bytes", 
           ...postJson("/api/v1/files/previews", {
             rootPath: root,
             policy: "artifact-v1",
+            expectedSource: { hostId: host.id, canonicalReadRoot: root },
           }),
         )
       ).json();
@@ -572,6 +601,7 @@ it("expires strict leases and refuses unknown descriptor roots before assigning 
             ...postJson("/api/v1/files/previews", {
               target: { kind: "workspace", environmentId: "missing", root },
               policy: "artifact-v1",
+              expectedSource: { hostId: host.id, canonicalReadRoot: "/notes" },
             }),
           )
         ).status,
@@ -582,6 +612,7 @@ it("expires strict leases and refuses unknown descriptor roots before assigning 
         ...postJson("/api/v1/files/previews", {
           rootPath: "/notes",
           policy: "artifact-v1",
+          expectedSource: { hostId: host.id, canonicalReadRoot: "/notes" },
           ttlMs: 60000,
         }),
       )
@@ -600,10 +631,153 @@ it("expires strict leases and refuses unknown descriptor roots before assigning 
         ...postJson("/api/v1/files/previews", {
           rootPath: "/notes",
           policy: "artifact-v1",
+          expectedSource: { hostId: host.id, canonicalReadRoot: "/notes" },
         }),
       )
     ).json();
     expect(renewed.policy).toBe("artifact-v1");
     expect(renewed.baseUrl).not.toBe(lease.baseUrl);
   });
+});
+
+it("pins original physical A while a fresh B descriptor returns zero B bytes", async () => {
+  const fs = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const reader: unknown = await import(
+    new URL(
+      "../../../host-daemon/src/command-handlers/host-files.ts",
+      import.meta.url,
+    ).href
+  );
+  if (
+    typeof reader !== "object" ||
+    !reader ||
+    !("readHostFileChunk" in reader) ||
+    typeof reader.readHostFileChunk !== "function"
+  )
+    throw Error("Missing reader");
+  const read = reader.readHostFileChunk;
+  const dir = await fs.mkdtemp(join(tmpdir(), "artifact-source-"));
+  const A = join(dir, "A"),
+    B = join(dir, "B");
+  try {
+    await fs.mkdir(A);
+    await fs.mkdir(B);
+    await fs.writeFile(join(A, "report.md"), "original-A");
+    await fs.writeFile(join(B, "report.md"), "forbidden-B");
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: A,
+      });
+      const returned: string[] = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: async ({ command }) => {
+          if (command.type !== "host.read_file_chunk")
+            throw Error("Unexpected command");
+          expect(command.expectedCanonicalRoot).toBe(A);
+          try {
+            const result = await read(command);
+            returned.push(Buffer.from(result.content, "base64").toString());
+            return { ok: true, result };
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              "code" in error &&
+              typeof error.code === "string"
+            )
+              return {
+                ok: false,
+                errorCode: error.code,
+                errorMessage: error.message,
+              };
+            throw error;
+          }
+        },
+      });
+      for (const [name, bytes] of Object.entries({
+        "report.html": "<h1>Report</h1>",
+        "script.js": "window.ready=true",
+        "style.css": "body{color:green}",
+        "image.svg": "<svg/>",
+        ".env": "private",
+        "big.html": "x".repeat(1_000_001),
+      }))
+        await fs.writeFile(join(A, name), bytes);
+      await fs.mkdir(join(A, "folder"));
+      const body = {
+        target: { kind: "workspace", environmentId: environment.id, root: "" },
+        policy: "artifact-v1",
+        expectedSource: { hostId: host.id, canonicalReadRoot: A },
+      };
+      const first = await (
+        await harness.app.request(...postJson("/api/v1/files/previews", body))
+      ).json();
+      for (const suffix of [
+        "",
+        "/",
+        "/report.html",
+        "/script.js",
+        "/style.css",
+        "/image.svg",
+        "/folder",
+        "/folder/",
+        "/missing.html",
+        "/.env",
+        "/big.html",
+        "/%00bad",
+        "/%E0%A4%A",
+      ]) {
+        const response = await harness.app.request(first.baseUrl + suffix, {
+          headers: { "if-none-match": "*" },
+        });
+        expect(response.status < 300 || response.status >= 400, suffix).toBe(
+          true,
+        );
+        expect(response.headers.get("location"), suffix).toBeNull();
+        await response.arrayBuffer();
+      }
+      const { environments } = await import("@bb/db");
+      const { eq } = await import("drizzle-orm");
+      harness.deps.db
+        .update(environments)
+        .set({ path: B })
+        .where(eq(environments.id, environment.id))
+        .run();
+      const stale = await harness.app.request(first.baseUrl + "/report.md");
+      expect(stale.status).toBe(200);
+      expect(await stale.text()).toBe("original-A");
+      returned.length = 0;
+      const secondResponse = await harness.app.request(
+        ...postJson("/api/v1/files/previews", body),
+      );
+      expect(secondResponse.status).toBe(200);
+      const second = await secondResponse.json();
+      expect(second.expectedSource).toEqual(body.expectedSource);
+      const substitute = await harness.app.request(
+        second.baseUrl + "/report.md",
+      );
+      expect(substitute.status).not.toBe(200);
+      expect(await substitute.text()).not.toContain("forbidden-B");
+      expect(returned).toEqual([]);
+      const mismatch = await harness.app.request(
+        ...postJson("/api/v1/files/previews", {
+          ...body,
+          expectedSource: { ...body.expectedSource, hostId: "different" },
+        }),
+      );
+      expect(mismatch.status).toBe(409);
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

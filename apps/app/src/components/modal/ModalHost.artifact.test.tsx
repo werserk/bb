@@ -43,6 +43,7 @@ let revalidate: ReturnType<
     (request: {
       target: import("@get-bb/plugin-sdk").ExperimentalLiveFileTarget;
       readRoot: string;
+      relativePath: string;
       signal: AbortSignal;
     }) => Promise<boolean>
   >
@@ -60,6 +61,7 @@ function open(path = target.path) {
     experimental_artifact: {
       version: 1,
       readRoot: "nested",
+      physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
       revalidate,
       lifetime: caller.signal,
     },
@@ -87,6 +89,7 @@ beforeEach(() => {
   transport.create.mockResolvedValue({
     baseUrl: "/api/v1/file-previews/lease",
     policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
   });
   transport.fetch.mockImplementation(
     async () => new Response("# Report\n\n[Next](next.md)"),
@@ -328,3 +331,51 @@ it("consumes unsupported nested links without falling back to an unscoped naviga
   expect(revalidate).toHaveBeenCalledTimes(1);
   expect(transport.create).toHaveBeenCalledTimes(1);
 });
+
+it.each(["scoped", "native"])(
+  "returns to the actual prior router index/key after %s close, then rejects only scoped Forward",
+  async (kind) => {
+    window.history.replaceState(
+      { usr: { prior: "kept" }, idx: 40, key: "prior-route" },
+      "",
+      "/threads/original?keep=1#anchor",
+    );
+    show();
+    const prior = {
+      idx: window.history.state.idx,
+      key: window.history.state.key,
+      url: window.location.href,
+    };
+    act(() => {
+      if (kind === "scoped") open();
+      else openCoreModal("core/other", { title: "Native" });
+    });
+    await settle();
+    const opened = {
+      idx: window.history.state.idx,
+      key: window.history.state.key,
+    };
+    expect(opened.idx).toBe(prior.idx + 1);
+    expect(opened.key).not.toBe(prior.key);
+    act(() => closeModal());
+    await settle();
+    expect({
+      idx: window.history.state.idx,
+      key: window.history.state.key,
+      url: window.location.href,
+    }).toEqual(prior);
+    expect(window.history.state.usr).toEqual({ prior: "kept" });
+    const reads = transport.fetch.mock.calls.length;
+    act(() => window.history.forward());
+    await settle();
+    expect(window.history.state.idx).toBe(opened.idx);
+    if (kind === "scoped") {
+      expect(window.history.state.usr?.bbModal).toBeUndefined();
+      expect(screen.queryByText("owner chat")).toBeNull();
+      expect(transport.fetch).toHaveBeenCalledTimes(reads);
+    } else {
+      expect(window.history.state.key).toBe(opened.key);
+      expect(screen.getByText("other modal")).toBeTruthy();
+    }
+  },
+);

@@ -125,28 +125,48 @@ host PDFs use the existing host content URL and PDF blob frame, without a lease
 or attached chat.
 
 Native popup bodies reuse the existing rooted file routes, limits and dot assets.
-Caller-scoped bodies use `ScopedArtifactBody`: a typed workspace/storage descriptor
-or validated absolute host root creates the existing lease with `artifact-v1`.
-The response must acknowledge that policy before any URL is consumed. Text bodies,
-images, PDF and relative assets use lease bytes only. Each content load, refresh and nested activation re-admits its exact candidate
-through an ephemeral callback before lease creation. `artifact-admission.ts` owns
-the 10,000 ms admission deadline and races late/uncancellable callbacks; it never
-claims to cancel underlying plugin RPC work. `modal-host.ts` binds this custody
-to the existing modal token, retires it on queued replacement/close/Back/unbind
-or caller abort, and passes the token through private core context. Missing scoped
-custody is stale history; native Forward remains unchanged. No callback/signal or
-new handle is serialized. Query generations fence stale reads; PDF Retry renews
-admission and lease as well. Semantic component props and public modal props are
-unchanged.
+Caller-scoped bodies use `ScopedArtifactBody`: an exact workspace/storage descriptor
+or absolute host root requests `artifact-v1` with the original authoritative
+`expectedSource {hostId,canonicalReadRoot}`. Both fields are required together;
+the acknowledgement pins and echoes the expectation, rather than attesting the
+current filesystem. Core checks that exact acknowledgement before consuming a URL.
+Each application-controlled initial/Refresh/Retry/refetch/remount/nested attempt
+re-admits its exact candidate, slash-relative path, root and original physical
+source through the live Library closure. Primary PDF/image renderer GET belongs
+to that admitted attempt; subsequent browser reads and Download may reuse its
+strict lease until expiry (default ten minutes). Membership removal, project
+disable and logical source rebinding do not immediately revoke that lease.
 
-The server forwards `artifactPolicy` on every chunk including metadata. The daemon
-checks requested and resolved names, lexical identity, post-open containment and
-inode identity, regular-file status and fstat size before returning bytes. Scoped
-HTML CSP confines resources to the lease path; fonts/media remain unsupported.
-Native and legacy leases keep their previous behavior. The optional strict field
-preserves protocol 260 deliberately: older strict daemons reject the new field
-and scoped reads remain unavailable, never retried without policy. No queue or
-session wire fields change. The pinned denial fixture digest is checked by both
+`artifact-admission.ts` owns the 10,000 ms admission deadline, races callbacks
+that ignore cancellation and never claims to cancel underlying Library RPC work.
+Existing modal tokens bind private records outside JSON/public modal props;
+queued replacement/close/Back/unbind/caller abort retire custody. Dead scoped
+history is stripped; native Forward is unchanged. Query generations discard late
+bytes. Unsuccessful admission creates no lease/fetch. After positive admission a
+root mismatch may leave an unused TTL lease but returns zero substituted bytes.
+A stale descriptor still resolving original physical A may read A after a logical
+rebind to B; continuous database freshness is not promised.
+
+Every strict metadata/chunk carries `artifactPolicy` and `expectedCanonicalRoot`.
+The daemon validates the original canonical root before open, after open and
+post-read before returning bytes, comparing the file with its canonical-root
+relative path. Ancestor aliases reaching the same canonical root work; root and
+inside-root symlinks, denied names, inode replacement and strict fstat caps refuse.
+Protocol 261 rejects older daemon wire semantics; native/legacy payloads stay
+unchanged. No queue/session schema or persistent metadata is added.
+
+Scoped HTML reads bounded original bytes once with `redirect:"error"`, decodes
+BOM-first (UTF-16LE/BE or UTF-8; otherwise the route's forced UTF-8), then renders
+`ScopedHtmlFrame`: an opaque static outer srcdoc guard around escaped inner srcdoc.
+The shared `@bb/domain/artifact-preview` CSP forbids document-frame network loads
+and limits scripts/styles/images to the lease (plus inline scripts/styles/data
+images). Same-document fragments retain hash/scroll; other document links stay
+inert with a persistent note. Script/meta attempts can replace the inner document
+with an error page. Strict routes emit no 3xx; injected proxy/asset redirects are
+outside that guarantee because CSP paths alone do not constrain redirect targets.
+Fonts/media stay unsupported. UTF-16 document.characterSet differs after decoding;
+text/title/script output parity is checked only in Chromium, not all engines.
+The pinned denial fixture digest is checked by both
 core and Library tests; `scripts/check-artifact-fixtures.sh <core-worktree>` also
 compares their actual bytes.
 

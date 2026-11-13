@@ -49,6 +49,7 @@ it("parses JSON scope without weakening the separate imperative validator", () =
       ...scoped,
       experimental_artifact: {
         ...scoped.experimental_artifact,
+        physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
         revalidate: async () => true,
         lifetime: new AbortController().signal,
       },

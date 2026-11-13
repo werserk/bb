@@ -1,3 +1,5 @@
+import { getRelativeHostPath } from "@bb/domain";
+import { isArtifactCanonicalRoot } from "@bb/domain/artifact-preview";
 import type {
   ExperimentalFileLocation,
   ExperimentalFileOpenOptions,
@@ -239,9 +241,11 @@ export function normalizeExperimentalArtifactScope(
       )
     )
       return null;
-    const normalizedRoot = root.replace(/\\/gu, "/").replace(/\/+$/u, "");
-    const normalizedPath = target.path.replace(/\\/gu, "/");
-    if (!normalizedPath.startsWith(normalizedRoot + "/")) return null;
+    const relative = getRelativeHostPath({
+      rootPath: root,
+      candidatePath: target.path,
+    });
+    if (!relative || !isValidRelativeFilePath(relative)) return null;
   } else {
     if (root !== "" && !isValidRelativeFilePath(root)) return null;
     if (root !== "" && !target.path.startsWith(root + "/")) return null;
@@ -263,6 +267,19 @@ function isLiveAbortSignal(value: unknown): value is AbortSignal {
   } catch {
     return false;
   }
+}
+
+function normalizePhysicalSource(value: unknown) {
+  if (
+    !isJsonObject(value) ||
+    !hasExactKeys(value, ["hostId", "canonicalReadRoot"]) ||
+    !isNonEmptyIdentity(value.hostId) ||
+    typeof value.canonicalReadRoot !== "string"
+  )
+    return null;
+  const root = value.canonicalReadRoot;
+  if (!isArtifactCanonicalRoot(root)) return null;
+  return { hostId: value.hostId, canonicalReadRoot: root };
 }
 
 export function normalizeExperimentalFileOpenOptions(
@@ -290,6 +307,7 @@ export function normalizeExperimentalFileOpenOptions(
       !hasExactKeys(artifact, [
         "version",
         "readRoot",
+        "physicalSource",
         "revalidate",
         "lifetime",
       ]) ||
@@ -301,12 +319,19 @@ export function normalizeExperimentalFileOpenOptions(
       version: artifact.version,
       readRoot: artifact.readRoot,
     });
-    if (scope === null) return null;
+    const physicalSource = normalizePhysicalSource(artifact.physicalSource);
+    if (
+      scope === null ||
+      physicalSource === null ||
+      (target.kind === "host" && target.hostId !== physicalSource.hostId)
+    )
+      return null;
     return {
       target,
       location,
       experimental_artifact: {
         ...scope,
+        physicalSource,
         revalidate: artifact.revalidate as NonNullable<
           ExperimentalFileOpenOptions["experimental_artifact"]
         >["revalidate"],

@@ -266,6 +266,7 @@ export async function readHostFileChunk(
     length: command.length,
     revision: command.revision,
     artifactPolicy: command.artifactPolicy,
+    expectedCanonicalRoot: command.expectedCanonicalRoot,
   });
 }
 

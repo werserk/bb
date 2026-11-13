@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { LazyMarkdownHtml } from "@/components/ui/lazy-markdown-html";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ThreadListEntry } from "@bb/domain";
 import type { TimelineOwnerPostRow } from "@bb/thread-view";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -75,7 +75,12 @@ function postRow(
   };
 }
 
-function renderPostTree(row: TimelineOwnerPostRow) {
+function renderPostTree(
+  row: TimelineOwnerPostRow,
+  onOpenLocalFileLink?: React.ComponentProps<
+    typeof OwnerPostRow
+  >["onOpenLocalFileLink"],
+) {
   const { wrapper: QueryWrapper } = createQueryClientTestHarness();
   return (
     <QueryWrapper>
@@ -88,10 +93,10 @@ function renderPostTree(row: TimelineOwnerPostRow) {
           >
             <OwnerPostRow
               onOpenLink={undefined}
-              onOpenLocalFileLink={undefined}
+              onOpenLocalFileLink={onOpenLocalFileLink}
               projectId="proj_1"
               row={row}
-              workspaceRootPath={undefined}
+              workspaceRootPath="/repo"
             />
           </ThreadTitleMentionResourcesProvider>
         </RouteNavigationProvider>
@@ -280,4 +285,22 @@ describe("OwnerPostRow", () => {
     ).toBe(false);
     expect((window as { __pwned?: number }).__pwned).toBeUndefined();
   });
+});
+
+it.each([
+  {},
+  { ctrlKey: true },
+  { metaKey: true },
+  { shiftKey: true },
+  { altKey: true },
+])("carries real owner-post activation metadata %j", (event) => {
+  const onOpen = vi.fn(() => true);
+  render(renderPostTree(postRow("[Report](/repo/report.md)"), onOpen));
+  fireEvent.click(screen.getByRole("link", { name: "Report" }), event);
+  expect(onOpen).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: "/repo/report.md",
+      ordinaryActivation: Object.keys(event).length === 0,
+    }),
+  );
 });

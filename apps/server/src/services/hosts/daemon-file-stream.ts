@@ -28,6 +28,7 @@ export async function serveDaemonFileStream(
     path: string;
     rootPath: string;
     artifactPolicy?: "artifact-v1";
+    expectedCanonicalRoot?: string;
   },
   request: Request,
   prepareHeaders: (metadata: FileChunk) => Headers,
@@ -42,7 +43,10 @@ export async function serveDaemonFileStream(
         path: target.path,
         rootPath: target.rootPath,
         ...(target.artifactPolicy
-          ? { artifactPolicy: target.artifactPolicy }
+          ? {
+              artifactPolicy: target.artifactPolicy,
+              expectedCanonicalRoot: target.expectedCanonicalRoot,
+            }
           : {}),
         offset,
         length,

@@ -5116,10 +5116,13 @@ export interface ExperimentalFileOpenOptions {
   experimental_artifact?: {
     version: 1;
     readRoot: string;
-    /** In-process only. Literal true admits this exact candidate before each content load. */
+    /** Original authoritative physical source. In-process only; copied and never persisted. */
+    physicalSource: { hostId: string; canonicalReadRoot: string };
+    /** In-process only. Literal true admits this exact candidate before each application load attempt. */
     revalidate: (request: {
       target: ExperimentalLiveFileTarget;
       readRoot: string;
+      relativePath: string;
       signal: AbortSignal;
     }) => Promise<boolean>;
     /** Mounted caller lifetime. Disposal invalidates queued/open viewers and pending reads. */

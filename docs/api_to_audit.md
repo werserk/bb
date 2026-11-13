@@ -1423,7 +1423,7 @@ fires after a final unterminated line is emitted.
 ## Restrictive artifact preview intent
 
 `ExperimentalFileOpenOptions.experimental_artifact` is imperative-only
-`{ version: 1, readRoot: string, revalidate, lifetime }`. It requests the shared popup with artifact-v1
+`{ version: 1, readRoot: string, physicalSource: {hostId,canonicalReadRoot}, revalidate, lifetime }`. It requests the shared popup with artifact-v1
 byte restrictions, without widening files permission. Workspace/storage roots are
 relative (empty means source root); host roots are absolute, including drive/UNC
 roots. Locations and revision targets refuse this option. Invalid exact-key shapes
@@ -1434,8 +1434,8 @@ External opening refuses the option. Semantic/Markdown props gain no scope field
 Core callers: `usePanelFiles`, `artifact-activation`, `ScopedArtifactBody`; ordinary
 native/semantic activations share classification but never request a lease.
 Stabilization requires paired installed SDK/server/daemon skew, draft remount and
-host-custody acceptance. `revalidate({target,readRoot,signal})` must resolve literal
-true for the same candidate before every scoped content load. `lifetime` is the
+host-custody acceptance. `revalidate({target,readRoot,relativePath,signal})` must resolve literal
+true for the same candidate/root/original physical source before each application-controlled load attempt. Primary PDF/image GET is part of that attempt; later strict live-lease reads/Download may reuse its TTL grant after membership/project-disable/logical-binding changes. Canonical physical A remains pinned; stale descriptors reading A are allowed, substitution B returns zero bytes. The strict acknowledgement echoes policy and expectedSource, not root attestation. `lifetime` is the
 mounted consumer AbortSignal. Both are required in-process values: JSON scope
 parsing is a separate boundary, never a relaxation of imperative validation.
 Core owns ARTIFACT_ADMISSION_TIMEOUT_MS=10,000, combines per-attempt and caller
@@ -1443,7 +1443,7 @@ cancellation and ignores late completions before lease/fetch. The existing Libra
 RPC cannot be cancelled. Existing modal tokens bind ephemeral records; no new
 public registration, modal prop, serialized handle or persisted metadata is added.
 Scoped reload/Forward without a live record is stale, while native history is
-unchanged. SDK artifacts.2 replaces the unshipped artifacts.1 pin.
+unchanged. SDK artifacts.3 replaces the unshipped artifacts.2 pin. Protocol261 rejects older strict reader semantics. No live Windows or installed/front-proxy acceptance is implied.
 
 ## Live-file navigation (`experimental_FileLink`, `BbNavigate.experimental_openFilePreview`, `BbNavigate.experimental_openFileExternally`, and `experimental_useCanOpenFileExternally`)
 

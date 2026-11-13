@@ -1,6 +1,7 @@
 import { constants, type BigIntStats } from "node:fs";
 import { isUtf8 } from "node:buffer";
 import fs from "node:fs/promises";
+import { isArtifactRelativePath } from "@bb/domain/artifact-preview";
 import path from "node:path";
 import mimeTypes from "mime-types";
 import type { HostReadFileIfNoneMatch } from "@bb/host-daemon-contract";
@@ -340,23 +341,48 @@ export async function readFileChunkForTransport(
     length: number;
     revision: string | null;
     artifactPolicy?: "artifact-v1";
+    expectedCanonicalRoot?: string;
   },
 ) {
+  if (
+    (args.artifactPolicy === undefined) !==
+    (args.expectedCanonicalRoot === undefined)
+  )
+    throw new CommandDispatchError(
+      "invalid_path",
+      "Artifact root expectation is required",
+    );
+  const strictRoot = args.artifactPolicy ? args.expectedCanonicalRoot! : null;
+  const lexical = path.resolve(args.resolvedPath);
+  const relative = args.rootPath
+    ? path.relative(path.resolve(args.rootPath), lexical)
+    : "";
+  if (
+    strictRoot !== null &&
+    (!isArtifactRelativePath(relative.split(path.sep).join("/")) ||
+      [args.rootPath!, args.resolvedPath].some((value) =>
+        value
+          .split(/[\\/]/u)
+          .some((segment) => segment === "." || segment === ".."),
+      ))
+  )
+    throw new CommandDispatchError(
+      "invalid_path",
+      "Artifact path is unavailable",
+    );
   const readablePath = await resolveReadablePath(args);
-  const strictRoot = args.artifactPolicy
-    ? await fs.realpath(args.rootPath!)
-    : null;
   const assertStrictPath = async () => {
     if (strictRoot === null) return;
-    const lexical = path.resolve(args.resolvedPath);
+    const canonicalRoot = await resolveNonSymlinkDirectoryPath({
+      description: "Artifact root",
+      path: args.rootPath!,
+    });
     const real = await fs.realpath(lexical);
-    const denied = (value: string) =>
-      value.split(/[\\/]/u).some(artifactDeniedName);
     if (
-      real !== lexical ||
+      canonicalRoot !== strictRoot ||
+      real !== path.join(canonicalRoot, relative) ||
       !isPathWithinDirectory(strictRoot, real) ||
-      denied(path.relative(strictRoot, lexical)) ||
-      denied(path.relative(strictRoot, real))
+      relative.split(/[\\/]/u).some(artifactDeniedName)
     ) {
       throw new CommandDispatchError(
         "invalid_path",
@@ -439,6 +465,14 @@ export async function readFileChunkForTransport(
       );
     }
     await assertStrictPath();
+    if (strictRoot !== null) {
+      const current = await fs.stat(lexical, { bigint: true });
+      if (current.dev !== stat.dev || current.ino !== stat.ino)
+        throw new CommandDispatchError(
+          "invalid_path",
+          "Artifact changed during read",
+        );
+    }
     return {
       path: args.resultPath,
       sizeBytes,

@@ -27,7 +27,12 @@ it("keeps native bytes while refusing scoped oversized, secret, symlink and unsu
       offset: 0,
       length: 20,
       revision: null,
-      ...(strict ? { artifactPolicy: "artifact-v1" as const } : {}),
+      ...(strict
+        ? {
+            artifactPolicy: "artifact-v1" as const,
+            expectedCanonicalRoot: rootPath,
+          }
+        : {}),
     });
   for (const name of [...Object.keys(files), "a.png"]) {
     expect((await read(name, false)).sizeBytes).toBeGreaterThan(0);
@@ -59,6 +64,7 @@ it("refuses parent replacement between resolution and open", async () => {
       length: 20,
       revision: null,
       artifactPolicy: "artifact-v1",
+      expectedCanonicalRoot: rootPath,
     }),
   ).rejects.toThrow();
 });
@@ -81,10 +87,28 @@ it("pins the same denial fixtures as Library", async () => {
 
 it("preserves protocol 260 compatibility by refusing the optional field on old strict readers", async () => {
   const { z } = await import("zod");
-  const legacy = z.object({type:z.literal("host.read_file_chunk"),path:z.string(),rootPath:z.string(),offset:z.number(),length:z.number(),revision:z.string().nullable()}).strict();
-  const command={type:"host.read_file_chunk",path:"/root/a.md",rootPath:"/root",offset:0,length:10,revision:null};
+  const legacy = z
+    .object({
+      type: z.literal("host.read_file_chunk"),
+      path: z.string(),
+      rootPath: z.string(),
+      offset: z.number(),
+      length: z.number(),
+      revision: z.string().nullable(),
+    })
+    .strict();
+  const command = {
+    type: "host.read_file_chunk",
+    path: "/root/a.md",
+    rootPath: "/root",
+    offset: 0,
+    length: 10,
+    revision: null,
+  };
   expect(legacy.safeParse(command).success).toBe(true);
-  expect(legacy.safeParse({...command,artifactPolicy:"artifact-v1"}).success).toBe(false);
+  expect(
+    legacy.safeParse({ ...command, artifactPolicy: "artifact-v1" }).success,
+  ).toBe(false);
 });
 
 it("refuses FIFO without blocking for either policy", async () => {
@@ -94,5 +118,99 @@ it("refuses FIFO without blocking for either policy", async () => {
   const rootPath = await makeTempDir("artifact-fifo-");
   const filePath = path.join(rootPath, "pipe.md");
   await promisify(execFile)("mkfifo", [filePath]);
-  for (const strict of [false, true]) await expect(readHostFileChunk({ type: "host.read_file_chunk", path: filePath, rootPath, offset: 0, length: 20, revision: null, ...(strict ? { artifactPolicy: "artifact-v1" as const } : {}) })).rejects.toThrow("not a regular file");
+  for (const strict of [false, true])
+    await expect(
+      readHostFileChunk({
+        type: "host.read_file_chunk",
+        path: filePath,
+        rootPath,
+        offset: 0,
+        length: 20,
+        revision: null,
+        ...(strict
+          ? {
+              artifactPolicy: "artifact-v1" as const,
+              expectedCanonicalRoot: rootPath,
+            }
+          : {}),
+      }),
+    ).rejects.toThrow("not a regular file");
+});
+
+it("allows a symlinked ancestor of the pinned root but refuses root substitution before any open", async () => {
+  const base = await makeTempDir("artifact-namespace-");
+  const a = path.join(base, "A"),
+    b = path.join(base, "B"),
+    alias = path.join(base, "alias");
+  for (const directory of [a, b]) {
+    await fs.mkdir(path.join(directory, "root"), { recursive: true });
+    await fs.writeFile(
+      path.join(directory, "root/good.md"),
+      directory === a ? "source A" : "source B",
+    );
+  }
+  await fs.symlink(a, alias);
+  const command = {
+    type: "host.read_file_chunk" as const,
+    path: path.join(alias, "root/good.md"),
+    rootPath: path.join(alias, "root"),
+    offset: 0,
+    length: 20,
+    revision: null,
+    artifactPolicy: "artifact-v1" as const,
+    expectedCanonicalRoot: await fs.realpath(path.join(a, "root")),
+  };
+  const open = vi.spyOn(fs, "open");
+  expect(
+    Buffer.from(
+      (await readHostFileChunk(command)).content,
+      "base64",
+    ).toString(),
+  ).toBe("source A");
+  open.mockClear();
+  await fs.unlink(alias);
+  await fs.symlink(b, alias);
+  await expect(readHostFileChunk(command)).rejects.toThrow();
+  expect(open).not.toHaveBeenCalled();
+});
+
+it("discards a buffer when its ancestor switches after the read and rechecks metadata/chunks", async () => {
+  const base = await makeTempDir("artifact-postread-");
+  const a = path.join(base, "A"),
+    b = path.join(base, "B"),
+    alias = path.join(base, "alias");
+  for (const directory of [a, b]) {
+    await fs.mkdir(path.join(directory, "root"), { recursive: true });
+    await fs.writeFile(
+      path.join(directory, "root/good.md"),
+      directory === a ? "source A" : "source B",
+    );
+  }
+  await fs.symlink(a, alias);
+  const command = {
+    type: "host.read_file_chunk" as const,
+    path: path.join(alias, "root/good.md"),
+    rootPath: path.join(alias, "root"),
+    offset: 0,
+    length: 0,
+    revision: null,
+    artifactPolicy: "artifact-v1" as const,
+    expectedCanonicalRoot: await fs.realpath(path.join(a, "root")),
+  };
+  await readHostFileChunk(command);
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    const read = handle.read.bind(handle);
+    vi.spyOn(handle, "read").mockImplementation(
+      async (...readArgs: Parameters<typeof read>) => {
+        const result = await read(...readArgs);
+        await fs.unlink(alias);
+        await fs.symlink(b, alias);
+        return result;
+      },
+    );
+    return handle;
+  });
+  await expect(readHostFileChunk({ ...command, length: 20 })).rejects.toThrow();
 });

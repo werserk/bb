@@ -15,6 +15,7 @@ let revalidate: ReturnType<
     (request: {
       target: import("@get-bb/plugin-sdk").ExperimentalLiveFileTarget;
       readRoot: string;
+      relativePath: string;
       signal: AbortSignal;
     }) => Promise<boolean>
   >
@@ -32,6 +33,7 @@ beforeEach(() => {
     location: null,
     experimental_artifact: {
       ...target.experimental_artifact,
+      physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
       revalidate,
       lifetime: caller.signal,
     },
@@ -66,6 +68,7 @@ it("reads scoped Markdown only from acknowledged bytes and renews the same descr
     baseUrl: "/api/v1/file-previews/lease",
     expiresAtMs: Date.now() + 60000,
     policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
   });
   mocks.fetch.mockResolvedValue(new Response("# scoped"));
   const result = await readScopedArtifact(
@@ -81,6 +84,7 @@ it("reads scoped Markdown only from acknowledged bytes and renews the same descr
       path: "nested/report.md",
     },
     readRoot: "nested",
+    relativePath: "report.md",
     signal: expect.any(AbortSignal),
   });
   expect(mocks.fetch.mock.calls[0]![0]).toBe(
@@ -97,6 +101,7 @@ it("reads scoped Markdown only from acknowledged bytes and renews the same descr
         root: "nested",
       },
       policy: "artifact-v1",
+      expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
     });
   expect(
     mocks.fetch.mock.calls.every(([url]) =>
@@ -203,6 +208,7 @@ it("fences a replaced generation even if the first admission completes late", as
   mocks.create.mockResolvedValue({
     baseUrl: "/api/v1/file-previews/new",
     policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
   });
   mocks.fetch.mockResolvedValue(new Response("# current"));
   expect(
@@ -261,7 +267,11 @@ it("does not fetch bytes after a lease response arrives for a disposed record", 
   const rejected = expect(read).rejects.toThrow();
   await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
   custody.dispose();
-  complete({ policy: "artifact-v1", baseUrl: "/api/v1/file-previews/late" });
+  complete({
+    policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+    baseUrl: "/api/v1/file-previews/late",
+  });
   await rejected;
   expect(mocks.fetch).not.toHaveBeenCalled();
 });
@@ -281,6 +291,7 @@ it("uses the admitted host candidate as the byte path even if display history di
     location: null,
     experimental_artifact: {
       ...host.experimental_artifact,
+      physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
       revalidate,
       lifetime: caller.signal,
     },
@@ -288,6 +299,7 @@ it("uses the admitted host candidate as the byte path even if display history di
   custody.bind("modal-test");
   mocks.create.mockResolvedValue({
     policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
     baseUrl: "/api/v1/file-previews/host",
   });
   mocks.fetch.mockResolvedValue(new Response("# admitted"));
@@ -300,4 +312,120 @@ it("uses the admitted host candidate as the byte path even if display history di
     hostId: "primary",
     path: "/brain/report.md",
   });
+});
+
+it.each([
+  { hostId: "other", canonicalReadRoot: "/source/A" },
+  { hostId: "primary", canonicalReadRoot: "/source/B" },
+  undefined,
+])(
+  "refuses mismatched physical acknowledgement %j before bytes",
+  async (expectedSource) => {
+    mocks.create.mockResolvedValue({
+      policy: "artifact-v1",
+      expectedSource,
+      baseUrl: "/lease",
+    });
+    await expect(
+      readScopedArtifact(target, new AbortController().signal, "modal-test"),
+    ).rejects.toThrow("unavailable");
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  },
+);
+it("retains the physical expectation and refuses controlled redirects", async () => {
+  mocks.create.mockResolvedValue({
+    policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+    baseUrl: "/lease",
+  });
+  mocks.fetch.mockRejectedValue(new TypeError("redirect refused"));
+  await expect(
+    readScopedArtifact(target, new AbortController().signal, "modal-test"),
+  ).rejects.toThrow("redirect refused");
+  expect(mocks.create.mock.calls[0]![0].expectedSource).toEqual({
+    hostId: "primary",
+    canonicalReadRoot: "/source/A",
+  });
+  expect(mocks.fetch.mock.calls[0]![1]).toMatchObject({
+    redirect: "error",
+    signal: expect.any(AbortSignal),
+  });
+});
+it("decodes UTF16 BOM bytes under the actual UTF8 header and checks the byte cap", async () => {
+  custody.dispose();
+  const html = {
+    ...target,
+    path: "nested/report.html",
+    relativePath: "nested/report.html",
+  };
+  custody = createArtifactAdmission({
+    target: {
+      kind: "thread-storage",
+      threadId: html.threadId,
+      path: html.relativePath,
+    },
+    location: null,
+    experimental_artifact: {
+      ...html.experimental_artifact,
+      physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+      revalidate,
+      lifetime: caller.signal,
+    },
+  });
+  custody.bind("modal-test");
+  mocks.create.mockResolvedValue({
+    policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+    baseUrl: "/lease",
+  });
+  const content = "<h1>Привет 世界</h1>";
+  const bytes = new Uint8Array(2 + content.length * 2);
+  bytes.set([255, 254]);
+  for (let i = 0; i < content.length; i++) {
+    bytes[2 + i * 2] = content.charCodeAt(i) & 255;
+    bytes[3 + i * 2] = content.charCodeAt(i) >> 8;
+  }
+  mocks.fetch.mockResolvedValue(
+    new Response(bytes, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }),
+  );
+  expect(
+    (await readScopedArtifact(html, new AbortController().signal, "modal-test"))
+      .text,
+  ).toBe(content);
+  mocks.fetch.mockResolvedValue(
+    new Response(new Uint8Array(1_000_001), {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }),
+  );
+  await expect(
+    readScopedArtifact(html, new AbortController().signal, "modal-test"),
+  ).rejects.toThrow("large");
+});
+it("discards a body completing after disposal even when arrayBuffer ignores cancellation", async () => {
+  mocks.create.mockResolvedValue({
+    policy: "artifact-v1",
+    expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+    baseUrl: "/lease",
+  });
+  let complete!: (value: ArrayBuffer) => void;
+  const response = new Response("unused");
+  vi.spyOn(response, "arrayBuffer").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  mocks.fetch.mockResolvedValue(response);
+  const read = readScopedArtifact(
+    target,
+    new AbortController().signal,
+    "modal-test",
+  );
+  const rejected = expect(read).rejects.toThrow();
+  await vi.waitFor(() => expect(response.arrayBuffer).toHaveBeenCalled());
+  custody.dispose();
+  complete(new TextEncoder().encode("late private text").buffer);
+  await rejected;
 });

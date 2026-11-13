@@ -1781,6 +1781,7 @@ describe("renderSlot", () => {
       experimental_artifact: {
         version: 1 as const,
         readRoot: "",
+        physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
         revalidate,
         lifetime,
       },

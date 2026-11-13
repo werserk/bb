@@ -4,6 +4,11 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./artifact-preview": {
+      "source": "./src/artifact-preview.ts",
+      "types": "./src/artifact-preview.ts",
+      "default": "./src/artifact-preview.ts"
+    },
     ".": {
       "source": "./src/index.ts",
       "types": "./src/index.ts",

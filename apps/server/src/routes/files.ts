@@ -1,3 +1,4 @@
+import { artifactPreviewCsp } from "@bb/domain/artifact-preview";
 import { readConversationQuestion } from "../services/threads/conversation-questions.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -49,6 +50,7 @@ const WINDOWS_DRIVE_SEGMENT_PATTERN = /^[A-Za-z]:$/u;
 
 interface FilePreviewLease {
   policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   hostId: string;
   rootPath: string;
   expiresAtMs: number;
@@ -56,6 +58,7 @@ interface FilePreviewLease {
 
 interface FileRoot {
   policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   hostId: string;
   rootPath: string;
   ref: string | null;
@@ -143,6 +146,7 @@ async function serveRootedFile(
         path: filePath,
         rootPath: root.rootPath,
         artifactPolicy: root.policy,
+        expectedCanonicalRoot: root.expectedSource?.canonicalReadRoot,
       },
       request,
       (metadata) => {
@@ -153,7 +157,7 @@ async function serveRootedFile(
           const source = url.origin + leaseBase;
           headers.set(
             "content-security-policy",
-            `sandbox allow-scripts; default-src 'none'; img-src data: ${source}; style-src 'unsafe-inline' ${source}; script-src 'unsafe-inline' ${source}`,
+            `sandbox allow-scripts; ${artifactPreviewCsp(source)}`,
           );
           headers.set("cache-control", "no-store");
         }
@@ -404,6 +408,15 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       hostId = resolveHostId(payload.hostId);
       rootPath = requireAbsoluteHostRoot(payload.rootPath);
     }
+    const expectedSource =
+      "expectedSource" in payload ? { ...payload.expectedSource } : undefined;
+    if (expectedSource && hostId !== expectedSource.hostId)
+      throw new ApiError(
+        409,
+        "artifact_source_changed",
+        "Artifact physical source changed",
+        false,
+      );
     const now = Date.now();
     for (const [id, lease] of previewLeases) {
       if (lease.expiresAtMs <= now) previewLeases.delete(id);
@@ -414,7 +427,8 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       hostId,
       rootPath,
       expiresAtMs,
-      policy: payload.policy,
+      policy: "policy" in payload ? payload.policy : undefined,
+      expectedSource,
     });
     return context.json({
       baseUrl: `/api/v1/file-previews/${encodeURIComponent(id)}`,
@@ -422,6 +436,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
         ? { policy: previewLeases.get(id)!.policy }
         : {}),
       expiresAtMs,
+      ...(expectedSource ? { expectedSource } : {}),
     });
   });
 
@@ -440,6 +455,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
         rootPath: lease.rootPath,
         ref: null,
         policy: lease.policy,
+        expectedSource: lease.expectedSource,
       },
       parseRelativeFileSegments(context.req.param("filePath")),
     );

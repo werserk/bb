@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isArtifactCanonicalRoot } from "@bb/domain/artifact-preview";
 import {
   FILE_LIST_EXCLUDE_NAME_MAX_LENGTH,
   FILE_LIST_EXCLUDE_NAMES_MAX,
@@ -114,19 +115,35 @@ const artifactPreviewTargetSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+const artifactExpectedSourceSchema = z
+  .object({
+    hostId: z.string().min(1),
+    canonicalReadRoot: z.string().refine(isArtifactCanonicalRoot),
+  })
+  .strict();
+
 export const createFilePreviewRequestSchema = z.union([
   z
     .object({
       hostId: z.string().min(1).optional(),
       rootPath: z.string().min(1),
       ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
-      policy: z.literal("artifact-v1").optional(),
+    })
+    .strict(),
+  z
+    .object({
+      hostId: z.string().min(1).optional(),
+      rootPath: z.string().min(1),
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+      policy: z.literal("artifact-v1"),
+      expectedSource: artifactExpectedSourceSchema,
     })
     .strict(),
   z
     .object({
       target: artifactPreviewTargetSchema,
       policy: z.literal("artifact-v1"),
+      expectedSource: artifactExpectedSourceSchema,
       ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
     })
     .strict(),
@@ -136,6 +153,7 @@ export type CreateFilePreviewRequest = z.infer<
 >;
 export interface CreateFilePreviewResponse {
   policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   baseUrl: string;
   expiresAtMs: number;
 }

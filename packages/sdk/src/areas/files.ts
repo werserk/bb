@@ -175,11 +175,20 @@ export function createFilesArea(args: CreateSdkAreaArgs): FilesArea {
           {
             json: {
               ...("target" in input
-                ? { target: input.target, policy: input.policy }
+                ? {
+                    target: input.target,
+                    policy: input.policy,
+                    expectedSource: input.expectedSource,
+                  }
                 : {
                     hostId: input.hostId,
                     rootPath: input.rootPath,
-                    policy: input.policy,
+                    ...("policy" in input
+                      ? {
+                          policy: input.policy,
+                          expectedSource: input.expectedSource,
+                        }
+                      : {}),
                   }),
               ttlMs: input.ttlMs,
             },

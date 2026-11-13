@@ -1,4 +1,9 @@
 import type { ExperimentalFileOpenOptions } from "@get-bb/plugin-sdk";
+import { getRelativeHostPath } from "@bb/domain";
+import {
+  isArtifactCanonicalRoot,
+  isArtifactRelativePath,
+} from "@bb/domain/artifact-preview";
 import type { CoreModalLifetime } from "./modal-host";
 import {
   toArtifactFileTarget,
@@ -25,7 +30,10 @@ function candidateKey(
 export function createArtifactAdmission(
   options: ExperimentalFileOpenOptions,
 ): CoreModalLifetime {
-  const intent = options.experimental_artifact!;
+  const intent = {
+    ...options.experimental_artifact!,
+    physicalSource: { ...options.experimental_artifact!.physicalSource },
+  };
   const controller = new AbortController();
   const record: Record = {
     intent,
@@ -119,6 +127,10 @@ export async function withArtifactAdmission<T>(
           return intent.revalidate({
             target: toArtifactFileTarget(target),
             readRoot: intent.readRoot,
+            relativePath: requireArtifactRelativePath(
+              toArtifactFileTarget(target),
+              intent.readRoot,
+            ),
             signal: controller.signal,
           });
         })
@@ -144,4 +156,32 @@ export async function withArtifactAdmission<T>(
     if (record.attempt === controller) record.attempt = null;
     controller.abort();
   }
+}
+
+export function requireArtifactRelativePath(
+  target: ExperimentalFileOpenOptions["target"],
+  readRoot: string,
+): string {
+  let relative: string | null = null;
+  if (target.kind === "host") {
+    if (
+      isArtifactCanonicalRoot(readRoot) &&
+      isArtifactCanonicalRoot(target.path)
+    )
+      relative = getRelativeHostPath({
+        rootPath: readRoot,
+        candidatePath: target.path,
+      });
+  } else if (
+    isArtifactRelativePath(target.path) &&
+    (readRoot === "" || isArtifactRelativePath(readRoot))
+  ) {
+    relative = getRelativeHostPath({
+      rootPath: `/${readRoot}`,
+      candidatePath: `/${target.path}`,
+    });
+  }
+  if (!isArtifactRelativePath(relative))
+    throw new Error("Artifact outside its read root");
+  return relative;
 }

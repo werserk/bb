@@ -7,6 +7,12 @@ it.each([
   [{ kind: "workspace", environmentId: "e", path: "a.md" }, ""],
   [{ kind: "thread-storage", threadId: "t", path: "nested/a.md" }, "nested"],
   [{ kind: "host", hostId: "h", path: "/brain/a.md" }, "/brain"],
+  [{ kind: "host", hostId: "h", path: "/a.md" }, "/"],
+  [{ kind: "host", hostId: "h", path: "c:/ROOT/Mixed.md" }, "C:\\root"],
+  [
+    { kind: "host", hostId: "h", path: "\\\\SERVER\\Share\\Mixed.md" },
+    "\\\\server\\share",
+  ],
   [{ kind: "host", hostId: "h", path: "C:\\brain\\a.md" }, "C:\\brain"],
   [
     { kind: "host", hostId: "h", path: "\\\\server\\share\\a.md" },
@@ -19,6 +25,10 @@ it.each([
     experimental_artifact: {
       version: 1,
       readRoot,
+      physicalSource: {
+        hostId: "hostId" in target ? target.hostId : "h",
+        canonicalReadRoot: "/original",
+      },
       revalidate: async () => true,
       lifetime: new AbortController().signal,
     },
@@ -35,6 +45,7 @@ it.each(["../brain", "/absolute", "C:\\brain", "nested/../x"])(
         experimental_artifact: {
           version: 1,
           readRoot,
+          physicalSource: { hostId: "h", canonicalReadRoot: "/original" },
           revalidate: async () => true,
           lifetime: new AbortController().signal,
         },
@@ -49,6 +60,7 @@ it("refuses unknown scope keys, versions, refs and locations", () => {
     experimental_artifact: {
       version: 1,
       readRoot: "",
+      physicalSource: { hostId: "h", canonicalReadRoot: "/original" },
       revalidate: async () => true,
       lifetime: new AbortController().signal,
     },
@@ -88,7 +100,12 @@ it("retains callable/signal identity and keeps JSON parsing separate", () => {
   const options = {
     target,
     location: null,
-    experimental_artifact: { ...scope, revalidate, lifetime },
+    experimental_artifact: {
+      ...scope,
+      physicalSource: { hostId: "h", canonicalReadRoot: "/original" },
+      revalidate,
+      lifetime,
+    },
   };
   const value = normalize(options)!;
   expect(value.experimental_artifact?.revalidate).toBe(revalidate);
@@ -126,4 +143,52 @@ it.each([
       experimental_artifact: { version: 1, readRoot: "", ...fields },
     }),
   ).toBeNull();
+});
+
+it("requires and copies exact physical custody without putting it into JSON scope", () => {
+  const physicalSource = { hostId: "h", canonicalReadRoot: "/original" };
+  const artifact = {
+    version: 1,
+    readRoot: "/brain",
+    physicalSource,
+    revalidate: async () => true,
+    lifetime: new AbortController().signal,
+  };
+  const intent = {
+    target: { kind: "host", hostId: "h", path: "/brain/a.md" },
+    location: null,
+    experimental_artifact: artifact,
+  };
+  const normalized = normalize(intent)!;
+  expect(normalized.experimental_artifact?.physicalSource).toEqual(
+    physicalSource,
+  );
+  physicalSource.canonicalReadRoot = "/replacement";
+  expect(
+    normalized.experimental_artifact?.physicalSource.canonicalReadRoot,
+  ).toBe("/original");
+  for (const source of [
+    undefined,
+    null,
+    {},
+    { hostId: "h" },
+    { hostId: "other", canonicalReadRoot: "/original" },
+    { hostId: "h", canonicalReadRoot: "relative" },
+    { hostId: "h", canonicalReadRoot: "/original/../replacement" },
+    { hostId: "h", canonicalReadRoot: "/original", extra: true },
+  ]) {
+    expect(
+      normalize({
+        ...intent,
+        experimental_artifact: { ...artifact, physicalSource: source },
+      }),
+    ).toBeNull();
+  }
+  expect(
+    normalizeExperimentalArtifactScope(
+      { kind: "host", hostId: "h", path: "/brain/a.md" },
+      null,
+      { version: 1, readRoot: "/brain" },
+    ),
+  ).toEqual({ version: 1, readRoot: "/brain" });
 });

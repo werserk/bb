@@ -51,6 +51,7 @@ vi.mock("@/lib/sdk", () => ({
     files: {
       createPreview: async () => ({
         policy: "artifact-v1",
+        expectedSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
         baseUrl: "/api/v1/file-previews/draft",
       }),
     },
@@ -126,6 +127,7 @@ it("preserves exact real ComposerBox text and stored draft across nested popup r
       experimental_artifact: {
         version: 1,
         readRoot: "nested",
+        physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
         lifetime: caller.signal,
         revalidate: async () => true,
       },

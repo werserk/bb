@@ -35,6 +35,7 @@ import {
   gitSourceInspectionSchema,
 } from "@bb/domain";
 import { z } from "zod";
+import { isArtifactCanonicalRoot } from "@bb/domain/artifact-preview";
 import {
   pathsExistRequestSchema,
   pathsExistResponseSchema,
@@ -466,6 +467,10 @@ const hostReadFileChunkCommandSchema = z
   .object({
     type: z.literal("host.read_file_chunk"),
     artifactPolicy: z.literal("artifact-v1").optional(),
+    expectedCanonicalRoot: z
+      .string()
+      .refine(isArtifactCanonicalRoot)
+      .optional(),
     path: z.string().min(1),
     rootPath: z.string().min(1),
     offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -475,7 +480,15 @@ const hostReadFileChunkCommandSchema = z
       .regex(/^[a-f0-9]{64}$/u)
       .nullable(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      (value.artifactPolicy === undefined) ===
+      (value.expectedCanonicalRoot === undefined),
+    {
+      message: "artifactPolicy and expectedCanonicalRoot are required together",
+    },
+  );
 
 const hostReadFileChunkResultSchema = z
   .object({
