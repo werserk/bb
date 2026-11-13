@@ -5112,6 +5112,8 @@ export type ExperimentalFileLocation =
 
 /** Options shared by BB's preview and preferred-external file intents. */
 export interface ExperimentalFileOpenOptions {
+  /** Restrictive artifact popup admission. Older hosts refuse; never retry without scope. */
+  experimental_artifact?: { version: 1; readRoot: string };
   target: ExperimentalLiveFileTarget;
   location: ExperimentalFileLocation | null;
 }

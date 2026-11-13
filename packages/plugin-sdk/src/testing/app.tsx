@@ -3080,6 +3080,9 @@ export function renderSlot<
       return options.openUrl?.(url) ?? false;
     },
     experimental_openFilePreview(fileOptions) {
+      const normalized = normalizeExperimentalFileOpenOptions(fileOptions);
+      if (normalized === null) return false;
+      fileOptions = normalized;
       navigateCalls.push({
         method: "experimental_openFilePreview",
         options: fileOptions,

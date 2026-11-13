@@ -1069,3 +1069,14 @@ that has not received that update status yet, retain the old immutable app
 assets and hold the update-status response at the old revision in a test
 proxy. Compare against a fresh tab and confirm the old tab's `performance.timeOrigin` and host stylesheet URL stay unchanged. Inspect
 Plugin Guide's `.font-bold` elements: they must still compute to weight 700.
+
+### Restrictive artifact preview leases
+
+`POST /api/v1/files/previews` also accepts strict `{ target, policy: "artifact-v1",
+ttlMs? }`, where target is `{kind:"workspace",environmentId,root?}` or
+`{kind:"thread-storage",threadId,root?}`. Relative root is resolved against the
+server-owned identity; absolute and traversal roots refuse. Absolute host-root
+requests may add the same policy. No other policy value is accepted. The response
+acknowledges stored policy; missing acknowledgement is unavailable and its URL
+must never be fetched. Legacy requests without policy keep their previous bytes.
+An older daemon rejects `artifactPolicy`; callers never drop it on Retry.

@@ -1,3 +1,5 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
+import { resolveEmbeddedLocalFileTarget } from "@/lib/embedded-local-file-target";
 import {
   RetainedThreadFixedTabs,
   useRetainedThreadTabHostState,
@@ -1283,6 +1285,13 @@ function ThreadDetailViewInternal(
       link: ThreadTimelineLocalFileLink,
       options?: ThreadSecondaryPanelFileOpenOptions,
     ) => {
+      if (!options?.viewer && link.openTargetId === null && link.lineRange === null) {
+        const resolved = resolveEmbeddedLocalFileTarget({ environmentId: thread?.environmentId ?? null, threadId, threadStorageRootPath, workspaceRootPath: workspacePreviewRootPath, link });
+        if (resolved.kind === "workspace" || resolved.kind === "thread-storage") {
+          const target = resolved.kind === "workspace" ? { kind: resolved.kind, environmentId: resolved.environmentId, path: resolved.relativePath } : { kind: resolved.kind, threadId: resolved.threadId, path: resolved.relativePath };
+          if (openArtifactPopup({ target, location: null })) return true;
+        }
+      }
       return handleTimelineLocalFileLinkResolution(
         resolveThreadLocalFileLink({
           fileOpenTargetIds: fileOpenTargets.map((target) => target.id),
@@ -1299,6 +1308,7 @@ function ThreadDetailViewInternal(
     [
       fileOpenTargets,
       handleTimelineLocalFileLinkResolution,
+      threadId,
       thread?.environmentId,
       threadStorageRootPath,
       workspacePreviewRootPath,

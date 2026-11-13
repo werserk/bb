@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import { useCallback } from "react";
 import {
   getEnvironmentFilePreviewSourceAtRef,
@@ -108,24 +109,84 @@ export function usePanelFiles({
 }: UsePanelFilesArgs): PanelFiles {
   const openWorkspaceFile = useCallback(
     (file: WorkspaceFileTabState, options?: PanelFileOpenOptions) => {
+      if (
+        !options?.viewer &&
+        scope?.environmentId &&
+        openArtifactPopup({
+          target: {
+            kind: "workspace",
+            environmentId: scope.environmentId,
+            path: file.path,
+            ...(file.source.kind === "working-tree"
+              ? {}
+              : { experimental_ref: "HEAD" }),
+          },
+          location: file.lineRange
+            ? {
+                kind: "range",
+                startLine: file.lineRange.startLineNumber,
+                endLine: file.lineRange.endLineNumber,
+              }
+            : null,
+        })
+      )
+        return;
       openTab({ kind: "workspace-file-preview", tab: file }, options);
     },
-    [openTab],
+    [openTab, scope],
   );
   const openStorageFile = useCallback(
     (file: ThreadStorageFileTabState, options?: PanelFileOpenOptions) => {
+      if (
+        !options?.viewer &&
+        scope?.threadId &&
+        openArtifactPopup({
+          target: {
+            kind: "thread-storage",
+            threadId: scope.threadId,
+            path: file.path,
+          },
+          location: file.lineRange
+            ? {
+                kind: "range",
+                startLine: file.lineRange.startLineNumber,
+                endLine: file.lineRange.endLineNumber,
+              }
+            : null,
+        })
+      )
+        return;
       openTab({ kind: "thread-storage-file-preview", tab: file }, options);
     },
-    [openTab],
+    [openTab, scope],
   );
   const openHostFile = useCallback(
     (file: HostFileTabState, options?: PanelFileOpenOptions) => {
+      if (
+        !options?.viewer &&
+        scope?.hostId &&
+        openArtifactPopup({
+          target: { kind: "host", hostId: scope.hostId, path: file.path },
+          location: file.lineRange
+            ? {
+                kind: "range",
+                startLine: file.lineRange.startLineNumber,
+                endLine: file.lineRange.endLineNumber,
+              }
+            : null,
+        })
+      )
+        return;
       openTab({ kind: "host-file-preview", tab: file }, options);
     },
-    [openTab],
+    [openTab, scope],
   );
   const openFilePreview = useCallback(
     (intent: AppFilePreviewIntent) => {
+      if (intent.experimental_artifact) {
+        const normalized = normalizeExperimentalFileOpenOptions(intent);
+        return normalized !== null && openArtifactPopup(normalized);
+      }
       if (!available) return false;
       const request = livePreviewRequest(intent, scope);
       if (request === null) return false;

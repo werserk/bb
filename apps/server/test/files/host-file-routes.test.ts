@@ -416,3 +416,194 @@ describe("host file routes", () => {
     });
   });
 });
+
+it("acknowledges artifact policy and forwards it on every byte read while legacy stays unpoliced", async () => {
+  await withTestHarness(async (harness) => {
+    const { host, session } = seedHostSession(harness.deps);
+    seedPrimaryHost(harness.deps, host.id);
+    const commands: HostDaemonOnlineRpcRequestMessage["command"][] = [];
+    registerHostRpcResponder(harness, {
+      hostId: host.id,
+      sessionId: session.id,
+      handle: ({ command }) => {
+        commands.push(command);
+        if (command.type !== "host.read_file_chunk")
+          throw new Error("Unexpected command");
+        return {
+          ok: true,
+          result: {
+            path: command.path,
+            offset: command.offset,
+            sizeBytes: 2,
+            modifiedAtMs: 1,
+            mimeType: "text/markdown",
+            revision: "a".repeat(64),
+            content: Buffer.from("ok")
+              .subarray(command.offset, command.offset + command.length)
+              .toString("base64"),
+          },
+        };
+      },
+    });
+    for (const policy of ["native", "artifact-v2", ""]) {
+      expect(
+        (
+          await harness.app.request(
+            ...postJson("/api/v1/files/previews", {
+              rootPath: "/notes",
+              policy,
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+    expect(
+      (
+        await harness.app.request(
+          ...postJson("/api/v1/files/previews", {
+            target: { kind: "thread-storage", threadId: "missing" },
+          }),
+        )
+      ).status,
+    ).toBe(400);
+    for (const strict of [false, true]) {
+      const response = await harness.app.request(
+        ...postJson("/api/v1/files/previews", {
+          rootPath: "/notes",
+          ...(strict ? { policy: "artifact-v1" } : {}),
+        }),
+      );
+      const lease = await response.json();
+      expect(lease.policy).toBe(strict ? "artifact-v1" : undefined);
+      commands.length = 0;
+      expect(
+        await (await harness.app.request(`${lease.baseUrl}/report.md`)).text(),
+      ).toBe("ok");
+      expect(commands.length).toBeGreaterThan(0);
+      for (const command of commands) {
+        expect(command.type).toBe("host.read_file_chunk");
+        expect(
+          "artifactPolicy" in command ? command.artifactPolicy : undefined,
+        ).toBe(strict ? "artifact-v1" : undefined);
+      }
+    }
+  });
+});
+
+it("serves the real differential tree natively and refuses strict lease bytes", async () => {
+  const fs = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const reader: unknown = await import(new URL("../../../host-daemon/src/command-handlers/host-files.ts", import.meta.url).href);
+  if (typeof reader !== "object" || reader === null || !("readHostFileChunk" in reader) || typeof reader.readHostFileChunk !== "function") throw new Error("Missing daemon reader fixture");
+  const readHostFileChunk = reader.readHostFileChunk;
+  const root = await fs.mkdtemp(join(tmpdir(), "artifact-lease-"));
+  try {
+    await fs.mkdir(join(root, ".assets"));
+    const files = {
+      "report.md": "x".repeat(2_000_000),
+      "report.html": "x".repeat(3_000_000),
+      ".assets/x.png": "png",
+      ".env": "secret",
+    };
+    for (const [name, bytes] of Object.entries(files))
+      await fs.writeFile(join(root, name), bytes);
+    await fs.symlink(join(root, ".env"), join(root, "a.png"));
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      seedPrimaryHost(harness.deps, host.id);
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: async ({ command }) => {
+          if (command.type !== "host.read_file_chunk")
+            throw new Error("Unexpected command");
+          try {
+            return { ok: true, result: await readHostFileChunk(command) };
+          } catch (error) {
+            if (error instanceof Error && "code" in error && typeof error.code === "string")
+              return {
+                ok: false,
+                errorCode: error.code,
+                errorMessage: error.message,
+              };
+            throw error;
+          }
+        },
+      });
+      const lease = await (
+        await harness.app.request(
+          ...postJson("/api/v1/files/previews", {
+            rootPath: root,
+            policy: "artifact-v1",
+          }),
+        )
+      ).json();
+      for (const name of [...Object.keys(files), "a.png"]) {
+        const native = await harness.app.request(
+          `/api/v1/hosts/${host.id}/files/${root.slice(1)}/${name}`,
+        );
+        expect(native.status, name).toBe(200);
+        expect((await native.arrayBuffer()).byteLength).toBeGreaterThan(0);
+        const strict = await harness.app.request(`${lease.baseUrl}/${name}`);
+        expect(strict.status, name).not.toBe(200);
+        await strict.arrayBuffer();
+      }
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it("expires strict leases and refuses unknown descriptor roots before assigning source identity", async () => {
+  await withTestHarness(async (harness) => {
+    const { host } = seedHostSession(harness.deps);
+    seedPrimaryHost(harness.deps, host.id);
+    for (const root of [
+      "/absolute",
+      "../escape",
+      "C:\\root",
+      "nested/../secret",
+      "\\\\server\\share",
+    ]) {
+      expect(
+        (
+          await harness.app.request(
+            ...postJson("/api/v1/files/previews", {
+              target: { kind: "workspace", environmentId: "missing", root },
+              policy: "artifact-v1",
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+    const lease = await (
+      await harness.app.request(
+        ...postJson("/api/v1/files/previews", {
+          rootPath: "/notes",
+          policy: "artifact-v1",
+          ttlMs: 60000,
+        }),
+      )
+    ).json();
+    const { vi } = await import("vitest");
+    const time = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61000);
+    try {
+      expect(
+        (await harness.app.request(`${lease.baseUrl}/report.md`)).status,
+      ).toBe(404);
+    } finally {
+      time.mockRestore();
+    }
+    const renewed = await (
+      await harness.app.request(
+        ...postJson("/api/v1/files/previews", {
+          rootPath: "/notes",
+          policy: "artifact-v1",
+        }),
+      )
+    ).json();
+    expect(renewed.policy).toBe("artifact-v1");
+    expect(renewed.baseUrl).not.toBe(lease.baseUrl);
+  });
+});

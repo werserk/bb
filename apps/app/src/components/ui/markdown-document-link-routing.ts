@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import type { ExperimentalFileOpenOptions } from "@get-bb/plugin-sdk";
 import { getEnvironmentFilePreviewSourceAtRef } from "@bb/client-core";
 import { normalizeExperimentalLiveFileTarget } from "@/lib/live-file-navigation";
@@ -67,7 +68,7 @@ export function buildMarkdownDocumentLinkRouting({
         ) {
           return messageRouting.localFile?.onOpenLink(link) ?? false;
         }
-        return openFilePreview({
+        const intent: ExperimentalFileOpenOptions = {
           target: {
             ...target,
             path: link.path.slice(rootPath === "/" ? 1 : rootPath.length + 1),
@@ -80,7 +81,8 @@ export function buildMarkdownDocumentLinkRouting({
                   startLine: link.lineRange.startLineNumber,
                   endLine: link.lineRange.endLineNumber,
                 },
-        });
+        };
+        return (link.openTargetId === null && openArtifactPopup(intent)) || openFilePreview(intent);
       },
     },
   };

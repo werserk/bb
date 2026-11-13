@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { appToast } from "@/components/ui/app-toast";
@@ -25,6 +26,7 @@ function showUnavailable(path: string): void {
 
 interface UseEmbeddedLocalFileLinkHandlerArgs {
   enabled: boolean;
+  artifactsOnly?: boolean;
   environmentId: string | null;
   threadId: string | null;
   workspaceRootPath: string | null;
@@ -36,6 +38,7 @@ interface EmbeddedLocalFileLinkHandler {
 
 export function useEmbeddedLocalFileLinkHandler({
   enabled,
+  artifactsOnly = false,
   environmentId,
   threadId,
   workspaceRootPath,
@@ -49,6 +52,7 @@ export function useEmbeddedLocalFileLinkHandler({
 
   const onOpenLocalFileLink = useCallback<ThreadTimelineLocalFileLinkHandler>(
     (link) => {
+      if (link.openTargetId !== null) return false;
       const resolved = resolveEmbeddedLocalFileTarget({
         environmentId,
         link,
@@ -60,19 +64,37 @@ export function useEmbeddedLocalFileLinkHandler({
         return false;
       }
       if (resolved.kind === "unavailable") {
+        if (artifactsOnly) return false;
         showUnavailable(resolved.path);
         return true;
       }
+      const target =
+        resolved.kind === "workspace"
+          ? {
+              kind: "workspace" as const,
+              environmentId: resolved.environmentId,
+              path: resolved.relativePath,
+            }
+          : {
+              kind: "thread-storage" as const,
+              threadId: resolved.threadId,
+              path: resolved.relativePath,
+            };
       const homeThreadId = resolveHomeThread(resolved);
       const title =
         homeThreadId === null
           ? null
           : getThreadEntity(queryClient, homeThreadId)?.thread.title;
+      if (
+        resolved.lineRange === null &&
+        openArtifactPopup({ target, location: null }, title ?? undefined)
+      )
+        return true;
+      if (artifactsOnly) return false;
       try {
         openCoreModal("core/local-file-viewer", {
           title: (
-            resolved.relativePath.split(/[\\/]/).at(-1) ??
-            resolved.relativePath
+            resolved.relativePath.split(/[\\/]/).at(-1) ?? resolved.relativePath
           ).slice(0, 200),
           ...(title ? { context: title.slice(0, 200) } : {}),
           params: {
@@ -87,6 +109,7 @@ export function useEmbeddedLocalFileLinkHandler({
       return true;
     },
     [
+      artifactsOnly,
       environmentId,
       queryClient,
       threadId,

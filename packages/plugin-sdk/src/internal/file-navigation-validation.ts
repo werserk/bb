@@ -212,11 +212,62 @@ export function normalizeExperimentalFileLocation(
 export function normalizeExperimentalFileOpenOptions(
   value: unknown,
 ): ExperimentalFileOpenOptions | null {
-  if (!isJsonObject(value) || !hasExactKeys(value, ["target", "location"])) {
+  if (
+    !isJsonObject(value) ||
+    !hasExactKeys(value, [
+      "target",
+      "location",
+      ...(Object.hasOwn(value, "experimental_artifact")
+        ? ["experimental_artifact"]
+        : []),
+    ])
+  ) {
     return null;
   }
   const target = normalizeExperimentalLiveFileTarget(value.target);
   const location = normalizeExperimentalFileLocation(value.location);
   if (target === null || location === undefined) return null;
+  if (Object.hasOwn(value, "experimental_artifact")) {
+    const artifact = value.experimental_artifact;
+    if (
+      !isJsonObject(artifact) ||
+      !hasExactKeys(artifact, ["version", "readRoot"]) ||
+      artifact.version !== 1 ||
+      typeof artifact.readRoot !== "string" ||
+      location !== null ||
+      (target.kind === "workspace" && target.experimental_ref !== undefined)
+    )
+      return null;
+    const root = artifact.readRoot;
+    if (
+      root.length > FILE_PATH_MAX_LENGTH ||
+      hasControlCharacter(root) ||
+      hasUnpairedSurrogate(root) ||
+      root
+        .split(/[\\/]/u)
+        .some((segment) => segment === ".." || segment === ".")
+    )
+      return null;
+    if (target.kind === "host") {
+      if (
+        !isValidAbsoluteHostFilePath(
+          root.replace(/[\\/]+$/u, "") +
+            (root.includes("\\") ? "\\__artifact__" : "/__artifact__"),
+        )
+      )
+        return null;
+      const normalizedRoot = root.replace(/\\/gu, "/").replace(/\/+$/u, "");
+      const normalizedPath = target.path.replace(/\\/gu, "/");
+      if (!normalizedPath.startsWith(normalizedRoot + "/")) return null;
+    } else {
+      if (root !== "" && !isValidRelativeFilePath(root)) return null;
+      if (root !== "" && !target.path.startsWith(root + "/")) return null;
+    }
+    return {
+      target,
+      location,
+      experimental_artifact: { version: 1, readRoot: root },
+    };
+  }
   return { target, location };
 }

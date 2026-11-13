@@ -1,3 +1,6 @@
+import { appToast } from "@/components/ui/app-toast";
+import { copyToClipboardWithToast } from "@/lib/clipboard";
+import { parseLocalFileHref, resolveRelativeLocalFileHref } from "@/components/ui/markdown-local-file-link";
 import { useCallback, useMemo } from "react";
 import type { MarkdownProps } from "@get-bb/plugin-sdk";
 import {
@@ -27,7 +30,14 @@ export function PluginMarkdown({
   const workspaceRootPath = timelineNavigation?.workspaceRootPath;
   const navigation = useAppNavigationHost();
   const onOpenLink = useCallback<MarkdownPreviewLinkHandler>(
-    ({ href }) => navigation.openUrl({ url: href }),
+    ({ href }) => {
+      const local = parseLocalFileHref({ href, absoluteLinks: { kind: "trusted-host" } }) ?? resolveRelativeLocalFileHref({ href, baseDir: "/__unbound__", rootPath: "/__unbound__" });
+      if (local) {
+        appToast.error("Can't open this file here", { description: href, action: { label: "Copy path", onClick: () => { void copyToClipboardWithToast(href, { successMessage: "Path copied" }); } } });
+        return true;
+      }
+      return navigation.openUrl({ url: href });
+    },
     [navigation],
   );
   const linkRouting = useMemo<MarkdownLinkRouting>(() => {
@@ -39,11 +49,11 @@ export function PluginMarkdown({
     }) ?? { onOpenLink };
     return experimental_document === undefined
       ? messageRouting
-      : buildMarkdownDocumentLinkRouting({
+      : { onOpenLink, ...buildMarkdownDocumentLinkRouting({
           document: experimental_document,
           messageRouting,
           openFilePreview: navigation.openFilePreview,
-        });
+        }) };
   }, [
     experimental_document,
     navigation.openFilePreview,

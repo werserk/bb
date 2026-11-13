@@ -399,6 +399,7 @@ function areMarkdownLinkRoutingsEqual({
   if (previous === next) return true;
   if (previous === undefined || next === undefined) return false;
   return (
+    previous.fallbackUrlTransform === next.fallbackUrlTransform &&
     previous.onOpenLink === next.onOpenLink &&
     areMarkdownLocalFileLinkRoutingsEqual({
       next: next.localFile,
@@ -1987,7 +1988,7 @@ function MarkdownPreviewComponent({
     () =>
       buildLocalAwareUrlTransform({
         applicationLinksEnabled,
-        fallbackUrlTransform: urlTransform,
+        fallbackUrlTransform: urlTransform ?? linkRouting?.fallbackUrlTransform,
         localFileRouting,
         localImageRouting,
       }),
@@ -1995,6 +1996,7 @@ function MarkdownPreviewComponent({
       applicationLinksEnabled,
       localFileRouting,
       localImageRouting,
+      linkRouting?.fallbackUrlTransform,
       urlTransform,
     ],
   );

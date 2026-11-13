@@ -1420,6 +1420,22 @@ fires after a final unterminated line is emitted.
    session instead of logging the drop. Decide whether the reader should offer
    a fail-closed mode before the signature is a promise.
 
+## Restrictive artifact preview intent
+
+`ExperimentalFileOpenOptions.experimental_artifact` is imperative-only
+`{ version: 1, readRoot: string }`. It requests the shared popup with artifact-v1
+byte restrictions, without widening files permission. Workspace/storage roots are
+relative (empty means source root); host roots are absolute, including drive/UNC
+roots. Locations and revision targets refuse this option. Invalid exact-key shapes
+refuse before navigation. Older hosts return false; callers retain safe preview
+and never retry without the option. True acknowledges admission only, not bytes.
+External opening refuses the option. Semantic/Markdown props gain no scope field.
+
+Core callers: `usePanelFiles`, `artifact-activation`, `ScopedArtifactBody`; ordinary
+native/semantic activations share classification but never request a lease.
+Stabilization requires paired installed SDK/server/daemon skew, draft remount and
+host-custody acceptance. Library Retry project/listing admission is unresolved.
+
 ## Live-file navigation (`experimental_FileLink`, `BbNavigate.experimental_openFilePreview`, `BbNavigate.experimental_openFileExternally`, and `experimental_useCanOpenFileExternally`)
 
 **Kept experimental (2026-08-22).** Windows/UNC paths were never verified.

@@ -144,7 +144,10 @@ describe("PluginThreadChat", () => {
       tone: "sidebar",
     });
     expect(props.composer).toEqual(
-      expect.objectContaining({ contextEnvironmentId: null, permissionPolicy: "snapshot" }),
+      expect.objectContaining({
+        contextEnvironmentId: null,
+        permissionPolicy: "snapshot",
+      }),
     );
   });
 
@@ -196,7 +199,10 @@ describe("PluginThreadChat", () => {
     const props = mocks.threadScreenProps.at(-1)!;
     expect(props.workspaceRootPath).toBe("/workspace");
     expect(props.timelineHost).toEqual(
-      expect.objectContaining({ onOpenLink, onOpenLocalFileLink }),
+      expect.objectContaining({
+        onOpenLink,
+        onOpenLocalFileLink: expect.any(Function),
+      }),
     );
 
     const embeddedResolveMentionLink = props.resolveMentionLink as (resource: {

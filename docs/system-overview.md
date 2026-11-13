@@ -110,12 +110,29 @@ Implementation packages never import across these boundaries. The server doesn't
 ### Local file viewer
 
 The app registers `core/local-file-viewer` at startup in `apps/app/src/main.tsx`.
-Embedded file links use the shared modal host, with a validated JSON file target.
-The modal reuses the secondary-panel preview and embeds `PluginThreadChat` for
-thread-storage files; workspace files stay alone because cached thread lists do
-not prove unique environment membership. Compact layouts retain both panes behind
-Artifact and Chat tabs. Thread-storage PDFs use the existing preview query update
-timestamp to reload their blob after realtime invalidation.
+Ordinary supported native, semantic, embedded and contextual document activations
+share `artifact-activation.ts`; imperative calls remain panel intents unless they
+carry the versioned restrictive artifact option. The existing modal supports
+workspace, actual owning-thread storage and host targets; only storage attaches a
+chat. Fixed-tab and retained-host navigation are unchanged.
+
+Native popup bodies reuse the existing rooted file routes, limits and dot assets.
+Caller-scoped bodies use `ScopedArtifactBody`: a typed workspace/storage descriptor
+or validated absolute host root creates the existing lease with `artifact-v1`.
+The response must acknowledge that policy before any URL is consumed. Text bodies,
+images, PDF and relative assets use lease bytes only. Retry renews the same scope;
+project/listing re-admission on Retry remains pending the Library retry contract.
+
+The server forwards `artifactPolicy` on every chunk including metadata. The daemon
+checks requested and resolved names, lexical identity, post-open containment and
+inode identity, regular-file status and fstat size before returning bytes. Scoped
+HTML CSP confines resources to the lease path; fonts/media remain unsupported.
+Native and legacy leases keep their previous behavior. The optional strict field
+preserves protocol 260 deliberately: older strict daemons reject the new field
+and scoped reads remain unavailable, never retried without policy. No queue or
+session wire fields change. The pinned denial fixture digest is checked by both
+core and Library tests; `scripts/check-artifact-fixtures.sh <core-worktree>` also
+compares their actual bytes.
 
 ### Service turn presentation
 

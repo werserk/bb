@@ -48,12 +48,14 @@ const REVISION_REF_PATTERN = /^(?:HEAD|[0-9a-f]{4,40})$/iu;
 const WINDOWS_DRIVE_SEGMENT_PATTERN = /^[A-Za-z]:$/u;
 
 interface FilePreviewLease {
+  policy?: "artifact-v1";
   hostId: string;
   rootPath: string;
   expiresAtMs: number;
 }
 
 interface FileRoot {
+  policy?: "artifact-v1";
   hostId: string;
   rootPath: string;
   ref: string | null;
@@ -136,9 +138,27 @@ async function serveRootedFile(
   if (root.ref === null) {
     return serveDaemonFileStream(
       deps,
-      { hostId: root.hostId, path: filePath, rootPath: root.rootPath },
+      {
+        hostId: root.hostId,
+        path: filePath,
+        rootPath: root.rootPath,
+        artifactPolicy: root.policy,
+      },
       request,
-      createRawFileHeaders,
+      (metadata) => {
+        const headers = createRawFileHeaders(metadata);
+        if (root.policy === "artifact-v1") {
+          const url = new URL(request.url);
+          const leaseBase = url.pathname.split("/").slice(0, 5).join("/") + "/";
+          const source = url.origin + leaseBase;
+          headers.set(
+            "content-security-policy",
+            `sandbox allow-scripts; default-src 'none'; img-src data: ${source}; style-src 'unsafe-inline' ${source}; script-src 'unsafe-inline' ${source}`,
+          );
+          headers.set("cache-control", "no-store");
+        }
+        return headers;
+      },
     );
   }
   const result = await callHostRetryableOnlineRpc(deps, {
@@ -357,18 +377,50 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     }),
   );
 
-  post(fileRoutes.createPreview, (context, payload) => {
-    const hostId = resolveHostId(payload.hostId);
-    const rootPath = requireAbsoluteHostRoot(payload.rootPath);
+  post(fileRoutes.createPreview, async (context, payload) => {
+    let hostId: string;
+    let rootPath: string;
+    if ("target" in payload) {
+      const root = payload.target.root ?? "";
+      const segments = root === "" ? [] : parseRelativeFileSegments(root);
+      if (isAbsoluteHostPath(root) || /^[a-z]:/iu.test(root))
+        throw createInvalidFilePathError();
+      if (payload.target.kind === "workspace") {
+        const environment = requireReadyEnvironment(
+          deps.db,
+          payload.target.environmentId,
+        );
+        hostId = resolveHostId(environment.hostId);
+        rootPath = joinHostPath(environment.path, segments);
+      } else {
+        const storage = await requireThreadStorageTarget(
+          deps,
+          payload.target.threadId,
+        );
+        hostId = resolveHostId(storage.hostId);
+        rootPath = joinHostPath(storage.storagePath, segments);
+      }
+    } else {
+      hostId = resolveHostId(payload.hostId);
+      rootPath = requireAbsoluteHostRoot(payload.rootPath);
+    }
     const now = Date.now();
     for (const [id, lease] of previewLeases) {
       if (lease.expiresAtMs <= now) previewLeases.delete(id);
     }
     const id = randomUUID();
     const expiresAtMs = now + (payload.ttlMs ?? FILE_PREVIEW_TTL_MS);
-    previewLeases.set(id, { hostId, rootPath, expiresAtMs });
+    previewLeases.set(id, {
+      hostId,
+      rootPath,
+      expiresAtMs,
+      policy: payload.policy,
+    });
     return context.json({
       baseUrl: `/api/v1/file-previews/${encodeURIComponent(id)}`,
+      ...(previewLeases.get(id)?.policy
+        ? { policy: previewLeases.get(id)!.policy }
+        : {}),
       expiresAtMs,
     });
   });
@@ -383,7 +435,12 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     return serveRootedFile(
       deps,
       context.req.raw,
-      { hostId: lease.hostId, rootPath: lease.rootPath, ref: null },
+      {
+        hostId: lease.hostId,
+        rootPath: lease.rootPath,
+        ref: null,
+        policy: lease.policy,
+      },
       parseRelativeFileSegments(context.req.param("filePath")),
     );
   });

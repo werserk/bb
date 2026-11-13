@@ -465,6 +465,7 @@ export const HOST_FILE_CHUNK_MAX_BYTES = 1024 * 1024;
 const hostReadFileChunkCommandSchema = z
   .object({
     type: z.literal("host.read_file_chunk"),
+    artifactPolicy: z.literal("artifact-v1").optional(),
     path: z.string().min(1),
     rootPath: z.string().min(1),
     offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),

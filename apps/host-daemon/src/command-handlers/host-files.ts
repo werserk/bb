@@ -265,6 +265,7 @@ export async function readHostFileChunk(
     offset: command.offset,
     length: command.length,
     revision: command.revision,
+    artifactPolicy: command.artifactPolicy,
   });
 }
 

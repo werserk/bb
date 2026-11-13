@@ -329,14 +329,42 @@ function fileRevision(stat: BigIntStats): string {
   );
 }
 
+export const artifactDeniedName = (segment: string) =>
+  segment.startsWith(".") ||
+  /\.(pem|key)$/iu.test(segment) ||
+  /^id_/iu.test(segment);
+
 export async function readFileChunkForTransport(
   args: ReadFileForTransportArgs & {
     offset: number;
     length: number;
     revision: string | null;
+    artifactPolicy?: "artifact-v1";
   },
 ) {
   const readablePath = await resolveReadablePath(args);
+  const strictRoot = args.artifactPolicy
+    ? await fs.realpath(args.rootPath!)
+    : null;
+  const assertStrictPath = async () => {
+    if (strictRoot === null) return;
+    const lexical = path.resolve(args.resolvedPath);
+    const real = await fs.realpath(lexical);
+    const denied = (value: string) =>
+      value.split(/[\\/]/u).some(artifactDeniedName);
+    if (
+      real !== lexical ||
+      !isPathWithinDirectory(strictRoot, real) ||
+      denied(path.relative(strictRoot, lexical)) ||
+      denied(path.relative(strictRoot, real))
+    ) {
+      throw new CommandDispatchError(
+        "invalid_path",
+        "Artifact path is unavailable",
+      );
+    }
+  };
+  await assertStrictPath();
   const file = await fs
     .open(
       readablePath,
@@ -356,6 +384,29 @@ export async function readFileChunkForTransport(
         "file_too_large",
         "File size exceeds supported byte offsets",
       );
+    }
+    if (strictRoot !== null) {
+      await assertStrictPath();
+      const current = await fs.stat(readablePath, { bigint: true });
+      if (current.dev !== stat.dev || current.ino !== stat.ino)
+        throw new CommandDispatchError(
+          "invalid_path",
+          "Artifact changed during open",
+        );
+      const mime = mimeTypes.lookup(args.resultPath) || "";
+      const cap =
+        mime.startsWith("image/") || mime === "application/pdf"
+          ? 10_000_000
+          : mime.startsWith("text/") ||
+              /^(application\/(json|javascript|xml))$/u.test(mime) ||
+              /\.(md|markdown|log)$/iu.test(args.resultPath)
+            ? 1_000_000
+            : 0;
+      if (!cap || stat.size > BigInt(cap))
+        throw new CommandDispatchError(
+          "file_too_large",
+          "Artifact type or size is unavailable",
+        );
     }
     const revision = fileRevision(stat);
     if (args.revision !== null && args.revision !== revision) {
@@ -387,6 +438,7 @@ export async function readFileChunkForTransport(
         "File changed during read",
       );
     }
+    await assertStrictPath();
     return {
       path: args.resultPath,
       sizeBytes,

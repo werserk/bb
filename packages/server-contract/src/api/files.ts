@@ -14,10 +14,13 @@ export const hostFileReadRequestSchema = z
     ref: z.string().min(1).optional(),
   })
   .strict()
-  .refine((request) => request.ref === undefined || request.rootPath !== undefined, {
-    message: "rootPath is required when ref is set",
-    path: ["rootPath"],
-  });
+  .refine(
+    (request) => request.ref === undefined || request.rootPath !== undefined,
+    {
+      message: "rootPath is required when ref is set",
+      path: ["rootPath"],
+    },
+  );
 export type HostFileReadRequest = z.infer<typeof hostFileReadRequestSchema>;
 
 export const hostFileWriteRequestSchema = z
@@ -95,17 +98,44 @@ export const hostRemovePathRequestSchema = z
   .strict();
 export type HostRemovePathRequest = z.infer<typeof hostRemovePathRequestSchema>;
 
-export const createFilePreviewRequestSchema = z
-  .object({
-    hostId: z.string().min(1).optional(),
-    rootPath: z.string().min(1),
-    ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
-  })
-  .strict();
+const artifactPreviewTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("workspace"),
+      environmentId: z.string().min(1),
+      root: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("thread-storage"),
+      threadId: z.string().min(1),
+      root: z.string().optional(),
+    })
+    .strict(),
+]);
+export const createFilePreviewRequestSchema = z.union([
+  z
+    .object({
+      hostId: z.string().min(1).optional(),
+      rootPath: z.string().min(1),
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+      policy: z.literal("artifact-v1").optional(),
+    })
+    .strict(),
+  z
+    .object({
+      target: artifactPreviewTargetSchema,
+      policy: z.literal("artifact-v1"),
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+    })
+    .strict(),
+]);
 export type CreateFilePreviewRequest = z.infer<
   typeof createFilePreviewRequestSchema
 >;
 export interface CreateFilePreviewResponse {
+  policy?: "artifact-v1";
   baseUrl: string;
   expiresAtMs: number;
 }

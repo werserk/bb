@@ -1,8 +1,10 @@
+import { ScopedArtifactBody } from "./ScopedArtifactBody";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ExperimentalModalProps } from "@get-bb/plugin-sdk";
 import { Button } from "@bb/shared-ui/button";
 import {
+  HostScopedFilePreviewTabContent,
   ThreadStorageFilePreviewTabContent,
   WorkspaceFilePreviewTabContent,
 } from "@/components/secondary-panel/ThreadSecondaryPanelTabContent";
@@ -11,6 +13,7 @@ import type { FilePreview } from "@bb/client-core";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useThreadStorageFilePreview } from "@/hooks/queries/thread-panel-queries";
 import {
+  buildHostFileContentUrl,
   buildEnvironmentFileContentUrl,
   buildThreadStorageRawContentUrl,
 } from "@/lib/file-content-urls";
@@ -30,6 +33,9 @@ function getFileName(path: string): string {
 }
 
 function getDownloadUrl(target: LocalFileViewerTarget): string {
+  if (target.experimental_artifact) return "";
+  if (target.kind === "host")
+    return buildHostFileContentUrl(target.hostId, target.path);
   return target.kind === "thread-storage"
     ? buildThreadStorageRawContentUrl(target.threadId, target.relativePath)
     : buildEnvironmentFileContentUrl(
@@ -40,6 +46,17 @@ function getDownloadUrl(target: LocalFileViewerTarget): string {
 }
 
 function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
+  if (target.experimental_artifact)
+    return <ScopedArtifactBody target={target} />;
+  if (target.kind === "host")
+    return (
+      <HostScopedFilePreviewTabContent
+        activePath={target.path}
+        hostId={target.hostId}
+        isPanelOpen
+        lineRange={target.lineRange}
+      />
+    );
   if (isPdfPath(target.relativePath)) {
     return target.kind === "thread-storage" ? (
       <ThreadStoragePdf target={target} />
@@ -222,11 +239,13 @@ export function LocalFileViewerModal({
             >
               Copy path
             </Button>
-            <Button asChild size="sm" variant="outline">
-              <a href={getDownloadUrl(target)} download={fileName}>
-                Download
-              </a>
-            </Button>
+            {!target.experimental_artifact && (
+              <Button asChild size="sm" variant="outline">
+                <a href={getDownloadUrl(target)} download={fileName}>
+                  Download
+                </a>
+              </Button>
+            )}
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-auto">
             <LocalFileViewerBody target={target} />

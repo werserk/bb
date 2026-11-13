@@ -23,7 +23,12 @@ type ReadChunk = (
 
 export async function serveDaemonFileStream(
   deps: LoggedWorkSessionDeps,
-  target: { hostId: string; path: string; rootPath: string },
+  target: {
+    hostId: string;
+    path: string;
+    rootPath: string;
+    artifactPolicy?: "artifact-v1";
+  },
   request: Request,
   prepareHeaders: (metadata: FileChunk) => Headers,
 ): Promise<Response> {
@@ -36,6 +41,9 @@ export async function serveDaemonFileStream(
         type: "host.read_file_chunk",
         path: target.path,
         rootPath: target.rootPath,
+        ...(target.artifactPolicy
+          ? { artifactPolicy: target.artifactPolicy }
+          : {}),
         offset,
         length,
         revision,

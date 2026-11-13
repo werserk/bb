@@ -206,3 +206,12 @@ describe("Markdown file preview image routing", () => {
     ).toBe("../../outside.png");
   });
 });
+
+it("restricts unmatched scoped Markdown URLs while keeping lease-relative images", () => {
+  const routing = buildMarkdownFileImageRouting({ path: "report.md", rootPath: null, threadId: null, resolveRelativeSrc: path => `/api/v1/file-previews/lease/${path}` });
+  render(<FilePreview path="report.md" headerMode="none" markdownLinkRouting={{...routing, fallbackUrlTransform: () => ""}} state={{ kind:"ready", file:{name:"report.md",contents:"![allowed](asset.png)\n![denied](/api/v1/hosts/other/files/secret.png)\n![outside](../secret.png)\n[escape](/unknown.md)"},lineRange:null,textPreviewKind:"markdown" }}/>);
+  expect(screen.getByAltText("allowed").getAttribute("src")).toBe("/api/v1/file-previews/lease/asset.png");
+  expect(screen.queryByAltText("denied")).toBeNull();
+  expect(screen.queryByAltText("outside")).toBeNull();
+  expect(screen.getByText("escape").getAttribute("href") ?? "").toBe("");
+});

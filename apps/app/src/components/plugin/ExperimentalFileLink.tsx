@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import {
   useCallback,
   useMemo,
@@ -64,7 +65,7 @@ export function ExperimentalFileLink({
         return;
       }
       event.preventDefault();
-      navigation.openFilePreview(intent);
+      if (!openArtifactPopup(intent)) navigation.openFilePreview(intent);
     },
     [intent, navigation, onClick],
   );
@@ -79,9 +80,7 @@ export function ExperimentalFileLink({
     <ContextMenu onOpenChange={setMenuOpen}>
       <ContextMenuTrigger asChild>{anchor}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-52">
-        {isMenuOpen ? (
-          <LazyExperimentalFileLinkMenu intent={intent} />
-        ) : null}
+        {isMenuOpen ? <LazyExperimentalFileLinkMenu intent={intent} /> : null}
       </ContextMenuContent>
     </ContextMenu>
   );
