@@ -9,6 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import { useStore } from "jotai";
+import { useRouteState } from "@/hooks/useRouteState";
+import { lookupCachedThread } from "@/lib/cached-thread";
+import {
+  useRootComposeProjectId,
+  useRootComposeReuseEnvironment,
+} from "@/lib/root-compose-selection";
+import { parseEnvironmentValue } from "@/components/pickers/environment-picker-value";
+import { buildSidebarComposeHref } from "./sidebarComposeHref";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import type {
@@ -173,6 +181,9 @@ export function SidebarNavigationModelProvider({
   );
   const location = useLocation();
   const navigate = useNavigate();
+  const route = useRouteState();
+  const [composeProjectId] = useRootComposeProjectId();
+  const [reuseEnvironment] = useRootComposeReuseEnvironment();
   const commandRunner = useAppCommandRunner();
   const splitActions = usePaneContentSplitActions();
   const setPluginEnabled = useSetPluginEnabled();
@@ -241,6 +252,9 @@ export function SidebarNavigationModelProvider({
   const latest = useRef({
     arrangement,
     commandRunner,
+    route,
+    composeProjectId,
+    reuseEnvironment,
     host,
     isHomeActive,
     items,
@@ -253,6 +267,9 @@ export function SidebarNavigationModelProvider({
     latest.current = {
       arrangement,
       commandRunner,
+      route,
+      composeProjectId,
+      reuseEnvironment,
       host,
       isHomeActive,
       items,
@@ -308,7 +325,27 @@ export function SidebarNavigationModelProvider({
               return;
             }
             if (target === "tab") {
-              openInBrowserTab(getRootComposeRoutePath());
+              const thread = current.route.threadId
+                ? lookupCachedThread(appQueryClient, current.route.threadId)
+                : null;
+              const selectedEnvironment = current.reuseEnvironment
+                ? parseEnvironmentValue(current.reuseEnvironment)
+                : null;
+              openInBrowserTab(
+                buildSidebarComposeHref(
+                  thread?.projectId ??
+                    current.route.projectId ??
+                    current.composeProjectId,
+                  thread !== null
+                    ? thread.environmentId
+                    : (current.route.projectId === undefined ||
+                          current.route.projectId ===
+                            current.composeProjectId) &&
+                        selectedEnvironment?.type === "reuse"
+                      ? selectedEnvironment.environmentId
+                      : null,
+                ),
+              );
               return;
             }
             current.host.onNewChat?.();

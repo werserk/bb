@@ -196,6 +196,11 @@ export function RailNewThreadButton() {
         item.shortcut ? `${item.label} (${item.shortcut.label})` : undefined
       }
       {...split.splitProps}
+      onAuxClick={(event) => {
+        if (event.button !== 1) return;
+        event.preventDefault();
+        actions.activate(item.id, { target: "tab" });
+      }}
       onClick={(event) =>
         actions.activate(item.id, {
           target: clickTarget(event),

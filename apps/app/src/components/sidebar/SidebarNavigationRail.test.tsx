@@ -12,6 +12,9 @@ import { useSyncExternalStore } from "react";
 import type { ExperimentalBadge } from "@get-bb/plugin-sdk";
 import { experimental_useSidebarNavigation } from "@get-bb/plugin-sdk/app";
 import { createStore, Provider } from "jotai";
+import { appQueryClient } from "@/lib/app-query-client";
+import { threadQueryKey } from "@/hooks/queries/query-keys";
+import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   afterEach,
@@ -927,6 +930,46 @@ describe("Rail", () => {
     } finally {
       for (const spy of viewport) spy.mockRestore();
     }
+  });
+
+  it("opens the composer in a browser tab on middle click without activating the current view", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    appQueryClient.setQueryData(
+      threadQueryKey("thr_one"),
+      makeThreadResponse({
+        id: "thr_one",
+        projectId: "proj_one",
+        environmentId: "env_one",
+      }),
+    );
+    renderRail(THREAD_PATH);
+    const button = screen.getByRole("button", { name: "New thread" });
+    fireEvent(
+      button,
+      new MouseEvent("auxclick", {
+        button: 1,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    const href = new URL(String(open.mock.calls[0]?.[0]), "https://bb.test");
+    expect(href.pathname).toBe(getRootComposeRoutePath());
+    expect(href.searchParams.get("projectId")).toBe("proj_one");
+    expect(href.searchParams.get("reuseEnvironmentId")).toBe("env_one");
+    expect(mocks.onNewChat).not.toHaveBeenCalled();
+    expect(pathname()).toBe(THREAD_PATH);
+    fireEvent(
+      button,
+      new MouseEvent("auxclick", {
+        button: 2,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    appQueryClient.removeQueries({ queryKey: threadQueryKey("thr_one") });
+    open.mockRestore();
   });
 
   it("keeps the header New thread button when stored preferences leave New thread out", () => {

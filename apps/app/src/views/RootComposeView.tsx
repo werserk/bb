@@ -1,3 +1,4 @@
+import { readSidebarComposeTarget } from "@/components/sidebar/sidebarComposeHref";
 import { AppPanelTabsPublisher } from "@/lib/app-panel-tabs";
 import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
 import type { ComposerAttachment } from "@get-bb/plugin-sdk";
@@ -394,9 +395,35 @@ export function buildRootComposeTerminalSessions({
 }
 
 export function RootComposeView() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tabTarget = readSidebarComposeTarget(location.search);
   const { navigateInPane } = usePaneContext();
   const [rootComposeProjectId, setRootComposeProjectId] =
     useRootComposeProjectId();
+  useEffect(() => {
+    if (tabTarget === null) return;
+    setRootComposeProjectId(tabTarget.projectId);
+    const params = new URLSearchParams(location.search);
+    params.delete("projectId");
+    params.delete("reuseEnvironmentId");
+    const search = params.toString();
+    navigate(getRootComposeRoutePath() + (search ? `?${search}` : ""), {
+      replace: true,
+      state: {
+        focusPrompt: true,
+        ...(tabTarget.reuseEnvironmentId === null
+          ? {}
+          : { reuseEnvironmentId: tabTarget.reuseEnvironmentId }),
+      },
+    });
+  }, [
+    location.search,
+    navigate,
+    setRootComposeProjectId,
+    tabTarget?.projectId,
+    tabTarget?.reuseEnvironmentId,
+  ]);
   const createThread = useCreateThread();
   const [placement, setPlacement] = useRootComposePlacement();
   const [lastCreatedThreadId, setLastCreatedThreadId] = useState<string | null>(
@@ -430,7 +457,7 @@ export function RootComposeView() {
 
   return (
     <NewThreadComposer
-      projectId={rootComposeProjectId}
+      projectId={tabTarget?.projectId ?? rootComposeProjectId}
       onProjectChange={setRootComposeProjectId}
       draftStorage={{ kind: "new-thread" }}
       selectionScope="new-thread"

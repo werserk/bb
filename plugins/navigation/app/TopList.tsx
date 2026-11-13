@@ -110,6 +110,11 @@ function NavigationListRow({
             "text-sidebar-foreground/55 [&_[data-icon-root]]:opacity-60",
         )}
         {...split.splitProps}
+        onAuxClick={(event) => {
+          if (event.button !== 1 || item.action.kind !== "new-thread") return;
+          event.preventDefault();
+          actions.activate(item.id, { target: "tab" });
+        }}
         onClick={(event) =>
           actions.activate(item.id, {
             target: clickTarget(event),

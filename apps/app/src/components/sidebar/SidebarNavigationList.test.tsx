@@ -199,6 +199,25 @@ afterEach(() => {
 });
 
 describe("SidebarNavigationList", () => {
+  it("opens New thread in a browser tab on middle click and preserves primary activation", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    renderList(THREAD_PATH, { visibleKeys: ["__bb__/new-thread"] });
+    const button = screen.getByRole("button", { name: "New thread" });
+    fireEvent(
+      button,
+      new MouseEvent("auxclick", {
+        button: 1,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(mocks.onNewChat).not.toHaveBeenCalled();
+    expect(screen.getByTestId("pathname").textContent).toBe(THREAD_PATH);
+    fireEvent.click(button);
+    expect(mocks.onNewChat).toHaveBeenCalledTimes(1);
+    open.mockRestore();
+  });
   it("labels each visible destination in a row and puts hidden ones, New thread included, behind More", async () => {
     renderList(THREAD_PATH, {
       visibleKeys: ["__bb__/extensions", "garden/docs"],

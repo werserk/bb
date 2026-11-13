@@ -64,3 +64,9 @@ remain shared. See docs/system-overview.md and the instant-question-answer
 OpenSpec delta for the acceptance and stored-data compatibility contract.
 
 Claimed card answers alone set optional internal host turn.submit.injectOnly. Protocol260 requires the matching daemon through existing protocol self-update. The runtime checks bridge-negotiated steerMode; queue-mode ACP is refused before sending/cancelling. Legacy, system, agent and plugin commands omit the marker and keep their previous steering behavior. A withdrawn-before-refusal response is settled without requeueing or failing its active thread.
+
+The approved UI A slice keeps sidebar New thread primary/split activation and
+adds middle-button browser-tab activation through the existing Navigation action.
+The host passes project/reused-environment context in a one-use composer URL;
+RootComposeView consumes it into the existing selection and location-state path.
+No SDK or stored-data contract changes.
