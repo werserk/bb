@@ -1,3 +1,4 @@
+import { startThreadSendIntakes, stopThreadSendIntakes } from "../threads/thread-send-request.js";
 import { statfs } from "node:fs/promises";
 import type { AppSurface } from "@bb/config/app-surface";
 import type { ServerBindHost } from "@bb/config/server";
@@ -81,6 +82,7 @@ export function parseServerMoveTargetPort(
 export function resumeServerMoveDeferredWork(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): void {
+  startThreadSendIntakes(deps);
   for (const hostId of deps.hub.listConnectedHostIds()) {
     const daemonSessionId = deps.hub.getDaemonSessionIdForHost(hostId);
     if (daemonSessionId !== null) {
@@ -131,8 +133,9 @@ export function createDefaultServerMoveEnvironment(
         await pluginService.resumeSuspendedPlugins();
       },
       setSchedulesPaused: (paused) => pluginService.setSchedulesPaused(paused),
-      stop: () => pluginService.stop(),
+      stop: () => { stopThreadSendIntakes(deps); return pluginService.stop(); },
       suspendAllButConnect: async () => {
+        stopThreadSendIntakes(deps);
         await pluginService.suspendPlugins({
           keep: (plugin) =>
             CONNECT_HOLD_SOURCES.some((source) => source === plugin.source),
@@ -153,7 +156,10 @@ export function createDefaultServerMoveEnvironment(
     retireProcess: args.retireProcess,
     serverAppSurface: args.appSurface,
     serverTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    stopRunningWork: (stopArgs) => stopRunningServerWork(deps, stopArgs),
+    stopRunningWork: (stopArgs) => {
+      stopThreadSendIntakes(deps);
+      return stopRunningServerWork(deps, stopArgs);
+    },
     targetServerPort: () => targetPortOverride ?? deps.config.serverPort,
     timings: SERVER_MOVE_TIMINGS,
   };

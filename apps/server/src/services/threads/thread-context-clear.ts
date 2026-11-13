@@ -1,3 +1,4 @@
+import { assertSendIntake, commitSendIntake, stableSendIntakeOperation, type SendIntakeAuthority } from "./send-intake-authority.js";
 import { createEventId, getThread, type DbTransaction } from "@bb/db";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
@@ -18,6 +19,7 @@ export async function clearThreadContext(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: {
     beforeCommitInTransaction?: (args: { tx: DbTransaction }) => void;
+    intake?: SendIntakeAuthority;
     environment: Pick<Environment, "hostId" | "id">;
     thread: Thread;
   },
@@ -47,6 +49,7 @@ export async function clearThreadContext(
       );
     }
 
+    const operationId = stableSendIntakeOperation(deps.db, args.intake, "clear") ?? createEventId();
     await stopThreadForCurrentState(deps, thread, args.environment);
     const releasedThread = getThread(deps.db, thread.id);
     if (
@@ -69,12 +72,16 @@ export async function clearThreadContext(
         scope: threadScope(),
         data: {
           operation: THREAD_CONTEXT_CLEAR_OPERATION,
-          operationId: createEventId(),
+          operationId,
           status: "completed",
           message: THREAD_CONTEXT_CLEARED_DETAIL,
         },
       },
-      args.beforeCommitInTransaction,
+      ({ tx }) => {
+        assertSendIntake(tx, args.intake);
+        args.beforeCommitInTransaction?.({ tx });
+        commitSendIntake(tx, args.intake, { kind: "clear", id: operationId });
+      },
     );
     deps.hub.notifyThread(
       releasedThread.id,

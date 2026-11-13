@@ -1,3 +1,4 @@
+import { assertSendIntake, sealSendIntake, commitSendIntake, stableSendIntakeOperation, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   assertSubmissionNotAdmitted,
   submissionAdmissionFloor,
@@ -22,6 +23,7 @@ import type {
 import {
   flattenPromptInputGroups,
   isStandaloneBuiltinClearCommand,
+  isStandaloneBuiltinCompactCommand,
 } from "@bb/domain";
 import type { SendMessageRequest } from "@bb/server-contract";
 import { renderTemplate } from "@bb/templates";
@@ -105,6 +107,8 @@ type SendThreadMessagePayload = SendMessageRequest & {
 };
 
 interface SendThreadMessageArgs {
+  intake?: SendIntakeAuthority;
+  requestId?: string;
   preserveSelfSender?: boolean;
   questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
@@ -168,6 +172,7 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
+  intake?: SendIntakeAuthority;
   questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
@@ -434,6 +439,7 @@ export function captureUserMessageSentTelemetry(
 }
 
 function appendAndQueueSendThreadMessageInTransaction({
+  intake,
   questionResponse,
   dispatchProvenance,
   deferredFromRequestId,
@@ -459,6 +465,7 @@ function appendAndQueueSendThreadMessageInTransaction({
   let activeThread: Thread | null = null;
   const request = db.transaction(
     (tx) => {
+      assertSendIntake(tx, intake);
       assertThreadHostAcceptsWork(tx, thread);
       beforeAppendInTransaction?.({ tx });
       if (
@@ -523,6 +530,7 @@ function appendAndQueueSendThreadMessageInTransaction({
         tx,
       });
       activeThread = queueResult.activeThread;
+      commitSendIntake(tx, intake, { kind: "request", id: requestId, sequence: appended.sequence });
       return appended;
     },
     { behavior: "immediate" },
@@ -542,6 +550,7 @@ export async function sendThreadMessage(
       ...(args.beforeAppendInTransaction !== undefined
         ? { beforeCommitInTransaction: args.beforeAppendInTransaction }
         : {}),
+      intake: args.intake,
       environment: args.environment,
       thread: args.thread,
     });
@@ -590,11 +599,14 @@ async function sendThreadMessageWithoutContextClear(
             senderThreadId,
           })
         : payload.input;
+  const hasEffectfulMentions = input.some(item => item.type === "text" && item.mentions.some(mention => mention.resource.kind === "plugin"));
+  if (hasEffectfulMentions) sealSendIntake(deps.db, args.intake, "mention");
   if (args.deferredFromRequestId === undefined)
     ({ input, inputGroups } = await appendPluginMentionContext({
       input,
       ...(inputGroups !== undefined ? { inputGroups } : {}),
     }));
+  if (args.intake) deps.db.transaction(tx => assertSendIntake(tx, args.intake));
   const deferredFirstTurnContext =
     args.deferredFromRequestId === undefined && args.retryOf === undefined
       ? resolveDeferredFirstTurnContext(deps.db, thread.id)
@@ -606,6 +618,7 @@ async function sendThreadMessageWithoutContextClear(
   const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
     tx,
   }) => {
+    assertSendIntake(tx, args.intake);
     args.beforeAppendInTransaction?.({ tx });
     if (deferredFirstTurnContext) {
       requireDeferredFirstTurnContextCurrent(tx, {
@@ -620,6 +633,7 @@ async function sendThreadMessageWithoutContextClear(
     input,
     projectId: thread.projectId,
     hostId: threadTargetHostId(deps, thread),
+    beforeWrite: tx => assertSendIntake(tx, args.intake),
   });
   const resolvedByInput = new Map(
     input.map((item, index) => [item, resolvedInput[index]!]),
@@ -656,6 +670,7 @@ async function sendThreadMessageWithoutContextClear(
   // override the way an explicit user send's model does.
   if (initiator === "user" && args.deferredFromRequestId === undefined) {
     await recoverThreadModelOverride(deps, {
+      intake: args.intake,
       model: payload.model,
       modelSource:
         payload.executionInputSources === undefined
@@ -683,6 +698,7 @@ async function sendThreadMessageWithoutContextClear(
 
   if (
     await dispatchTurnDuringReprovision({
+      intake: args.intake,
       dispatchProvenance: args.dispatchProvenance,
       deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: payload.serviceTurn,
@@ -740,7 +756,8 @@ async function sendThreadMessageWithoutContextClear(
     };
   }
 
-  const requestId = createClientTurnRequestId();
+  const requestId = args.requestId ?? (isStandaloneBuiltinCompactCommand(payload.input)
+    ? stableSendIntakeOperation(deps.db, args.intake, "compact") : undefined) ?? createClientTurnRequestId();
 
   if (mode === "start") {
     const commandArgs = {
@@ -776,6 +793,7 @@ async function sendThreadMessageWithoutContextClear(
         }
       : await prepareReadyThreadTurnCommand(deps, commandArgs);
     const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+      intake: args.intake,
       questionResponse: args.questionResponse,
       dispatchProvenance: args.dispatchProvenance,
       deferredFromRequestId: args.deferredFromRequestId,
@@ -894,6 +912,7 @@ async function sendThreadMessageWithoutContextClear(
     requestId,
   });
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
+    intake: args.intake,
     questionResponse: args.questionResponse,
     dispatchProvenance: args.dispatchProvenance,
     deferredFromRequestId: args.deferredFromRequestId,

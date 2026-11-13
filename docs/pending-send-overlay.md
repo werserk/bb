@@ -187,3 +187,12 @@ The plugin-owned fork patch ledger was updated in plugin commit
 
 No release readiness is inferred from unit/typecheck/build evidence. Stored-format,
 Chrome/Electron Web Locks and packaged native/embedded proof remain separate gates.
+
+
+## Authorised intake amendment (unreleased)
+
+The actual amendment is [core-pending-send-intake](../openspec/changes/core-pending-send-intake/proposal.md). Typed owner approval permits one generated intake table and explicit accepted/admissionVersion contract; the immutable overlay approval snapshot is unchanged. Subpart A provides server custody/worker/fences/minimal canonical reads/actions. B still must connect UI/SDK/CLI and joint canonical observation before an accepted receipt can retire local custody. C still must provide the default managed rollback barrier; stock cannot see/cancel/deliver pending intake. No new release or live acceptance follows from this amendment.
+
+The negotiated endpoint is additive `/threads/:id/send-admission`; the old send endpoint shares the lane and retains truthful sent/queued responses. Canonical reads retain post-seal conflicts and failed recovery custody. Preserve M1 causal handoff, M2 lock-wait exits, identity generation fences and all IDs/group-zero continuation. Confirmed pre-seal cancellation can produce [0,1,0]; a post-seal 409 is not a confirmed cancellation. Exact API rationale and scope are in the amendment design.
+
+A canonical failed sealed intake keeps custody and blocks later intake preparation. Its revisioned server-evidence reconcile action can settle only from genuine native handoff; no proof leaves it visibly unresolved. CompactFirst's compact subrequest cannot settle its parent. Pre-effect deterministic rejection replays its original error. Known post-seal 4xx also replays its original error with retained-custody/recovery details while the failed head stays blocked; unknown/blocked legacy waits return a bounded 409 with custodyRetained:true, not a cancellation. Dedicated context actions/native drain remain outside intake ordering, so a pending send may deliver after an independent clear, as native queued sends already can. UI/SDK/CLI integration of these states/actions remains B.

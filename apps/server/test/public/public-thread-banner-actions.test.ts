@@ -1,8 +1,9 @@
-import { getLastStoredProviderThreadId, getThread, listEvents } from "@bb/db";
+import { getLastStoredProviderThreadId, getThread, getThreadSendIntake, listEvents, listThreadSendIntakes } from "@bb/db";
 import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
+  turnRequestEventDataSchema,
   type PromptInput,
 } from "@bb/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -286,60 +287,70 @@ describe("public thread banner actions", () => {
     });
   });
 
-  it("rejects a send while an in-place context clear is in flight", async () => {
+  it("retains a legacy send during context clear and returns its native post-clear receipt", async () => {
     await withTestHarness(async (harness) => {
       const fixture = seedBannerFixture(harness, { status: "idle" });
       seedThreadRuntimeState(harness.deps, {
-        environmentId: fixture.environmentId,
-        providerThreadId: "provider-thread-1",
-        threadId: fixture.threadId,
+        environmentId: fixture.environmentId, providerThreadId: "provider-thread-1", threadId: fixture.threadId,
       });
+      const beforeRequests = listEvents(harness.db, { threadId: fixture.threadId }).filter(row => row.type === "client/turn/requested");
       let finishStop: () => void = () => {};
-      const stopPending = new Promise<void>((resolve) => {
-        finishStop = resolve;
-      });
+      const stopPending = new Promise<void>(resolve => { finishStop = resolve; });
       const responder = registerHostRpcResponder(harness, {
-        hostId: fixture.hostId,
-        sessionId: fixture.sessionId,
+        hostId: fixture.hostId, sessionId: fixture.sessionId,
         handle: async ({ command }) => {
-          expect(command).toMatchObject({
-            type: "thread.stop",
-            threadId: fixture.threadId,
-          });
-          await stopPending;
-          return { ok: true, result: { providerCheckpointId: null } };
+          switch (command.type) {
+            case "thread.stop":
+              expect(command.threadId).toBe(fixture.threadId);
+              await stopPending;
+              return { ok: true, result: { providerCheckpointId: null } };
+            case "host.read_workspace_agent_context": return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
+            case "thread.start": return { ok: true, result: { providerThreadId: "provider-after-legacy-clear" } };
+            default: throw new Error(`Unexpected command ${command.type}`);
+          }
         },
       });
-
-      const clearResponsePending = harness.app.request(
-        `/api/v1/threads/${fixture.threadId}/context/clear`,
-        { method: "POST" },
-      );
-      await vi.waitFor(() => {
-        expect(responder.requests).toHaveLength(1);
-      });
-
-      const sendResponse = await harness.app.request(
-        `/api/v1/threads/${fixture.threadId}/send`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "start",
-            input: [{ type: "text", text: "race the clear", mentions: [] }],
-          }),
-        },
-      );
-      expect(sendResponse.status).toBe(409);
-      expect(await readJson(sendResponse)).toMatchObject({
-        message: "Thread context is being cleared",
-      });
-
-      finishStop();
-      expect((await clearResponsePending).status).toBe(200);
-      expect(
-        getLastStoredProviderThreadId(harness.db, fixture.threadId),
-      ).toBeNull();
+      const clearResponsePending = harness.app.request(`/api/v1/threads/${fixture.threadId}/context/clear`, { method: "POST" });
+      let sendResponsePending: Promise<Response> | undefined;
+      try {
+        await vi.waitFor(() => expect(responder.requests.filter(({ command }) => command.type === "thread.stop")).toHaveLength(1));
+        let sendSettled = false;
+        sendResponsePending = Promise.resolve(harness.app.request(`/api/v1/threads/${fixture.threadId}/send`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "start", input: [{ type: "text", text: "race the clear", mentions: [] }] }),
+        })).then(response => { sendSettled = true; return response; });
+        await vi.waitFor(() => expect(listThreadSendIntakes(harness.db, fixture.threadId)).toEqual([
+          expect.objectContaining({ state: "pending", sealedAt: null, claimEpoch: 1 }),
+        ]));
+        const retained = listThreadSendIntakes(harness.db, fixture.threadId)[0]!;
+        expect(retained.currentEnvelope).not.toBeNull();
+        expect(sendSettled).toBe(false);
+        expect(listEvents(harness.db, { threadId: fixture.threadId }).filter(row => row.type === "client/turn/requested")).toEqual(beforeRequests);
+        expect(responder.requests.filter(({ command }) => command.type === "thread.start" || command.type === "turn.submit")).toEqual([]);
+        finishStop();
+        expect((await clearResponsePending).status).toBe(200);
+        const response = await sendResponsePending;
+        expect(response.status).toBe(200);
+        expect(await readJson(response)).toEqual({ ok: true, delivery: "sent" });
+        await vi.waitFor(() => expect(responder.requests.filter(({ command }) => command.type === "thread.start")).toHaveLength(1));
+        const events = listEvents(harness.db, { threadId: fixture.threadId });
+        const requests = events.filter(row => row.type === "client/turn/requested");
+        expect(requests).toHaveLength(beforeRequests.length + 1);
+        const requested = requests.at(-1)!;
+        const request = turnRequestEventDataSchema.parse(JSON.parse(requested.data));
+        expect(request.input).toEqual([{ type: "text", text: "race the clear", mentions: [] }]);
+        const cleared = events.find(row => row.type === "system/operation" && JSON.parse(row.data).operation === "context_clear")!;
+        expect(requested.sequence).toBeGreaterThan(cleared.sequence);
+        const completed = getThreadSendIntake(harness.db, retained.id)!;
+        expect(completed.state).toBe("transferred");
+        expect(JSON.parse(completed.nativeHandoff!)).toMatchObject({ id: request.requestId, sequence: requested.sequence });
+        expect(getLastStoredProviderThreadId(harness.db, fixture.threadId)).toBeNull();
+      } finally {
+        finishStop();
+        await clearResponsePending;
+        await sendResponsePending;
+        responder.unregister();
+      }
     });
   });
 

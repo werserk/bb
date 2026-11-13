@@ -1,3 +1,4 @@
+import type { SendIntakeAuthority } from "./send-intake-authority.js";
 import type {
   PromptInput,
   TurnRequestEventData,
@@ -30,6 +31,7 @@ export interface ReadyThreadEnvironment extends EnvironmentRow {
 }
 
 interface DispatchTurnDuringReprovisionArgs {
+  intake?: SendIntakeAuthority;
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
@@ -81,6 +83,7 @@ export async function dispatchTurnDuringReprovision(
     args.environment.status !== "destroyed"
   ) {
     requestThreadTargetReprovision(args.deps, {
+      intake: args.intake,
       dispatchProvenance: args.dispatchProvenance,
       deferredFromRequestId: args.deferredFromRequestId,
       serviceTurn: args.serviceTurn,

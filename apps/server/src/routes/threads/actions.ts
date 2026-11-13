@@ -1,4 +1,6 @@
 import { requestQueuedMessageDispatch } from "../../services/threads/queued-message-dispatch.js";
+import { readThreadSendIntakePage } from "@bb/db";
+import { toSendIntakeView } from "../../services/threads/thread-send-intake.js";
 import { PLUGIN_RPC_CALLER_HEADER } from "../../services/plugins/plugin-rpc-caller.js";
 import { refreshProviderRetirement } from "../../services/environments/environment-engine.js";
 import {
@@ -63,7 +65,7 @@ import {
   ensureThreadIsWritable,
   ensureThreadQueueIsWritable,
 } from "../../services/threads/thread-send.js";
-import { acceptThreadSendRequest } from "../../services/threads/thread-send-request.js";
+import { acceptThreadSendRequest, admitThreadSendRequest, getThreadSendIntakeService } from "../../services/threads/thread-send-request.js";
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
 import {
@@ -217,16 +219,16 @@ export function registerThreadActionRoutes(
   deps: AppDeps,
   plugins?: import("../../services/plugins/plugin-service.js").PluginService,
 ): void {
-  const { post, patch, del } = typedRoutes<PublicApiSchema>(app, {
+  const { get, post, patch, del } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
 
-  post(routes.send, async (context, payload) => {
-    const thread = requirePublicThread(deps.db, context.req.param("id"));
+  function authoriseSend(threadId: string, rpcCallerHeader: string | undefined, payload: import("@bb/server-contract").SendMessageRequest) {
+    const thread = requirePublicThread(deps.db, threadId);
     if (payload.serviceTurn) {
       const resolution = plugins?.resolveRpcCaller(
-        context.req.header(PLUGIN_RPC_CALLER_HEADER),
+        rpcCallerHeader,
       );
       if (
         !resolution?.ok ||
@@ -265,9 +267,29 @@ export function registerThreadActionRoutes(
       }
       payload = { ...payload, mode: "queue-if-active" };
     }
-    return context.json(
-      await acceptThreadSendRequest(deps, { payload, thread }),
-    );
+    return { payload, thread };
+  }
+
+  post(routes.send, async (context, payload) => {
+    const args = authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload);
+    return context.json(await acceptThreadSendRequest(deps, args));
+  });
+  post(routes.sendAdmission, async (context, payload) => {
+    const args = authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload);
+    return context.json(await admitThreadSendRequest(deps, {
+      thread: args.thread, payload: { ...args.payload, clientSubmissionId: payload.clientSubmissionId, admissionVersion: payload.admissionVersion },
+    }));
+  });
+  get(routes.sendIntakes, (context, query) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    const page = readThreadSendIntakePage(deps.db, thread.id, query.afterOrder);
+    return context.json({ admissionVersion: 1 as const, rows: page.slice(0, 100).map(toSendIntakeView),
+      nextAfterOrder: page.length > 100 ? page[99]!.intakeOrder : null });
+  });
+  post(routes.mutateSendIntake, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    ensureThreadQueueIsWritable(thread);
+    return context.json(await getThreadSendIntakeService(deps).mutate(thread.id, payload));
   });
 
   post(routes.editMessage, async (context, payload) => {

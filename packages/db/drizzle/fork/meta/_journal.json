@@ -43,6 +43,13 @@
       "when": 1794458242846,
       "tag": "0005_glorious_mentor",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795719232762,
+      "tag": "0006_flowery_stone_men",
+      "breakpoints": true
     }
   ]
 }

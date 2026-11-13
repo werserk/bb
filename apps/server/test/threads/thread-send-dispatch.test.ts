@@ -854,11 +854,18 @@ describe("startup queue waits", () => {
         },
       });
       const queueChangedInTransactions: boolean[] = [];
+      const allQueueChangedInTransactions: boolean[] = [];
+      let previousQueueIds = listQueuedThreadMessages(harness.db, thread.id).map(row => row.id);
       const notifyThread = harness.hub.notifyThread.bind(harness.hub);
       vi.spyOn(harness.hub, "notifyThread").mockImplementation(
         (threadId, changes, metadata) => {
-          if (changes.includes("queue-changed")) {
-            queueChangedInTransactions.push(harness.db.$client.inTransaction);
+          if (threadId === thread.id && changes.includes("queue-changed")) {
+            allQueueChangedInTransactions.push(harness.db.$client.inTransaction);
+            const ids = listQueuedThreadMessages(harness.db, thread.id).map(row => row.id);
+            if (ids.length !== previousQueueIds.length || ids.some((id, index) => id !== previousQueueIds[index])) {
+              queueChangedInTransactions.push(harness.db.$client.inTransaction);
+              previousQueueIds = ids;
+            }
           }
           notifyThread(threadId, changes, metadata);
         },
@@ -992,6 +999,8 @@ describe("startup queue waits", () => {
           thread,
         }),
       ).resolves.toEqual({ ok: true, delivery: "sent" });
+      expect(allQueueChangedInTransactions.length).toBeGreaterThanOrEqual(2);
+      expect(allQueueChangedInTransactions.every(inTransaction => !inTransaction)).toBe(true);
     });
   });
 
@@ -2551,7 +2560,7 @@ it.each([
 );
 describe("pending send admission provenance", () => {
   it.each(["cold", "provider"] as const)(
-    "commits %s owner admission before the receipt and rejects a retained repeat",
+    "commits %s owner admission before the receipt and replays a retained repeat",
     async (kind) => {
       await withTestHarness(async (harness) => {
         const fixture =
@@ -2595,10 +2604,13 @@ describe("pending send admission provenance", () => {
             thread: fixture.thread,
             payload,
           }),
-        ).rejects.toMatchObject({
-          status: 409,
-          body: { code: "submission_already_admitted" },
-        });
+        ).resolves.toEqual(result);
+        await expect(
+          acceptThreadSendRequest(harness.deps, {
+            thread: fixture.thread,
+            payload: { ...payload, input: textInput("changed owner words") },
+          }),
+        ).rejects.toMatchObject({ status: 409, body: { code: "submission_conflict" } });
         expect(
           listEvents(harness.db, { threadId: fixture.thread.id }).filter(
             (row) => row.type === "client/turn/requested",

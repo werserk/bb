@@ -373,6 +373,8 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
   });
   const {
     app,
+    startSendIntakes,
+    stopSendIntakes,
     closeWebSockets,
     injectWebSocket,
     pluginCatalogService,
@@ -536,6 +538,9 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
         pluginService,
         providerRegistry,
       }).finally(() => {
+        try { startSendIntakes(); } catch (error) {
+          logger.error({ err: error }, "Pending send startup recovery failed");
+        }
         void serverMove.handlePluginsStarted();
       });
     }
@@ -559,6 +564,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       return shutdownPromise;
     }
     shutdownPromise = (async () => {
+      stopSendIntakes();
       hub.stopClientChangeNotifications();
       serverMove.dispose();
       appUpdate.dispose();

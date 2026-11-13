@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { assertSendIntake, commitSendIntake, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   assertSubmissionNotAdmitted,
   submissionAdmissionFloor,
@@ -88,6 +89,7 @@ export interface QueuedDispatchMessage {
 }
 
 export interface RecordQueuedMessageWaitArgs {
+  intake?: SendIntakeAuthority;
   thread: Thread;
   message: QueuedDispatchMessage;
   placement: "back" | "front";
@@ -131,6 +133,7 @@ export function recordQueuedMessageWait(
   if (leadClaim === undefined) {
     row = deps.db.transaction(
       (tx) => {
+        assertSendIntake(tx, args.intake);
         assertThreadHostAcceptsWork(tx, args.thread);
         if (args.message.clientSubmissionId)
           assertSubmissionNotAdmitted(
@@ -162,9 +165,15 @@ export function recordQueuedMessageWait(
           systemNotice: args.message.systemNotice,
           deliveryMode: args.message.deliveryMode,
         });
-        return args.placement === "front"
-          ? moveQueuedThreadMessageToFrontInTransaction(tx, created)
-          : created;
+        const placed =
+          args.placement === "front"
+            ? moveQueuedThreadMessageToFrontInTransaction(tx, created)
+            : created;
+        commitSendIntake(tx, args.intake, { kind: "queue", id: placed.id }, {
+          ok: true, delivery: "queued", queuedMessage: toThreadQueuedMessage(placed),
+          ...(args.message.clientSubmissionId ? { submissionIds: [args.message.clientSubmissionId] } : {}),
+        });
+        return placed;
       },
       { behavior: "immediate" },
     );

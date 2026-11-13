@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
-  "prevId": "52fc633d-d1e3-4f3d-a0ee-26e8bda3269b",
+  "id": "dcbe712c-95f7-479a-ac6d-bf35be0dbb2d",
+  "prevId": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -3991,6 +3991,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "delivery_mode": {
+          "name": "delivery_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'steer'"
+        },
+        "coalesce_key": {
+          "name": "coalesce_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "coalesce_state": {
+          "name": "coalesce_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "question_id": {
           "name": "question_id",
           "type": "text",
@@ -4045,28 +4067,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "delivery_mode": {
-          "name": "delivery_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'steer'"
-        },
-        "coalesce_key": {
-          "name": "coalesce_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "coalesce_state": {
-          "name": "coalesce_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -5043,6 +5043,224 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "thread_send_intakes": {
+      "name": "thread_send_intakes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_submission_id": {
+          "name": "client_submission_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "intake_order": {
+          "name": "intake_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "original_envelope": {
+          "name": "original_envelope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "original_fingerprint": {
+          "name": "original_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "current_envelope": {
+          "name": "current_envelope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "claim_epoch": {
+          "name": "claim_epoch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sealed_at": {
+          "name": "sealed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "admission_receipt": {
+          "name": "admission_receipt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "native_receipt": {
+          "name": "native_receipt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "native_handoff": {
+          "name": "native_handoff",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "clear_operation_id": {
+          "name": "clear_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "compact_request_id": {
+          "name": "compact_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "compact_checkpoint": {
+          "name": "compact_checkpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "thread_send_intakes_submission_idx": {
+          "name": "thread_send_intakes_submission_idx",
+          "columns": [
+            "thread_id",
+            "client_submission_id"
+          ],
+          "isUnique": true
+        },
+        "thread_send_intakes_order_idx": {
+          "name": "thread_send_intakes_order_idx",
+          "columns": [
+            "thread_id",
+            "intake_order"
+          ],
+          "isUnique": true
+        },
+        "thread_send_intakes_recovery_idx": {
+          "name": "thread_send_intakes_recovery_idx",
+          "columns": [
+            "state",
+            "lease_expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "thread_send_intakes_thread_id_threads_id_fk": {
+          "name": "thread_send_intakes_thread_id_threads_id_fk",
+          "tableFrom": "thread_send_intakes",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "thread_send_intakes_state_check": {
+          "name": "thread_send_intakes_state_check",
+          "value": "\"thread_send_intakes\".\"state\" IN ('staging','pending','preparing','transferred','failed','cancelled','rejected')"
+        },
+        "thread_send_intakes_payload_check": {
+          "name": "thread_send_intakes_payload_check",
+          "value": "\"thread_send_intakes\".\"state\" IN ('transferred','cancelled','rejected') OR (\"thread_send_intakes\".\"original_envelope\" IS NOT NULL AND \"thread_send_intakes\".\"current_envelope\" IS NOT NULL)"
+        },
+        "thread_send_intakes_claim_check": {
+          "name": "thread_send_intakes_claim_check",
+          "value": "(\"thread_send_intakes\".\"state\" = 'preparing' AND \"thread_send_intakes\".\"claim_token\" IS NOT NULL AND \"thread_send_intakes\".\"lease_expires_at\" IS NOT NULL) OR (\"thread_send_intakes\".\"state\" <> 'preparing' AND \"thread_send_intakes\".\"claim_token\" IS NULL AND \"thread_send_intakes\".\"lease_expires_at\" IS NULL)"
+        }
+      }
     },
     "thread_tabs": {
       "name": "thread_tabs",

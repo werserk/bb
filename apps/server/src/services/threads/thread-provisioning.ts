@@ -1,3 +1,4 @@
+import { assertSendIntake, commitSendIntake, sealSendIntake, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   assertSubmissionNotAdmitted,
   submissionAdmissionFloor,
@@ -83,6 +84,7 @@ interface RequestThreadProvisionArgs {
 }
 
 interface RequestThreadTargetReprovisionArgs {
+  intake?: SendIntakeAuthority;
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   deferredFromRequestId?: ClientTurnRequestId;
   serviceTurn?: ServiceTurnDescriptor;
@@ -439,7 +441,7 @@ export function requestThreadTargetReprovision(
   args: RequestThreadTargetReprovisionArgs,
 ): ThreadProvisionContext {
   return deps.db.transaction(
-    () => {
+    (tx) => {
       const request = appendReprovisionTurnRequest(deps, args);
       const context = createThreadStartup({
         clientRequestId: request.requestId,
@@ -476,6 +478,7 @@ export function requestThreadTargetReprovision(
         threadId: args.thread.id,
         context,
       });
+      commitSendIntake(tx, args.intake, { kind: "request", id: request.requestId, sequence: request.sequence });
       return context;
     },
     { behavior: "immediate" },
@@ -501,6 +504,7 @@ function appendReprovisionTurnRequest(
             entry.id,
             submissionAdmissionFloor(deps.db, args.thread.id, entry.id),
           );
+      assertSendIntake(tx, args.intake);
       args.beforeRequestAppendInTransaction?.({ tx });
       const request =
         appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
@@ -648,15 +652,18 @@ export function scheduleThreadProvisioningAdvance(
 export async function restoreInterruptedThreadStartupRequest(
   deps: ThreadProvisioningDeps,
   threadId: string,
+  intake?: SendIntakeAuthority,
 ): Promise<ThreadProvisionContext["request"] | null> {
   const context = readThreadProvisionContext(deps.db, threadId);
   if (context === null) return null;
   const provisioning = getPreparingEnvironment(deps.db, threadId);
   if (provisioning !== null) {
+    sealSendIntake(deps.db, intake, "startup-cleanup");
     await cancelProviderEnvironmentCreation(deps, threadId);
   }
   const machine = getNonDestroyedHostByLaunchKey(deps.db, threadId);
   if (machine?.phase === "removing") {
+    sealSendIntake(deps.db, intake, "startup-cleanup");
     await sweepProviderMachine(deps, machine.id);
   }
   return context.request;

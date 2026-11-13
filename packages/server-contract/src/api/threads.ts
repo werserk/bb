@@ -1467,3 +1467,56 @@ export const queueSnapshotResponseSchema = z.object({
   }),
 });
 export type QueueSnapshotResponse = z.infer<typeof queueSnapshotResponseSchema>;
+
+export const sendAdmissionRequestSchema = sendMessageRequestSchema.extend({
+  admissionVersion: z.literal(1),
+  clientSubmissionId: z.uuid(),
+}).strict();
+export type SendAdmissionRequest = z.infer<typeof sendAdmissionRequestSchema>;
+
+export const sendAdmissionResponseSchema = z.object({
+  ok: z.literal(true),
+  delivery: z.literal("accepted"),
+  admissionVersion: z.literal(1),
+  admission: z.object({
+    id: z.string().min(1), clientSubmissionId: z.uuid(),
+    revision: z.number().int().positive(), state: z.literal("pending"),
+  }),
+});
+export type SendAdmissionResponse = z.infer<typeof sendAdmissionResponseSchema>;
+
+export const threadSendIntakeViewSchema = z.object({
+  id: z.string().min(1), clientSubmissionId: z.uuid().nullable(),
+  intakeOrder: z.number().int().positive(), revision: z.number().int().positive(),
+  state: z.enum(["staging", "pending", "preparing", "transferred", "failed", "cancelled", "rejected"]),
+  input: z.array(promptInputSchema).nullable(),
+  sealed: z.boolean(), recoveryRequired: z.boolean(), error: z.string().nullable(),
+  effectStage: z.enum(["hook", "mention", "model", "clear", "compact", "startup-cleanup", "request"]).nullable(),
+  handoff: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("queue"), id: z.string() }),
+    z.object({ kind: z.literal("request"), id: z.string(), sequence: z.number().int() }),
+    z.object({ kind: z.literal("startup"), id: z.string() }),
+    z.object({ kind: z.literal("clear"), id: z.string() }),
+  ]).nullable(),
+});
+export type ThreadSendIntakeView = z.infer<typeof threadSendIntakeViewSchema>;
+export const threadSendIntakesResponseSchema = z.object({
+  admissionVersion: z.literal(1), rows: z.array(threadSendIntakeViewSchema),
+  nextAfterOrder: z.number().int().positive().nullable(),
+});
+export type ThreadSendIntakesResponse = z.infer<typeof threadSendIntakesResponseSchema>;
+export const threadSendIntakesQuerySchema = z.object({
+  afterOrder: z.coerce.number().int().nonnegative().default(0),
+});
+export const mutateThreadSendIntakeRequestSchema = z.object({
+  id: z.string().min(1), revision: z.number().int().positive(),
+  action: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("cancel") }),
+    z.object({ kind: z.literal("retry") }),
+    z.object({ kind: z.literal("reconcile") }),
+    z.object({ kind: z.literal("edit"), input: z.array(promptInputSchema).min(1) }),
+    z.object({ kind: z.literal("send-now") }),
+    z.object({ kind: z.literal("reorder") }),
+  ]),
+}).strict();
+export type MutateThreadSendIntakeRequest = z.infer<typeof mutateThreadSendIntakeRequestSchema>;

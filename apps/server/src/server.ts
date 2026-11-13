@@ -1,3 +1,4 @@
+import { startThreadSendIntakes, stopThreadSendIntakes } from "./services/threads/thread-send-request.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { resolveQuestion } from "./services/threads/question-resolution.js";
 import { currentQuestionResolutionInvocation } from "./services/threads/question-resolution-context.js";
@@ -172,6 +173,8 @@ interface ServerApp {
   pluginCatalogService: PluginCatalogService;
   serverMove: ServerMoveCoordinator;
   tunnelIngress: TunnelIngressManager;
+  startSendIntakes(): void;
+  stopSendIntakes(): void;
 }
 
 interface CloseWebSocketServerArgs {
@@ -519,6 +522,7 @@ export function createApp(
     },
   };
   const pendingServerMove = serverMoveOptions.pending;
+  let intakeLifecycleClosed = false;
 
   app.use("*", async (context, next) => {
     const signal = context.req.raw.signal;
@@ -1105,6 +1109,10 @@ export function createApp(
 
   return {
     app,
+    startSendIntakes: () => {
+      if (!intakeLifecycleClosed && pendingServerMove === null && !isServerMoveSnapshotFenced(deps.db)) startThreadSendIntakes(deps);
+    },
+    stopSendIntakes: () => { intakeLifecycleClosed = true; stopThreadSendIntakes(deps, true); },
     closeWebSockets: () =>
       closeWebSocketServer({
         forceCloseAfterMs: WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS,

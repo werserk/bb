@@ -2,6 +2,11 @@ import {
   findRequestedSubmission,
   guardSubmission,
 } from "./submission-admission.js";
+import { isServerMoveFrozen } from "../server-move/freeze-state.js";
+import { sendAdmissionResponseSchema } from "@bb/server-contract";
+import { createThreadSendIntakeService } from "./thread-send-intake.js";
+import type { SendIntakeAuthority } from "./send-intake-authority.js";
+import { getExperiments } from "@bb/db";
 import {
   isStandaloneBuiltinClearCommand,
   isStandaloneBuiltinCompactCommand,
@@ -21,6 +26,7 @@ import { assertProviderAcceptsPromptActions } from "../providers/provider-plan-c
 
 interface AcceptThreadSendRequestArgs {
   payload: SendMessageRequest;
+  intake?: SendIntakeAuthority;
   thread: Thread;
 }
 
@@ -40,6 +46,7 @@ async function acceptThreadSendRequestOnce(
       thread: args.thread,
     });
     await attemptDispatch(deps, {
+      intake: args.intake,
       thread: args.thread,
       payload: request,
       source: { kind: "operation", environment },
@@ -75,6 +82,7 @@ async function acceptThreadSendRequestOnce(
     () =>
       attemptDispatch(deps, {
         thread: args.thread,
+        intake: args.intake,
         payload,
         source: { kind: "inline" },
         queuePayload: { kind: "inline" },
@@ -100,7 +108,7 @@ function throwInvalidCompactFirst(reason: string): never {
   throw new ApiError(400, "invalid_request", `compactFirst ${reason}`);
 }
 
-export async function acceptThreadSendRequest(
+async function executeThreadSendIntake(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
@@ -119,7 +127,68 @@ export async function acceptThreadSendRequest(
     );
     return requested ? { ...result, submissionIds: [id], requested } : result;
   };
-  return id
-    ? guardSubmission(deps.db, args.thread.id, id, args.payload, send)
-    : send();
+  return send();
+}
+
+const readyIntakeDatabases = new WeakSet<object>();
+const stoppedIntakeDatabases = new WeakSet<object>();
+const closedIntakeDatabases = new WeakSet<object>();
+const intakeServices = new WeakMap<object, ReturnType<typeof createThreadSendIntakeService>>();
+
+export function getThreadSendIntakeService(deps: LoggedPendingInteractionWorkSessionDeps) {
+  if (closedIntakeDatabases.has(deps.db) || stoppedIntakeDatabases.has(deps.db) || isServerMoveFrozen(deps.db))
+    throw new ApiError(503, "intake_unavailable", "Pending send intake is stopped");
+  let service = intakeServices.get(deps.db);
+  if (!service) {
+    service = createThreadSendIntakeService(deps, (payload, thread, intake) =>
+      executeThreadSendIntake(deps, { payload, thread, intake }), () => readyIntakeDatabases.has(deps.db));
+    intakeServices.set(deps.db, service);
+  }
+  return service;
+}
+
+function validateIntakeRequest(deps: LoggedPendingInteractionWorkSessionDeps, args: AcceptThreadSendRequestArgs): void {
+  assertThreadHostAcceptsWork(deps.db, args.thread);
+  assertProviderAcceptsPromptActions(deps.providerRegistry, { input: args.payload.input, providerId: args.thread.providerId });
+  if (!args.payload.compactFirst) return;
+  if (isStandaloneBuiltinClearCommand(args.payload.input)) throwInvalidCompactFirst("cannot clear the context");
+  if (isStandaloneBuiltinCompactCommand(args.payload.input)) throwInvalidCompactFirst("needs a message to send after compacting");
+  if (args.payload.sendAt !== undefined) throwInvalidCompactFirst("cannot be scheduled with sendAt");
+  if (args.payload.mode === "steer") throwInvalidCompactFirst("cannot steer a turn");
+}
+
+export async function acceptThreadSendRequest(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: AcceptThreadSendRequestArgs,
+): Promise<SendMessageResponse> {
+  validateIntakeRequest(deps, args);
+  const service = getThreadSendIntakeService(deps);
+  const row = await service.admit(args.payload, args.thread);
+  return service.wait(row.id);
+}
+
+export async function admitThreadSendRequest(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: { payload: import("@bb/server-contract").SendAdmissionRequest; thread: Thread },
+): Promise<import("@bb/server-contract").SendAdmissionResponse> {
+  validateIntakeRequest(deps, args);
+  const { admissionVersion, ...payload } = args.payload;
+  const row = await getThreadSendIntakeService(deps).admit(payload, args.thread);
+  if (row.admissionReceipt === null) throw new ApiError(503, "intake_unavailable", "No committed admission receipt");
+  return sendAdmissionResponseSchema.parse(JSON.parse(row.admissionReceipt));
+}
+
+export function startThreadSendIntakes(deps: LoggedPendingInteractionWorkSessionDeps): void {
+  if (closedIntakeDatabases.has(deps.db) || isServerMoveFrozen(deps.db)) return;
+  stoppedIntakeDatabases.delete(deps.db);
+  readyIntakeDatabases.add(deps.db);
+  getThreadSendIntakeService(deps).recover();
+}
+
+export function stopThreadSendIntakes(deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">, permanent = false): void {
+  readyIntakeDatabases.delete(deps.db);
+  if (permanent) closedIntakeDatabases.add(deps.db);
+  stoppedIntakeDatabases.add(deps.db);
+  intakeServices.get(deps.db)?.stop();
+  intakeServices.delete(deps.db);
 }

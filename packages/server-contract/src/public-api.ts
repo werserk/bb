@@ -1,5 +1,10 @@
 import type { ThreadReleaseIdleResult } from "./api/threads.js";
 import {
+  sendAdmissionRequestSchema, threadSendIntakesQuerySchema, mutateThreadSendIntakeRequestSchema,
+  type SendAdmissionRequest, type SendAdmissionResponse,
+  type ThreadSendIntakesResponse, type ThreadSendIntakeView, type MutateThreadSendIntakeRequest,
+} from "./api/threads.js";
+import {
   queueSnapshotRequestSchema,
   type QueueSnapshotRequest,
   type QueueSnapshotResponse,
@@ -1444,6 +1449,24 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest<PathId>(),
       response: jsonResponse<ThreadChildSummaryResponse>(),
+    }),
+    sendAdmission: defineRoute({
+      path: "/threads/:id/send-admission",
+      method: "post",
+      request: jsonRequest<PathId, SendAdmissionRequest>(sendAdmissionRequestSchema),
+      response: jsonResponse<SendAdmissionResponse>(),
+    }),
+    sendIntakes: defineRoute({
+      path: "/threads/:id/send-intakes",
+      method: "get",
+      request: queryRequest<PathId, { afterOrder: number }>(threadSendIntakesQuerySchema),
+      response: jsonResponse<ThreadSendIntakesResponse>(),
+    }),
+    mutateSendIntake: defineRoute({
+      path: "/threads/:id/send-intakes/action",
+      method: "post",
+      request: jsonRequest<PathId, MutateThreadSendIntakeRequest>(mutateThreadSendIntakeRequestSchema),
+      response: jsonResponse<ThreadSendIntakeView>(),
     }),
     send: defineRoute({
       path: "/threads/:id/send",

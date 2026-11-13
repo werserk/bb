@@ -1,3 +1,4 @@
+import { assertSendIntake, sealSendIntake, commitSendIntake, compactSendIntakeComplete, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   classifyLocalQuestionAnswer,
   QuestionResponseNotDeliverableError,
@@ -260,6 +261,7 @@ export type DispatchAttemptSource =
     };
 
 export interface DispatchAttemptArgs {
+  intake?: SendIntakeAuthority;
   thread: Thread;
   payload: SendMessageRequest & {
     inputGroups?: PromptInput[][];
@@ -352,6 +354,7 @@ async function runOperationDispatch(
   source: Extract<DispatchAttemptSource, { kind: "operation" }>,
 ): Promise<DispatchAttemptOutcome> {
   await sendThreadMessage(deps, {
+    intake: args.intake,
     environment: source.environment,
     originPluginId: args.originPluginId,
     payload: args.payload,
@@ -409,6 +412,7 @@ async function runDispatchAttempt(
       input: payload.input,
       projectId: thread.projectId,
       hostId: threadTargetHostId(deps, thread),
+      beforeWrite: tx => assertSendIntake(tx, args.intake),
     });
     payload = { ...payload, input };
     args = { ...args, payload };
@@ -428,7 +432,7 @@ async function runDispatchAttempt(
     systemNotice === null &&
     (thread.status === "error" || thread.status === "idle") &&
     thread.environmentId === null
-      ? await restoreInterruptedThreadStartupRequest(deps, thread.id)
+      ? await restoreInterruptedThreadStartupRequest(deps, thread.id, args.intake)
       : null;
   const firstDispatch =
     systemNotice === null &&
@@ -468,7 +472,8 @@ async function runDispatchAttempt(
   );
   if (payload.compactFirst) {
     const { compactFirst, ...request } = payload;
-    await compactThreadContext(deps, thread);
+    if (!compactSendIntakeComplete(deps.db, args.intake))
+      await compactThreadContext(deps, thread, args.intake);
     payload = request;
     args = { ...args, payload };
   }
@@ -500,6 +505,7 @@ async function runDispatchAttempt(
       waitingOn,
       sendAt,
       claimed,
+      intake: args.intake,
     });
     if (entry === null) {
       // The row vanished under a re-queue (the user deleted it). Nothing is
@@ -638,6 +644,7 @@ async function runDispatchAttempt(
       const outcome = queueInputForStartingTurn(deps, {
         claimed,
         input: queuedMessage,
+        intake: args.intake,
         threadId: thread.id,
       });
       if (outcome.kind === "queued" || outcome.kind === "dispatched") {
@@ -663,6 +670,7 @@ async function runDispatchAttempt(
 
     if (firstDispatch) {
       admitted.value = await admitPendingThread(deps, {
+        intake: args.intake,
         author,
         claimed,
         dispatchProvenance: {
@@ -696,6 +704,7 @@ async function runDispatchAttempt(
 
   if (!sendNow && hasMessageDispatchHooks()) {
     const outcome = await runMessageDispatchHookPass(deps, {
+      beforeHooks: () => sealSendIntake(deps.db, args.intake, "hook"),
       thread,
       threadResponse: toThreadResponseFromThread(deps, { thread }),
       serviceTurn: payload.serviceTurn,
@@ -791,6 +800,7 @@ async function runDispatchAttempt(
         });
   try {
     await sendThreadMessage(deps, {
+      intake: args.intake,
       preserveSelfSender:
         args.source.kind === "drain" &&
         args.queuePayload.kind === "questionResponse",
@@ -914,6 +924,7 @@ function consumeClaimedRows(
 }
 
 interface AdmitPendingThreadArgs {
+  intake?: SendIntakeAuthority;
   author: DispatchAuthor;
   dispatchProvenance: {
     origin: ThreadCreateOrigin | null;
@@ -990,6 +1001,7 @@ async function admitPendingThread(
   try {
     startingThread = deps.db.transaction(
       (tx) => {
+        assertSendIntake(tx, args.intake);
         // The row is consumed and the thread flipped in ONE transaction: a
         // flip that loses to a concurrent attempt rolls the consumption back,
         // so the row stays claimed for the caller to hand back rather than
@@ -1010,7 +1022,7 @@ async function admitPendingThread(
         }
         const starting = getThread(tx, args.thread.id);
         if (starting === null) throw new PendingThreadAdmissionLost();
-        requestThreadProvision(deps, {
+        const provision = requestThreadProvision(deps, {
           serviceTurn: args.payload.serviceTurn,
           author: args.author,
           dispatchProvenance: args.dispatchProvenance,
@@ -1034,6 +1046,7 @@ async function admitPendingThread(
           startedOnBehalfOf: startContext.startedOnBehalfOf,
           titleProvided: startContext.titleProvided,
         });
+        commitSendIntake(tx, args.intake, { kind: "startup", id: provision.request.clientRequestId });
         return starting;
       },
       { behavior: "immediate" },
@@ -1109,6 +1122,7 @@ function resolveExecutionIntoPayload(
 export async function compactThreadContext(
   deps: LoggedPendingInteractionWorkSessionDeps,
   thread: Thread,
+  intake?: SendIntakeAuthority,
 ): Promise<void> {
   ensureThreadIsWritable(thread);
   if (!deps.providerRegistry.supportsManualCompaction(thread.providerId)) {
@@ -1128,6 +1142,7 @@ export async function compactThreadContext(
 
   const environment = await requireThreadCommandEnvironment(deps, { thread });
   await attemptDispatch(deps, {
+    intake: intake === undefined ? undefined : { ...intake, stage: "compact" },
     thread,
     payload: {
       input: createStandaloneBuiltinCompactCommandInput(),

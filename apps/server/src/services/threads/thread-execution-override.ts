@@ -1,6 +1,8 @@
+import { assertSendIntake, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   getThreadExecutionOverride,
   setThreadExecutionOverride,
+  sealThreadSendIntake,
   type ThreadExecutionOverride,
 } from "@bb/db";
 import {
@@ -31,11 +33,13 @@ interface ResolveThreadExecutionOverrideUpdateArgs {
 }
 
 interface ApplyThreadExecutionOverrideArgs {
+  intake?: SendIntakeAuthority;
   thread: Thread;
   patch: ThreadExecutionOverridePatch;
 }
 
 interface RecoverThreadModelOverrideArgs {
+  intake?: SendIntakeAuthority;
   model: string | undefined;
   modelSource: CallerExecutionInputSource | undefined;
   reasoningLevel: ReasoningLevel | undefined;
@@ -139,11 +143,18 @@ export async function applyThreadExecutionOverride(
     fallbackModel: resolveThreadFallbackModel(deps, thread),
   });
 
-  setThreadExecutionOverride(deps.db, {
-    threadId: thread.id,
-    modelOverride: next.modelOverride,
-    reasoningLevelOverride: next.reasoningLevelOverride,
-  });
+  deps.db.transaction(tx => {
+    assertSendIntake(tx, args.intake);
+    if (args.intake) {
+      args.intake.beforeEffects?.();
+      sealThreadSendIntake(tx, args.intake.claim, Date.now(), "model");
+    }
+    setThreadExecutionOverride(tx, {
+      threadId: thread.id,
+      modelOverride: next.modelOverride,
+      reasoningLevelOverride: next.reasoningLevelOverride,
+    });
+  }, { behavior: "immediate" });
 }
 
 export async function recoverThreadModelOverride(
@@ -171,6 +182,7 @@ export async function recoverThreadModelOverride(
   if (patch.model === undefined && patch.reasoningLevel === undefined) return;
 
   await applyThreadExecutionOverride(deps, {
+    intake: args.intake,
     thread: args.thread,
     patch,
   });

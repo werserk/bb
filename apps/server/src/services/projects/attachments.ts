@@ -10,6 +10,7 @@ import {
   projectAttachmentBackfills,
   attachmentUnavailable,
   type DbConnection,
+  type DbTransaction,
   type ProjectAttachmentRow,
 } from "@bb/db";
 import {
@@ -47,6 +48,8 @@ interface ResolvePromptAttachmentReferencesArgs {
   input: PromptInput[];
   projectId: string;
   hostId: string | null;
+  beforeWrite?: (tx: DbTransaction) => void;
+  copyTargetPath?: (sourceProjectId: string, path: string) => string;
 }
 
 function sanitizeFilename(name: string): string {
@@ -123,6 +126,7 @@ export async function ensureAttachmentReferenceExists(
   dataDir: string,
   projectId: string,
   attachmentPath: string,
+  beforeWrite?: (tx: DbTransaction) => void,
 ): Promise<void> {
   const dir = projectAttachmentDir(dataDir, projectId);
   const resolved = resolveAttachmentPath(dir, attachmentPath);
@@ -146,15 +150,13 @@ export async function ensureAttachmentReferenceExists(
   if (!fileStat || !fileStat.isFile())
     throw missingAttachmentReferenceError(attachmentPath);
   if (!existing) {
-    recordProjectAttachment(db, {
-      projectId,
-      storedPath,
-      originalName: basename(storedPath),
-      mimeType: mimeTypes.lookup(storedPath) || null,
-      sizeBytes: fileStat.size,
-      createdAt: Math.floor(fileStat.mtimeMs),
-      readyAt: Date.now(),
-    });
+    db.transaction(tx => {
+      beforeWrite?.(tx);
+      recordProjectAttachment(tx, {
+        projectId, storedPath, originalName: basename(storedPath), mimeType: mimeTypes.lookup(storedPath) || null,
+        sizeBytes: fileStat.size, createdAt: Math.floor(fileStat.mtimeMs), readyAt: Date.now(),
+      });
+    }, { behavior: "immediate" });
   }
 }
 
@@ -236,19 +238,27 @@ export async function resolvePromptAttachmentReferences(
     }
     const { sourceProjectId: sourceProjectId = args.projectId, ...attachment } =
       input;
+    const targetPath = sourceProjectId !== args.projectId && args.copyTargetPath
+      ? canonicalProjectAttachmentPath(args.copyTargetPath(sourceProjectId, input.path)) : input.path;
+    const copied = targetPath !== input.path ? getProjectAttachment(args.db, args.projectId, targetPath) : undefined;
+    if (copied?.readyAt !== null && copied?.readyAt !== undefined && copied.deletionClaimedAt === null) {
+      resolved.push({ ...attachment, path: targetPath });
+      continue;
+    }
     requirePublicProject(args.db, sourceProjectId);
     await ensureAttachmentReferenceExists(
       args.db,
       args.dataDir,
       sourceProjectId,
       input.path,
+      args.beforeWrite,
     );
     if (sourceProjectId !== args.projectId) {
       const paths = copies.get(sourceProjectId) ?? new Set<string>();
       paths.add(input.path);
       copies.set(sourceProjectId, paths);
     }
-    resolved.push(attachment);
+    resolved.push({ ...attachment, path: targetPath });
   }
   for (const [sourceProjectId, paths] of copies) {
     await copyProjectAttachments(
@@ -257,6 +267,7 @@ export async function resolvePromptAttachmentReferences(
       sourceProjectId,
       args.projectId,
       [...paths],
+      { beforeWrite: args.beforeWrite, targetPath: args.copyTargetPath === undefined ? undefined : path => args.copyTargetPath!(sourceProjectId, path) },
     );
   }
   return resolved;
@@ -386,6 +397,7 @@ export async function copyProjectAttachments(
   sourceProjectId: string,
   targetProjectId: string,
   attachmentPaths: readonly string[],
+  options?: { beforeWrite?: (tx: DbTransaction) => void; targetPath?: (path: string) => string },
 ): Promise<void> {
   if (sourceProjectId === targetProjectId || attachmentPaths.length === 0) {
     return;
@@ -399,7 +411,7 @@ export async function copyProjectAttachments(
     const { content } = await readAttachment(dataDir, sourceProjectId, path);
     const source = getProjectAttachment(db, sourceProjectId, path);
     attachments.push({
-      path,
+      path: options?.targetPath ? canonicalProjectAttachmentPath(options.targetPath(path)) : path,
       content,
       originalName: source?.originalName ?? basename(path),
       mimeType: source ? source.mimeType : mimeTypes.lookup(path) || null,
@@ -414,6 +426,7 @@ export async function copyProjectAttachments(
       content,
       originalName,
       mimeType,
+      options?.beforeWrite,
     );
   }
 }
@@ -444,22 +457,19 @@ async function writeInventoriedAttachment(
   content: Buffer,
   originalName: string,
   mimeType: string | null,
+  beforeWrite?: (tx: DbTransaction) => void,
 ): Promise<void> {
   const existing = getProjectAttachment(db, projectId, storedPath);
   if (existing) {
-    await ensureAttachmentReferenceExists(db, dataDir, projectId, storedPath);
+    await ensureAttachmentReferenceExists(db, dataDir, projectId, storedPath, beforeWrite);
     return;
   }
   const now = Date.now();
-  const row = recordProjectAttachment(db, {
-    projectId,
-    storedPath,
-    originalName,
-    mimeType,
-    sizeBytes: content.length,
-    createdAt: now,
-    readyAt: null,
-  });
+  const row = db.transaction(tx => {
+    beforeWrite?.(tx);
+    return recordProjectAttachment(tx, { projectId, storedPath, originalName, mimeType,
+      sizeBytes: content.length, createdAt: now, readyAt: null });
+  }, { behavior: "immediate" });
   const pendingPath = pendingAttachmentPath(dataDir, projectId, row.id);
   const outputPath = resolveAttachmentPath(
     projectAttachmentDir(dataDir, projectId),
@@ -471,6 +481,7 @@ async function writeInventoriedAttachment(
     await writeFile(pendingPath, content, { flag: "wx" });
     db.transaction(
       (tx) => {
+        beforeWrite?.(tx);
         const current = getProjectAttachment(tx, projectId, storedPath);
         if (
           !current ||
@@ -489,7 +500,9 @@ async function writeInventoriedAttachment(
     );
   } catch (error) {
     await rm(pendingPath, { force: true });
-    db.update(projectAttachments)
+    db.transaction(tx => {
+      beforeWrite?.(tx);
+      tx.update(projectAttachments)
       .set({ deletionClaimedAt: Date.now() })
       .where(
         and(
@@ -498,6 +511,7 @@ async function writeInventoriedAttachment(
         ),
       )
       .run();
+    }, { behavior: "immediate" });
     throw error;
   }
 }

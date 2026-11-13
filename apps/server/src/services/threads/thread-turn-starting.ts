@@ -1,3 +1,4 @@
+import type { SendIntakeAuthority } from "./send-intake-authority.js";
 import { getThread, type ClaimedQueuedThreadMessageRow } from "@bb/db";
 import type { Thread, ThreadQueuedMessage } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
@@ -18,6 +19,7 @@ export type QueueInputForStartingTurnResult =
 export function queueInputForStartingTurn(
   deps: TurnStartingDeps,
   args: {
+    intake?: SendIntakeAuthority;
     claimed: readonly ClaimedQueuedThreadMessageRow[] | null;
     input: QueuedDispatchMessage;
     threadId: string;
@@ -43,6 +45,7 @@ export function queueInputForStartingTurn(
         { db: tx, hub: notifications },
         {
           thread,
+          intake: args.intake,
           message: args.input,
           placement: "back",
           waitingOn: { kind: "turn-starting" },

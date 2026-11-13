@@ -76,6 +76,7 @@ export interface TestAppHarness {
   pluginService: ReturnType<typeof createApp>["pluginService"];
   pluginCatalogService: ReturnType<typeof createApp>["pluginCatalogService"];
   serverMove: ReturnType<typeof createApp>["serverMove"];
+  startSendIntakes(): void;
   cleanup(): Promise<void>;
 }
 
@@ -107,6 +108,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   nativeRootsClock?: () => number;
   liveCommandsClock?: () => number;
   seedFirstPartyProviders?: boolean;
+  startSendIntakes?: boolean;
   tunnelIngressNow?: () => number;
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
@@ -173,6 +175,7 @@ export async function createTestAppHarness(
     nativeRootsClock,
     liveCommandsClock,
     seedFirstPartyProviders = true,
+    startSendIntakes: autoStartSendIntakes = true,
     tunnelIngressNow: _tunnelIngressNow,
     ...configOverrides
   } = overrides;
@@ -389,9 +392,10 @@ export async function createTestAppHarness(
     watchInterests,
     sharedPorts,
   };
-  const { app, pluginCatalogService, pluginService, serverMove } =
+  const { app, pluginCatalogService, pluginService, serverMove, startSendIntakes, stopSendIntakes } =
     createApp(deps);
   installDefaultEnvironmentProviders();
+  if (autoStartSendIntakes) startSendIntakes();
 
   return {
     app,
@@ -402,7 +406,9 @@ export async function createTestAppHarness(
     pluginService,
     pluginCatalogService,
     serverMove,
+    startSendIntakes,
     async cleanup(): Promise<void> {
+      stopSendIntakes();
       clearAllThreadProvisionSchedules();
       setPluginEnvironmentProviderBridge(undefined);
       await pluginService.stop();
