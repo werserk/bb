@@ -211,7 +211,7 @@ describe("Markdown reading position in open secondary-panel tabs", () => {
       "aside [data-file-preview-scroll-container]",
     );
     expect(slot?.hasAttribute("data-radix-scroll-area-viewport")).toBe(true);
-    expect(slot?.querySelector(".panel-scroll-gutter")).toBeNull();
+    expect(slot?.querySelector("[data-radix-scroll-area-viewport]")).toBeNull();
   });
 
   it("provides a bounded scroll container inside a full-height file opener", () => {

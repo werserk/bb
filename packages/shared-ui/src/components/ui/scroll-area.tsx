@@ -17,6 +17,7 @@ type ScrollAreaProps = React.ComponentPropsWithoutRef<
   };
   scrollbarClassName?: string;
   horizontal?: boolean;
+  overlay?: boolean;
 };
 
 const ScrollArea = React.forwardRef<
@@ -31,6 +32,7 @@ const ScrollArea = React.forwardRef<
       viewportProps,
       scrollbarClassName,
       horizontal = false,
+      overlay = false,
       ...props
     },
     ref,
@@ -39,8 +41,8 @@ const ScrollArea = React.forwardRef<
     return (
       <ScrollAreaPrimitive.Root
         ref={ref}
-        type="auto"
-        data-overlay-scroll-area=""
+        type={overlay ? "auto" : undefined}
+        data-overlay-scroll-area={overlay ? "" : undefined}
         data-dragging={dragging || undefined}
         className={cn("relative overflow-hidden", className)}
         {...props}
@@ -57,6 +59,7 @@ const ScrollArea = React.forwardRef<
         </ScrollAreaPrimitive.Viewport>
         <ScrollBar
           className={scrollbarClassName}
+          overlay={overlay}
           onPointerDownCapture={(event) => {
             if (event.button === 0) setDragging(true);
           }}
@@ -65,6 +68,7 @@ const ScrollArea = React.forwardRef<
         {horizontal ? (
           <ScrollBar
             orientation="horizontal"
+            overlay={overlay}
             onPointerDownCapture={(event) => {
               if (event.button === 0) setDragging(true);
             }}
@@ -80,20 +84,34 @@ ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
 
 const ScrollBar = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>,
-  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>
->(({ className, orientation = "vertical", ...props }, ref) => (
+  React.ComponentPropsWithoutRef<
+    typeof ScrollAreaPrimitive.ScrollAreaScrollbar
+  > & { overlay?: boolean }
+>(({ className, orientation = "vertical", overlay = false, ...props }, ref) => (
   <ScrollAreaPrimitive.ScrollAreaScrollbar
     ref={ref}
     orientation={orientation}
     className={cn(
-      "bb-overlay-scrollbar flex touch-none select-none",
-      orientation === "vertical" && "w-2 px-[2px]",
-      orientation === "horizontal" && "h-2 flex-col py-[2px]",
+      "flex touch-none select-none",
+      overlay ? "bb-overlay-scrollbar" : "transition-colors",
+      orientation === "vertical" &&
+        (overlay
+          ? "w-2 px-[2px]"
+          : "h-full w-2.5 border-l border-l-transparent p-[1px]"),
+      orientation === "horizontal" &&
+        (overlay
+          ? "h-2 flex-col py-[2px]"
+          : "h-2.5 flex-col border-t border-t-transparent p-[1px]"),
       className,
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="bb-overlay-scrollbar-thumb relative flex-1 rounded-full" />
+    <ScrollAreaPrimitive.ScrollAreaThumb
+      className={cn(
+        "relative flex-1 rounded-full",
+        overlay ? "bb-overlay-scrollbar-thumb" : "bg-border",
+      )}
+    />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ));
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;

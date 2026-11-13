@@ -10,7 +10,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { FilePreviewScrollPositionContext } from "./filePreviewScrollPositionContext";
+import {
+  FilePreviewHostScrollContext,
+  FilePreviewScrollPositionContext,
+} from "./filePreviewScrollPositionContext";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@bb/shared-ui/button";
 import {
@@ -537,11 +540,12 @@ export function FilePreview({
     usesCodeLayout ||
     usesMarkdownPreviewLayout;
 
+  const hostOwnsScroll = useContext(FilePreviewHostScrollContext);
   const centersImage = headerMode === "none" && state.kind === "image";
 
   return (
     <FilePreviewReadingSlot
-      scrolls={usesMarkdownPreviewLayout}
+      scrolls={usesMarkdownPreviewLayout && !hostOwnsScroll}
       className={
         usesFullHeightLayout
           ? cn(
@@ -551,7 +555,7 @@ export function FilePreview({
           : cn("@container/page min-h-full", centersImage && "flex flex-col")
       }
       data-file-preview-scroll-container={
-        usesMarkdownPreviewLayout ? "" : undefined
+        usesMarkdownPreviewLayout && !hostOwnsScroll ? "" : undefined
       }
       style={FILE_PREVIEW_WRAPPER_STYLE}
     >

@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "@/components/ui/reading-scroll-area";
 import { threadNeedsOwnerAttention } from "@bb/client-core";
 import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
 import { QuestionFallback } from "@/components/thread/user-questions/QuestionFallback";
@@ -680,10 +681,13 @@ export function ThreadScreen({
         return (
           <WithoutThreadContextCard>
             {presentation.layout === "contained" ? (
-              <div className="panel-scroll-gutter min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
+              <ReadingScrollArea
+                className="min-h-0 flex-1 bg-background"
+                viewportProps={{ className: "px-2 pb-3 pt-3" }}
+              >
                 {surface}
                 {questions}
-              </div>
+              </ReadingScrollArea>
             ) : (
               <div className="bg-background px-2 pb-3 pt-3">
                 {surface}

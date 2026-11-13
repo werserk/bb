@@ -50,7 +50,10 @@ import { SecondaryPanelHostLayoutContext } from "./SecondaryPanelHostLayoutConte
 import { MobilePanelTabPager } from "./MobilePanelTabPager";
 import { SecondaryPanelTabStrip } from "./SecondaryPanelTabStrip";
 import { ImageTabLightboxProvider } from "./ImageTabLightboxContext";
-import { FilePreviewScrollPositionContext } from "./filePreviewScrollPositionContext";
+import {
+  FilePreviewHostScrollContext,
+  FilePreviewScrollPositionContext,
+} from "./filePreviewScrollPositionContext";
 import type {
   SecondaryPanelPaneRenderContext,
   SecondaryPanelRenderableTab,
@@ -1204,15 +1207,19 @@ function PanelReadingSlot({
   children,
   ...props
 }: React.ComponentProps<"div"> & { fills: boolean }) {
-  return fills ? (
-    <div {...props}>{children}</div>
-  ) : (
-    <ReadingScrollArea
-      horizontal
-      className="min-h-0 flex-1"
-      viewportProps={props}
-    >
-      {children}
-    </ReadingScrollArea>
+  return (
+    <FilePreviewHostScrollContext.Provider value={!fills}>
+      {fills ? (
+        <div {...props}>{children}</div>
+      ) : (
+        <ReadingScrollArea
+          horizontal
+          className="min-h-0 flex-1"
+          viewportProps={props}
+        >
+          {children}
+        </ReadingScrollArea>
+      )}
+    </FilePreviewHostScrollContext.Provider>
   );
 }

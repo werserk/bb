@@ -116,3 +116,11 @@ follows pane hover, keyboard focus and captured drag, never a scroll timer. Fine
 vertical resize targets are 6px, shifted 2px right of the boundary center, touching
 the scrollbar lane at boundary minus 1px. Coarse resize targets stay 32px. This is
 an internal UI change, with no SDK, host, persistence or scrolling-physics change.
+
+Overlay is explicitly opted into by the app-local ReadingScrollArea, preserving
+ResourceCollection's existing scroll-triggered Radix policy. The unrelated plugin
+category list retains its native transient CSS. Contained transcript panes also
+use ReadingScrollArea. FilePreviewHostScrollContext makes the existing host slot
+the sole Markdown scroll owner when it already scrolls; full-height slots let the
+preview own scrolling. This avoids an unbounded nested Radix viewport observed
+in the isolated candidate lab. No context or primitive is exported through SDK.

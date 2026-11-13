@@ -327,3 +327,8 @@ resize metrics live in `panelTransitionTokens.ts` and `SidebarChrome.tsx`. This
 removes the old reserved gutter and scroll-activity visibility timer. Terminal,
 iframe, CSV and code viewports keep their specialized scroll ownership; Markdown
 file preview uses the common primitive at its existing scroll-owner boundary.
+
+ReadingScrollArea opts into that overlay policy; other shared ScrollArea consumers
+retain their previous defaults. The internal FilePreviewHostScrollContext shares
+existing host-slot ownership with FilePreview so a Markdown preview does not add
+a second viewport when its host already owns scrolling.

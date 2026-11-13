@@ -351,7 +351,7 @@ export function AppSidebar({
       >
         <OverflowFade placement="above" tone="sidebar" size="sm" />
         {isFooterCustomizing ? (
-          <div className="max-h-[50svh] overflow-y-auto md:mr-(--bb-panel-scrollbar-inset)">
+          <div className="max-h-[50svh] overflow-y-auto ">
             <LazySidebarFooterCustomize
               onDone={() => {
                 flushSync(() => setFooterCustomizing(false));
