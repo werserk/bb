@@ -85,6 +85,16 @@ The journal key includes that identity, origin, primary host and data root. Ther
 is no separate core logout UI; the account plugin owns that action. Unit integration
 covers the actual signal/RPC boundary; live account-switch proof remains separate.
 
+Existing-thread composers keep upstream's shared draft submission ownership:
+a pending submission serializes further submissions of the same draft scope, and a
+rejected send restores its draft. Pending owners therefore retain a failed or
+unconfirmed send in addition to that restored draft. The earlier behaviour that
+released the captured draft before awaiting the send RPC, so a distinct next draft
+could submit while earlier RPCs stayed pending, is not part of this port because it
+changes that upstream contract. Queue action pending state belongs to the action's
+thread. This UI availability would not make server admission earlier: the send RPC
+still awaits preparation and dispatch policy before returning its custody receipt.
+
 ## Verification and delivery boundary
 
 The implementation builder commits only its isolated core branch. The controller
