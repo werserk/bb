@@ -120,8 +120,16 @@ Native popup bodies reuse the existing rooted file routes, limits and dot assets
 Caller-scoped bodies use `ScopedArtifactBody`: a typed workspace/storage descriptor
 or validated absolute host root creates the existing lease with `artifact-v1`.
 The response must acknowledge that policy before any URL is consumed. Text bodies,
-images, PDF and relative assets use lease bytes only. Retry renews the same scope;
-project/listing re-admission on Retry remains pending the Library retry contract.
+images, PDF and relative assets use lease bytes only. Each content load, refresh and nested activation re-admits its exact candidate
+through an ephemeral callback before lease creation. `artifact-admission.ts` owns
+the 10,000 ms admission deadline and races late/uncancellable callbacks; it never
+claims to cancel underlying plugin RPC work. `modal-host.ts` binds this custody
+to the existing modal token, retires it on queued replacement/close/Back/unbind
+or caller abort, and passes the token through private core context. Missing scoped
+custody is stale history; native Forward remains unchanged. No callback/signal or
+new handle is serialized. Query generations fence stale reads; PDF Retry renews
+admission and lease as well. Semantic component props and public modal props are
+unchanged.
 
 The server forwards `artifactPolicy` on every chunk including metadata. The daemon
 checks requested and resolved names, lexical identity, post-open containment and

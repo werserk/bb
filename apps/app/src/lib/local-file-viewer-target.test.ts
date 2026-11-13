@@ -36,3 +36,22 @@ describe("resolveHomeThread", () => {
     expect(resolveHomeThread(value)).toBeNull();
   });
 });
+
+it("parses JSON scope without weakening the separate imperative validator", () => {
+  const scoped = {
+    ...workspace,
+    path: "report.md",
+    experimental_artifact: { version: 1, readRoot: "" },
+  };
+  expect(parseLocalFileViewerTarget(scoped)).toEqual(scoped);
+  expect(
+    parseLocalFileViewerTarget({
+      ...scoped,
+      experimental_artifact: {
+        ...scoped.experimental_artifact,
+        revalidate: async () => true,
+        lifetime: new AbortController().signal,
+      },
+    }),
+  ).toBeNull();
+});

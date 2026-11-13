@@ -1742,7 +1742,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Use bb's own chat, prompt box, and pickers inside plugin pages. With this, a plugin can:",
         bullets: [
           "Embed a thread, a new-thread prompt box, or a textarea with editable voice input",
-          "Open a restrictive artifact popup with imperative experimental_artifact {version:1,readRoot}; roots are relative for workspace/storage and absolute for host. False retains safe fallback; never retry by dropping scope. Ordinary native/semantic document links share classification without acquiring a lease.",
+          "Open a restrictive artifact popup with imperative experimental_artifact {version:1,readRoot,revalidate,lifetime}; callback and AbortSignal are required in-process custody, never JSON. Core races admission against its 10,000ms deadline before every content load/Retry; missing lifetime or stale history refuses without a lease. Roots are relative for workspace/storage and absolute for host. False retains safe fallback; never retry by dropping scope. Ordinary native/semantic document links share classification without acquiring a lease.",
           "Render Markdown, code, diffs, and file links, and copy text and save files, the way bb does",
           "Open app links with device approval, remember allowed apps, and revoke approvals in Settings",
           "Add or override app icons while matching bb's styling",

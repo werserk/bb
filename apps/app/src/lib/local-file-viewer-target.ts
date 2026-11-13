@@ -1,4 +1,5 @@
-import { normalizeExperimentalFileOpenOptions } from "@/lib/live-file-navigation";
+import { normalizeExperimentalLiveFileTarget } from "@/lib/live-file-navigation";
+import { normalizeExperimentalArtifactScope } from "@get-bb/plugin-sdk/internal/file-navigation-validation";
 import { z } from "zod";
 import { isRawThreadId } from "@bb/domain";
 
@@ -58,28 +59,22 @@ export function parseLocalFileViewerTarget(
   const result = targetSchema.safeParse(value);
   if (!result.success) return null;
   const target = result.data;
-  if (target.kind === "host" && normalizeExperimentalFileOpenOptions({ target: { kind: "host", hostId: target.hostId, path: target.path }, location: null }) === null) return null;
+  if (
+    target.kind === "host" &&
+    normalizeExperimentalLiveFileTarget({
+      kind: "host",
+      hostId: target.hostId,
+      path: target.path,
+    }) === null
+  )
+    return null;
   if (target.experimental_artifact) {
-    const file =
-      target.kind === "workspace"
-        ? {
-            kind: target.kind,
-            environmentId: target.environmentId,
-            path: target.relativePath,
-          }
-        : target.kind === "host"
-          ? { kind: target.kind, hostId: target.hostId, path: target.path }
-          : {
-              kind: target.kind,
-              threadId: target.threadId,
-              path: target.relativePath,
-            };
     if (
-      normalizeExperimentalFileOpenOptions({
-        target: file,
-        location: null,
-        experimental_artifact: target.experimental_artifact,
-      }) === null
+      normalizeExperimentalArtifactScope(
+        toArtifactFileTarget(target),
+        null,
+        target.experimental_artifact,
+      ) === null
     )
       return null;
   }
@@ -89,4 +84,17 @@ export function parseLocalFileViewerTarget(
 export function resolveHomeThread(value: unknown): string | null {
   const target = parseLocalFileViewerTarget(value);
   return target?.kind === "thread-storage" ? target.threadId : null;
+}
+
+export function toArtifactFileTarget(target: LocalFileViewerTarget) {
+  const path = target.kind === "host" ? target.path : target.relativePath;
+  return target.kind === "host"
+    ? { kind: "host" as const, hostId: target.hostId, path }
+    : target.kind === "workspace"
+      ? {
+          kind: "workspace" as const,
+          environmentId: target.environmentId,
+          path,
+        }
+      : { kind: "thread-storage" as const, threadId: target.threadId, path };
 }

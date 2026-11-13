@@ -1768,6 +1768,48 @@ describe("renderSlot", () => {
     ]);
   });
 
+  it("passes imperative admission identity through the harness without serializing it", () => {
+    const lifetime = new AbortController().signal;
+    const revalidate = vi.fn(async () => true);
+    const intent = {
+      target: {
+        kind: "workspace" as const,
+        environmentId: "env_42",
+        path: "report.md",
+      },
+      location: null,
+      experimental_artifact: {
+        version: 1 as const,
+        readRoot: "",
+        revalidate,
+        lifetime,
+      },
+    };
+    const open = vi.fn(
+      (_intent: import("../../app-contract.js").ExperimentalFileOpenOptions) =>
+        true,
+    );
+    function Probe() {
+      const nav = useBbNavigate();
+      return (
+        <button onClick={() => nav.experimental_openFilePreview(intent)}>
+          Scoped open
+        </button>
+      );
+    }
+    const slot = renderSlot(
+      { component: Probe },
+      {},
+      { openFilePreview: open },
+    );
+    fireEvent.click(slot.getByRole("button", { name: "Scoped open" }));
+    expect(open).toHaveBeenCalledWith(intent);
+    const forwarded = open.mock.calls[0]![0] as typeof intent;
+    expect(forwarded.experimental_artifact.revalidate).toBe(revalidate);
+    expect(forwarded.experimental_artifact.lifetime).toBe(lifetime);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
   it("records panel calls and retains target state until the owner clears it", () => {
     const slot = renderSlot(
       { component: FixedTabProbe },

@@ -17,6 +17,8 @@ import {
 import { usePluginSlots, type ExperimentalModalSlot } from "@/lib/plugin-slots";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { ModalBodyBoundary, ModalBodyError } from "./ModalBodyError";
+import { hasLiveArtifactAdmission } from "@/lib/artifact-admission";
+import { CoreModalTokenContext } from "@/lib/core-modal-context";
 import { ModalFrame } from "./ModalFrame";
 
 function findPluginModal(
@@ -58,7 +60,16 @@ export function ModalHost() {
   const inHistory = readModalFromState(window.history.state);
   const agrees = located !== null && inHistory?.token === located.token;
   const known = agrees && isKnownModalToken(located.token);
-  const registered = known && isRegistered(located, modals);
+  const scoped =
+    located?.kind === "core" &&
+    located.modalId === "core/local-file-viewer" &&
+    located.params !== null &&
+    typeof located.params === "object" &&
+    "experimental_artifact" in located.params;
+  const registered =
+    known &&
+    isRegistered(located, modals) &&
+    (!scoped || hasLiveArtifactAdmission(located.token));
   const visible =
     registered && !isDismissingModal(located.token) ? located : null;
   const stale = agrees && !registered;
@@ -99,7 +110,9 @@ export function ModalHost() {
             key={`${visible.token}/${attempt}`}
             fallback={fallback}
           >
-            {createElement(component, props)}
+            <CoreModalTokenContext.Provider value={visible.token}>
+              {createElement(component, props)}
+            </CoreModalTokenContext.Provider>
           </ModalBodyBoundary>
         );
     } else {

@@ -9,6 +9,7 @@ type PdfState =
 
 interface PdfViewerFrameProps {
   reloadKey?: string | number;
+  onRetry?: () => void;
   title: string;
   url: string;
 }
@@ -33,7 +34,12 @@ async function loadPdfBlob(url: string, signal: AbortSignal): Promise<Blob> {
   });
 }
 
-export function PdfViewerFrame({ reloadKey, title, url }: PdfViewerFrameProps) {
+export function PdfViewerFrame({
+  reloadKey,
+  title,
+  url,
+  onRetry,
+}: PdfViewerFrameProps) {
   const [reloadNonce, setReloadNonce] = useState(0);
   const requestKey = JSON.stringify([url, reloadKey ?? null, reloadNonce]);
   const [loaded, setLoaded] = useState<{
@@ -79,7 +85,9 @@ export function PdfViewerFrame({ reloadKey, title, url }: PdfViewerFrameProps) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setReloadNonce((current) => current + 1)}
+            onClick={
+              onRetry ?? (() => setReloadNonce((current) => current + 1))
+            }
           >
             Retry
           </Button>

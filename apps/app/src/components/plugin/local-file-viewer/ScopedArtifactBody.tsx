@@ -1,3 +1,9 @@
+import { useState } from "react";
+import { useCoreModalToken } from "@/lib/core-modal-context";
+import {
+  withArtifactAdmission,
+  getArtifactAdmissionIntent,
+} from "@/lib/artifact-admission";
 import { Button } from "@bb/shared-ui/button";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -8,48 +14,73 @@ import { buildMarkdownFileImageRouting } from "@/components/ui/markdown-file-ima
 import { sdk } from "@/lib/sdk";
 import { fetchWithAppSurface } from "@/lib/app-surface";
 import { openArtifactPopup } from "@/lib/artifact-activation";
-import type { LocalFileViewerTarget } from "@/lib/local-file-viewer-target";
+import {
+  toArtifactFileTarget,
+  type LocalFileViewerTarget,
+} from "@/lib/local-file-viewer-target";
 import { PdfViewerFrame, isPdfPath } from "./PdfViewerFrame";
 
 export async function readScopedArtifact(
   target: LocalFileViewerTarget,
   signal: AbortSignal,
+  token: string,
 ) {
-  const root = target.experimental_artifact!.readRoot;
-  const lease = await sdk.files.createPreview(
-    target.kind === "host"
-      ? { hostId: target.hostId, rootPath: root, policy: "artifact-v1", signal }
-      : {
-          target:
-            target.kind === "workspace"
-              ? { kind: "workspace", environmentId: target.environmentId, root }
-              : { kind: "thread-storage", threadId: target.threadId, root },
-          policy: "artifact-v1",
-          signal,
-        },
+  return withArtifactAdmission(
+    token,
+    target,
+    signal,
+    async (signal, assertActive) => {
+      const root = target.experimental_artifact!.readRoot;
+      const lease = await sdk.files.createPreview(
+        target.kind === "host"
+          ? {
+              hostId: target.hostId,
+              rootPath: root,
+              policy: "artifact-v1",
+              signal,
+            }
+          : {
+              target:
+                target.kind === "workspace"
+                  ? {
+                      kind: "workspace",
+                      environmentId: target.environmentId,
+                      root,
+                    }
+                  : { kind: "thread-storage", threadId: target.threadId, root },
+              policy: "artifact-v1",
+              signal,
+            },
+      );
+      assertActive();
+      if (lease.policy !== "artifact-v1")
+        throw new Error("Restricted artifact preview unavailable");
+      const candidatePath = toArtifactFileTarget(target).path;
+      const relative =
+        root === ""
+          ? candidatePath
+          : candidatePath
+              .replace(/\\/gu, "/")
+              .slice(root.replace(/\\/gu, "/").replace(/\/+$/u, "").length + 1);
+      if (
+        !relative ||
+        relative
+          .split("/")
+          .some((segment) => segment === ".." || segment === ".")
+      )
+        throw new Error("Artifact outside its read root");
+      const url = `${lease.baseUrl}/${relative.split("/").map(encodeURIComponent).join("/")}`;
+      const response = await fetchWithAppSurface(url, { signal });
+      assertActive();
+      if (!response.ok)
+        throw new Error(`Artifact unavailable (${response.status})`);
+      const text = /\.(md|markdown|html?)$/iu.test(target.path)
+        ? await response.text()
+        : null;
+      if (text === null) await response.body?.cancel();
+      return { url, text, lease };
+    },
   );
-  if (lease.policy !== "artifact-v1")
-    throw new Error("Restricted artifact preview unavailable");
-  const relative =
-    root === ""
-      ? target.relativePath
-      : target.relativePath
-          .replace(/\\/gu, "/")
-          .slice(root.replace(/\\/gu, "/").replace(/\/+$/u, "").length + 1);
-  if (
-    !relative ||
-    relative.split("/").some((segment) => segment === ".." || segment === ".")
-  )
-    throw new Error("Artifact outside its read root");
-  const url = `${lease.baseUrl}/${relative.split("/").map(encodeURIComponent).join("/")}`;
-  const response = await fetchWithAppSurface(url, { signal });
-  if (!response.ok)
-    throw new Error(`Artifact unavailable (${response.status})`);
-  const text = /\.(md|markdown|html?)$/iu.test(target.path)
-    ? await response.text()
-    : null;
-  if (text === null) await response.body?.cancel();
-  return { url, text, lease };
 }
 
 export function ScopedArtifactBody({
@@ -57,11 +88,17 @@ export function ScopedArtifactBody({
 }: {
   target: LocalFileViewerTarget;
 }) {
+  const token = useCoreModalToken() ?? "";
+  const [attempt, setAttempt] = useState(0);
+  const refresh = () => setAttempt((value) => value + 1);
   const query = useQuery({
-    queryKey: ["artifact-v1", target],
-    queryFn: ({ signal }) => readScopedArtifact(target, signal),
+    queryKey: ["artifact-v1", token, attempt, target],
+    queryFn: ({ signal }) => readScopedArtifact(target, signal, token),
     retry: false,
     staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const data = query.data;
   const download = data ? (
@@ -71,11 +108,24 @@ export function ScopedArtifactBody({
       </a>
     </Button>
   ) : null;
+  const actions = (
+    <div className="flex items-center gap-2">
+      {download}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={refresh}
+        disabled={query.isFetching}
+      >
+        {query.error ? "Retry" : "Refresh file"}
+      </Button>
+    </div>
+  );
   if (data && isPdfPath(target.path))
     return (
       <>
-        {download}
-        <PdfViewerFrame title={target.path} url={data.url} />
+        {actions}
+        <PdfViewerFrame title={target.path} url={data.url} onRetry={refresh} />
       </>
     );
   const file = {
@@ -121,15 +171,16 @@ export function ScopedArtifactBody({
     routing.localImage.absolutePaths = { kind: "contained", rootPath: root };
   return (
     <>
-      {download}
+      {actions}
       <FilePreview
         state={state}
         path={target.path}
         headerMode="none"
-        onRefresh={() => void query.refetch()}
+        onRefresh={refresh}
         markdownLinkRouting={{
           ...routing,
-          fallbackUrlTransform: (value, key) => key === "href" && /^https?:\/\//iu.test(value) ? value : "",
+          fallbackUrlTransform: (value, key) =>
+            key === "href" && /^https?:\/\//iu.test(value) ? value : "",
           localFile: {
             absoluteLinks: { kind: "contained", rootPath: root },
             relativeLinks: routing?.localImage?.relativePaths,
@@ -153,11 +204,14 @@ export function ScopedArtifactBody({
                         threadId: target.threadId,
                         path,
                       };
-              return openArtifactPopup({
+              const admission = getArtifactAdmissionIntent(token, target);
+              if (!admission) return true;
+              openArtifactPopup({
                 target: next,
                 location: null,
-                experimental_artifact: target.experimental_artifact,
+                experimental_artifact: admission,
               });
+              return true;
             },
           },
         }}
