@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessageInTransaction,
@@ -160,7 +161,20 @@ export function recordQueuedMessageWait(
     return null;
   }
   const entry = toThreadQueuedMessage(row);
-  emitPluginMessageQueued(entry);
+  const changed =
+    claimed.length === 0 ||
+    claimed.some(
+      (claim) =>
+        claim.beforeClaim.state !== row.state ||
+        claim.beforeClaim.sendAt !== row.sendAt ||
+        !isDeepStrictEqual(
+          claim.beforeClaim.waitingOn === null
+            ? null
+            : JSON.parse(claim.beforeClaim.waitingOn),
+          row.waitingOn === null ? null : JSON.parse(row.waitingOn),
+        ),
+    );
+  if (changed) emitPluginMessageQueued(entry);
   deps.hub.notifyThread(args.thread.id, ["queue-changed"]);
   return entry;
 }

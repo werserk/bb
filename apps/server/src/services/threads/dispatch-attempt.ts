@@ -15,7 +15,7 @@ import {
   getThread,
   isThreadQueueAutoSendPaused,
   listRunningThreads,
-  listQueuedThreadMessages,
+  hasOrdinaryQueuedThreadMessages,
   type ClaimedQueuedThreadMessageRow,
   type RunningThreadRow,
 } from "@bb/db";
@@ -455,9 +455,7 @@ async function runDispatchAttempt(
 
     if (
       payload.serviceTurn &&
-      listQueuedThreadMessages(deps.db, thread.id).some(
-        (row) => row.serviceTurn === null,
-      )
+      hasOrdinaryQueuedThreadMessages(deps.db, thread.id)
     ) {
       continued.outcome = waitOn({ kind: "thread-busy" }, null);
       return;

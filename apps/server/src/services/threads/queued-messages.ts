@@ -2,6 +2,7 @@ import { classifyLocalQuestionAnswer } from "@bb/db";
 import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
   getLatestThreadSequence,
+  hasOrdinaryQueuedThreadMessages,
   getQueuedQuestionResponseDeferral,
   QuestionResponseNotDeliverableError,
   setQueuedThreadMessageFailureReason,
@@ -161,6 +162,11 @@ export function createAutomaticQueuedMessageGroupEligibility(
   const activeTurnId = getActiveTurnId(deps, args.thread.id);
   return (group) =>
     group.every((member) => {
+      if (
+        member.serviceTurn !== null &&
+        hasOrdinaryQueuedThreadMessages(deps.db, args.thread.id)
+      )
+        return false;
       if (isQueuedMessageFailedState(member.state) && !args.retryingFailure)
         return false;
       const waitingOn = parseStoredQueuedThreadMessageWaitingOn(member);

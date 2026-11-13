@@ -1,3 +1,4 @@
+import { requestQueuedMessageDispatch } from "../../services/threads/queued-message-dispatch.js";
 import { PLUGIN_RPC_CALLER_HEADER } from "../../services/plugins/plugin-rpc-caller.js";
 import { refreshProviderRetirement } from "../../services/environments/environment-engine.js";
 import {
@@ -423,6 +424,10 @@ export function registerThreadActionRoutes(
       throw new ApiError(404, "invalid_request", "Queued message not found");
     }
     emitPluginMessageCancelled(toThreadQueuedMessage(queuedMessage));
+    requestQueuedMessageDispatch(deps, {
+      kind: "thread-ready",
+      threadId: queuedMessage.threadId,
+    });
     return context.json({ ok: true });
   });
 

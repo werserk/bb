@@ -117,6 +117,7 @@ export interface ClaimedQueuedThreadMessageRow extends QueuedThreadMessageRow {
   claimedAt: number;
   claimToken: string;
   state: "claimed";
+  beforeClaim: Pick<QueuedThreadMessageRow, "state" | "waitingOn" | "sendAt">;
 }
 
 type QueuedMessageStateColumns = Pick<
@@ -539,6 +540,7 @@ function isQueuedThreadMessageGroupEditHeld(
 
 function requireClaimedQueuedThreadMessage(
   row: QueuedThreadMessageRow | null,
+  beforeClaim: QueuedThreadMessageRow,
 ): ClaimedQueuedThreadMessageRow | null {
   if (
     !row ||
@@ -553,6 +555,11 @@ function requireClaimedQueuedThreadMessage(
     claimedAt: row.claimedAt,
     claimToken: row.claimToken,
     state: row.state,
+    beforeClaim: {
+      state: beforeClaim.state,
+      waitingOn: beforeClaim.waitingOn,
+      sendAt: beforeClaim.sendAt,
+    },
   };
 }
 
@@ -1128,6 +1135,24 @@ function notOrdinaryTurnEndQueuedThreadMessage() {
   );
 }
 
+function ordinaryQueuedMessagesForThread(
+  db: DbQueryConnection,
+  threadId: string | typeof threads.id,
+) {
+  const ordinary = alias(queuedThreadMessages, "ordinary_queue_blocker");
+  return db
+    .select({ id: ordinary.id })
+    .from(ordinary)
+    .where(and(eq(ordinary.threadId, threadId), isNull(ordinary.serviceTurn)));
+}
+
+export function hasOrdinaryQueuedThreadMessages(
+  db: DbQueryConnection,
+  threadId: string,
+): boolean {
+  return ordinaryQueuedMessagesForThread(db, threadId).limit(1).get() !== undefined;
+}
+
 /**
  * Threads a drain could move right now.
  *
@@ -1162,6 +1187,10 @@ export function listIdleThreadsWithQueuedMessages(
         // candidate, and listing it would re-run the whole send pipeline
         // every sweep tick for a row that cannot move.
         drainableQueuedThreadMessage(),
+        or(
+          isNull(queuedThreadMessages.serviceTurn),
+          notExists(ordinaryQueuedMessagesForThread(db, threads.id)),
+        ),
       ),
     )
     .groupBy(threads.id)
@@ -1185,6 +1214,7 @@ function claimQueuedThreadMessagesInTransaction(
         row,
         transition: { event: "dispatch.claimed", claimToken },
       }),
+      row,
     );
     if (!claimed) return null;
     claimedRows.push(claimed);

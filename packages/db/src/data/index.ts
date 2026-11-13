@@ -478,6 +478,7 @@ export {
   isOrdinaryTurnEndQueuedMessage,
   isThreadQueueAutoSendPaused,
   listDueScheduledQueuedThreadMessages,
+  hasOrdinaryQueuedThreadMessages,
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessageCountsByThreadIds,
   listQueuedThreadMessagePluginWaitRefs,

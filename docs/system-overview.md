@@ -47,7 +47,14 @@ losing the new readiness signal. Queue claims and dispatch admission remain the
 authority for exactly-once delivery, manual-stop pauses and plugin waits.
 Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
-signals. This introduces no persisted or public contract.
+signals. Automatic service drains and idle discovery share the admission rule
+that any ordinary queued row takes priority, including an exhausted failure;
+blocked service rows remain untouched until that blocker leaves. Native queue
+removal requests a readiness wake immediately. A claim carries its pre-claim
+public wait facts only in memory, so requeueing to the same state, wait and
+schedule does not emit `message.queued`; creation and changed waits still do.
+This prevents bookkeeping retries from driving project-state rebuilds without
+changing message priority, queue storage or public contracts.
 
 
 
