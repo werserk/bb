@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,6 +42,7 @@ type Fixture = {
   bytes: Uint8Array<ArrayBuffer>;
   mime: string;
   declaredSize?: number;
+  status?: number;
 };
 const fixtures = new Map<string, Fixture>();
 const clients: QueryClient[] = [];
@@ -124,7 +131,7 @@ beforeEach(() => {
         ? fixture.bytes.slice(0, FILE_PREVIEW_SAMPLE_BYTES)
         : fixture.bytes;
       return new Response(bytes, {
-        status: range ? 206 : 200,
+        status: fixture.status ?? (range ? 206 : 200),
         headers: {
           "content-type": fixture.mime,
           ...(range
@@ -255,3 +262,57 @@ it("retains thread host-files for absolute dot-assets inside a native storage po
   );
   expect(requests.map(({ path }) => path)).toEqual([target.route, assetRoute]);
 });
+
+it.each([false, true])(
+  "loads native host PDF bytes through the host route (retry=%s)",
+  async (retry) => {
+    const route = `${prefix}/hosts/host_native/files/host/My%20Report.PDF`;
+    const blob = vi.fn(() => "blob:native-host-pdf");
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = blob;
+        static revokeObjectURL = revoke;
+      },
+    );
+    fixtures.set(route, {
+      bytes: encoder.encode("%PDF-1.4\nNative PDF"),
+      mime: "application/pdf",
+      ...(retry ? { status: 503 } : {}),
+    });
+    const view = show({
+      kind: "host",
+      hostId: "host_native",
+      path: "/host/My Report.PDF",
+      relativePath: "/host/My Report.PDF",
+      lineRange: null,
+    });
+    if (retry) {
+      expect((await screen.findByRole("alert")).textContent).toContain("503");
+      expect(blob).not.toHaveBeenCalled();
+      fixtures.get(route)!.status = 200;
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    }
+    expect(
+      (await screen.findByTitle("My Report.PDF")).getAttribute("src"),
+    ).toBe("blob:native-host-pdf");
+    expect(blob).toHaveBeenCalledTimes(1);
+    expect((blob.mock.calls[0] as unknown as [Blob])[0].type).toBe(
+      "application/pdf",
+    );
+    expect(requests).toEqual(
+      Array.from({ length: retry ? 2 : 1 }, () => ({
+        path: route,
+        method: "GET",
+        range: null,
+      })),
+    );
+    expect(screen.queryByText("Native owner chat")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open thread" })).toBeNull();
+    for (const link of screen.getAllByRole("link", { name: "Download" }))
+      expect(link.getAttribute("href")).toBe(route);
+    view.unmount();
+    expect(revoke).toHaveBeenCalledWith("blob:native-host-pdf");
+  },
+);

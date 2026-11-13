@@ -82,7 +82,12 @@ export function buildMarkdownDocumentLinkRouting({
                   endLine: link.lineRange.endLineNumber,
                 },
         };
-        return (link.openTargetId === null && openArtifactPopup(intent)) || openFilePreview(intent);
+        return (
+          (link.ordinaryActivation === true &&
+            link.openTargetId === null &&
+            openArtifactPopup(intent)) ||
+          openFilePreview(intent)
+        );
       },
     },
   };

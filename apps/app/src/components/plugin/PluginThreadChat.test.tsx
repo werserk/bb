@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 
 import { LazyPluginThreadChat } from "./LazyPluginThreadChat";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { MarkdownPreview } from "@/components/ui/markdown-preview";
+import type { MarkdownPreviewLocalFileLinkHandler } from "@/components/ui/markdown-local-file-link";
 import { MemoryRouter } from "react-router-dom";
 import {
   beforeAll,
@@ -21,7 +29,22 @@ import { PluginSlotMount } from "./PluginSlotMount";
 beforeAll(() => LazyPluginThreadChat.preload());
 
 const mocks = vi.hoisted(() => ({
+  nativeContent: null as string | null,
+  modal: vi.fn(),
   threadScreenProps: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("@/lib/modal-host", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/modal-host")>()),
+  openCoreModal: mocks.modal,
+}));
+vi.mock("@/hooks/queries/thread-panel-queries", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/hooks/queries/thread-panel-queries")
+  >()),
+  useThreadStorageLocation: (id: string) => ({
+    data: { storageRootPath: `/home/me/.bb/thread-storage/${id}` },
+  }),
 }));
 
 vi.mock("@/lib/sdk", () => ({
@@ -55,7 +78,25 @@ vi.mock("@/hooks/useHostDaemon", () => ({
 vi.mock("@/views/thread-detail/ThreadScreen", () => ({
   ThreadScreen: (props: Record<string, unknown>) => {
     mocks.threadScreenProps.push(props);
-    return <div data-testid="thread-screen" />;
+    return (
+      <div data-testid="thread-screen">
+        {mocks.nativeContent === null ? null : (
+          <MarkdownPreview
+            content={mocks.nativeContent}
+            linkRouting={{
+              localFile: {
+                absoluteLinks: { kind: "trusted-host" },
+                onOpenLink: (
+                  props.timelineHost as {
+                    onOpenLocalFileLink: MarkdownPreviewLocalFileLinkHandler;
+                  }
+                ).onOpenLocalFileLink,
+              },
+            }}
+          />
+        )}
+      </div>
+    );
   },
 }));
 
@@ -109,11 +150,82 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  mocks.nativeContent = null;
   mocks.threadScreenProps = [];
   vi.mocked(sdk.threads.get).mockResolvedValue(THREAD_FIXTURE as never);
 });
 
 describe("PluginThreadChat", () => {
+  it.each([false, true])(
+    "preserves actual embedded ThreadChat activation and editor fallback (same environment=%s)",
+    async (same) => {
+      const path = "/home/me/.bb/thread-storage/thr_demo/report.md";
+      mocks.nativeContent = `[report](${path}) [editor](vscode://file${path}:7)`;
+      const onOpenLocalFileLink = vi.fn(() => true);
+      const { wrapper: Wrapper } = createQueryClientTestHarness();
+      render(
+        <Wrapper>
+          <MemoryRouter>
+            <ThreadTimelineNavigationProvider
+              environmentId={same ? null : "env_outer"}
+              workspaceRootPath="/outer"
+              onOpenLink={() => true}
+              onOpenLocalFileLink={onOpenLocalFileLink}
+              resolveMentionLink={() => null}
+            >
+              <DemoPluginPage threadId="thr_demo" />
+            </ThreadTimelineNavigationProvider>
+          </MemoryRouter>
+        </Wrapper>,
+      );
+      const link = await screen.findByRole("link", { name: "report" });
+      expect(fireEvent.click(link)).toBe(false);
+      expect(mocks.modal.mock.calls[0]![1].params).toMatchObject({
+        kind: "thread-storage",
+        threadId: "thr_demo",
+        relativePath: "report.md",
+      });
+      expect(onOpenLocalFileLink).not.toHaveBeenCalled();
+      mocks.modal.mockClear();
+      fireEvent.click(link, { metaKey: true });
+      if (same) {
+        expect(mocks.modal).not.toHaveBeenCalled();
+        expect(onOpenLocalFileLink).toHaveBeenLastCalledWith({
+          path,
+          lineRange: null,
+          openTargetId: null,
+          ordinaryActivation: false,
+        });
+      } else {
+        expect(mocks.modal.mock.calls[0]![1].params).toMatchObject({
+          path,
+          threadId: "thr_demo",
+        });
+        expect(onOpenLocalFileLink).not.toHaveBeenCalled();
+      }
+      mocks.modal.mockClear();
+      expect(
+        fireEvent.click(screen.getByRole("link", { name: "editor" })),
+      ).toBe(false);
+      if (same) {
+        expect(mocks.modal).not.toHaveBeenCalled();
+        expect(onOpenLocalFileLink).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            path,
+            openTargetId: "vscode",
+            lineRange: { startLineNumber: 7, endLineNumber: 7 },
+          }),
+        );
+      } else {
+        expect(mocks.modal.mock.calls[0]![1].params).toMatchObject({
+          path,
+          lineRange: { startLineNumber: 7, endLineNumber: 7 },
+        });
+        expect(onOpenLocalFileLink).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("gives a plugin page a working query client and sdk-backed thread context", async () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
     render(

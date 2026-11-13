@@ -9,6 +9,7 @@ import {
 import type { WorkspaceOpenTargetId } from "@bb/host-daemon-contract";
 
 export interface MarkdownPreviewLocalFileLink {
+  ordinaryActivation?: boolean;
   lineRange: FilePreviewLineRange | null;
   openTargetId: WorkspaceOpenTargetId | null;
   path: string;

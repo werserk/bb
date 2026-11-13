@@ -1269,7 +1269,6 @@ function ThreadDetailViewInternal(
         return true;
       }
 
-      if (!options?.viewer && resolution.request.lineRange === null && environment?.hostId && openArtifactPopup({ target: { kind: "host", hostId: environment.hostId, path: resolution.request.path }, location: null })) return true;
       openHostFile(
         {
           lineRange: resolution.request.lineRange,
@@ -1279,34 +1278,70 @@ function ThreadDetailViewInternal(
       );
       return true;
     },
-    [environment?.hostId, openHostFile, openPathInFileTarget, openStorageFile, openWorkspaceFile],
+    [openHostFile, openPathInFileTarget, openStorageFile, openWorkspaceFile],
   );
   const handleOpenTimelineLocalFileLink = useCallback(
     (
       link: ThreadTimelineLocalFileLink,
       options?: ThreadSecondaryPanelFileOpenOptions,
     ) => {
-      if (!options?.viewer && link.openTargetId === null && link.lineRange === null) {
-        const resolved = resolveEmbeddedLocalFileTarget({ environmentId: thread?.environmentId ?? null, threadId, threadStorageRootPath, workspaceRootPath: workspacePreviewRootPath, link });
-        if (resolved.kind === "workspace" || resolved.kind === "thread-storage") {
-          const target = resolved.kind === "workspace" ? { kind: resolved.kind, environmentId: resolved.environmentId, path: resolved.relativePath } : { kind: resolved.kind, threadId: resolved.threadId, path: resolved.relativePath };
-          if (openArtifactPopup({ target, location: null })) return true;
-        }
-      }
-      return handleTimelineLocalFileLinkResolution(
-        resolveThreadLocalFileLink({
-          fileOpenTargetIds: fileOpenTargets.map((target) => target.id),
-          hostFileLinksAvailable:
-            thread?.environmentId !== null &&
-            thread?.environmentId !== undefined,
-          link,
+      const resolution = resolveThreadLocalFileLink({
+        fileOpenTargetIds: fileOpenTargets.map((target) => target.id),
+        hostFileLinksAvailable:
+          thread?.environmentId !== null && thread?.environmentId !== undefined,
+        link,
+        threadStorageRootPath,
+        workspaceRootPath: workspacePreviewRootPath,
+      });
+      if (
+        link.ordinaryActivation === true &&
+        !options?.viewer &&
+        link.openTargetId === null &&
+        link.lineRange === null
+      ) {
+        const resolved = resolveEmbeddedLocalFileTarget({
+          environmentId: thread?.environmentId ?? null,
+          threadId,
           threadStorageRootPath,
           workspaceRootPath: workspacePreviewRootPath,
-        }),
-        options,
-      );
+          link,
+        });
+        if (
+          resolved.kind === "workspace" ||
+          resolved.kind === "thread-storage"
+        ) {
+          const target =
+            resolved.kind === "workspace"
+              ? {
+                  kind: resolved.kind,
+                  environmentId: resolved.environmentId,
+                  path: resolved.relativePath,
+                }
+              : {
+                  kind: resolved.kind,
+                  threadId: resolved.threadId,
+                  path: resolved.relativePath,
+                };
+          if (openArtifactPopup({ target, location: null })) return true;
+        } else if (
+          resolution.kind === "open-host-path" &&
+          environment?.hostId &&
+          openArtifactPopup({
+            target: {
+              kind: "host",
+              hostId: environment.hostId,
+              path: resolution.request.path,
+            },
+            location: null,
+          })
+        ) {
+          return true;
+        }
+      }
+      return handleTimelineLocalFileLinkResolution(resolution, options);
     },
     [
+      environment?.hostId,
       fileOpenTargets,
       handleTimelineLocalFileLinkResolution,
       threadId,

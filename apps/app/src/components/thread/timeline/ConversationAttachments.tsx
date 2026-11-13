@@ -1,4 +1,5 @@
 import { isVideoAttachment } from "@/lib/video-attachments";
+import { isOrdinaryFileActivation } from "@/lib/file-activation";
 import { VideoThumbnail } from "@bb/shared-ui/video-thumbnail";
 import { useEffect, useState } from "react";
 import type { TimelineConversationAttachments } from "@bb/server-contract";
@@ -257,8 +258,9 @@ export function ConversationAttachments({
                 key={path}
                 type="button"
                 className={cn(className, "cursor-pointer hover:bg-state-hover")}
-                onClick={() => {
+                onClick={(event) => {
                   onOpenLocalFileLink({
+                    ordinaryActivation: isOrdinaryFileActivation(event),
                     lineRange: null,
                     openTargetId: null,
                     path,

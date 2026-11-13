@@ -454,6 +454,7 @@ describe("MarkdownPreview", () => {
         workspaceLinkRouting.localFile.onOpenLink,
       ).toHaveBeenCalledExactlyOnceWith({
         path,
+        ordinaryActivation: true,
         lineRange:
           line === null ? null : { startLineNumber: line, endLineNumber: line },
         openTargetId: null,
@@ -773,6 +774,7 @@ describe("MarkdownPreview", () => {
           lineRange: null,
           openTargetId: "devin-desktop",
           path: "/Users/me/.bb/artifacts/thr_1/review.diff",
+          ordinaryActivation: true,
         },
       ],
       [
@@ -780,6 +782,7 @@ describe("MarkdownPreview", () => {
           lineRange: { endLineNumber: 12, startLineNumber: 12 },
           openTargetId: "cursor",
           path: "/workspace/My App.ts",
+          ordinaryActivation: true,
         },
       ],
     ]);
@@ -854,9 +857,17 @@ describe("MarkdownPreview", () => {
           lineRange: null,
           openTargetId: "devin-desktop",
           path: "/tmp/review.diff",
+          ordinaryActivation: true,
         },
       ],
-      [{ lineRange: null, openTargetId: "vscode", path: "/tmp/a.ts" }],
+      [
+        {
+          lineRange: null,
+          openTargetId: "vscode",
+          path: "/tmp/a.ts",
+          ordinaryActivation: true,
+        },
+      ],
     ]);
   });
 

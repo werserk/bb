@@ -116,6 +116,14 @@ carry the versioned restrictive artifact option. The existing modal supports
 workspace, actual owning-thread storage and host targets; only storage attaches a
 chat. Fixed-tab and retained-host navigation are unchanged.
 
+Markdown and absolute-path attachment leaves carry ephemeral ordinary-activation
+metadata through the existing message and embedded ThreadChat callbacks. The
+shared `file-activation.ts` predicate preserves modifier, button, Download and
+prevented-event dispatch; absent metadata retains baseline programmatic behavior.
+Explicit editor links retain native editor or embedded viewer fallback. Native
+host PDFs use the existing host content URL and PDF blob frame, without a lease
+or attached chat.
+
 Native popup bodies reuse the existing rooted file routes, limits and dot assets.
 Caller-scoped bodies use `ScopedArtifactBody`: a typed workspace/storage descriptor
 or validated absolute host root creates the existing lease with `artifact-v1`.

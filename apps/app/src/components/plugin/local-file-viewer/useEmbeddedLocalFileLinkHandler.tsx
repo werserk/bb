@@ -52,7 +52,7 @@ export function useEmbeddedLocalFileLinkHandler({
 
   const onOpenLocalFileLink = useCallback<ThreadTimelineLocalFileLinkHandler>(
     (link) => {
-      if (link.openTargetId !== null) return false;
+      if (artifactsOnly && link.openTargetId !== null) return false;
       const resolved = resolveEmbeddedLocalFileTarget({
         environmentId,
         link,
@@ -86,6 +86,8 @@ export function useEmbeddedLocalFileLinkHandler({
           ? null
           : getThreadEntity(queryClient, homeThreadId)?.thread.title;
       if (
+        link.ordinaryActivation === true &&
+        link.openTargetId === null &&
         resolved.lineRange === null &&
         openArtifactPopup({ target, location: null }, title ?? undefined)
       )

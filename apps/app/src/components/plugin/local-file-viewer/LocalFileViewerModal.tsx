@@ -48,6 +48,13 @@ function getDownloadUrl(target: LocalFileViewerTarget): string {
 function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
   if (target.experimental_artifact)
     return <ScopedArtifactBody target={target} />;
+  if (target.kind === "host" && isPdfPath(target.path))
+    return (
+      <PdfViewerFrame
+        title={getFileName(target.path)}
+        url={getDownloadUrl(target)}
+      />
+    );
   if (target.kind === "host")
     return (
       <HostScopedFilePreviewTabContent

@@ -1,4 +1,5 @@
 import { openArtifactPopup } from "@/lib/artifact-activation";
+import { isOrdinaryFileActivation } from "@/lib/file-activation";
 import {
   useCallback,
   useMemo,
@@ -32,20 +33,6 @@ const LazyExperimentalFileLinkMenu = defineSplit<{
   tier: "intent",
 });
 
-function shouldHandleFileClick(
-  event: ReactMouseEvent<HTMLAnchorElement>,
-): boolean {
-  return !(
-    event.defaultPrevented ||
-    event.button !== 0 ||
-    event.altKey ||
-    event.ctrlKey ||
-    event.metaKey ||
-    event.shiftKey ||
-    event.currentTarget.hasAttribute("download")
-  );
-}
-
 export function ExperimentalFileLink({
   target,
   location = null,
@@ -61,7 +48,7 @@ export function ExperimentalFileLink({
   const handleClick = useCallback(
     (event: ReactMouseEvent<HTMLAnchorElement>) => {
       onClick?.(event);
-      if (intent === null || !shouldHandleFileClick(event)) {
+      if (intent === null || !isOrdinaryFileActivation(event)) {
         return;
       }
       event.preventDefault();

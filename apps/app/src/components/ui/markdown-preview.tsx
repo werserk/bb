@@ -1,4 +1,5 @@
 import { parseApplicationUrl } from "@bb/domain/application-url";
+import { isOrdinaryFileActivation } from "@/lib/file-activation";
 import {
   openApplicationUrl,
   useApplicationLinksEnabled,
@@ -714,7 +715,12 @@ function MarkdownAnchor({
       : openTargets.find((target) => target.id === localFileLink.openTargetId);
   const handleAnchorClick = (event: MarkdownAnchorEvent) => {
     if (localFileLink && onOpenLocalFileLink) {
-      if (onOpenLocalFileLink(localFileLink)) {
+      if (
+        onOpenLocalFileLink({
+          ...localFileLink,
+          ordinaryActivation: isOrdinaryFileActivation(event),
+        })
+      ) {
         event.preventDefault();
       }
       return;
