@@ -189,6 +189,7 @@ function createUiPreferences(): UiPreferenceEntries {
     "infoPanel.collapsedSections": uiPreferenceEntry(
       "infoPanel.collapsedSections",
     ),
+    "threadHeader.pinned": uiPreferenceEntry("threadHeader.pinned"),
     "threadContextCard.pinned": uiPreferenceEntry("threadContextCard.pinned"),
   };
 }

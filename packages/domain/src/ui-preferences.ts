@@ -52,6 +52,7 @@ export const UI_PREFERENCE_KEYS = [
   "composer.provider",
   "infoPanel.collapsedSections",
   "threadContextCard.pinned",
+  "threadHeader.pinned",
 ] as const;
 export type UiPreferenceKey = (typeof UI_PREFERENCE_KEYS)[number];
 const uiPreferenceKeySchema = z.enum(UI_PREFERENCE_KEYS);
@@ -155,6 +156,11 @@ export const uiPreferenceDefinitions = {
     uiPreferenceStringSchema,
     "__automatic__",
     "Plugin that draws the composer's input box: a plugin key such as bb--composer/composer, or __automatic__ for the first composer from a plugin you installed, then the bundled Composer plugin. With no composer plugin enabled, no composer is shown.",
+  ),
+  "threadHeader.pinned": defineUiPreference(
+    uiPreferenceStringListSchema.transform((keys) => [...new Set(keys)]),
+    [],
+    "Ordered thread header contribution keys (<pluginId>/<id>, or bb--core/open). Only pinned contributions appear; unknown keys are retained. Pinning appends.",
   ),
   "threadContextCard.pinned": defineUiPreference(
     z.boolean(),

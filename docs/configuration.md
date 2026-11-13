@@ -1470,3 +1470,12 @@ update message. Web browsers control their own handoff and may show a second
 prompt; BB cannot reliably detect missing apps in a browser. Executable web
 schemes, local-file launch schemes, and reserved editor-action schemes remain
 blocked.
+
+### Thread header contributions
+
+`threadHeader.pinned` is a synced UI preference containing ordered contribution
+keys (`<pluginId>/<id>`; workspace Open uses `bb--core/open`). It defaults to `[]`.
+Unknown keys are retained for plugins that return later. Pinning appends; pane
+controls cannot be pinned. Use the thread title menu's Pin to header / Unpin from
+header controls, or `bb settings ui set threadHeader.pinned '["wprojects/threads"]'`.
+The same preference is available through `sdk.system.uiPreferences`.

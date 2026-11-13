@@ -339,3 +339,15 @@ Use `--selected-model <model-id>` to discover its reasoning choices and include 
 - `bb browser import-cookies`
 
 - `bb thread plan [id] --self --json`: canonical plan/history/native interaction IDs; see `bb guide thread-inspection`.
+
+The customization guide documents `threadHeader.pinned` under UI preferences.
+
+- `bb thread plan`
+- `bb thread questions`
+- `bb thread questions answer`
+- `bb thread questions dismiss`
+- `bb thread questions list`
+- `bb thread questions publish`
+- `bb thread questions resolve`
+- `bb thread questions show`
+- `bb thread questions withdraw`

@@ -70,16 +70,12 @@ import { PageShell } from "@/components/ui/page-shell.js";
 import { RouteLoadingSkeleton } from "@/components/ui/route-loading-skeleton";
 import { ThreadTimelineLoadingSkeleton } from "@/components/thread/timeline/ThreadTimelineLoadingSkeleton";
 import { HEADER_ICON_BUTTON_CLASS } from "@/components/layout/AppPageHeader";
-import type {
-  JsonValue,
-  PluginThreadActionsInlineItem,
-} from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@get-bb/plugin-sdk";
 import { ThreadActionsMenu } from "@/components/thread/ThreadActionsMenu";
 import { toThreadActionTarget } from "@/lib/thread-actions/thread-action-target";
 import { Button } from "@bb/shared-ui/button";
 import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { cn } from "@bb/shared-ui/lib/utils";
-import { PluginThreadHeaderActions } from "@/components/plugin/PluginThreadHeaderActions";
 import { ThreadWorkspaceOpenButton } from "@/components/thread/ThreadWorkspaceOpenButton";
 import {
   formatEnvironmentDisplay,
@@ -235,7 +231,6 @@ const EMPTY_PARENT_THREADS: readonly ThreadListEntry[] = [];
 const EMPTY_PROJECT_THREAD_SUBSET_FILTERS =
   {} satisfies ProjectThreadSubsetFilters;
 const EMPTY_TERMINAL_SESSIONS: readonly TerminalSession[] = [];
-const THREAD_HEADER_ACTIONS_GROUP = "0_header";
 const THREAD_DETAIL_SCREEN_PRESENTATION = { kind: "page" } as const;
 
 type OpenFilePreviewHandler = (relativePath: string) => void;
@@ -1616,37 +1611,17 @@ function ThreadDetailViewInternal(
     ? formatWorkspaceCheckoutDisplay({ checkout: workspaceStatus.checkout })
     : undefined;
   const threadTitle = getThreadDisplayTitle(thread);
-  const responsiveWorkspaceActions: PluginThreadActionsInlineItem[] =
+  const workspaceOpenAction =
     workspaceOpenPath && preferredDirectoryTarget
-      ? [
-          preferredDirectoryTarget,
-          ...directoryOpenTargets.filter(
-            (target) => target.id !== preferredDirectoryTarget.id,
-          ),
-        ].map((target) => ({
-          key: `workspace/${target.id}`,
-          group: THREAD_HEADER_ACTIONS_GROUP,
-          action: {
-            icon: "FolderOpen",
-            label: `Open workspace in ${target.label}`,
-            run: async () => {
-              if (target.id === preferredDirectoryTarget.id) {
-                await openPathInPreferredDirectoryTarget({
-                  lineNumber: null,
-                  path: workspaceOpenPath,
-                });
-                return;
-              }
-              await openPathInDirectoryTarget({
-                lineNumber: null,
-                path: workspaceOpenPath,
-                rememberTarget: true,
-                targetId: target.id,
-              });
-            },
-          },
-        }))
-      : [];
+      ? {
+          label: `Open in ${preferredDirectoryTarget.label}`,
+          run: () =>
+            openPathInPreferredDirectoryTarget({
+              lineNumber: null,
+              path: workspaceOpenPath,
+            }),
+        }
+      : undefined;
   const threadActionTarget = toThreadActionTarget(
     thread,
     isThreadOnReusableEnvironment && thread.environmentId !== null
@@ -1677,8 +1652,7 @@ function ThreadDetailViewInternal(
   const timelineHeader = (
     <ThreadDetailHeader
       actionsMenu={({
-        includeResponsiveActions,
-        headerActions,
+        headerContributions,
         requestRename,
         onCloseAutoFocus,
       }) => (
@@ -1708,20 +1682,7 @@ function ThreadDetailViewInternal(
               />
             </Button>
           )}
-          inline={
-            includeResponsiveActions
-              ? [
-                  ...responsiveWorkspaceActions,
-                  ...headerActions.map(
-                    ({ key, action }): PluginThreadActionsInlineItem => ({
-                      key,
-                      group: THREAD_HEADER_ACTIONS_GROUP,
-                      action: { ...action, run: () => action.run() },
-                    }),
-                  ),
-                ]
-              : []
-          }
+          headerContributions={headerContributions}
           requestRename={requestRename}
           onCloseAutoFocus={onCloseAutoFocus}
         />
@@ -1729,16 +1690,11 @@ function ThreadDetailViewInternal(
       isSecondaryPanelOpen={isSecondaryPanelOpen}
       onClosePane={onRequestClose ?? undefined}
       onToggleSecondaryPanel={toggleSecondaryPanel}
-      pluginActions={
-        <PluginThreadHeaderActions
-          threadId={thread.id}
-          projectId={thread.projectId}
-        />
-      }
       thread={threadActionTarget}
       threadTitle={threadTitle}
       contextCardButton={<ThreadContextCardHeaderButton />}
       workspaceOpenButton={workspaceOpenButton}
+      workspaceOpenAction={workspaceOpenAction}
     />
   );
   const threadScreen = (

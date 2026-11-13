@@ -16,7 +16,20 @@ import type {
 } from "@get-bb/plugin-sdk";
 import { COARSE_POINTER_TOOLBAR_ACTION_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { Icon } from "@bb/shared-ui/icon";
-import { SplitButton } from "@/components/ui/split-button.js";
+import { useAtom } from "jotai";
+import { usePluginSlots } from "@/lib/plugin-slots";
+import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
+import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
+import {
+  threadHeaderPinnedAtom,
+  toggleHeaderPin,
+  partitionHeaderContributions,
+  activateHeaderComponent,
+} from "./threadHeaderPreferences";
+import {
+  ThreadHeaderContributionsMenu,
+  type HeaderContribution,
+} from "./ThreadHeaderContributionsMenu";
 import {
   AppPageHeader,
   HEADER_ICON_BUTTON_CLASS,
@@ -65,6 +78,7 @@ const THREAD_HEADER_ACTION_BUTTON_CLASS = cn(
 const NARROW_SPLIT_HEADER_MAX_WIDTH = 560;
 
 export interface ThreadDetailHeaderActionsMenuArgs {
+  headerContributions: ReactNode;
   includeResponsiveActions: boolean;
   headerActions: readonly PluginThreadActionEntry[];
   requestRename: (threadId: string) => void;
@@ -77,10 +91,10 @@ interface ThreadDetailHeaderProps {
   isSecondaryPanelOpen: boolean;
   onClosePane?: () => void;
   onToggleSecondaryPanel: () => void;
-  pluginActions?: ReactNode;
   thread: PluginThreadActionTarget;
   threadTitle: string;
   workspaceOpenButton?: ReactNode;
+  workspaceOpenAction?: { label: string; run: () => void | Promise<unknown> };
 }
 
 export function ThreadDetailHeader({
@@ -88,17 +102,62 @@ export function ThreadDetailHeader({
   isSecondaryPanelOpen,
   onClosePane,
   onToggleSecondaryPanel,
-  pluginActions,
   thread,
   threadTitle,
   workspaceOpenButton,
+  workspaceOpenAction,
   contextCardButton,
 }: ThreadDetailHeaderProps) {
   const isCompactViewport = useIsCompactViewport();
   const isPointerCoarse = usePointerCoarse();
   const threadId = thread.id;
   const headerActions = useThreadHeaderActionEntries(thread);
-  const [primaryAction, ...secondaryActions] = headerActions;
+  const { threadHeaderActions: componentSlots } = usePluginSlots();
+  const plugins = usePluginList({ enabled: true }).data?.plugins ?? [];
+  const [pinnedKeys, setPinnedKeys] = useAtom(threadHeaderPinnedAtom);
+  const componentHosts = useRef(new Map<string, HTMLElement>());
+  const pluginLabel = (pluginId: string, label: string) =>
+    pluginId === "bb--core"
+      ? label
+      : `${label} · ${plugins.find((plugin) => plugin.id === pluginId)?.name ?? pluginId}`;
+  const contributions: HeaderContribution[] = [
+    ...componentSlots.map((slot) => {
+      const key = `${slot.pluginId}/${slot.id}`;
+      return {
+        key,
+        label: pluginLabel(slot.pluginId, slot.title),
+        action: {
+          label: slot.title,
+          icon: "LayoutGrid" as const,
+          run: async () =>
+            activateHeaderComponent(componentHosts.current.get(key)),
+        },
+      };
+    }),
+    ...headerActions.map((entry) => ({
+      ...entry,
+      label: pluginLabel(entry.pluginId, entry.action.label),
+    })),
+    ...(workspaceOpenButton
+      ? [
+          {
+            key: "bb--core/open",
+            label: workspaceOpenAction?.label ?? "Open workspace",
+            action: {
+              label: workspaceOpenAction?.label ?? "Open workspace",
+              icon: "FolderOpen" as const,
+              run: async () => {
+                if (workspaceOpenAction) await workspaceOpenAction.run();
+              },
+            },
+          },
+        ]
+      : []),
+  ];
+  const { pinned, more } = partitionHeaderContributions(
+    contributions,
+    pinnedKeys,
+  );
   const { renameThreadAsync } = useThreadActions();
   const handleRename = useCallback(
     (nextTitle: string) => renameThreadAsync(threadId, nextTitle),
@@ -234,6 +293,15 @@ export function ThreadDetailHeader({
           )}
         >
           {actionsMenu({
+            headerContributions: (
+              <ThreadHeaderContributionsMenu
+                pinned={pinned}
+                more={more}
+                onToggle={(key) =>
+                  setPinnedKeys((previous) => toggleHeaderPin(previous, key))
+                }
+              />
+            ),
             includeResponsiveActions: usesResponsiveActionOverflow,
             headerActions,
             requestRename: requestRenameFromMenu,
@@ -250,43 +318,75 @@ export function ThreadDetailHeader({
         className="flex items-center gap-1"
         data-thread-header-workflow-actions=""
       >
-        {pluginActions}
-        {!usesResponsiveActionOverflow && workspaceOpenButton ? (
-          <span className="inline-flex" data-thread-header-responsive-action="">
-            {workspaceOpenButton}
-          </span>
-        ) : null}
-        {!usesResponsiveActionOverflow && primaryAction ? (
-          <span className="inline-flex" data-thread-header-responsive-action="">
-            {secondaryActions.length > 0 ? (
-              <SplitButton
-                className={THREAD_HEADER_ACTION_BUTTON_CLASS}
-                primaryAction={{
-                  disabled: primaryAction.action.disabled,
-                  label: primaryAction.action.label,
-                  onSelect: () => void primaryAction.action.run(),
-                }}
-                secondaryActions={secondaryActions.map(({ key, action }) => ({
-                  id: key,
-                  disabled: action.disabled,
-                  label: action.label,
-                  onSelect: () => void action.run(),
-                }))}
-              />
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className={THREAD_HEADER_ACTION_BUTTON_CLASS}
-                disabled={primaryAction.action.disabled}
-                onClick={() => void primaryAction.action.run()}
+        {componentSlots.map((slot) => {
+          const key = `${slot.pluginId}/${slot.id}`;
+          const Component = slot.component;
+          const visible =
+            !usesResponsiveActionOverflow && pinnedKeys.includes(key);
+          return (
+            <div
+              key={`${key}/${slot.generation}/${threadId}`}
+              ref={(host) => {
+                if (host) componentHosts.current.set(key, host);
+                else componentHosts.current.delete(key);
+              }}
+              hidden={!visible}
+              style={{
+                display: visible ? "flex" : "none",
+                order: pinned.findIndex((item) => item.key === key),
+              }}
+              className="max-h-7 max-w-64 shrink-0 items-center"
+              data-thread-header-component={key}
+            >
+              <PluginSlotMount
+                pluginId={slot.pluginId}
+                slotKind="threadHeaderAction"
+                slotId={slot.id}
+                instanceId={threadId}
+                crashFallback={null}
               >
-                {primaryAction.action.label}
-              </Button>
-            )}
-          </span>
-        ) : null}
+                <Component
+                  threadId={threadId}
+                  projectId={thread.projectId}
+                  isCompactViewport={isCompactViewport}
+                />
+              </PluginSlotMount>
+            </div>
+          );
+        })}
+        {!usesResponsiveActionOverflow
+          ? pinned.map((item, order) => {
+              if (
+                componentSlots.some(
+                  (slot) => `${slot.pluginId}/${slot.id}` === item.key,
+                )
+              )
+                return null;
+              return (
+                <span
+                  key={item.key}
+                  style={{ order }}
+                  className="inline-flex shrink-0"
+                  data-thread-header-responsive-action=""
+                >
+                  {item.key === "bb--core/open" ? (
+                    workspaceOpenButton
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={THREAD_HEADER_ACTION_BUTTON_CLASS}
+                      disabled={item.action.disabled}
+                      onClick={() => void item.action.run()}
+                    >
+                      {item.action.label}
+                    </Button>
+                  )}
+                </span>
+              );
+            })
+          : null}
       </div>
       <div
         className="ml-1 flex items-center gap-0.5"

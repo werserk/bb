@@ -577,7 +577,7 @@ export function registerSettingsCommands(
   const ui = settings
     .command("ui")
     .description(
-      "Manage server-synced UI preferences such as sidebar layout and navigation",
+      "Manage server-synced UI preferences such as sidebar layout and pinned thread header actions",
     );
   ui.command("list")
     .description("List every UI preference with its value and revision")

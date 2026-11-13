@@ -7,8 +7,15 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ReactNode, Ref } from "react";
+import { useEffect, type ReactNode, type Ref } from "react";
+import { act } from "@testing-library/react";
+import {
+  setPluginSlotRegistrations,
+  resetPluginSlotStoreForTest,
+} from "@/lib/plugin-slots";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getDefaultStore } from "jotai";
+import { threadHeaderPinnedAtom } from "./threadHeaderPreferences";
 import { ThreadDetailHeader } from "./ThreadDetailHeader";
 import { PaneContext, type PaneContextValue } from "./PaneContext";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
@@ -29,6 +36,10 @@ import type {
   PluginThreadActionRegistration,
   PluginThreadActionTarget,
 } from "@get-bb/plugin-sdk";
+
+vi.mock("@/hooks/queries/plugin-settings-queries", () => ({
+  usePluginList: () => ({ data: { plugins: [] } }),
+}));
 
 const mocks = vi.hoisted(() => ({
   renameThreadAsync: vi.fn(),
@@ -169,7 +180,9 @@ const PANE_CONTEXT: PaneContextValue = {
 
 afterEach(() => {
   cleanup();
+  getDefaultStore().set(threadHeaderPinnedAtom, []);
   resetThreadActionRegistryForTest();
+  resetPluginSlotStoreForTest();
   viewportState.isCompactViewport = false;
   viewportState.isPointerCoarse = false;
   mocks.renameThreadAsync.mockReset();
@@ -179,6 +192,53 @@ afterEach(() => {
 });
 
 describe("ThreadDetailHeader", () => {
+  it("keeps hidden component instances mounted across pin and fold", () => {
+    const mounted = vi.fn();
+    const unmounted = vi.fn();
+    function Tasks() {
+      useEffect(() => {
+        mounted();
+        return unmounted;
+      }, []);
+      return <button>Tasks counter</button>;
+    }
+    setPluginSlotRegistrations("wprojects", {
+      homepageSections: [],
+      settingsSections: [],
+      navPanels: [],
+      threadPanelActions: [],
+      sidebarFooterActions: [],
+      fileOpeners: [],
+      messageDirectives: [],
+      threadHeaderActions: [
+        { id: "threads", title: "Tasks", component: Tasks },
+      ],
+    });
+    const header = () => (
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          isSecondaryPanelOpen={false}
+          onToggleSecondaryPanel={vi.fn()}
+          thread={THREAD_TARGET}
+          threadTitle="Calm header"
+        />
+      </PaneContext.Provider>
+    );
+    const view = render(header());
+    expect(screen.queryByRole("button", { name: "Tasks counter" })).toBeNull();
+    expect(mounted).toHaveBeenCalledTimes(1);
+    act(() =>
+      getDefaultStore().set(threadHeaderPinnedAtom, ["wprojects/threads"]),
+    );
+    expect(screen.getByRole("button", { name: "Tasks counter" })).toBeTruthy();
+    viewportState.isCompactViewport = true;
+    view.rerender(header());
+    expect(screen.queryByRole("button", { name: "Tasks counter" })).toBeNull();
+    expect(mounted).toHaveBeenCalledTimes(1);
+    expect(unmounted).not.toHaveBeenCalled();
+  });
+
   it("leaves the open right-panel collapse control to the panel header", () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>
@@ -317,6 +377,10 @@ describe("ThreadDetailHeader", () => {
       y: 0,
       toJSON: () => ({}),
     });
+    getDefaultStore().set(threadHeaderPinnedAtom, [
+      "bb--core/commit",
+      "bb--core/open",
+    ]);
     const splitContext: PaneContextValue = {
       ...PANE_CONTEXT,
       isFocused: true,
@@ -380,6 +444,10 @@ describe("ThreadDetailHeader", () => {
       y: 0,
       toJSON: () => ({}),
     });
+    getDefaultStore().set(threadHeaderPinnedAtom, [
+      "bb--core/commit",
+      "bb--core/open",
+    ]);
     const splitContext: PaneContextValue = {
       ...PANE_CONTEXT,
       isFocused: true,
@@ -423,8 +491,13 @@ describe("ThreadDetailHeader", () => {
     expect(screen.queryByText("menu: Commit")).toBeNull();
   });
 
-  it("keeps each of several header actions independently enabled in one split button", async () => {
+  it("keeps each of several header actions independently enabled in pinned order", async () => {
     const runs = { Ship: vi.fn(), Review: vi.fn(), Deploy: vi.fn() };
+    getDefaultStore().set(threadHeaderPinnedAtom, [
+      "bb--core/Review",
+      "bb--core/Deploy",
+      "bb--core/Ship",
+    ]);
     render(
       <>
         <HeaderActionCollectors
@@ -448,14 +521,12 @@ describe("ThreadDetailHeader", () => {
 
     const ship = await screen.findByRole("button", { name: "Ship" });
     expect(ship.hasAttribute("disabled")).toBe(true);
-    const more = screen.getByRole("button", { name: "More actions" });
-    expect(more.hasAttribute("disabled")).toBe(false);
-    fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
-    const items = screen.getAllByRole("menuitem");
-    expect(items.map((item) => item.textContent)).toEqual(["Review", "Deploy"]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Review" }));
+    expect(
+      screen.getByRole("button", { name: "Review" }).hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(runs.Review).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Deploy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deploy" }));
     expect(runs.Deploy).toHaveBeenCalledTimes(1);
     expect(runs.Ship).not.toHaveBeenCalled();
   });

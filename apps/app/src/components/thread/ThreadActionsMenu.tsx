@@ -132,7 +132,8 @@ export function ThreadActionsMenu({
   side,
   align = "end",
   sideOffset,
-}: PluginThreadActionsMenuProps) {
+  headerContributions,
+}: PluginThreadActionsMenuProps & { headerContributions?: ReactNode }) {
   const isCompactViewport = useIsCompactViewport();
   const { drawerStep, setDrawerStep, handleOpenChange } =
     useDrawerStep(onOpenChange);
@@ -148,6 +149,7 @@ export function ThreadActionsMenu({
         mobileTitle={MENU_LABEL}
         onCloseAutoFocus={onCloseAutoFocus}
       >
+        {drawerStep === null ? headerContributions : null}
         <ThreadActionsMenuItems
           thread={thread}
           inline={inline}

@@ -288,7 +288,7 @@ conflicting plugin defaults stay unbound. Plugin defaults resolve in each app
 window, not in `keyboard list`, so CLI/SDK callers should clear conflicting
 explicit bindings in the same update.
 
-Sidebar preferences
+UI preferences
 
 `bb settings ui` reads and writes server-side sidebar preferences shared by
 every window, device, and the CLI. The same registry stores which thread Info
@@ -305,6 +305,14 @@ bb settings ui reset <key> [--json]
 `null`; it retries once if another writer changed the key. `reset` writes the
 default. The SDK offers `sdk.system.uiPreferences.list()`, `.set()`, and
 `.reset()`.
+
+`threadHeader.pinned` controls which contributions appear in the thread header.
+It defaults to `[]`; use `bb settings ui set threadHeader.pinned '["wprojects/threads"]'`
+to pin Tasks, or include `bb--core/open` to pin workspace Open. Keys are ordered
+`<pluginId>/<id>` values; unknown keys are retained. The thread title menu lists
+In header and More actions, with Pin to header / Unpin from header controls.
+Pane controls always stay visible. Compact and narrow split panes fold pinned
+contributions into In header. SDK clients use the same uiPreferences methods.
 
 The thread list is drawn by `sidebar.threadListProvider`, which defaults to
 `__automatic__`: the first installed thread list plugin other than the bundled
