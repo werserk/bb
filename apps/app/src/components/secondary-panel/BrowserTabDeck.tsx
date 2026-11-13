@@ -213,7 +213,7 @@ export function BrowserTabDeck({
     placement === "pending" ||
     (placement === "check-saved-window" && savedWindowStatus === null)
   ) {
-    return <div className="flex min-h-0 flex-1 bg-sidebar" />;
+    return <div className="flex min-h-0 flex-1 bg-panel" />;
   }
   if (
     placement === "unavailable" ||
@@ -245,7 +245,7 @@ export function BrowserTabDeck({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-sidebar">
+    <div className="flex min-h-0 flex-1 flex-col bg-panel">
       <BrowserTabContent
         key={activeBrowserTab.id}
         tabId={activeBrowserTab.id}
@@ -308,7 +308,7 @@ function BrowserTabElsewhere({
   const canOpenExternally =
     parsedUrl?.protocol === "https:" || parsedUrl?.protocol === "http:";
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-sidebar px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-panel px-6 text-center">
       <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
         <Icon name="Globe" className="size-6" aria-hidden />
       </span>

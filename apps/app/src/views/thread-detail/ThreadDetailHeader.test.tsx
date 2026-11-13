@@ -415,12 +415,12 @@ describe("ThreadDetailHeader", () => {
               workspaceOpenActions={[
                 {
                   id: "code",
-                  label: "Open workspace in VS Code",
+                  label: "Open in VS Code",
                   run: vi.fn(),
                 },
                 {
                   id: "terminal",
-                  label: "Open workspace in Terminal",
+                  label: "Open in Terminal",
                   run: vi.fn(),
                 },
               ]}
@@ -433,11 +433,11 @@ describe("ThreadDetailHeader", () => {
       expect(screen.queryByText("More actions")).toBeNull();
       expect(screen.getByRole("menuitem", { name: "Commit" })).not.toBeNull();
       expect(
-        screen.getByRole("menuitem", { name: "Open workspace in VS Code" }),
+        screen.getByRole("menuitem", { name: "Open in VS Code" }),
       ).not.toBeNull();
       expect(
-        screen.getByRole("menuitem", { name: "Open workspace in Terminal" }),
-      ).not.toBeNull();
+        screen.queryByRole("menuitem", { name: "Open in Terminal" }),
+      ).toBeNull();
       expect(
         screen.queryByRole("button", { name: "Open workspace" }),
       ).toBeNull();
@@ -502,7 +502,7 @@ describe("ThreadDetailHeader", () => {
     expect(screen.getByRole("menuitem", { name: "Commit" })).not.toBeNull();
   });
 
-  it("offers every workspace target in More actions when Open is unpinned", async () => {
+  it("offers one preferred Open row and a target submenu when Open is unpinned", async () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>
         <ThreadDetailHeader
@@ -517,10 +517,10 @@ describe("ThreadDetailHeader", () => {
           threadTitle="Unpinned Open"
           workspaceOpenButton={<button>Open workspace</button>}
           workspaceOpenActions={[
-            { id: "code", label: "Open workspace in VS Code", run: vi.fn() },
+            { id: "code", label: "Open in VS Code", run: vi.fn() },
             {
               id: "terminal",
-              label: "Open workspace in Terminal",
+              label: "Open in Terminal",
               run: vi.fn(),
             },
           ]}
@@ -530,11 +530,11 @@ describe("ThreadDetailHeader", () => {
     expect(await screen.findByText("More actions")).not.toBeNull();
     expect(screen.queryByText("In header")).toBeNull();
     expect(
-      screen.getByRole("menuitem", { name: "Open workspace in VS Code" }),
+      screen.getByRole("menuitem", { name: "Open in VS Code" }),
     ).not.toBeNull();
     expect(
-      screen.getByRole("menuitem", { name: "Open workspace in Terminal" }),
-    ).not.toBeNull();
+      screen.queryByRole("menuitem", { name: "Open in Terminal" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Open workspace" })).toBeNull();
   });
 

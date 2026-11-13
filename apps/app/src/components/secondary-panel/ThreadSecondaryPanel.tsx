@@ -136,7 +136,7 @@ export function getSecondaryPanelChromeStackClassName(
 }
 
 const FRAMED_PANEL_SURFACE_CLASS =
-  "isolate bg-transparent before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:top-[calc(var(--bb-window-title-bar-height)+1px)] before:-z-10 before:rounded-tr-(--bb-frame-card-radius) before:bg-sidebar";
+  "isolate bg-transparent before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:top-[calc(var(--bb-window-title-bar-height)+1px)] before:-z-10 before:rounded-tr-(--bb-frame-card-radius) before:bg-panel";
 
 interface CollapsedPanelTrafficLightReserveArgs {
   isConversationCollapsed: boolean;

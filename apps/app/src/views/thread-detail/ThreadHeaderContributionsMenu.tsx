@@ -1,9 +1,20 @@
-import { Fragment, useLayoutEffect, useRef } from "react";
+import {
+  Fragment,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuPortal,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@bb/shared-ui/dropdown-menu";
+import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { Icon } from "@bb/shared-ui/icon";
 import type { PluginBoundThreadAction } from "@get-bb/plugin-sdk";
 
@@ -18,6 +29,136 @@ export interface HeaderContribution {
   label: string;
   action: PluginBoundThreadAction;
   menuActions?: readonly HeaderMenuAction[];
+}
+
+function ContributionRow({
+  item,
+  pin,
+}: {
+  item: HeaderContribution;
+  pin: ReactNode;
+}) {
+  const compact = useIsCompactViewport();
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLElement | null>(null);
+  const targets = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (compact && open)
+      targets.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [compact, open]);
+  const row = (
+    <div className="flex items-center gap-1">
+      <DropdownMenuItem
+        className="min-w-0 flex-1"
+        disabled={item.action.disabled}
+        onSelect={() => void item.action.run()}
+        onKeyDown={(event) => {
+          if (item.menuActions?.length && event.key === "ArrowRight") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        <Icon name={item.action.icon} aria-hidden />
+        <span className="truncate">{item.label}</span>
+      </DropdownMenuItem>
+      {item.menuActions?.length ? (
+        compact ? (
+          <DropdownMenuItem
+            asChild
+            className="size-6 shrink-0 justify-center p-0"
+            aria-label="Choose Open target"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onSelect={(event) => {
+              event.preventDefault();
+              setOpen(!open);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight") {
+                event.preventDefault();
+                setOpen(true);
+              }
+            }}
+          >
+            <button
+              type="button"
+              ref={(element) => {
+                trigger.current = element;
+              }}
+            >
+              <Icon name="ChevronRight" aria-hidden />
+            </button>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuSubTrigger
+            ref={(element) => {
+              trigger.current = element;
+            }}
+            aria-label="Choose Open target"
+            className="size-6 shrink-0 justify-center gap-0 p-0"
+          />
+        )
+      ) : null}
+      {pin}
+    </div>
+  );
+  const choices = item.menuActions?.map((action) => (
+    <DropdownMenuItem key={action.id} onSelect={() => void action.run()}>
+      {action.label}
+    </DropdownMenuItem>
+  ));
+  if (!item.menuActions?.length) return row;
+  if (compact)
+    return (
+      <>
+        {row}
+        {open ? (
+          <div
+            ref={targets}
+            role="menu"
+            aria-label="Open workspace in"
+            className="ml-6 border-l pl-2"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft" || event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpen(false);
+                trigger.current?.focus();
+              } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const items = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLElement>(
+                    '[role="menuitem"]',
+                  ),
+                );
+                const index = items.findIndex(
+                  (element) => element === document.activeElement,
+                );
+                items[
+                  (index +
+                    (event.key === "ArrowDown" ? 1 : -1) +
+                    items.length) %
+                    items.length
+                ]?.focus();
+              }
+            }}
+          >
+            {choices}
+          </div>
+        ) : null}
+      </>
+    );
+  return (
+    <DropdownMenuSub open={open} onOpenChange={setOpen}>
+      {row}
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent className="max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto">
+          {choices}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
+  );
 }
 
 export function ThreadHeaderContributionsMenu({
@@ -45,39 +186,29 @@ export function ThreadHeaderContributionsMenu({
         items.length === 0 ? null : (
           <Fragment key={label}>
             <DropdownMenuLabel>{label}</DropdownMenuLabel>
-            {items.flatMap((item) => {
+            {items.map((item) => {
               const pinLabel = isPinned ? "Unpin from header" : "Pin to header";
-              const actions = item.menuActions ?? [
-                { id: "default", label: item.label, run: item.action.run },
-              ];
-              return actions.map((action) => {
-                const rowKey = `${item.key}/${action.id}`;
-                return (
-                  <div key={rowKey} className="flex items-center gap-1">
-                    <DropdownMenuItem
-                      className="min-w-0 flex-1"
-                      disabled={item.action.disabled}
-                      onSelect={() => void action.run()}
-                    >
-                      <Icon name={item.action.icon} aria-hidden />
-                      <span className="truncate">{action.label}</span>
-                    </DropdownMenuItem>
+              return (
+                <ContributionRow
+                  key={item.key}
+                  item={item}
+                  pin={
                     <DropdownMenuItem
                       asChild
                       className="size-6 shrink-0 justify-center p-0"
-                      aria-label={`${pinLabel}: ${action.label}`}
+                      aria-label={`${pinLabel}: ${item.label}`}
                       title={pinLabel}
                       onSelect={(event) => {
                         event.preventDefault();
-                        pendingFocus.current = rowKey;
+                        pendingFocus.current = item.key;
                         onPinChange(item.key, !isPinned);
                       }}
                     >
                       <button
                         type="button"
                         ref={(button) => {
-                          if (button) pinButtons.current.set(rowKey, button);
-                          else pinButtons.current.delete(rowKey);
+                          if (button) pinButtons.current.set(item.key, button);
+                          else pinButtons.current.delete(item.key);
                         }}
                       >
                         <Icon
@@ -87,9 +218,9 @@ export function ThreadHeaderContributionsMenu({
                         />
                       </button>
                     </DropdownMenuItem>
-                  </div>
-                );
-              });
+                  }
+                />
+              );
             })}
             <DropdownMenuSeparator />
           </Fragment>

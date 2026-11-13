@@ -230,10 +230,11 @@ function createSelectEvent(): Event {
 
 type DropdownMenuItemProps = Omit<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>,
-  "onBlur" | "onFocus"
+  "onBlur" | "onFocus" | "onKeyDown"
 > & {
   inset?: boolean;
   variant?: "default" | "destructive";
+  onKeyDown?: React.KeyboardEventHandler<HTMLElement>;
   onBlur?: React.FocusEventHandler<HTMLElement>;
   onFocus?: React.FocusEventHandler<HTMLElement>;
 };
@@ -280,7 +281,9 @@ const DropdownMenuItem = React.forwardRef<
       const Comp = asChild ? Slot : "button";
       return (
         <Comp
+          {...(domProps as React.HTMLAttributes<HTMLElement>)}
           ref={ref as React.RefCallback<HTMLButtonElement> | null}
+          onKeyDown={callerKeyDown}
           type={asChild ? undefined : "button"}
           role={role}
           disabled={disabled}

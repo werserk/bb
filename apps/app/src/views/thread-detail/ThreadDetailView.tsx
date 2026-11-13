@@ -1620,7 +1620,7 @@ function ThreadDetailViewInternal(
           ),
         ].map((target) => ({
           id: target.id,
-          label: `Open workspace in ${target.label}`,
+          label: `Open in ${target.label}`,
           run: async () => {
             if (target.id === preferredDirectoryTarget.id) {
               await openPathInPreferredDirectoryTarget({

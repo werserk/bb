@@ -146,6 +146,11 @@ export function ThreadActionsMenu({
         side={side}
         align={align}
         sideOffset={sideOffset}
+        className={
+          isCompactViewport
+            ? undefined
+            : "max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto"
+        }
         mobileTitle={MENU_LABEL}
         onCloseAutoFocus={onCloseAutoFocus}
       >

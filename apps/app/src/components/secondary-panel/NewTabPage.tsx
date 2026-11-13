@@ -36,7 +36,7 @@ export function NewTabPage({
   return (
     <div
       data-panel-new-tab-page=""
-      className="flex min-h-full flex-col gap-3 bg-sidebar px-4 pb-3 pt-1"
+      className="flex min-h-full flex-col gap-3 bg-panel px-4 pb-3 pt-1"
     >
       <NewTabFileSearch
         projectId={projectId}

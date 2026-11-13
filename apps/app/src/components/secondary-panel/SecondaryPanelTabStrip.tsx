@@ -615,7 +615,7 @@ function TabStripScrollButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "z-20 shrink-0 bg-sidebar text-muted-foreground/70 shadow-none hover:bg-surface-raised-solid hover:text-foreground focus-visible:bg-sidebar",
+        "z-20 shrink-0 bg-chrome text-muted-foreground/70 shadow-none hover:bg-surface-raised-solid hover:text-foreground focus-visible:bg-chrome",
         canScroll
           ? TAB_STRIP_SCROLL_BUTTON_CLASS
           : "h-7 w-0 overflow-hidden p-0 max-md:pointer-coarse:h-9",

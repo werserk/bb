@@ -138,10 +138,10 @@ export function ThreadDetailHeader({
       ? [
           {
             key: "bb--core/open",
-            label: "Open workspace",
+            label: workspaceOpenActions?.[0]?.label ?? "Open workspace",
             menuActions: workspaceOpenActions,
             action: {
-              label: "Open workspace",
+              label: workspaceOpenActions?.[0]?.label ?? "Open workspace",
               icon: "FolderOpen" as const,
               run: async () => {
                 await workspaceOpenActions?.[0]?.run();

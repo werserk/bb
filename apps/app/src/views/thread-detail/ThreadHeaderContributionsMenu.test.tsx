@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -18,6 +18,14 @@ import {
   partitionHeaderContributions,
   setHeaderPin,
 } from "./threadHeaderPreferences";
+
+const viewport = vi.hoisted(() => ({ compact: false }));
+vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+  useIsCompactViewport: () => viewport.compact,
+}));
+beforeEach(() => {
+  viewport.compact = false;
+});
 
 afterEach(cleanup);
 
@@ -148,64 +156,80 @@ it("keeps keyboard focus on the moved pin button and supports arrow navigation",
   }
 });
 
-it("opens each workspace target and pins the shared Open contribution", () => {
-  const openCode = vi.fn();
-  const openTerminal = vi.fn();
-  const onPinChange = vi.fn();
-  const item: HeaderContribution = {
-    key: "bb--core/open",
-    label: "Open workspace",
-    action: {
-      label: "Open workspace",
-      icon: "FolderOpen",
-      run: vi.fn(async () => {}),
-    },
-    menuActions: [
-      { id: "code", label: "Open workspace in VS Code", run: openCode },
-      {
-        id: "terminal",
-        label: "Open workspace in Terminal",
-        run: openTerminal,
-      },
-    ],
-  };
-  const view = render(
-    <DropdownMenu defaultOpen>
-      <DropdownMenuContent>
-        <ThreadHeaderContributionsMenu
-          pinned={[]}
-          more={[item]}
-          onPinChange={onPinChange}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>,
-  );
-  fireEvent.click(
-    screen.getByRole("menuitem", {
-      name: "Pin to header: Open workspace in Terminal",
-    }),
-  );
-  expect(onPinChange).toHaveBeenCalledWith("bb--core/open", true);
-  expect(openTerminal).not.toHaveBeenCalled();
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Open workspace in Terminal" }),
-  );
-  expect(openTerminal).toHaveBeenCalledTimes(1);
-  expect(openCode).not.toHaveBeenCalled();
-  view.unmount();
-  render(
-    <DropdownMenu defaultOpen>
-      <DropdownMenuContent>
-        <ThreadHeaderContributionsMenu
-          pinned={[item]}
-          more={[]}
-          onPinChange={onPinChange}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>,
-  );
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Open workspace in VS Code" }),
-  );
-  expect(openCode).toHaveBeenCalledTimes(1);
-});
+it.each([false, true])(
+  "keeps one preferred Open row and opens its target submenu (compact: %s)",
+  async (compact) => {
+    viewport.compact = compact;
+    const openCode = vi.fn();
+    const openTerminal = vi.fn();
+    const onPinChange = vi.fn();
+    const item: HeaderContribution = {
+      key: "bb--core/open",
+      label: "Open in VS Code",
+      action: { label: "Open in VS Code", icon: "FolderOpen", run: openCode },
+      menuActions: [
+        { id: "code", label: "Open in VS Code", run: openCode },
+        { id: "terminal", label: "Open in Terminal", run: openTerminal },
+      ],
+    };
+    const view = render(
+      <DropdownMenu defaultOpen>
+        <DropdownMenuContent>
+          <ThreadHeaderContributionsMenu
+            pinned={[]}
+            more={[item]}
+            onPinChange={onPinChange}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    const primary = await screen.findByRole("menuitem", {
+      name: "Open in VS Code",
+    });
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Terminal" }),
+    ).toBeNull();
+    const pin = screen.getByRole("menuitem", {
+      name: "Pin to header: Open in VS Code",
+    });
+    fireEvent.click(pin);
+    expect(onPinChange).toHaveBeenCalledWith("bb--core/open", true);
+    expect(openCode).not.toHaveBeenCalled();
+    const trigger = screen.getByRole("menuitem", {
+      name: "Choose Open target",
+    });
+    primary.focus();
+    fireEvent.keyDown(primary, { key: "ArrowRight" });
+    const terminal = await screen.findByRole("menuitem", {
+      name: "Open in Terminal",
+    });
+    terminal.focus();
+    fireEvent.keyDown(terminal, { key: "ArrowLeft" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Terminal" }),
+    ).toBeNull();
+    fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Open in Terminal" }),
+    );
+    expect(openTerminal).toHaveBeenCalledTimes(1);
+    expect(openCode).not.toHaveBeenCalled();
+    view.unmount();
+    render(
+      <DropdownMenu defaultOpen>
+        <DropdownMenuContent>
+          <ThreadHeaderContributionsMenu
+            pinned={[item]}
+            more={[]}
+            onPinChange={onPinChange}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Open in VS Code" }),
+    );
+    expect(openCode).toHaveBeenCalledTimes(1);
+  },
+);

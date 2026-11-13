@@ -797,7 +797,7 @@ function SidebarSplitLeaf(props: SidebarSplitLeafProps) {
         data-focused={isFocused ? "true" : "false"}
         data-maximized={isMaximized ? "true" : undefined}
       >
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-sidebar">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
           {props.renderPane({
             group,
             isFocused,

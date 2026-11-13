@@ -223,7 +223,7 @@ function ShellRow({
 }
 
 const REPRESENTATIVE_FILE_SOURCE = `export function ThreadSecondaryPanel() {
-  return <Panel className="bg-sidebar">…</Panel>;
+  return <Panel className="bg-panel">…</Panel>;
 }`;
 
 function RepresentativeFileContent({ path }: { path: string }) {

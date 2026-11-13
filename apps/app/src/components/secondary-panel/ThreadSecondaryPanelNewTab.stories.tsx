@@ -308,7 +308,7 @@ function PanelStage({ children, presentation = "card" }: PanelStageProps) {
     <div
       className={
         presentation === "sidebar"
-          ? "flex h-screen min-h-[640px] w-full max-w-[480px] min-w-0 flex-col overflow-hidden border-l border-border bg-sidebar"
+          ? "flex h-screen min-h-[640px] w-full max-w-[480px] min-w-0 flex-col overflow-hidden border-l border-border bg-panel"
           : "flex h-[380px] w-full max-w-[720px] min-w-0 flex-col overflow-hidden rounded-md border border-border bg-background"
       }
     >
