@@ -61,7 +61,7 @@ function ThreadSecondaryPanelInlinePlaceholder({
       data-testid="thread-secondary-panel-placeholder"
     >
       {isOpen ? (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background pt-12">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden bg-panel pt-12">
           {children ?? <SecondaryPanelContentSkeleton />}
         </div>
       ) : null}

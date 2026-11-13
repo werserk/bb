@@ -980,7 +980,7 @@ function ThreadSecondaryPanelContent({
           : undefined
       }
       className={cn(
-        "flex h-full min-h-0 flex-col overflow-hidden bg-panel",
+        "flex h-full min-h-0 flex-col overflow-hidden bg-panel [--sidebar:var(--panel)]",
         renderAsDrawer && "min-w-0 flex-1",
         isPanelInFrame && FRAMED_PANEL_SURFACE_CLASS,
         !renderAsDrawer && [

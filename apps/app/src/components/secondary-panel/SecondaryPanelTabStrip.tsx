@@ -62,7 +62,7 @@ const TAB_STRIP_SCROLL_BUTTON_CLASS =
 
 const EDGE_EPSILON_PX = 1;
 
-const SECONDARY_PANEL_TAB_STRIP_FADE_TONE: OverflowFadeTone = "sidebar";
+const SECONDARY_PANEL_TAB_STRIP_FADE_TONE: OverflowFadeTone = "chrome";
 
 class InertTouchSensor extends TouchSensor {
   static override setup(): () => void {

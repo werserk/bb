@@ -1066,7 +1066,7 @@ function MarkdownFilePreview({
       markdown
       onSelectionAddToChat={onSelectionAddToChat}
     >
-      <div ref={contentRef} className="flex-auto bg-background px-4 py-4">
+      <div ref={contentRef} className="flex-auto bg-panel px-4 py-4">
         <MarkdownPreview
           allowHtml
           content={file.contents}
@@ -1110,7 +1110,7 @@ function CsvFilePreview({ file, onSelectionAddToChat }: CsvFilePreviewProps) {
 
   return (
     <SecondaryPanelSelectionActions onSelectionAddToChat={onSelectionAddToChat}>
-      <div className="flex min-h-0 flex-auto flex-col bg-surface-raised px-4 py-4">
+      <div className="flex min-h-0 flex-auto flex-col bg-panel px-4 py-4">
         <div
           ref={scrollRef}
           className="persistent-scrollbar min-h-0 overflow-auto overscroll-contain rounded-md border border-border bg-background"

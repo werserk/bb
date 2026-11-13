@@ -12,6 +12,7 @@ export default {
 const TONE_SURFACE_CLASS: Record<OverflowFadeTone, string> = {
   background: "bg-background",
   sidebar: "bg-sidebar",
+  chrome: "bg-chrome",
   "surface-raised": "bg-surface-raised",
   "surface-recessed": "bg-surface-recessed",
 };

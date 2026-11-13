@@ -4,6 +4,7 @@ type OverflowFadePlacement = "above" | "below" | "left" | "right";
 export type OverflowFadeTone =
   | "background"
   | "sidebar"
+  | "chrome"
   | "surface-raised"
   | "surface-recessed";
 type OverflowFadeSize = "default" | "sm" | "lg";
@@ -58,6 +59,7 @@ function isHorizontalPlacement(
 interface OverflowFadeGradientClasses {
   background: string;
   sidebar: string;
+  chrome: string;
   "surface-raised": string;
   "surface-recessed": string;
 }
@@ -69,6 +71,7 @@ const OVERFLOW_FADE_GRADIENT_CLASSES: Record<
   above: {
     background: "bg-gradient-to-b from-transparent to-background",
     sidebar: "bg-gradient-to-b from-transparent to-sidebar",
+    chrome: "bg-gradient-to-b from-transparent to-chrome",
     "surface-raised":
       "bg-gradient-to-b from-transparent to-surface-raised-solid",
     "surface-recessed":
@@ -77,6 +80,7 @@ const OVERFLOW_FADE_GRADIENT_CLASSES: Record<
   below: {
     background: "bg-gradient-to-b to-transparent from-background",
     sidebar: "bg-gradient-to-b to-transparent from-sidebar",
+    chrome: "bg-gradient-to-b to-transparent from-chrome",
     "surface-raised":
       "bg-gradient-to-b to-transparent from-surface-raised-solid",
     "surface-recessed":
@@ -85,6 +89,7 @@ const OVERFLOW_FADE_GRADIENT_CLASSES: Record<
   left: {
     background: "bg-gradient-to-l from-transparent to-background",
     sidebar: "bg-gradient-to-l from-transparent to-sidebar",
+    chrome: "bg-gradient-to-l from-transparent to-chrome",
     "surface-raised":
       "bg-gradient-to-l from-transparent to-surface-raised-solid",
     "surface-recessed":
@@ -93,6 +98,7 @@ const OVERFLOW_FADE_GRADIENT_CLASSES: Record<
   right: {
     background: "bg-gradient-to-r from-transparent to-background",
     sidebar: "bg-gradient-to-r from-transparent to-sidebar",
+    chrome: "bg-gradient-to-r from-transparent to-chrome",
     "surface-raised":
       "bg-gradient-to-r from-transparent to-surface-raised-solid",
     "surface-recessed":
@@ -107,6 +113,7 @@ const OVERFLOW_FADE_INSET_VERTICAL_GRADIENT_CLASSES: Record<
   above: {
     background: "bg-gradient-to-b from-background to-transparent",
     sidebar: "bg-gradient-to-b from-sidebar to-transparent",
+    chrome: "bg-gradient-to-b from-chrome to-transparent",
     "surface-raised":
       "bg-gradient-to-b from-surface-raised-solid to-transparent",
     "surface-recessed":
@@ -115,6 +122,7 @@ const OVERFLOW_FADE_INSET_VERTICAL_GRADIENT_CLASSES: Record<
   below: {
     background: "bg-gradient-to-b from-transparent to-background",
     sidebar: "bg-gradient-to-b from-transparent to-sidebar",
+    chrome: "bg-gradient-to-b from-transparent to-chrome",
     "surface-raised":
       "bg-gradient-to-b from-transparent to-surface-raised-solid",
     "surface-recessed":

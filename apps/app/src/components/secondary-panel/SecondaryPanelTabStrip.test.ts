@@ -174,6 +174,8 @@ describe("secondary panel tab-strip edge fades", () => {
     expect(rightButton?.classList.contains("w-0")).toBe(true);
 
     const rightFade = container.querySelector("[data-overflow-fade='right']");
+    expect(rightFade?.classList.contains("to-chrome")).toBe(true);
+    expect(rightButton?.classList.contains("bg-chrome")).toBe(true);
     expect(rightFade?.classList.contains("opacity-0")).toBe(true);
     Object.defineProperties(viewport!, {
       clientWidth: { configurable: true, value: 120 },
