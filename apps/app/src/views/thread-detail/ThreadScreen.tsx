@@ -609,7 +609,7 @@ export function ThreadScreen({
               scrollAnchorThreadId={thread.id}
               scrollContentInsetEndPx={contextCardInset}
               shellClassName="!mx-0 !mt-0 md:!mx-0 md:!mt-0"
-              scrollAreaClassName="scroll-pt-4"
+              scrollAreaClassName="scroll-pt-4 seam-scrollbar md:mr-2 md:pointer-coarse:mr-5"
               contentClassName="gap-2 pt-4"
               footerClassName="chat-prompt-box"
               footer={

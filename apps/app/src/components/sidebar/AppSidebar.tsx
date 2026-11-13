@@ -334,7 +334,7 @@ export function AppSidebar({
         }
       />
       {placement === "list" ? navigationRegion("shrink-0") : null}
-      <SidebarContent>
+      <SidebarContent className="md:mr-2 md:pointer-coarse:mr-5">
         <ThreadActionSurfaceVisibility visible={isThreadListVisible}>
           <PluginThreadList
             replacement={threadListReplacement}

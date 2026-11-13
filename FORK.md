@@ -70,3 +70,12 @@ adds middle-button browser-tab activation through the existing Navigation action
 The host passes project/reused-environment context in a one-use composer URL;
 RootComposeView consumes it into the existing selection and location-state path.
 No SDK or stored-data contract changes.
+
+Sidebar and page-chat scrollers reserve
+8px outside the scrollbar at desktop seams (20px for coarse pointers); Chromium
+scrollbars there remain 8px. Firefox uses its native thin scrollbar metric.
+The two right-panel seam targets and the sidebar target use 9px for fine pointers
+around the 1px seam, preserving 32px coarse targets. Hover feedback waits 200ms;
+only pointer-down starts resizing. Right-panel separators remain keyboard-focusable.
+Plugin-owned scrollers need their own external gutter; core does not pad their
+inner content or change Markdown table breakout policy.

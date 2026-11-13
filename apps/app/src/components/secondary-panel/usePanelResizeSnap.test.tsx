@@ -87,7 +87,7 @@ function setup(secondarySize = 50, width = 800) {
           data-panel-resize-snap-handle=""
           data-testid="divider"
           hitAreaMargins={{ coarse: 0, fine: 0 }}
-          tabIndex={-1}
+          tabIndex={0}
         >
           <span ref={hitTargetRef} />
         </PanelResizeHandle>
@@ -159,6 +159,22 @@ function setup(secondarySize = 50, width = 800) {
 }
 
 describe("usePanelResizeSnap", () => {
+  it("preserves the panel library keyboard resize path", () => {
+    const h = setup();
+    h.divider.focus();
+    fireEvent.keyDown(h.divider, { key: "ArrowRight" });
+    h.expectLayout(60, 40);
+    expect(h.onDragging).not.toHaveBeenCalled();
+  });
+  it("does not resize or start a drag when hovering the divider", () => {
+    const h = setup();
+    fireEvent.pointerOver(h.divider, { clientX: 500 });
+    h.move(450);
+    advanceFrame();
+    h.expectLayout(50, 50);
+    expect(h.onResize).not.toHaveBeenCalled();
+    expect(h.onDragging).not.toHaveBeenCalled();
+  });
   it("updates the panel library once per frame without a separate DOM preview", () => {
     const h = setup();
     h.down();
@@ -288,10 +304,10 @@ describe("usePanelResizeSnap", () => {
     }
   });
 
-  it("keeps the pointer-only divider out of focus", () => {
+  it("keeps pointer dragging from stealing keyboard focus", () => {
     const h = setup();
     h.down();
-    expect(h.divider.tabIndex).toBe(-1);
+    expect(h.divider.tabIndex).toBe(0);
     expect(document.activeElement).not.toBe(h.divider);
     h.release();
   });
