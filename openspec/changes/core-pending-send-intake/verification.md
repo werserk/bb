@@ -1,6 +1,6 @@
 # Subpart A review-candidate evidence
 
-Status: partial, not ready to ship. This local snapshot is for the same independent reviewer; there is no A code verdict, release authority or client enablement. The owner-authorised one-table/API exceptions and accepted fixture prerequisite are recorded in proposal.md. No B UI/SDK/CLI or C ops implementation is included.
+Status: partial, not ready to ship. This local snapshot is for the same independent reviewer; Addendum15 gave cf448538 a conditional source verdict with no blocker, not an all-green/ship/live PASS; this follow-up has no delta review, release authority or client enablement. The owner-authorised one-table/API exceptions and accepted fixture prerequisite are recorded in proposal.md. No B UI/SDK/CLI or C ops implementation is included.
 
 ## Checked runtime and source boundaries
 
@@ -38,3 +38,21 @@ C source facts and a separate source-only artifact proposal are delivered in the
 ## Missing gates
 
 Candidate scrollback paired half; disposition of full-only anomaly; standalone core build; same-reviewer A verdict; packaged runtime/Desktop/upgrade/live proof; approved and implemented offline artifact/C barrier; B client integration. A review-candidate commit records these limits and does not waive any of them.
+
+## Addendum15 S1 follow-up (separate partial checkpoint)
+
+The worker no longer installs the unconditional 30s legacy HTTP waiter timer. Genuine failed-head settlement and lifecycle stop are unchanged. The existing post-handoff legacy-tail regression now waits 60,001ms and passed. A new real-SQLite worker regression holds healthy preparation and its follower for 60,001ms, then requires their distinct original receipts and exactly one execution each, including replay. It replaces the old contract-changing timeout test.
+
+Fresh serial guarded commands used the existing run-phase.sh with load1<16, nice19/ionice-c3 and 45min bound:
+
+| Phase | Actual result | Limit |
+|---|---|---|
+| intake-161-add15-typecheck-1 | exit0,load4.12,Turbo8/8,7cached,2.828s | Before the post-run fixture correction below; DB/contract unchanged cached |
+| intake-161-add15-worker-1 | exit1,load6.95,16passed/1failed,1unhandled rejection; Turbo9/10,8cached,19.834s | New healthy-head fixture timed out at15s; no baseline label |
+| Remaining affected descriptor checks, candidate scrollback, standalone build, strict OpenSpec | NOT RUN | Chain stopped on failure, no heavy retry |
+
+The failing fixture supplied invalid creq_held/creq_following IDs to a receipt schema requiring creq_ plus10 alphabet characters. Source tracing shows parsing the stored invalid receipt can throw during settle, leaving its waiter unresolved; cleanup then rejected the still-live waiter. This is a source-backed diagnosis, not a reproduced corrected runtime result. A narrow test-only correction uses the existing request-ID generator, commits the matching original receipt, and observes both results with Promise.allSettled so cleanup cannot produce an unobserved follower rejection. Exact fulfilled values, retained pending states, order, replay and single-effect assertions remain. This correction is UNVERIFIED; no timeout/assertion weakening or production alteration was added to satisfy the fixture. The prior16 passes include real failed-head bounded409 and stop/restart/late-result coverage.
+
+S2–S5 remain explicit risks in design.md. Generator/copy/binding is NOT implemented: the four-file offline proposal did not establish the complete launched core closure. Checked source routes include Desktop ASAR/unpacked main/bridge, bb-app installed-newer update delegation, computed plugin/SDK loads and executable copied assets/plugins added after the proposed server generator. Full path/line evidence and the missing load/selection-inventory boundary are retained in intake-A/addendum15-followup-1/OFFLINE-ENTRY-BOUNDARY.md in the author thread storage. No complete-closure or packaged compatibility assertion is emitted. Missing descriptor remains incompatible for C; the FIRST A-containing release build still requires a sound generator. A standalone source build is not a release proof, and was not reached in this commission.
+
+Historical full-server RED,14 exact .161 six-file matched signatures and full-only scrollback anomaly remain unchanged. Isolated base16/16 does not resolve that anomaly. No new full server/DB loops, package, image extraction, live or ops edits occurred.

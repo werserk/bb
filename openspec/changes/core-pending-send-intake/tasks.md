@@ -16,5 +16,5 @@ Required failure scenarios: mixed legacy/modern ordering with delayed staging he
 Addenda13/14 required source/regression delta (definitions are not runtime evidence):
 
 - [x] Revisioned same-row reconcile from authoritative native evidence; keep no-proof custody blocked and preserve compactFirst parent semantics.
-- [x] Retain original pre-effect deterministic rejection/replay, classify post-seal uncertainty honestly, bound legacy waits and guard retries.
+- [x] Retain original pre-effect deterministic rejection/replay, classify post-seal uncertainty honestly, bound failed-head legacy errors and guard retries while preserving healthy legacy waits.
 - [ ] Verify R-a..R-f through real SQLite/server paths, mode/hook context table, and dedicated context/native-drain boundary. Include exact test names/results and remaining simulation boundaries.

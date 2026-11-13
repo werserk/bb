@@ -9,6 +9,7 @@ import { createMigratedConnection } from "@bb/db/testing";
 import { createSendIntakeWorker } from "../../../src/services/threads/send-intake-worker.js";
 import { assertSendIntake, commitSendIntake, sealSendIntake, type SendIntakeAuthority } from "../../../src/services/threads/send-intake-authority.js";
 import { ApiError } from "../../../src/errors.js";
+import { createClientTurnRequestId } from "../../../src/services/threads/thread-events.js";
 import { acquireThreadSendGuard, ThreadContextClearInProgressError, withThreadContextClearGuard } from "../../../src/services/threads/thread-context-mutation-guard.js";
 
 const cleanups: Array<() => void> = [];
@@ -65,6 +66,9 @@ describe("send intake worker", () => {
     expect(getThreadSendIntake(f.db, "head")?.state).toBe("transferred");
     expect(settled).toBe(false);
     const replay = f.worker.wait("head");
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(settled).toBe(false);
+    expect(getThreadSendIntake(f.db, "next")?.state).toBe("transferred");
     held.resolve();
     await expect(origin).resolves.toEqual(sent);
     await expect(replay).resolves.toEqual(sent);
@@ -135,14 +139,44 @@ describe("send intake worker", () => {
     await expect(f.worker.wait("next")).rejects.toMatchObject({ body: { code: "intake_blocked" } });
   });
 
-  it("bounds a legacy wait even when preparation is still held, without dropping custody", async () => {
+  it("keeps healthy legacy preparation and its follower pending beyond 30s, then returns each original receipt once", async () => {
     const held = createDeferredPromise<void>();
-    const f = fixture(async () => { await held.promise; return sent; });
-    f.add("held");
-    const waiting = expect(f.worker.wait("held")).rejects.toMatchObject({ status: 409, body: { code: "intake_blocked", details: { custodyRetained: true } } });
-    f.worker.wake(f.thread.id); await vi.advanceTimersByTimeAsync(30_001); await waiting;
-    expect(getThreadSendIntake(f.db, "held")).toMatchObject({ state: "preparing", currentEnvelope: "{}" });
-    f.worker.stop(); held.resolve(); await vi.advanceTimersByTimeAsync(1);
+    const executed: string[] = [];
+    const receipts = new Map([
+      ["held", { ...sent, requested: { requestId: createClientTurnRequestId(), sequence: 1 } }],
+      ["following", { ...sent, requested: { requestId: createClientTurnRequestId(), sequence: 2 } }],
+    ]);
+    const f = fixture(async (row, auth) => {
+      executed.push(row.id);
+      if (row.id === "held") await held.promise;
+      const receipt = receipts.get(row.id);
+      if (!receipt) throw new Error("Unexpected intake identity");
+      f.db.transaction(tx => commitSendIntake(tx, auth, { kind: "request", id: receipt.requested.requestId, sequence: receipt.requested.sequence }, receipt));
+      return receipt;
+    });
+    f.add("held"); f.add("following");
+    const settled: string[] = [];
+    const observe = (id: string) => f.worker.wait(id).then(
+      receipt => { settled.push(id); return receipt; },
+      error => { settled.push(id); throw error; },
+    );
+    const results = Promise.allSettled([observe("held"), observe("following")]);
+    f.worker.wake(f.thread.id);
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(settled).toEqual([]);
+    expect(executed).toEqual(["held"]);
+    expect(getThreadSendIntake(f.db, "held")).toMatchObject({ state: "preparing", currentEnvelope: "{}", claimEpoch: 1 });
+    expect(getThreadSendIntake(f.db, "following")).toMatchObject({ state: "pending", currentEnvelope: "{}", claimEpoch: 0 });
+    held.resolve();
+    expect(await results).toEqual([
+      { status: "fulfilled", value: receipts.get("held") },
+      { status: "fulfilled", value: receipts.get("following") },
+    ]);
+    expect(settled).toEqual(["held", "following"]);
+    expect(executed).toEqual(["held", "following"]);
+    await expect(f.worker.wait("held")).resolves.toEqual(receipts.get("held"));
+    await expect(f.worker.wait("following")).resolves.toEqual(receipts.get("following"));
+    expect(executed).toEqual(["held", "following"]);
   });
 
   it("retains a timed-out sealed head and fences its late continuation while followers stay blocked", async () => {

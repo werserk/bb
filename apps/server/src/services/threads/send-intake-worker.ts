@@ -37,12 +37,10 @@ interface WorkSlot {
 interface LegacyWaiter {
   resolve: (response: SendMessageResponse) => void;
   reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
 }
 
 const LEASE_MS = 30_000;
 const ATTEMPT_MS = 5 * 60_000;
-const LEGACY_WAIT_MS = 30_000;
 
 export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
   let stopped = false;
@@ -75,7 +73,6 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
       if (head?.state !== "failed") return;
       for (const listener of listeners) listener.reject(intakeBlockedError(id, head.id));
     }
-    for (const listener of listeners) clearTimer(listener.timer);
     waiters.delete(id);
   }
 
@@ -251,13 +248,7 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
       if (stopped) return Promise.reject(new Error("Intake worker stopped"));
       return new Promise((resolve, reject) => {
         const listeners = waiters.get(id) ?? new Set<LegacyWaiter>();
-        const listener: LegacyWaiter = { resolve, reject, timer: later(() => {
-          listeners.delete(listener);
-          if (listeners.size === 0) waiters.delete(id);
-          const row = getThreadSendIntake(deps.db, id);
-          const head = row ? listThreadSendIntakes(deps.db, row.threadId, 1)[0] : undefined;
-          reject(intakeBlockedError(id, head?.id ?? null));
-        }, LEGACY_WAIT_MS) };
+        const listener: LegacyWaiter = { resolve, reject };
         listeners.add(listener);
         waiters.set(id, listeners);
         settle(id);
