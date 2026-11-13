@@ -81,6 +81,20 @@ afterEach(() => {
 });
 
 describe("GeneratedConversationMessage images", () => {
+  it("contains tables in expanded nested message bodies within their scroll viewport", () => {
+    renderChildCompleted(
+      "Report\n\n| Scope | Status |\n| --- | --- |\n| Contained tables | Ready |",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Rebuild comments finished/u }),
+    );
+    const viewport = screen.getByRole("table").parentElement;
+    expect(viewport?.classList.contains("max-w-full")).toBe(true);
+    expect(viewport?.classList.contains("overflow-x-auto")).toBe(true);
+    expect(viewport?.style.width).toBe("");
+    expect(viewport?.parentElement?.style.width).toBe("");
+  });
+
   it("routes images in generated system messages through the current thread", () => {
     renderChildCompleted("![report](reports/result.png)");
 

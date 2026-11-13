@@ -618,6 +618,7 @@ function AssistantConversationMessage({
   const markdown = (
     <>
       <MarkdownPreview
+        tableLayout="contained"
         allowHtml
         className={
           streamingSplit === null
@@ -634,6 +635,7 @@ function AssistantConversationMessage({
       />
       {streamingSplit === null ? null : (
         <MarkdownPreview
+          tableLayout="contained"
           allowHtml
           className={STREAMING_TAIL_MARKDOWN_CLASS_NAME}
           content={liveMarkdown}

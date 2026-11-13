@@ -79,4 +79,10 @@ around the 1px seam, preserving 32px coarse targets. Hover feedback waits 200ms;
 only pointer-down starts resizing. Right-panel separators retain the upstream
 pointer-only focus policy and remain outside the tab order.
 Plugin-owned scrollers need their own external gutter; core does not pad their
-inner content or change Markdown table breakout policy.
+inner content.
+
+Chat Markdown tables use the existing contained renderer, keeping their outer
+edges within the prose column and scrolling wide contents horizontally. Assistant
+settled blocks and streaming tails share this policy, as do collapsed and expanded
+generated messages. User messages already use contained tables. Shared
+MarkdownPreview defaults remain unchanged for non-chat previews.

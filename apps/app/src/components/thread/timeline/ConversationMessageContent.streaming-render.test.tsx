@@ -81,6 +81,29 @@ afterEach(() => {
 });
 
 describe("assistant streaming Markdown rendering", () => {
+  const table =
+    "| Scope | Status |\n| --- | --- |\n| Contained tables | Ready |";
+
+  it.each([
+    ["completed", table, false],
+    [
+      "settled during streaming",
+      `${table}\n\nFollowing paragraph\nstill streaming`,
+      true,
+    ],
+    ["streaming tail", `Introduction.\n\n${table}`, true],
+  ])(
+    "contains a table in the %s message within its own scroll viewport",
+    (_state, text, streaming) => {
+      render(assistant(text, streaming));
+      const viewport = screen.getByRole("table").parentElement;
+      expect(viewport?.classList.contains("max-w-full")).toBe(true);
+      expect(viewport?.classList.contains("overflow-x-auto")).toBe(true);
+      expect(viewport?.style.width).toBe("");
+      expect(viewport?.parentElement?.style.width).toBe("");
+    },
+  );
+
   it.each([
     ["**Live bold and `live code", ["strong"]],
     ["__Live bold and `live code", ["strong"]],
