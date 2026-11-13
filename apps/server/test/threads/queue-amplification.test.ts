@@ -5,6 +5,7 @@ import {
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
   setQueuedThreadMessageFailureReason,
+  setQueuedThreadMessageWaitingOn,
 } from "@bb/db";
 import type { QueuedMessageWaitingOn } from "@bb/domain";
 import { afterEach, expect, it, vi } from "vitest";
@@ -59,7 +60,7 @@ function fixture(h: TestAppHarness) {
       origin: { pluginId: "wprojects", senderThreadId: null },
     },
   });
-  return { thread, service };
+  return { thread, service, host };
 }
 
 it.each([
@@ -190,3 +191,50 @@ it("publishes a newly created wait even when other queued rows have the same rea
     expect(emit).toHaveBeenCalledOnce();
   });
 });
+
+
+it.each(["plugin", "host-offline"] as const)(
+  "retains a one-shot %s wake behind an ordinary blocker",
+  async (kind) => {
+    await withTestHarness(async (h) => {
+      const { thread, service, host } = fixture(h);
+      const ordinary = seedQueuedMessage(h.deps, {
+        threadId: thread.id,
+        content: textInput("ordinary"),
+      });
+      setQueuedThreadMessageFailureReason(h.db, h.deps.hub, {
+        id: ordinary.id,
+        threadId: thread.id,
+        failureReason: "exhausted",
+        now: Date.now(),
+        retryDelaysMs: [],
+      });
+      setQueuedThreadMessageWaitingOn(h.db, h.deps.hub, {
+        id: service.id,
+        threadId: thread.id,
+        waitingOn:
+          kind === "plugin"
+            ? { kind, pluginId: "queue-gate", reason: "held" }
+            : { kind, hostName: "Test Host" },
+        sendAt: null,
+      });
+      await runQueuedMessageDispatch(
+        h.deps,
+        kind === "plugin"
+          ? { kind: "plugin-recheck" }
+          : { kind: "host-connected", hostId: host.id },
+      );
+      expect(getQueuedThreadMessage(h.db, service.id)?.waitingOn).toBe(
+        JSON.stringify({ kind: "thread-busy" }),
+      );
+      const response = await h.app.request(
+        `/api/v1/threads/${thread.id}/queued-messages/${ordinary.id}`,
+        { method: "DELETE" },
+      );
+      expect(response.status).toBe(200);
+      await vi.waitFor(() =>
+        expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(0),
+      );
+    });
+  },
+);

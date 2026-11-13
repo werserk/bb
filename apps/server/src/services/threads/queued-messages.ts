@@ -157,12 +157,18 @@ interface SendClaimedQueuedMessageForThreadArgs {
 
 export function createAutomaticQueuedMessageGroupEligibility(
   deps: Pick<AppDeps, "db" | "hub">,
-  args: { now: number; retryingFailure: boolean; thread: Thread },
+  args: {
+    now: number;
+    retryingFailure: boolean;
+    thread: Thread;
+    idleDrain?: boolean;
+  },
 ): QueuedThreadMessageGroupEligibility {
   const activeTurnId = getActiveTurnId(deps, args.thread.id);
   return (group) =>
     group.every((member) => {
       if (
+        args.idleDrain &&
         member.serviceTurn !== null &&
         hasOrdinaryQueuedThreadMessages(deps.db, args.thread.id)
       )
@@ -1055,6 +1061,7 @@ export async function sendNextQueuedMessageIfPresent(
       now: Date.now(),
       retryingFailure: false,
       thread: initialThread,
+      idleDrain: true,
     }),
   );
   if (!nextQueuedMessages) {

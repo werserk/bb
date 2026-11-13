@@ -47,9 +47,12 @@ losing the new readiness signal. Queue claims and dispatch admission remain the
 authority for exactly-once delivery, manual-stop pauses and plugin waits.
 Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
-signals. Automatic service drains and idle discovery share the admission rule
-that any ordinary queued row takes priority, including an exhausted failure;
-blocked service rows remain untouched until that blocker leaves. Native queue
+signals. Idle service drains and idle discovery share the admission rule
+that any ordinary queued row takes priority, including an exhausted failure
+and a claimed row; these blocked service rows remain untouched. By-id readiness
+wakes still run admission and convert a cleared plugin or host wait into an
+idle-drainable thread-busy wait when ordinary work blocks delivery. This keeps
+one-shot readiness signals effective after the blocker leaves. Native queue
 removal requests a readiness wake immediately. A claim carries its pre-claim
 public wait facts only in memory, so requeueing to the same state, wait and
 schedule does not emit `message.queued`; creation and changed waits still do.
