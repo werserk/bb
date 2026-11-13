@@ -609,7 +609,7 @@ export function ThreadScreen({
               scrollAnchorThreadId={thread.id}
               scrollContentInsetEndPx={contextCardInset}
               shellClassName="!mx-0 !mt-0 md:!mx-0 md:!mt-0"
-              scrollAreaClassName="scroll-pt-4 seam-scrollbar md:mr-2 md:pointer-coarse:mr-5"
+              scrollAreaClassName="scroll-pt-4"
               contentClassName="gap-2 pt-4"
               footerClassName="chat-prompt-box"
               footer={
@@ -680,7 +680,7 @@ export function ThreadScreen({
         return (
           <WithoutThreadContextCard>
             {presentation.layout === "contained" ? (
-              <div className="min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
+              <div className="panel-scroll-gutter min-h-0 flex-1 overflow-y-auto bg-background px-2 pb-3 pt-3">
                 {surface}
                 {questions}
               </div>

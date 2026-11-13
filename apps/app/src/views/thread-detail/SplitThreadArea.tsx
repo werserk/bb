@@ -1,3 +1,7 @@
+import {
+  PANEL_RESIZE_HIT_TARGET_CLASS,
+  PANEL_STACK_RESIZE_HIT_TARGET_CLASS,
+} from "@/components/secondary-panel/panelTransitionTokens";
 import { focusPaneComposer } from "@/lib/pane-composer-focus";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
@@ -1527,7 +1531,6 @@ function SplitDivider({
   onResize,
 }: SplitDividerProps) {
   const horizontal = dir === "row";
-  const isSidebarFramed = useIsSidebarFramed();
   const finishResizeRef = useRef<(() => void) | null>(null);
   useEffect(
     () => () => {
@@ -1639,8 +1642,7 @@ function SplitDivider({
       aria-orientation={horizontal ? "vertical" : "horizontal"}
       className={cn(
         "group relative z-[25] flex-shrink-0 transition-colors",
-        isSidebarFramed ? "bg-border" : "bg-border-seam",
-        "hover:bg-ring/40 data-[dragging]:bg-ring/40",
+        "bg-transparent hover:bg-ring/40 hover:delay-200 data-[dragging]:bg-ring/40 data-[dragging]:!delay-0",
         hidden && "invisible pointer-events-none",
         horizontal ? "w-px cursor-col-resize" : "h-px cursor-row-resize",
       )}
@@ -1649,12 +1651,11 @@ function SplitDivider({
         aria-hidden
         data-split-divider-hit-target=""
         onPointerDown={handlePointerDown}
-        className={cn(
-          "absolute z-10 touch-none bg-transparent",
+        className={
           horizontal
-            ? "-left-1.5 top-0 h-full w-3 cursor-col-resize"
-            : "left-0 -top-1.5 h-3 w-full cursor-row-resize",
-        )}
+            ? PANEL_RESIZE_HIT_TARGET_CLASS
+            : PANEL_STACK_RESIZE_HIT_TARGET_CLASS
+        }
       />
     </div>
   );

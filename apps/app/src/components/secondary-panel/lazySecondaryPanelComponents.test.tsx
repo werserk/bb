@@ -48,14 +48,13 @@ function renderLoadingPanel({
 }
 
 describe("LazyThreadSecondaryPanel", () => {
-  it("keeps the panel seam visible while inline content loads", () => {
+  it("keeps the panel seam hidden while inline content loads", () => {
     renderLoadingPanel();
 
     const placeholder = screen.getByTestId(
       "thread-secondary-panel-placeholder",
     );
-    expect(placeholder.className).toContain("border-l");
-    expect(placeholder.className).toContain("border-border-seam");
+    expect(placeholder.className).not.toContain("border-l");
   });
 
   it("does not show the loading seam when the panel is closed or full screen", () => {

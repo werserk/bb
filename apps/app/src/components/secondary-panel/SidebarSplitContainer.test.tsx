@@ -825,7 +825,7 @@ describe("SidebarSplitContainer", () => {
       });
       expect(screen.getAllByRole("separator")).toHaveLength(1);
       expect(separator.getAttribute("aria-orientation")).toBe(orientation);
-      expect(separator.className).toContain("bg-border-seam");
+      expect(separator.className).toContain("bg-transparent");
     },
   );
 
@@ -1133,7 +1133,7 @@ describe("SidebarSplitContainer", () => {
     });
 
     const separator = screen.getByRole("separator");
-    expect(separator.className).toContain("bg-border-seam");
+    expect(separator.className).toContain("bg-transparent");
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;

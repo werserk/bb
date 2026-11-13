@@ -31,6 +31,7 @@
     --bb-app-chrome-row-height: 3rem;
     --bb-chrome-control-gap: 0.25rem;
     --bb-panel-chrome-padding: 1rem;
+    --bb-panel-scrollbar-inset: 8px;
     --bb-shell-height: 100dvh;
     --bb-window-frame-top: 0px;
     --bb-window-frame-lip: 0px;
@@ -39,6 +40,12 @@
     --bb-sidebar-rail-padding: var(--bb-frame-rail-padding);
     --bb-sidebar-control-size: var(--bb-frame-rail-control-size);
     --bb-sidebar-control-icon-size: 16px;
+  }
+
+  @media (pointer: coarse) {
+    :root {
+      --bb-panel-scrollbar-inset: 20px;
+    }
   }
 
   @media (width < 48rem) and (pointer: coarse) {
@@ -107,9 +114,18 @@
   }
 
   * {
+    --bb-scrollbar-thumb: color-mix(
+      in oklab,
+      var(--foreground) 20%,
+      transparent
+    );
+    --bb-scrollbar-thumb-hover: color-mix(
+      in oklab,
+      var(--foreground) 40%,
+      transparent
+    );
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
-      transparent;
+    scrollbar-color: var(--bb-scrollbar-thumb) transparent;
   }
 
   *::-webkit-scrollbar {
@@ -123,12 +139,19 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+    background-color: var(--bb-scrollbar-thumb);
     border-radius: 9999px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+    background-color: var(--bb-scrollbar-thumb-hover);
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
   }
 
   /*
@@ -469,69 +492,29 @@
    */
   .thread-scrollbar,
   .transient-scrollbar {
-    scrollbar-color: transparent transparent;
-  }
-
-  .thread-scrollbar::-webkit-scrollbar-thumb,
-  .thread-scrollbar::-webkit-scrollbar-thumb:hover,
-  .transient-scrollbar::-webkit-scrollbar-thumb,
-  .transient-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: transparent;
+    --bb-scrollbar-thumb: transparent;
+    --bb-scrollbar-thumb-hover: transparent;
   }
 
   .thread-scrollbar[data-scrollbar-scrolling="true"],
   .transient-scrollbar[data-scrollbar-scrolling="true"] {
-    scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
-      transparent;
+    --bb-scrollbar-thumb: color-mix(
+      in oklab,
+      var(--foreground) 20%,
+      transparent
+    );
+    --bb-scrollbar-thumb-hover: color-mix(
+      in oklab,
+      var(--foreground) 40%,
+      transparent
+    );
   }
 
-  .thread-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb,
-  .transient-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
-  }
-
-  .thread-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb:hover,
-  .transient-scrollbar[data-scrollbar-scrolling="true"]::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
-  }
-
-  @supports selector(::-webkit-scrollbar) {
-    .seam-scrollbar,
-    .seam-scrollbar[data-scrollbar-scrolling="true"] {
-      scrollbar-width: auto;
-      scrollbar-color: auto;
+  @media (min-width: 48rem) {
+    .panel-scroll-gutter {
+      margin-inline: var(--bb-panel-scrollbar-inset);
+      margin-bottom: var(--bb-panel-scrollbar-inset);
     }
-  }
-
-  .seam-scrollbar::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  [data-sidebar="content"] {
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 25%, transparent)
-      transparent;
-  }
-
-  @supports selector(::-webkit-scrollbar) {
-    [data-sidebar="content"] {
-      scrollbar-width: auto;
-      scrollbar-color: auto;
-    }
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 25%, transparent);
-    border-radius: 4px;
-  }
-
-  [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
   }
 
   @media (hover: none) and (pointer: coarse) {
@@ -547,70 +530,23 @@
   }
 
   [data-vaul-drawer-direction] [data-sidebar="content"] {
-    scrollbar-color: transparent transparent;
-  }
-
-  [data-vaul-drawer-direction]
-    [data-sidebar="content"]::-webkit-scrollbar-thumb,
-  [data-vaul-drawer-direction]
-    [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
-    background-color: transparent;
+    --bb-scrollbar-thumb: transparent;
+    --bb-scrollbar-thumb-hover: transparent;
   }
 
   @media (hover: hover) and (pointer: fine) {
-    [data-vaul-drawer-direction] [data-sidebar="content"] {
-      scrollbar-width: thin;
-    }
-
     [data-vaul-drawer-direction] [data-sidebar="content"]:hover {
-      scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
-        transparent;
+      --bb-scrollbar-thumb: color-mix(
+        in oklab,
+        var(--foreground) 20%,
+        transparent
+      );
+      --bb-scrollbar-thumb-hover: color-mix(
+        in oklab,
+        var(--foreground) 40%,
+        transparent
+      );
     }
-
-    [data-vaul-drawer-direction]
-      [data-sidebar="content"]:hover::-webkit-scrollbar-thumb {
-      background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
-    }
-
-    [data-vaul-drawer-direction]
-      [data-sidebar="content"]:hover::-webkit-scrollbar-thumb:hover {
-      background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
-    }
-  }
-
-  /*
-   * Opt out of the global thin scrollbar into always-visible classic
-   * scrollbars for two-axis data surfaces (e.g. the CSV table preview).
-   * Native thin scrollbars render as macOS overlay bars that fade out and
-   * give a wide table no persistent horizontal-scroll affordance. Chromium
-   * only honors `::-webkit-scrollbar` customization when `scrollbar-width`
-   * and `scrollbar-color` are both `auto`, so those resets are what
-   * re-enable the persistent chrome below.
-   */
-  .persistent-scrollbar {
-    scrollbar-width: auto;
-    scrollbar-color: auto;
-  }
-
-  .persistent-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .persistent-scrollbar::-webkit-scrollbar-track,
-  .persistent-scrollbar::-webkit-scrollbar-corner {
-    background: transparent;
-  }
-
-  .persistent-scrollbar::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 20%, transparent);
-    border-radius: 9999px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-  }
-
-  .persistent-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
   }
 }
 

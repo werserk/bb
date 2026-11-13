@@ -666,6 +666,9 @@ const SidebarProvider = React.forwardRef<
                   style={
                     {
                       ...sidebarMobileWidthStyle,
+                      "--bb-sidebar-rail-border-width": isFramed
+                        ? "1px"
+                        : "0px",
                       ...(isFramed
                         ? {
                             "--bb-window-card-collapsed-left":

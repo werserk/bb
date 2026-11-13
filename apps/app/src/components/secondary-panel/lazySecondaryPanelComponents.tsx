@@ -56,7 +56,6 @@ function ThreadSecondaryPanelInlinePlaceholder({
       className={cn(
         "min-w-0",
         `relative transition-[flex-grow,flex-basis] ${PANEL_COLLAPSE_TRANSITION_CLASS}`,
-        isOpen && !isConversationCollapsed && "border-l border-border-seam",
       )}
       data-testid="thread-secondary-panel-placeholder"
     >

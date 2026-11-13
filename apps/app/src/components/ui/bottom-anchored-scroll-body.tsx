@@ -334,7 +334,7 @@ export function BottomAnchoredScrollBody({
             ref={scrollAreaRef}
             data-page-scroll-viewport=""
             className={cn(
-              "thread-scrollbar @container/page col-start-1 row-start-1 min-h-0 overflow-x-hidden overflow-y-auto",
+              "thread-scrollbar panel-scroll-gutter @container/page col-start-1 row-start-1 min-h-0 overflow-x-hidden overflow-y-auto",
               scrollAreaClassName,
             )}
           >

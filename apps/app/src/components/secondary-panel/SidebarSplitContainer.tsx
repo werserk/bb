@@ -1,4 +1,8 @@
 import {
+  PANEL_RESIZE_HIT_TARGET_CLASS,
+  PANEL_STACK_RESIZE_HIT_TARGET_CLASS,
+} from "@/components/secondary-panel/panelTransitionTokens";
+import {
   Fragment,
   useCallback,
   useEffect,
@@ -375,7 +379,9 @@ export function SidebarSplitContainer({
     next?.scrollIntoView({ block: "nearest" });
     return true;
   };
-  useAppCommandHandler("panel.previousNewTabItem", () => navigateNewTabItem(-1));
+  useAppCommandHandler("panel.previousNewTabItem", () =>
+    navigateNewTabItem(-1),
+  );
   useAppCommandHandler("panel.nextNewTabItem", () => navigateNewTabItem(1));
 
   const focusPane = useCallback(
@@ -981,7 +987,7 @@ function SidebarSplitDivider({
       }
       aria-orientation={horizontal ? "vertical" : "horizontal"}
       className={cn(
-        "group relative z-[25] shrink-0 bg-border-seam transition-colors hover:bg-ring/40 data-[dragging]:bg-ring/40",
+        "group relative z-[25] shrink-0 bg-transparent transition-colors hover:bg-ring/40 hover:delay-200 data-[dragging]:bg-ring/40 data-[dragging]:!delay-0",
         MACOS_APP_REGION_NO_DRAG_CLASS,
         "pointer-events-auto",
         hidden && "invisible pointer-events-none",
@@ -991,12 +997,11 @@ function SidebarSplitDivider({
       <div
         aria-hidden
         onPointerDown={handlePointerDown}
-        className={cn(
-          "absolute z-10 touch-none bg-transparent",
+        className={
           horizontal
-            ? "-left-1.5 top-0 h-full w-3 cursor-col-resize"
-            : "left-0 -top-1.5 h-3 w-full cursor-row-resize",
-        )}
+            ? PANEL_RESIZE_HIT_TARGET_CLASS
+            : PANEL_STACK_RESIZE_HIT_TARGET_CLASS
+        }
       />
     </div>
   );

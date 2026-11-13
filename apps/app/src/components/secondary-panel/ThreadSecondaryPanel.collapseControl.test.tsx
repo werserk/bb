@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-
 import { ThreadInfoFixedTabContent } from "@/components/secondary-panel/thread-info-registration";
 import {
   cleanup,
@@ -732,7 +731,6 @@ describe("ThreadSecondaryPanel Diff eligibility", () => {
     ).toBeNull();
     expect(screen.queryByText("This panel view is unavailable.")).toBeNull();
   });
-
 });
 
 describe("ThreadSecondaryPanel hide control glyph", () => {
@@ -754,7 +752,7 @@ describe("ThreadSecondaryPanel hide control glyph", () => {
 });
 
 describe("ThreadSecondaryPanel resize boundary", () => {
-  it("keeps the panel seam visible while the clipped panel surface moves", () => {
+  it("keeps the panel seam hidden at rest while the clipped panel surface moves", () => {
     const view = renderPanel({
       isConversationCollapsed: false,
       onToggleConversationCollapse: noop,
@@ -767,7 +765,11 @@ describe("ThreadSecondaryPanel resize boundary", () => {
       "span:not([data-panel-resize-hit-target])",
     );
     expect(boundary.tabIndex).toBe(-1);
-    expect(seam?.className).toContain("bg-border-seam");
+    expect(seam?.className).toContain("bg-transparent");
+    expect(seam?.className).toContain("group-hover:bg-accent-foreground/35");
+    expect(view.container.querySelector("aside")?.className).not.toContain(
+      "border-l",
+    );
   });
 });
 

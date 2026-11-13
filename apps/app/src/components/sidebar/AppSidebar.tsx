@@ -334,7 +334,7 @@ export function AppSidebar({
         }
       />
       {placement === "list" ? navigationRegion("shrink-0") : null}
-      <SidebarContent className="md:mr-2 md:pointer-coarse:mr-5">
+      <SidebarContent className="md:mr-(--bb-panel-scrollbar-inset)">
         <ThreadActionSurfaceVisibility visible={isThreadListVisible}>
           <PluginThreadList
             replacement={threadListReplacement}
@@ -351,7 +351,7 @@ export function AppSidebar({
       >
         <OverflowFade placement="above" tone="sidebar" size="sm" />
         {isFooterCustomizing ? (
-          <div className="max-h-[50svh] overflow-y-auto">
+          <div className="max-h-[50svh] overflow-y-auto md:mr-(--bb-panel-scrollbar-inset)">
             <LazySidebarFooterCustomize
               onDone={() => {
                 flushSync(() => setFooterCustomizing(false));

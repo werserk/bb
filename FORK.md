@@ -26,7 +26,6 @@ The earlier item 1b/1c presentation paragraphs above are historical; the core-pl
 
 Persistent question markers survive hidden service turns through the same standalone conversation rows as ordinary questions; surrounding service replies stay hidden. Persistent cards inject the app voice textarea locally, so multiple cards do not register competing global shortcuts. HTML question materials use the shared document bootstrap in `packages/shared-ui/src/lib/html-frame.ts` and theme observer in `use-frame-theme.ts`, also consumed by inline-vis through reexports. Frozen HTML receives theme tokens and bounded content height messages without changing stored snapshots or adding same-origin sandbox access.
 
-
 Open-question reads share `packages/db/src/data/conversation-questions.ts`'s public,
 non-archived open selector. `readThreadPlan` emits `questionAttention` on every
 read (including zero/null), using indexed count and oldest identity queries in
@@ -71,15 +70,30 @@ The host passes project/reused-environment context in a one-use composer URL;
 RootComposeView consumes it into the existing selection and location-state path.
 No SDK or stored-data contract changes.
 
-Sidebar and page-chat scrollers reserve
-8px outside the scrollbar at desktop seams (20px for coarse pointers); Chromium
-scrollbars there remain 8px. Firefox uses its native thin scrollbar metric.
-The two right-panel seam targets and the sidebar target use 9px for fine pointers
-around the 1px seam, preserving 32px coarse targets. Hover feedback waits 200ms;
-only pointer-down starts resizing. Right-panel separators retain the upstream
-pointer-only focus policy and remain outside the tab order.
-Plugin-owned scrollers need their own external gutter; core does not pad their
-inner content.
+Scrollbar metrics live in app.css: Chromium/WebKit use 8px native scrollbars,
+with thin as the Firefox fallback. Reading visibility changes the per-element
+--bb-scrollbar-thumb and --bb-scrollbar-thumb-hover colors without overriding
+scrollbar-width or scrollbar-color. Sidebar, chat, metadata and file preview
+scrollers share that policy, including persistent CSV scrollbars. Horizontal
+navigation strips retain their explicit hidden-scrollbar policy.
+
+Core reading surfaces reserve an external 8px desktop gutter (20px for coarse
+pointers), using the shared --bb-panel-scrollbar-inset root token so plugin
+reading surfaces can use the same metric. panel-scroll-gutter covers shared chat viewports and native right-panel
+reading slots, Markdown, code and metadata without padding their inner content.
+The sidebar reserves its gutter outside SidebarContent. Plugin-owned scrollers
+keep their own external gutter and inherit the global scrollbar metrics; local
+thin or WebKit non-auto color overrides must not replace those metrics.
+Panel resize hit targets share panelTransitionTokens.ts for both split axes:
+9px fine targets around the 1px seam and 32px coarse targets. Sidebar resizing
+uses the same widths. Right-panel separators retain the upstream pointer-only
+focus policy and remain outside the tab order. Seams are transparent at rest;
+hover feedback waits 200ms and pointer dragging reveals the seam immediately.
+The native right-panel aside and its loading placeholder have no duplicate left
+border; resize handles own the boundary feedback. Framed inset chrome is unchanged.
+The collapsed navigation rail includes its 1px body border only in framed mode
+through --bb-sidebar-rail-border-width. Plain browser chrome reserves no removed
+border, keeping the header body flush with the actual rail.
 
 Chat Markdown tables use the existing contained renderer, keeping their outer
 edges within the prose column and scrolling wide contents horizontally. Assistant

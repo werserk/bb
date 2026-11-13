@@ -256,7 +256,7 @@ export function TopList({
             <div
               ref={destinationsRef}
               data-testid="sidebar-navigation-destinations"
-              className="max-h-[max(4rem,calc(70svh_-_4.5rem))] space-y-0.5 overflow-y-auto [scrollbar-width:thin]"
+              className="max-h-[max(4rem,calc(70svh_-_4.5rem))] space-y-0.5 overflow-y-auto"
             >
               {visible.map((item) => (
                 <NavigationListRow
