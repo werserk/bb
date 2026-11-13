@@ -4,10 +4,12 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   sanitizeInheritedChildProcessEnv,
+  hostToolchain,
   spawnManagedProcess,
   type ManagedProcess,
 } from "@bb/process-utils";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
+import { prepareProviderProcessPriority } from "./provider-process-priority.js";
 import type { CreateBridgeAdapterOptions } from "./provider-adapter.js";
 import { createProviderForId } from "./provider-registry.js";
 import {
@@ -178,11 +180,12 @@ export class RuntimeProviderProcessManager {
 
     const startPromise = (async () => {
       const adapter = this.getAdapter(args.providerId, args.bridgeLaunch);
-      const providerProcess = this.spawnProvider({
+      const providerProcess = await this.spawnProvider({
         adapter,
         processKey: args.processKey,
         providerId: args.providerId,
       });
+      if (providerProcess === undefined) return;
 
       try {
         if (hasChildProcessExited(providerProcess.child)) {
@@ -369,7 +372,9 @@ export class RuntimeProviderProcessManager {
     );
   }
 
-  private spawnProvider(args: SpawnProviderArgs): RuntimeProviderProcess {
+  private async spawnProvider(
+    args: SpawnProviderArgs,
+  ): Promise<RuntimeProviderProcess | undefined> {
     const processConfig = args.adapter.process;
     const env: NodeJS.ProcessEnv = {
       ...sanitizeInheritedChildProcessEnv({ env: process.env }),
@@ -381,12 +386,15 @@ export class RuntimeProviderProcessManager {
       env[PROVIDER_BRIDGE_RECORD_DIR_ENV] = join(recordRoot, args.providerId);
     }
 
-    const managed = spawnManagedProcess({
-      command: processConfig.command,
-      args: processConfig.args,
+    const launch = await prepareProviderProcessPriority({
+      ...hostToolchain.command(processConfig.command, processConfig.args, {
+        cwd: this.args.workspacePath,
+        env,
+      }),
       cwd: this.args.workspacePath,
-      env,
     });
+    if (this.shuttingDown) return undefined;
+    const managed = spawnManagedProcess(launch);
     const { child } = managed;
     let finalizeExit: () => void = () => undefined;
     const exitFinalized = new Promise<void>((resolve) => {

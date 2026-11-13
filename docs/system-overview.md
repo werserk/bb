@@ -49,7 +49,32 @@ Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
 signals. This introduces no persisted or public contract.
 
+### Provider CPU priority on Linux
 
+`RuntimeProviderProcessManager` prepares only provider bridge launches through
+`provider-process-priority.ts`. The bridge and its descendant provider CLI,
+agent commands and locally spawned MCP processes share a transient user scope in
+`app-bbchecks.slice`. Both the slice (runtime property) and scope use `CPUWeight=1`;
+`nice -n 19` and `ionice -c 3` apply to the bridge before execution. This is relative
+priority without a CPU quota. The main server, host daemon RPC and UI retain their
+existing scheduling. Provider bridge RPC/event forwarding also gets the lower
+priority and may take longer under contention.
+
+The original toolchain launch is prepared before wrapping. Executable and argv
+remain separate; systemd environment expansion is disabled. Scope execution
+preserves piped stdio, environment, working directory and process-group ownership.
+Existing provider EOF handlers and managed process-group cancellation retain
+cleanup ownership. No host wire, SDK or stored data contract changes.
+
+When user systemd executables or the user manager probe are unavailable, the
+bridge uses only nice/ionice and remains in its inherited cgroup. Missing nice or
+ionice, failed slice setup, and failed scope admission refuse the launch; the
+actual bridge command is never retried through a fallback. Non-Linux launches
+retain their previous behavior. Only the common bridge launch is wrapped: ACP's
+inner agent launch is not wrapped again. Separately hosted plugin tools, remote
+executors, host git/gh operations and interactive PTYs do not pass through this
+seam and retain their existing policy. Providers that delegate work outside their
+local process tree do not inherit this scope.
 
 ### Thread lifecycle ownership
 
