@@ -419,11 +419,11 @@ export function AppSidebar({
             {placement === "rail" ? (
               <div
                 className={cn(
-                  "col-start-1 row-start-2 flex shrink-0 items-center justify-center",
+                  "col-start-1 row-start-2 flex shrink-0 items-center justify-center bg-chrome",
                   NAV_RAIL_WIDTH_CLASS,
                   isFramed
                     ? "h-(--bb-app-chrome-row-height)"
-                    : "bg-surface-recessed -mb-[env(safe-area-inset-bottom)] pt-2 pb-[calc(var(--bb-frame-footer-inset)_+_env(safe-area-inset-bottom))]",
+                    : "bg-chrome -mb-[env(safe-area-inset-bottom)] pt-2 pb-[calc(var(--bb-frame-footer-inset)_+_env(safe-area-inset-bottom))]",
                 )}
               >
                 <NavRailSettingsButton
