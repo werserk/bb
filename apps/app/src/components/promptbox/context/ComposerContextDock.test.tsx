@@ -2,13 +2,12 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useLayoutEffect, useState } from "react";
 import {
   ComposerContextProvider,
   ComposerContextSources,
   ComposerContextItem,
   useComposerContextStore,
-  type ComposerContextStore,
 } from "./composer-context";
 import { ComposerContextDock } from "./ComposerContextDock";
 
@@ -218,9 +217,10 @@ it("keeps plan and native questions in the overview even when other sources moun
 });
 
 it("updates native detail content without republishing unchanged summary metadata", () => {
-  const observed: { store: ComposerContextStore | null } = { store: null };
+  const listener = vi.fn();
   function Source({ tick, summary }: { tick: number; summary: number }) {
-    observed.store = useComposerContextStore();
+    const store = useComposerContextStore();
+    useLayoutEffect(() => store?.subscribe(listener), [store]);
     return (
       <ComposerContextSources>
         <ComposerContextItem
@@ -244,9 +244,7 @@ it("updates native detail content without republishing unchanged summary metadat
     </ComposerContextProvider>
   );
   const { rerender } = render(fixture(60, 2));
-  if (!observed.store) throw new Error("Missing store");
-  const listener = vi.fn();
-  const unsubscribe = observed.store.subscribe(listener);
+  listener.mockClear();
   rerender(fixture(59, 2));
   expect(listener).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Needs you: 2" }));
@@ -254,5 +252,4 @@ it("updates native detail content without republishing unchanged summary metadat
   rerender(fixture(58, 3));
   expect(listener).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Needs you: 3" })).toBeTruthy();
-  unsubscribe();
 });
