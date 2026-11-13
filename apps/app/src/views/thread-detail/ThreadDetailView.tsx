@@ -1269,6 +1269,7 @@ function ThreadDetailViewInternal(
         return true;
       }
 
+      if (!options?.viewer && resolution.request.lineRange === null && environment?.hostId && openArtifactPopup({ target: { kind: "host", hostId: environment.hostId, path: resolution.request.path }, location: null })) return true;
       openHostFile(
         {
           lineRange: resolution.request.lineRange,
@@ -1278,7 +1279,7 @@ function ThreadDetailViewInternal(
       );
       return true;
     },
-    [openHostFile, openPathInFileTarget, openStorageFile, openWorkspaceFile],
+    [environment?.hostId, openHostFile, openPathInFileTarget, openStorageFile, openWorkspaceFile],
   );
   const handleOpenTimelineLocalFileLink = useCallback(
     (
