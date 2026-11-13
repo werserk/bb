@@ -1,4 +1,4 @@
-import { HEADER_SEAM_CLASS } from "@/components/layout/AppPageHeader";
+import { APP_PAGE_HEADER_SURFACE_CLASS } from "@/components/layout/AppPageHeader";
 import {
   useIsSidebarFramed,
   useOptionalIsSidebarShowing,
@@ -63,9 +63,10 @@ export function RouteLoadingSkeleton({
           className={cn(
             CHROME_ROW_CLASS,
             "shrink-0 gap-2",
+            APP_PAGE_HEADER_SURFACE_CLASS,
             isInTitleBar
               ? [MACOS_TITLE_BAR_BAND_CLASS, "px-4"]
-              : [HEADER_SEAM_CLASS, isBoundedPane ? "px-4" : "px-3 pl-12"],
+              : [isBoundedPane ? "px-4" : "px-3 pl-12"],
           )}
         >
           <div

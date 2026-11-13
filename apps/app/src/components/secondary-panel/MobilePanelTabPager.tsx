@@ -140,14 +140,14 @@ export function MobilePanelTabPager({
       className={`flex min-w-0 flex-1 items-center gap-2 ${MACOS_APP_REGION_NO_DRAG_CLASS}`}
       data-testid="mobile-panel-tab-pager"
     >
-      <div className="flex shrink-0 items-center gap-1 [&_button]:size-8 max-md:pointer-coarse:[&_button]:size-9">
+      <div className="flex shrink-0 items-center gap-1 [&_button]:h-8 max-md:pointer-coarse:[&_button]:h-9">
         {fixedTabs.map((tab) => (
           <TabPill
             compact
             key={tab.id}
             label={tab.label}
             ariaLabel={tab.ariaLabel}
-            iconOnly
+            iconOnly={tab.id !== activeTabId}
             leadingVisual={tab.leadingVisual}
             title={tab.label}
             isActive={tab.id === activeTabId}

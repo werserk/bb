@@ -98,6 +98,10 @@ describe("ThreadSecondaryPanel saved plugin tab while frontends load", () => {
         }),
       );
       expect(screen.getByText("Diff content")).not.toBeNull();
+      expect(screen.getByText("Diff").classList.contains("sr-only")).toBe(
+        false,
+      );
+      expect(screen.getByText("Info").classList.contains("sr-only")).toBe(true);
       expect(screen.queryByText("Info content")).toBeNull();
     },
   );

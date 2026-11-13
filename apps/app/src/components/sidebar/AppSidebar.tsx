@@ -389,10 +389,10 @@ export function AppSidebar({
             {placement === "rail"
               ? navigationRegion(
                   cn(
-                    "relative z-10 flex shrink-0 flex-col",
+                    "relative z-10 flex shrink-0 flex-col bg-chrome",
                     NAV_RAIL_WIDTH_CLASS,
                     !isFramed &&
-                      "-mt-[env(safe-area-inset-top)] bg-surface-recessed pt-[env(safe-area-inset-top)]",
+                      "-mt-[env(safe-area-inset-top)] bg-chrome pt-[env(safe-area-inset-top)]",
                   ),
                 )
               : null}

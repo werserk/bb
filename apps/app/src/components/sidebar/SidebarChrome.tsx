@@ -66,7 +66,7 @@ export function SidebarTopReserveRow({
       data-testid={testId}
       className={cn(
         CHROME_ROW_CLASS,
-        "shrink-0 justify-end gap-1 px-2",
+        "shrink-0 justify-end gap-1 bg-chrome px-2",
         isFramed && FRAMED_CARD_TOP_BORDER_OFFSET_CLASS,
         usesDesktopChrome && !isFramed && MACOS_WINDOW_DRAG_CLASS,
         hasRail &&

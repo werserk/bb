@@ -815,7 +815,6 @@ const Sidebar = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
             "group-data-[collapsible=offcanvas]:invisible group-data-[collapsible=offcanvas]:[transition:left_200ms_linear,right_200ms_linear,width_200ms_linear,visibility_0s_linear_200ms]",
             "left-(--bb-window-frame-leading-lip) group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]",
             "group-data-[collapsible=rail]:w-(--sidebar-rail-width)",
-            "border-border-seam group-data-[side=left]:border-r",
             SIDEBAR_FRAMED_PANEL_CLASS,
             className,
           )}
@@ -1093,7 +1092,6 @@ const SidebarMobilePanel = React.forwardRef<
           data-vaul-drawer-direction="left"
           className={cn(
             "group fixed inset-y-0 left-0 z-0 flex h-(--bb-shell-height) w-(--sidebar-width-mobile) touch-pan-y select-none flex-col bg-sidebar text-sidebar-foreground outline-none",
-            "border-border-seam data-[side=left]:border-r",
             className,
           )}
           style={

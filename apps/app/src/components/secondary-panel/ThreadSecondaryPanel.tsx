@@ -724,7 +724,7 @@ function ThreadSecondaryPanelContent({
             data-testid="thread-secondary-panel-top-chrome"
             className={cn(
               CHROME_ROW_CLASS,
-              "min-w-0 justify-between gap-2",
+              "min-w-0 justify-between gap-2 bg-chrome",
               renderAsDrawer ? "px-2" : "px-(--bb-panel-chrome-padding)",
               usesDesktopChrome && usesWindowChrome && MACOS_WINDOW_DRAG_CLASS,
               usesDesktopChrome &&
@@ -793,7 +793,7 @@ function ThreadSecondaryPanelContent({
             ) : null}
           </div>
         </div>
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-sidebar">
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-panel">
           <TabVisibleContext.Provider value={isLayoutOpen}>
             {isPanelInFrame && usesWindowChrome ? (
               <TitleBarScrollFade tone="sidebar" />
@@ -980,7 +980,7 @@ function ThreadSecondaryPanelContent({
           : undefined
       }
       className={cn(
-        "flex h-full min-h-0 flex-col overflow-hidden bg-sidebar",
+        "flex h-full min-h-0 flex-col overflow-hidden bg-panel",
         renderAsDrawer && "min-w-0 flex-1",
         isPanelInFrame && FRAMED_PANEL_SURFACE_CLASS,
         !renderAsDrawer && [
@@ -1090,7 +1090,7 @@ function PinnedIconTab({
             label={label}
             ariaLabel={ariaLabel}
             ariaKeyshortcuts={ariaKeyshortcuts}
-            iconOnly
+            iconOnly={!isActive}
             leadingVisual={leadingVisual}
             title={title}
             isActive={isActive}

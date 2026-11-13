@@ -24,6 +24,8 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-chrome: var(--chrome);
+  --color-panel: var(--panel);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -473,6 +475,8 @@
   --canvas: oklch(1 0 0);
   --ink: oklch(0.3211 0 0);
   --background: var(--canvas);
+  --chrome: color-mix(in oklch, var(--ink) 6%, var(--canvas));
+  --panel: color-mix(in oklch, var(--ink) 3%, var(--canvas));
   --foreground: var(--ink);
   /* Card and popover are flush with the canvas — elevation is conveyed by
    * border + shadow, not a surface tint, so floating menus, raised cards, and
@@ -601,9 +605,9 @@
     var(--ink) 19.2%,
     var(--canvas)
   );
-  --sidebar: color-mix(in oklch, var(--ink) 2.2%, var(--canvas));
+  --sidebar: var(--panel);
   --sidebar-foreground: var(--ink);
-  --sidebar-accent: color-mix(in oklch, var(--ink) 8%, var(--canvas));
+  --sidebar-accent: color-mix(in oklch, var(--ink) 14%, var(--canvas));
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: color-mix(in oklch, var(--ink) 14%, var(--canvas));
   /* Search-match highlight: a manilla-folder tint over the canvas. Chromatic on
@@ -717,6 +721,8 @@
    * follows by an imperceptible amount. */
   --ink: oklch(0.81 0 0);
   --background: var(--canvas);
+  --chrome: oklch(from var(--canvas) calc(l - 0.05) c h);
+  --panel: oklch(from var(--canvas) calc(l - 0.025) c h);
   --foreground: var(--ink);
   /* Card and popover stay flush with the canvas here too — elevation comes from
    * border + shadow. The lift ramp below uses larger steps than light so the
@@ -824,7 +830,7 @@
     var(--ink) 25.2%,
     var(--canvas)
   );
-  --sidebar: color-mix(in oklch, var(--ink) 4.3%, var(--canvas));
+  --sidebar: var(--panel);
   --sidebar-foreground: var(--ink);
   --sidebar-accent: color-mix(in oklch, var(--ink) 12%, var(--canvas));
   --sidebar-accent-foreground: var(--ink);

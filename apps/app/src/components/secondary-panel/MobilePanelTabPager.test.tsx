@@ -196,7 +196,7 @@ describe("MobilePanelTabPager", () => {
           newTabControl={null}
         />,
       );
-      expect(screen.getByText(fixedTab.label).className).toContain("sr-only");
+      expect(screen.getByText(fixedTab.label).className).not.toContain("sr-only");
       expect(
         screen
           .getByRole("button", { name: fixedTab.label })

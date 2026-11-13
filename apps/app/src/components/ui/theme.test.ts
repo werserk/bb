@@ -33,7 +33,6 @@ const REQUIRED_RAMP_TOKENS = [
   "border-hairline",
   "border-seam",
   "input",
-  "sidebar",
   "sidebar-accent",
   "sidebar-border",
 ] as const;
@@ -267,18 +266,17 @@ describe("theme.css neutral ramp", () => {
 
       it("makes the pressed/selected fill stronger than hover", () => {
         expect(step("state-active")).toBeGreaterThan(step("state-hover"));
-        expect(step("sidebar-accent")).toBeGreaterThan(step("sidebar"));
-      });
-
-      it("keeps the sidebar a quiet chrome lift below the fills", () => {
-        expect(step("sidebar")).toBeLessThan(step("secondary"));
       });
     });
   }
 
   it("defines the same ramp tokens in light and dark", () => {
-    const light = [...rampSteps(modeBlock("light")).keys()].sort();
-    const dark = [...rampSteps(modeBlock("dark")).keys()].sort();
+    const light = [...rampSteps(modeBlock("light")).keys()]
+      .filter((token) => token !== "chrome" && token !== "panel")
+      .sort();
+    const dark = [...rampSteps(modeBlock("dark")).keys()]
+      .filter((token) => token !== "chrome" && token !== "panel")
+      .sort();
     expect(light).toEqual(dark);
   });
 
@@ -463,5 +461,64 @@ describe("theme.css shimmer paint scope", () => {
     expect(rule).toBeDefined();
     expect(rule).toMatch(/(?<!-)mask-image:\s*none;/);
     expect(rule).toMatch(/-webkit-mask-image:\s*none;/);
+  });
+});
+
+describe("theme.css frame surfaces", () => {
+  function surface(mode: (typeof MODES)[number], token: string): OklchColor {
+    const block = modeBlock(mode);
+    const value = variableValue(block, token);
+    const alias = value.match(/^var\(--([a-z-]+)\)$/);
+    if (alias) return surface(mode, alias[1]);
+    const relative = value.match(
+      /^oklch\(from var\(--canvas\) calc\(l - ([\d.]+)\) c h\)$/,
+    );
+    const canvas = parseOklch(variableValue(block, "canvas"));
+    if (relative)
+      return { ...canvas, lightness: canvas.lightness - Number(relative[1]) };
+    const mix = value.match(
+      /^color-mix\(in oklch, var\(--ink\) ([\d.]+)%, var\(--canvas\)\)$/,
+    );
+    if (!mix) return parseOklch(value);
+    const ink = parseOklch(variableValue(block, "ink"));
+    const weight = Number(mix[1]) / 100;
+    return {
+      ...canvas,
+      lightness: canvas.lightness * (1 - weight) + ink.lightness * weight,
+    };
+  }
+
+  for (const mode of MODES) {
+    it(`orders ${mode} chrome, panels and canvas by visual weight`, () => {
+      const chrome = surface(mode, "chrome");
+      const panel = surface(mode, "panel");
+      const canvas = surface(mode, "background");
+      expect(chrome.lightness).toBeLessThan(panel.lightness);
+      expect(panel.lightness).toBeLessThan(canvas.lightness);
+      expect(surface(mode, "sidebar")).toEqual(panel);
+      expect(variableValue(modeBlock(mode), "background")).toBe(
+        "var(--canvas)",
+      );
+      expect(
+        contrastRatio(surface(mode, "sidebar-accent"), panel),
+      ).toBeGreaterThanOrEqual(1.25);
+      const alpha = rampSteps(modeBlock(mode)).get("state-active")! / 100;
+      const ink = surface(mode, "ink");
+      expect(
+        contrastRatio(
+          {
+            ...panel,
+            lightness: panel.lightness * (1 - alpha) + ink.lightness * alpha,
+          },
+          panel,
+        ),
+      ).toBeGreaterThanOrEqual(1.25);
+    });
+  }
+
+  it("keeps the picked A1 dark steps", () => {
+    expect(surface("dark", "chrome").lightness).toBeCloseTo(0.145);
+    expect(surface("dark", "panel").lightness).toBeCloseTo(0.17);
+    expect(surface("dark", "background").lightness).toBeCloseTo(0.195);
   });
 });
