@@ -13,13 +13,14 @@ const stylesheet = readFileSync(
   "utf8",
 );
 
-function tokens(html: string): Array<[string, string]> {
+function tokens(html: string | null): Array<[string, string]> {
+  expect(html).not.toBeNull();
   return [
-    ...html.matchAll(/class="sh__token--(\w+)"[^>]*>([^<]*)<\/span>/g),
+    ...(html ?? "").matchAll(/class="sh__token--(\w+)"[^>]*>([^<]*)<\/span>/g),
   ].map((match) => [match[1]!, match[2]!]);
 }
 
-function tokenTypes(html: string): string[] {
+function tokenTypes(html: string | null): string[] {
   return tokens(html).map(([type]) => type);
 }
 
@@ -123,44 +124,61 @@ describe("highlightMarkdownCode", () => {
     expect(highlight).toHaveBeenCalledTimes(3);
   });
 
-  it("recomputes code over 128_000 characters and markup over the character budget without evicting cached blocks", () => {
+  it("keeps representative code through 1000 lines and 128_000 characters highlighted and cached", () => {
     const thousandLines = "const value = compute(input, { flag: true });\n"
       .repeat(1000)
       .trimEnd();
     const longest = " ".repeat(128_000);
-    const tooLong = " ".repeat(128_001);
-    const withinBudget = "a+".repeat(26_000);
-    const overBudget = "a+".repeat(28_000);
     vi.mocked(highlight).mockClear();
 
     for (const code of [thousandLines, thousandLines, longest, longest]) {
       highlightMarkdownCode({ code, language: null });
     }
     expect(highlight).toHaveBeenCalledTimes(2);
+    expect(
+      highlightMarkdownCode({ code: thousandLines, language: null }),
+    ).not.toBeNull();
+    expect(
+      highlightMarkdownCode({ code: longest, language: null }),
+    ).not.toBeNull();
+  });
 
-    const tooLongHtml = highlightMarkdownCode({
-      code: tooLong,
-      language: null,
-    });
-    expect(tooLong.length + tooLongHtml.length).toBeLessThan(4_000_000);
-    highlightMarkdownCode({ code: tooLong, language: null });
-    expect(highlight).toHaveBeenCalledTimes(4);
+  it.each(["\n", "\r\n", "\r"])(
+    "skips highlighting above 1000 lines separated by %j",
+    (newline) => {
+      const atLimit = Array.from(
+        { length: 1000 },
+        () => "const line = 1;",
+      ).join(newline);
+      expect(
+        highlightMarkdownCode({ code: atLimit, language: "js" }),
+      ).not.toBeNull();
+      const code = Array.from({ length: 1001 }, () => "const line = 1;").join(
+        newline,
+      );
+      vi.mocked(highlight).mockClear();
+      expect(highlightMarkdownCode({ code, language: "js" })).toBeNull();
+      expect(highlight).not.toHaveBeenCalled();
+    },
+  );
 
-    const withinHtml = highlightMarkdownCode({
-      code: withinBudget,
-      language: "js",
-    });
-    expect(withinBudget.length + withinHtml.length).toBeLessThan(3_900_000);
-    const overHtml = highlightMarkdownCode({
-      code: overBudget,
-      language: "js",
-    });
-    expect(overHtml.length).toBeGreaterThan(4_050_000);
-    highlightMarkdownCode({ code: overBudget, language: "js" });
-    expect(highlight).toHaveBeenCalledTimes(7);
+  it("skips the measured 4000-line control and oversized input before invoking the highlighter", () => {
+    vi.mocked(highlight).mockClear();
+    for (const code of [
+      "Synthetic code control\n".repeat(4000).trimEnd(),
+      " ".repeat(128_001),
+    ]) {
+      expect(highlightMarkdownCode({ code, language: null })).toBeNull();
+    }
+    expect(highlight).not.toHaveBeenCalled();
+  });
 
-    highlightMarkdownCode({ code: withinBudget, language: "js" });
-    expect(highlight).toHaveBeenCalledTimes(7);
+  it("caches a plain sentinel for dense markup instead of rebuilding or storing escaped source", () => {
+    const code = "a+".repeat(26_000);
+    vi.mocked(highlight).mockClear();
+    expect(highlightMarkdownCode({ code, language: "js" })).toBeNull();
+    expect(highlightMarkdownCode({ code, language: "js" })).toBeNull();
+    expect(highlight).toHaveBeenCalledTimes(1);
   });
 
   it("recomputes the least recently used code block past 128 entries and past the character budget", () => {
@@ -187,7 +205,8 @@ describe("highlightMarkdownCode", () => {
     for (let index = 0; index < 20; index += 1) {
       const code = budgetBlock(index);
       distinctChars +=
-        code.length + highlightMarkdownCode({ code, language: "ts" }).length;
+        code.length +
+        (highlightMarkdownCode({ code, language: "ts" })?.length ?? 0);
     }
     expect(distinctChars).toBeGreaterThan(4_000_000);
     vi.mocked(highlight).mockClear();
@@ -195,6 +214,48 @@ describe("highlightMarkdownCode", () => {
     highlightMarkdownCode({ code: budgetBlock(19), language: "ts" });
     expect(highlight).not.toHaveBeenCalled();
     highlightMarkdownCode({ code: countBlock(1), language: "js" });
+    expect(highlight).toHaveBeenCalledTimes(1);
+  });
+
+  it("evicts plain sentinels by entry count and charges their source keys against the character budget", () => {
+    const dense = (index: number) =>
+      `const sentinel${index} = ${"a+".repeat(26_000)}0;`;
+    const expandedMarkup = "x".repeat(4_100_000);
+    const original = dense(0);
+    vi.mocked(highlight).mockReturnValueOnce(expandedMarkup);
+    expect(
+      highlightMarkdownCode({ code: original, language: "js" }),
+    ).toBeNull();
+    for (let index = 1; index <= 80; index += 1) {
+      vi.mocked(highlight).mockReturnValueOnce(expandedMarkup);
+      expect(
+        highlightMarkdownCode({ code: dense(index), language: "js" }),
+      ).toBeNull();
+    }
+    vi.mocked(highlight).mockClear();
+    expect(
+      highlightMarkdownCode({ code: dense(80), language: "js" }),
+    ).toBeNull();
+    expect(highlight).not.toHaveBeenCalled();
+    expect(
+      highlightMarkdownCode({ code: original, language: "js" }),
+    ).toBeNull();
+    expect(highlight).toHaveBeenCalledTimes(1);
+    for (let index = 0; index < 128; index += 1) {
+      highlightMarkdownCode({
+        code: `const afterSentinel${index} = 1;`,
+        language: "js",
+      });
+    }
+    vi.mocked(highlight).mockClear();
+    expect(
+      highlightMarkdownCode({ code: original, language: "js" }),
+    ).toBeNull();
+    expect(highlight).toHaveBeenCalledTimes(1);
+    highlightMarkdownCode({
+      code: "const afterSentinel127 = 1;",
+      language: "js",
+    });
     expect(highlight).toHaveBeenCalledTimes(1);
   });
 });

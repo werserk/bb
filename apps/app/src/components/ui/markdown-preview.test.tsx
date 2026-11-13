@@ -315,6 +315,72 @@ describe("MarkdownPreview", () => {
     expect(container.textContent).toContain("<script>alert(1)</script>");
   });
 
+  it("keeps oversized code as literal selectable text with copy and wrapping", async () => {
+    const source = [
+      '<img src=x onerror="alert(1)"> &amp; <script>literal</script>',
+      ...Array.from({ length: 3999 }, () => "Synthetic code control"),
+    ].join("\n");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { container } = render(
+      <MarkdownPreview content={`\`\`\`ts\n${source}\n\`\`\``} />,
+    );
+    const code = requireElement(container, "pre code");
+    expect(code.childElementCount).toBe(0);
+    expect(code.textContent).toBe(source);
+    expect(code.classList.contains("language-ts")).toBe(true);
+    expect(code.querySelector("img,script")).toBeNull();
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    expect(range.toString()).toBe(source);
+    const wrap = screen.getByRole("button", { name: "Wrap lines" });
+    fireEvent.click(wrap);
+    expect(wrap.getAttribute("aria-pressed")).toBe("true");
+    expect(code.parentElement?.classList.contains("whitespace-pre-wrap")).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(source));
+  });
+
+  it.each([300, 500, 900])(
+    "keeps %i-line ordinary code highlighted",
+    (lines) => {
+      const source = Array.from(
+        { length: lines },
+        () => "const value = compute(input, { flag: true });",
+      ).join("\n");
+      const { container } = render(
+        <MarkdownPreview content={`\`\`\`js\n${source}\n\`\`\``} />,
+      );
+      const code = requireElement(container, "pre code");
+      expect(code.textContent).toBe(source);
+      expect(code.querySelectorAll("span.sh__line")).toHaveLength(lines);
+      expect(code.querySelector("span.sh__token--keyword")).not.toBeNull();
+    },
+  );
+
+  it("switches between highlighted and plain code as the same fence grows and shrinks", () => {
+    const small = "const state = 1;";
+    const large = Array.from({ length: 1001 }, () => small).join("\n");
+    const view = render(
+      <MarkdownPreview content={`\`\`\`ts\n${small}\n\`\`\``} />,
+    );
+    expect(
+      view.container.querySelector("pre code span.sh__line"),
+    ).not.toBeNull();
+    view.rerender(<MarkdownPreview content={`\`\`\`ts\n${large}\n\`\`\``} />);
+    expect(requireElement(view.container, "pre code").childElementCount).toBe(
+      0,
+    );
+    expect(requireElement(view.container, "pre code").textContent).toBe(large);
+    view.rerender(<MarkdownPreview content={`\`\`\`ts\n${small}\n\`\`\``} />);
+    expect(
+      view.container.querySelector("pre code span.sh__line"),
+    ).not.toBeNull();
+    expect(requireElement(view.container, "pre code").textContent).toBe(small);
+  });
+
   it("keeps highlighted code DOM until the code text changes", () => {
     const fence = "```ts\nconst a = 1;\n```";
     const view = render(<MarkdownPreview content={`${fence}\n\nPara one.`} />);
@@ -344,10 +410,11 @@ describe("MarkdownPreview", () => {
     );
 
     const expected = document.createElement("code");
-    expected.innerHTML = highlightMarkdownCode({
-      code: "const a = 1;\nconst b = 2;",
-      language: "ts",
-    });
+    expected.innerHTML =
+      highlightMarkdownCode({
+        code: "const a = 1;\nconst b = 2;",
+        language: "ts",
+      }) ?? "";
     expect(requireElement(view.container, "pre code")).toBe(code);
     expect(code.innerHTML).toBe(expected.innerHTML);
     expect(code.querySelectorAll("span.sh__line")).toHaveLength(2);

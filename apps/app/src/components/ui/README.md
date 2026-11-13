@@ -66,6 +66,21 @@ Files derived from shadcn/ui use this one-line header comment:
 Keep the marker at the top of the file so origin remains greppable even though
 shadcn-derived and hand-authored primitives live side by side.
 
+## Fenced Code
+
+Fenced-code highlighting is bounded in `markdown-code-highlight.ts`: inputs over
+128,000 UTF-16 code units or 1,000 lines use the existing React-text rendering
+path in `MarkdownCodeBlock`. Eligible input whose highlighted markup exceeds
+2,000,000 code units uses the same fallback, cached as a null sentinel. The LRU
+charges null entries for their source key only; highlighted entries also include
+the generated HTML. CRLF, LF and CR are line separators in the helper's input;
+the Markdown renderer removes one final LF before calling it.
+
+Fallback preserves full source text, copying, wrapping and the language class,
+while omitting syntax and diff-line colouring. It does not truncate code. The
+limits bound extreme cases; eligible 600–1,000-line code and changing dense
+streaming prefixes can still be expensive.
+
 ## Stories
 
 Stories are co-located with the component they exercise. Use visual catalogs for

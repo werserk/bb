@@ -883,7 +883,13 @@ function MarkdownCodeBlock({
         )}
       >
         {highlightedMarkup === null ? (
-          <code className="font-mono text-xs" {...codeProps}>
+          <code
+            className={cn(
+              "font-mono text-xs",
+              language ? `language-${language}` : "",
+            )}
+            {...codeProps}
+          >
             {codeText}
           </code>
         ) : (

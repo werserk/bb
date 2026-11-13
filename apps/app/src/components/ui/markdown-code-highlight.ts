@@ -13,9 +13,11 @@ const EXTRA_LANGUAGE_ALIASES: Record<string, LanguageName> = {
 
 const HIGHLIGHT_CACHE_MAX_ENTRIES = 128;
 const HIGHLIGHT_CACHE_MAX_CHARS = 4_000_000;
-const HIGHLIGHT_CACHE_MAX_CODE_LENGTH = 128_000;
+const HIGHLIGHT_MAX_CODE_LENGTH = 128_000;
+const HIGHLIGHT_MAX_LINES = 1000;
+const HIGHLIGHT_MAX_MARKUP_LENGTH = 2_000_000;
 
-const highlightCache = new Map<string, string>();
+const highlightCache = new Map<string, string | null>();
 let highlightCacheChars = 0;
 
 interface HighlightMarkdownCodeArgs {
@@ -43,9 +45,15 @@ function highlightCacheKey({
     : `${language.length}:${language}:${code}`;
 }
 
-export function highlightMarkdownCode(args: HighlightMarkdownCodeArgs): string {
-  if (args.code.length > HIGHLIGHT_CACHE_MAX_CODE_LENGTH) {
-    return highlightUncached(args);
+export function highlightMarkdownCode(
+  args: HighlightMarkdownCodeArgs,
+): string | null {
+  if (
+    args.code.length > HIGHLIGHT_MAX_CODE_LENGTH ||
+    args.code.split(/\r\n|\r|\n/, HIGHLIGHT_MAX_LINES + 1).length >
+      HIGHLIGHT_MAX_LINES
+  ) {
+    return null;
   }
   const key = highlightCacheKey(args);
   const cached = highlightCache.get(key);
@@ -54,8 +62,10 @@ export function highlightMarkdownCode(args: HighlightMarkdownCodeArgs): string {
     highlightCache.set(key, cached);
     return cached;
   }
-  const html = highlightUncached(args);
-  const entryChars = key.length + html.length;
+  const highlighted = highlightUncached(args);
+  const html =
+    highlighted.length > HIGHLIGHT_MAX_MARKUP_LENGTH ? null : highlighted;
+  const entryChars = key.length + (html?.length ?? 0);
   if (entryChars > HIGHLIGHT_CACHE_MAX_CHARS) {
     return html;
   }
@@ -69,7 +79,7 @@ export function highlightMarkdownCode(args: HighlightMarkdownCodeArgs): string {
       break;
     }
     highlightCache.delete(oldestKey);
-    highlightCacheChars -= oldestKey.length + oldestHtml.length;
+    highlightCacheChars -= oldestKey.length + (oldestHtml?.length ?? 0);
   }
   return html;
 }
