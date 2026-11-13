@@ -205,6 +205,15 @@ afterEach(() => {
 });
 
 describe("Markdown reading position in open secondary-panel tabs", () => {
+  it("reserves file reading gutters at the host slot without nesting them in the preview", () => {
+    const { container } = renderHarness();
+    const slot = container.querySelector(
+      "aside [data-file-preview-scroll-container]",
+    );
+    expect(slot?.classList.contains("panel-scroll-gutter")).toBe(true);
+    expect(slot?.querySelector(".panel-scroll-gutter")).toBeNull();
+  });
+
   it("provides a bounded scroll container inside a full-height file opener", () => {
     renderHarness({ contentFillsRegion: true });
     const container = scrollContainer();

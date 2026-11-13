@@ -545,7 +545,7 @@ export function FilePreview({
         usesFullHeightLayout
           ? cn(
               "@container/page flex h-full min-h-0 flex-col",
-              usesMarkdownPreviewLayout && "panel-scroll-gutter overflow-y-auto",
+              usesMarkdownPreviewLayout && "overflow-y-auto",
             )
           : cn(
               "@container/page min-h-full",
@@ -1113,7 +1113,7 @@ function CsvFilePreview({ file, onSelectionAddToChat }: CsvFilePreviewProps) {
       <div className="flex min-h-0 flex-auto flex-col bg-panel px-4 py-4">
         <div
           ref={scrollRef}
-          className="panel-scroll-gutter persistent-scrollbar min-h-0 overflow-auto overscroll-contain rounded-md border border-border bg-background"
+          className="min-h-0 overflow-auto overscroll-contain rounded-md border border-border bg-background"
         >
           <table
             className="min-w-full table-fixed border-separate border-spacing-0 font-mono text-xs leading-5"
@@ -1395,7 +1395,6 @@ function FilePreviewCode({
   );
   return (
     <SourceCodeHost
-      className="panel-scroll-gutter"
       content={file.contents}
       path={path}
       cacheKey={file.cacheKey ?? file.name}
