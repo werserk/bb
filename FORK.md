@@ -84,8 +84,8 @@ viewports and native right-panel reading slots without padding their inner
 content. File previews receive their gutter once from the host slot; their
 Markdown, CSV and code bodies do not reserve a second gutter. Metadata owns its
 own viewport gutter. Browser New Tab keeps inline gutters without a bottom
-margin on its full-height body. The shared BottomAnchoredScrollBody also gives
-static PageShell reading surfaces outside panes the same desktop gutter.
+margin on its full-height body. Static PageShell surfaces outside panels keep
+their own viewport and inset.
 The sidebar reserves its gutter outside SidebarContent. Plugin-owned scrollers
 keep their own external gutter and inherit the global scrollbar metrics; local
 thin or WebKit non-auto color overrides must not replace those metrics.
