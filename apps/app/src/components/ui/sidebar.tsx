@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "./reading-scroll-area";
 import * as React from "react";
 import { flushSync } from "react-dom";
 import { useComposedRefs } from "@radix-ui/react-compose-refs";
@@ -1458,10 +1459,7 @@ const SidebarInset = React.forwardRef<
       }
 
       const touch = event.touches.item(0);
-      if (
-        touch == null ||
-        touch.clientX < browserNavigationEdgeGuardPx()
-      ) {
+      if (touch == null || touch.clientX < browserNavigationEdgeGuardPx()) {
         return;
       }
 
@@ -1766,7 +1764,7 @@ SidebarFooter.displayName = "SidebarFooter";
 const SidebarContent = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div">
->(({ className, ...props }, ref) => {
+>(({ className, children, ...props }, ref) => {
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const composedRef = useComposedRefs(ref, contentRef);
   React.useLayoutEffect(() => {
@@ -1786,15 +1784,17 @@ const SidebarContent = React.forwardRef<
     return () => observer.disconnect();
   }, []);
   return (
-    <div
-      ref={composedRef}
-      data-sidebar="content"
-      className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto bg-sidebar [scrollbar-gutter:stable]",
-        className,
-      )}
-      {...props}
-    />
+    <ReadingScrollArea
+      className="min-h-0 flex-1"
+      viewportRef={composedRef}
+      viewportProps={{
+        ...props,
+        "data-sidebar": "content",
+        className: cn("bg-sidebar", className),
+      }}
+    >
+      {children}
+    </ReadingScrollArea>
   );
 });
 SidebarContent.displayName = "SidebarContent";

@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "../ui/reading-scroll-area";
 import { ThreadInfoContentContext } from "@/components/secondary-panel/thread-info-registration";
 import {
   type CSSProperties,
@@ -802,7 +803,8 @@ function ThreadSecondaryPanelContent({
             {isBrowserSurfaceActive ? null : holdsPanelContent ? (
               <SecondaryPanelContentSkeleton />
             ) : hasActiveSurfaceTab ? (
-              <div
+              <PanelReadingSlot
+                fills={isSurfaceTerminalActive || surfaceContentFillsRegion}
                 className={
                   isSurfaceTerminalActive || surfaceContentFillsRegion
                     ? "min-h-0 flex-1 overflow-hidden"
@@ -823,10 +825,11 @@ function ThreadSecondaryPanelContent({
                     </EmptyStatePanel>
                   )}
                 </FilePreviewScrollPositionContext.Provider>
-              </div>
+              </PanelReadingSlot>
             ) : activeSurfaceFixedTab !== undefined &&
               fixedSurfaceContent !== undefined ? (
-              <div
+              <PanelReadingSlot
+                fills={fixedSurfaceContentFillsRegion}
                 className={
                   fixedSurfaceContentFillsRegion
                     ? "flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -834,7 +837,7 @@ function ThreadSecondaryPanelContent({
                 }
               >
                 {fixedSurfaceContent}
-              </div>
+              </PanelReadingSlot>
             ) : isLayoutOpen ? (
               <EmptyStatePanel className="m-4 rounded-lg">
                 This panel view is unavailable.
@@ -1193,5 +1196,23 @@ function SecondaryPanelResizeHandle({
         />
       )}
     </PanelResizeHandle>
+  );
+}
+
+function PanelReadingSlot({
+  fills,
+  children,
+  ...props
+}: React.ComponentProps<"div"> & { fills: boolean }) {
+  return fills ? (
+    <div {...props}>{children}</div>
+  ) : (
+    <ReadingScrollArea
+      horizontal
+      className="min-h-0 flex-1"
+      viewportProps={props}
+    >
+      {children}
+    </ReadingScrollArea>
   );
 }

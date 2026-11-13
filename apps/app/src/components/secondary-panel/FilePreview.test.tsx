@@ -885,7 +885,7 @@ describe("FilePreview", () => {
     expect(mountedRows.length).toBeLessThan(60);
     expect(screen.queryByText("r499c0")).toBeNull();
 
-    const scrollBox = table.parentElement;
+    const scrollBox = table.closest("[data-radix-scroll-area-viewport]");
     if (!(scrollBox instanceof HTMLElement)) throw new Error("no scroll box");
     scrollBox.scrollTop = 499 * CSV_TEST_ROW_HEIGHT_PX;
     fireEvent.scroll(scrollBox);

@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "../ui/reading-scroll-area";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
@@ -71,7 +72,10 @@ export function BrowserNewTabScreen({
   }
 
   return (
-    <div className="panel-scroll-gutter mb-0 flex h-full flex-col overflow-y-auto px-4 pb-6 pt-8">
+    <ReadingScrollArea
+      className="h-full min-h-0"
+      viewportProps={{ className: "px-4 pb-6 pt-8" }}
+    >
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
         <section>
           <LauncherSectionHeader
@@ -104,6 +108,6 @@ export function BrowserNewTabScreen({
           </ul>
         </section>
       </div>
-    </div>
+    </ReadingScrollArea>
   );
 }

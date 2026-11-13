@@ -315,3 +315,15 @@ the distinct withdrawal event and queue remain owed. No schema or SDK repin is
 introduced. Existing idle/start/reprovision and bounded recovery limitations remain;
 queue submission is not evidence of model consumption. Protocol 260 rollback needs
 matching old server and daemon, and installed acceptance is an integrator gate.
+
+### Reading pane scrolling
+
+`packages/shared-ui/src/components/ui/scroll-area.tsx` retains Radix native viewport
+ownership for overlay scrolling. The app-local `reading-scroll-area.tsx` bridges
+that existing internal primitive into sidebar, bottom-anchored chat and secondary
+reading slots without a new package or SDK export. `app.css` owns hover/focus/drag
+visibility and the 4px painted / 8px interactive scrollbar metric; fine vertical
+resize metrics live in `panelTransitionTokens.ts` and `SidebarChrome.tsx`. This
+removes the old reserved gutter and scroll-activity visibility timer. Terminal,
+iframe, CSV and code viewports keep their specialized scroll ownership; Markdown
+file preview uses the common primitive at its existing scroll-owner boundary.

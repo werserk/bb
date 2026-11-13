@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "../ui/reading-scroll-area";
 import { SourceLoadingSkeleton } from "@/components/code/code-loading-skeletons";
 import {
   type CSSProperties,
@@ -233,7 +234,6 @@ const CSV_PREVIEW_MAX_COLUMNS = 100;
 const CSV_PREVIEW_MAX_ROWS = 500;
 const CSV_PREVIEW_ROW_HEIGHT_PX = 29;
 const CSV_PREVIEW_OVERSCAN_ROWS = 8;
-
 
 const HTML_FILE_PREVIEW_IFRAME_STYLE = {
   width: "100%",
@@ -540,17 +540,15 @@ export function FilePreview({
   const centersImage = headerMode === "none" && state.kind === "image";
 
   return (
-    <div
+    <FilePreviewReadingSlot
+      scrolls={usesMarkdownPreviewLayout}
       className={
         usesFullHeightLayout
           ? cn(
               "@container/page flex h-full min-h-0 flex-col",
               usesMarkdownPreviewLayout && "overflow-y-auto",
             )
-          : cn(
-              "@container/page min-h-full",
-              centersImage && "flex flex-col",
-            )
+          : cn("@container/page min-h-full", centersImage && "flex flex-col")
       }
       data-file-preview-scroll-container={
         usesMarkdownPreviewLayout ? "" : undefined
@@ -596,7 +594,7 @@ export function FilePreview({
         markdownLinkRouting={markdownLinkRouting}
         onSelectionAddToChat={onSelectionAddToChat}
       />
-    </div>
+    </FilePreviewReadingSlot>
   );
 }
 
@@ -1111,9 +1109,11 @@ function CsvFilePreview({ file, onSelectionAddToChat }: CsvFilePreviewProps) {
   return (
     <SecondaryPanelSelectionActions onSelectionAddToChat={onSelectionAddToChat}>
       <div className="flex min-h-0 flex-auto flex-col bg-panel px-4 py-4">
-        <div
-          ref={scrollRef}
-          className="min-h-0 overflow-auto overscroll-contain rounded-md border border-border bg-background"
+        <ReadingScrollArea
+          horizontal
+          viewportRef={scrollRef}
+          className="min-h-0 flex-1 rounded-md border border-border bg-background"
+          viewportProps={{ className: "overscroll-contain" }}
         >
           <table
             className="min-w-full table-fixed border-separate border-spacing-0 font-mono text-xs leading-5"
@@ -1193,7 +1193,7 @@ function CsvFilePreview({ file, onSelectionAddToChat }: CsvFilePreviewProps) {
               ) : null}
             </tbody>
           </table>
-        </div>
+        </ReadingScrollArea>
         {truncationNote === null ? null : (
           <p className="mt-2 shrink-0 text-xs leading-5 text-muted-foreground">
             {truncationNote}
@@ -1403,5 +1403,19 @@ function FilePreviewCode({
       scrollToHighlightedLines
       onSelectionAddToChat={onSelectionAddToChat}
     />
+  );
+}
+
+function FilePreviewReadingSlot({
+  scrolls,
+  children,
+  ...props
+}: React.ComponentProps<"div"> & { scrolls: boolean }) {
+  return scrolls ? (
+    <ReadingScrollArea className="h-full min-h-0" viewportProps={props}>
+      {children}
+    </ReadingScrollArea>
+  ) : (
+    <div {...props}>{children}</div>
   );
 }

@@ -99,7 +99,7 @@ afterEach(() => {
 });
 
 describe("BottomAnchoredScrollBody on coarse pointers", () => {
-  it("shows the transient scrollbar with one attribute write per scroll burst", () => {
+  it("does not reveal scrollbar chrome from off-hover scroll bursts", () => {
     stubMediaQueries(new Set(["(pointer: coarse)"]));
     vi.useFakeTimers();
     const { scrollArea } = renderTimeline("coarse-thread", ["row-a"]);
@@ -113,8 +113,8 @@ describe("BottomAnchoredScrollBody on coarse pointers", () => {
       scrollArea.scrollTop = scrollTop;
       fireEvent.scroll(scrollArea);
     }
-    expect(scrollArea.getAttribute("data-scrollbar-scrolling")).toBe("true");
-    expect(attributeWrites.takeRecords()).toHaveLength(1);
+    expect(scrollArea.hasAttribute("data-scrollbar-scrolling")).toBe(false);
+    expect(attributeWrites.takeRecords()).toHaveLength(0);
 
     vi.runAllTimers();
     expect(scrollArea.hasAttribute("data-scrollbar-scrolling")).toBe(false);

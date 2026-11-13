@@ -1,13 +1,11 @@
+import { ReadingScrollArea } from "../ui/reading-scroll-area";
 import { EnvironmentProviderIcon } from "@/components/plugin/EnvironmentProviderIcon";
 import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
   type ReactNode,
-  type UIEvent,
 } from "react";
 import {
   ForksSection,
@@ -28,11 +26,7 @@ import {
   type ExperimentalThreadInfoProps,
 } from "@get-bb/plugin-sdk";
 import { Link } from "react-router-dom";
-import type {
-  Environment,
-  Thread,
-  ThreadListEntry,
-} from "@bb/domain";
+import type { Environment, Thread, ThreadListEntry } from "@bb/domain";
 import {
   formatEnvironmentDisplay,
   type EnvironmentDisplayHostContext,
@@ -490,42 +484,18 @@ interface DetailCardWrapperProps {
   children: ReactNode;
 }
 
-const INFO_SCROLLBAR_IDLE_DELAY_MS = 600;
-
 export function ThreadMetadataCard({ children }: DetailCardWrapperProps) {
-  const scrollbarIdleTimeoutRef = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (scrollbarIdleTimeoutRef.current !== null) {
-        window.clearTimeout(scrollbarIdleTimeoutRef.current);
-      }
-    },
-    [],
-  );
-
-  const handleScroll = useCallback((event: UIEvent<HTMLDListElement>) => {
-    const scrollArea = event.currentTarget;
-    if (scrollArea.dataset.scrollbarScrolling !== "true") {
-      scrollArea.dataset.scrollbarScrolling = "true";
-    }
-    if (scrollbarIdleTimeoutRef.current !== null) {
-      window.clearTimeout(scrollbarIdleTimeoutRef.current);
-    }
-    scrollbarIdleTimeoutRef.current = window.setTimeout(() => {
-      scrollbarIdleTimeoutRef.current = null;
-      scrollArea.removeAttribute("data-scrollbar-scrolling");
-    }, INFO_SCROLLBAR_IDLE_DELAY_MS);
-  }, []);
-
   return (
-    <DetailCard
-      appearance="flat"
-      className="transient-scrollbar panel-scroll-gutter min-h-0 flex-1 gap-1.5 overflow-x-hidden overflow-y-auto px-4 py-3 max-md:py-1 max-md:[--detail-label-width:7.5rem]"
-      onScroll={handleScroll}
+    <ReadingScrollArea
+      className="min-h-0 flex-1"
+      viewportProps={{
+        className: "px-4 py-3 max-md:py-1 max-md:[--detail-label-width:7.5rem]",
+      }}
     >
+      <DetailCard appearance="flat" className="gap-1.5">
       {children}
     </DetailCard>
+    </ReadingScrollArea>
   );
 }
 

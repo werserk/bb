@@ -16,6 +16,7 @@ type ScrollAreaProps = React.ComponentPropsWithoutRef<
     [attribute: `data-${string}`]: string | number | boolean | undefined;
   };
   scrollbarClassName?: string;
+  horizontal?: boolean;
 };
 
 const ScrollArea = React.forwardRef<
@@ -29,29 +30,51 @@ const ScrollArea = React.forwardRef<
       viewportRef,
       viewportProps,
       scrollbarClassName,
+      horizontal = false,
       ...props
     },
     ref,
-  ) => (
-    <ScrollAreaPrimitive.Root
-      ref={ref}
-      className={cn("relative overflow-hidden", className)}
-      {...props}
-    >
-      <ScrollAreaPrimitive.Viewport
-        ref={viewportRef}
-        {...viewportProps}
-        className={cn(
-          "h-full w-full rounded-[inherit]",
-          viewportProps?.className,
-        )}
+  ) => {
+    const [dragging, setDragging] = React.useState(false);
+    return (
+      <ScrollAreaPrimitive.Root
+        ref={ref}
+        type="auto"
+        data-overlay-scroll-area=""
+        data-dragging={dragging || undefined}
+        className={cn("relative overflow-hidden", className)}
+        {...props}
       >
-        {children}
-      </ScrollAreaPrimitive.Viewport>
-      <ScrollBar className={scrollbarClassName} />
-      <ScrollAreaPrimitive.Corner />
-    </ScrollAreaPrimitive.Root>
-  ),
+        <ScrollAreaPrimitive.Viewport
+          ref={viewportRef}
+          {...viewportProps}
+          className={cn(
+            "h-full w-full rounded-[inherit]",
+            viewportProps?.className,
+          )}
+        >
+          {children}
+        </ScrollAreaPrimitive.Viewport>
+        <ScrollBar
+          className={scrollbarClassName}
+          onPointerDownCapture={(event) => {
+            if (event.button === 0) setDragging(true);
+          }}
+          onLostPointerCapture={() => setDragging(false)}
+        />
+        {horizontal ? (
+          <ScrollBar
+            orientation="horizontal"
+            onPointerDownCapture={(event) => {
+              if (event.button === 0) setDragging(true);
+            }}
+            onLostPointerCapture={() => setDragging(false)}
+          />
+        ) : null}
+        <ScrollAreaPrimitive.Corner />
+      </ScrollAreaPrimitive.Root>
+    );
+  },
 );
 ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
 
@@ -63,16 +86,14 @@ const ScrollBar = React.forwardRef<
     ref={ref}
     orientation={orientation}
     className={cn(
-      "flex touch-none select-none transition-colors",
-      orientation === "vertical" &&
-        "h-full w-2.5 border-l border-l-transparent p-[1px]",
-      orientation === "horizontal" &&
-        "h-2.5 flex-col border-t border-t-transparent p-[1px]",
+      "bb-overlay-scrollbar flex touch-none select-none",
+      orientation === "vertical" && "w-2 px-[2px]",
+      orientation === "horizontal" && "h-2 flex-col py-[2px]",
       className,
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+    <ScrollAreaPrimitive.ScrollAreaThumb className="bb-overlay-scrollbar-thumb relative flex-1 rounded-full" />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ));
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;

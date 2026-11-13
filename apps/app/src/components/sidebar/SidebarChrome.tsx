@@ -115,7 +115,7 @@ export function SidebarResizeHandle({
     <div
       data-testid={testId}
       className={cn(
-        "absolute -right-[4px] top-0 z-30 hidden h-full w-[9px] cursor-col-resize md:block pointer-coarse:-right-4 pointer-coarse:w-8",
+        "absolute -right-[5px] top-0 z-30 hidden h-full w-[6px] cursor-col-resize md:block pointer-coarse:-right-4 pointer-coarse:w-8",
         "before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors hover:before:bg-sidebar-border hover:before:delay-200",
         isResizing && "before:bg-sidebar-border before:delay-0",
       )}

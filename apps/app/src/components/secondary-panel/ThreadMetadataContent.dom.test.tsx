@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -25,29 +24,22 @@ afterEach(() => {
 });
 
 describe("ThreadMetadataCard", () => {
-  it("shows its scrollbar only during active scrolling", () => {
-    vi.useFakeTimers();
+  it("keeps metadata inside the native overlay viewport without scroll-triggered visibility", () => {
     const { container } = render(
       <ThreadMetadataCard>
         <div>Thread information</div>
       </ThreadMetadataCard>,
     );
-    const scrollArea = container.querySelector("dl");
-    if (!(scrollArea instanceof HTMLElement)) {
-      throw new Error("missing info scroll area");
-    }
-
-    expect(scrollArea.classList).toContain("transient-scrollbar");
-    expect(scrollArea.hasAttribute("data-scrollbar-scrolling")).toBe(false);
-
-    fireEvent.scroll(scrollArea);
-    expect(scrollArea.dataset.scrollbarScrolling).toBe("true");
-
-    act(() => vi.advanceTimersByTime(599));
-    expect(scrollArea.dataset.scrollbarScrolling).toBe("true");
-
-    act(() => vi.advanceTimersByTime(1));
-    expect(scrollArea.hasAttribute("data-scrollbar-scrolling")).toBe(false);
+    const viewport = container.querySelector(
+      "[data-radix-scroll-area-viewport]",
+    );
+    expect(viewport?.querySelector("dl")?.textContent).toBe(
+      "Thread information",
+    );
+    if (!(viewport instanceof HTMLElement))
+      throw new Error("missing native viewport");
+    fireEvent.scroll(viewport);
+    expect(viewport.hasAttribute("data-scrollbar-scrolling")).toBe(false);
   });
 });
 

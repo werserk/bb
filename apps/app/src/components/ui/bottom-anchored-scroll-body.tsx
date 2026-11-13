@@ -1,3 +1,4 @@
+import { ReadingScrollArea } from "./reading-scroll-area";
 import {
   createContext,
   useCallback,
@@ -60,7 +61,6 @@ interface HoldContentPositionArgs {
 }
 
 const BOTTOM_ANCHOR_THRESHOLD_PX = 4;
-const SCROLLBAR_IDLE_DELAY_MS = 600;
 const SCROLL_ANCHOR_CAPTURE_THROTTLE_MS = 100;
 const COARSE_SCROLL_ANCHOR_CAPTURE_THROTTLE_MS = 250;
 const NATIVE_PAGE_SCROLL_KEYS = new Set(["PageDown", "PageUp", " "]);
@@ -280,30 +280,11 @@ export function BottomAnchoredScrollBody({
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
 
-    let scrollbarIdleTimeout: number | null = null;
-    const handleScrollEvent = () => {
-      if (scrollArea.dataset.scrollbarScrolling !== "true") {
-        scrollArea.dataset.scrollbarScrolling = "true";
-      }
-      if (scrollbarIdleTimeout !== null) {
-        window.clearTimeout(scrollbarIdleTimeout);
-      }
-      scrollbarIdleTimeout = window.setTimeout(() => {
-        scrollbarIdleTimeout = null;
-        scrollArea.removeAttribute("data-scrollbar-scrolling");
-      }, SCROLLBAR_IDLE_DELAY_MS);
-      captureScrollAnchorThrottled();
-    };
-    scrollArea.addEventListener("scroll", handleScrollEvent, {
+    scrollArea.addEventListener("scroll", captureScrollAnchorThrottled, {
       passive: true,
     });
-    return () => {
-      scrollArea.removeEventListener("scroll", handleScrollEvent);
-      if (scrollbarIdleTimeout !== null) {
-        window.clearTimeout(scrollbarIdleTimeout);
-      }
-      scrollArea.removeAttribute("data-scrollbar-scrolling");
-    };
+    return () =>
+      scrollArea.removeEventListener("scroll", captureScrollAnchorThrottled);
   }, [captureScrollAnchorThrottled]);
 
   const bottomAnchorContextValue = useMemo<BottomAnchorContextValue>(
@@ -330,19 +311,24 @@ export function BottomAnchoredScrollBody({
       <TimelineScrollRestoreContext.Provider value={initialRestore}>
         <div className="relative grid min-h-0 flex-1 grid-rows-[minmax(auto,1fr)] overflow-hidden">
           <TitleBarScrollFade tone="background" />
-          <div
-            ref={scrollAreaRef}
-            data-page-scroll-viewport=""
-            className={cn(
-              "thread-scrollbar panel-scroll-gutter @container/page col-start-1 row-start-1 min-h-0 overflow-x-hidden overflow-y-auto",
-              scrollAreaClassName,
-            )}
+          <ReadingScrollArea
+            className="col-start-1 row-start-1 min-h-0"
+            viewportRef={scrollAreaRef}
+            viewportProps={{
+              "data-page-scroll-viewport": "",
+              className: cn(
+                "thread-scrollbar @container/page min-h-0",
+                scrollAreaClassName,
+              ),
+            }}
           >
             <div
               ref={scrollContentRef}
               className="flex min-h-full min-w-0 flex-col"
               style={
-                contentInsetEndPx ? { paddingInlineEnd: contentInsetEndPx } : undefined
+                contentInsetEndPx
+                  ? { paddingInlineEnd: contentInsetEndPx }
+                  : undefined
               }
             >
               <div
@@ -372,7 +358,7 @@ export function BottomAnchoredScrollBody({
                 </div>
               ) : null}
             </div>
-          </div>
+          </ReadingScrollArea>
           {scrollOverlay ? (
             <div
               data-scroll-overlay=""

@@ -205,12 +205,12 @@ afterEach(() => {
 });
 
 describe("Markdown reading position in open secondary-panel tabs", () => {
-  it("reserves file reading gutters at the host slot without nesting them in the preview", () => {
+  it("keeps file scroll ownership at the host viewport without nested viewports", () => {
     const { container } = renderHarness();
     const slot = container.querySelector(
       "aside [data-file-preview-scroll-container]",
     );
-    expect(slot?.classList.contains("panel-scroll-gutter")).toBe(true);
+    expect(slot?.hasAttribute("data-radix-scroll-area-viewport")).toBe(true);
     expect(slot?.querySelector(".panel-scroll-gutter")).toBeNull();
   });
 

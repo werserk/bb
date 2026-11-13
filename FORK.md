@@ -105,3 +105,14 @@ edges within the prose column and scrolling wide contents horizontally. Assistan
 settled blocks and streaming tails share this policy, as do collapsed and expanded
 generated messages. User messages already use contained tables. Shared
 MarkdownPreview defaults remain unchanged for non-chat previews.
+
+The owner-approved thin overlay replaces the reserved desktop scrollbar gutter on
+sidebar, chat and secondary reading panes with the existing shared Radix ScrollArea.
+Native viewport refs remain the scrolling and anchoring authority. The Radix content
+wrapper uses a column layout instead of its intrinsic-width table so long prose
+and bottom-anchored chat retain their containing width and content floor. App CSS
+owns the shared 4px thumb / 8px hit policy, inset 1px from the right edge; visibility
+follows pane hover, keyboard focus and captured drag, never a scroll timer. Fine
+vertical resize targets are 6px, shifted 2px right of the boundary center, touching
+the scrollbar lane at boundary minus 1px. Coarse resize targets stay 32px. This is
+an internal UI change, with no SDK, host, persistence or scrolling-physics change.

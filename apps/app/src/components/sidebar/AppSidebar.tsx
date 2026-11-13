@@ -334,7 +334,7 @@ export function AppSidebar({
         }
       />
       {placement === "list" ? navigationRegion("shrink-0") : null}
-      <SidebarContent className="md:mr-(--bb-panel-scrollbar-inset)">
+      <SidebarContent>
         <ThreadActionSurfaceVisibility visible={isThreadListVisible}>
           <PluginThreadList
             replacement={threadListReplacement}
