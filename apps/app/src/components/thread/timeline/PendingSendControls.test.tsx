@@ -8,8 +8,14 @@ import {
   pendingSendOwner,
   clearPendingSendScope,
 } from "@/hooks/cache-owners/pending-send-owner";
-import { expect, it } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import {
+  fireEvent,
+  waitFor,
+  render,
+  screen,
+  cleanup,
+} from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createAppQueryClient } from "@/lib/query-client";
 import { beginSendThreadMessageTransaction } from "@/hooks/cache-owners/thread-runtime-cache-owner";
@@ -140,6 +146,47 @@ it("clears custody for an actual server scope change and explicit logout, not qu
     expect(owner.list()).toEqual([]);
   } finally {
     clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("shows unavailable recovery after startup account failure and retries through Refresh without sending", async () => {
+  const { bindPendingSendIdentity } =
+    await import("@/hooks/cache-owners/pending-send-identity");
+  const { sdk } = await import("@/lib/sdk");
+  const { wsManager } = await import("@/lib/ws");
+  const client = createAppQueryClient();
+  const signal = vi.spyOn(wsManager, "onPluginSignal").mockReturnValue(vi.fn());
+  const connected = vi.spyOn(wsManager, "onConnected").mockReturnValue(vi.fn());
+  const status = vi
+    .spyOn(sdk.plugins, "callRpc")
+    .mockRejectedValueOnce(Error("account not ready"))
+    .mockResolvedValue({ state: "signed-out", revision: 1, account: null });
+  const send = vi.spyOn(sdk.threads, "send");
+  const dispose = bindPendingSendIdentity(client);
+  try {
+    render(
+      <QueryClientProvider client={client}>
+        <PendingSendControls threadId="thread-1" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Reload recovery unavailable")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText("Reload recovery unavailable")).toBeNull(),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(pendingSendOwner(client).list()).toEqual([]);
+  } finally {
+    cleanup();
+    dispose();
+    signal.mockRestore();
+    connected.mockRestore();
+    status.mockRestore();
+    send.mockRestore();
     client.clear();
   }
 });

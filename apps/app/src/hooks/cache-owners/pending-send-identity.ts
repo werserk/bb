@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
 import { sdk } from "@/lib/sdk";
 import { wsManager } from "@/lib/ws";
-import { setPendingSendIdentity } from "./pending-send-owner";
+import {
+  setPendingSendIdentity,
+  setPendingSendIdentityRetry,
+} from "./pending-send-owner";
 
 const statusSchema = z.discriminatedUnion("state", [
   z.object({
@@ -49,17 +52,25 @@ export function bindPendingSendIdentity(client: QueryClient) {
           : null,
     );
   };
-  const read = async () => {
+  let active: Promise<void> | undefined;
+  const read = (force = false) => {
+    if (active && !force) return active;
     const started = ++epoch;
-    try {
-      const status = await sdk.plugins.callRpc({
-        pluginId: "bb-account",
-        method: "bb-account.v1.status",
-        input: null,
-        outputSchema: statusSchema,
-      });
-      if (started === epoch) apply(status);
-    } catch {}
+    const promise = (async () => {
+      try {
+        const status = await sdk.plugins.callRpc({
+          pluginId: "bb-account",
+          method: "bb-account.v1.status",
+          input: null,
+          outputSchema: statusSchema,
+        });
+        if (started === epoch) apply(status);
+      } catch {}
+    })().finally(() => {
+      if (active === promise) active = undefined;
+    });
+    active = promise;
+    return promise;
   };
   const offSignal = wsManager.onPluginSignal((signal) => {
     if (signal.pluginId !== "bb-account" || signal.channel !== "account")
@@ -72,14 +83,17 @@ export function bindPendingSendIdentity(client: QueryClient) {
     apply(payload.data.status);
   });
   const offConnected = wsManager.onConnected(() => {
+    setPendingSendIdentity(client, null);
     revision = -1;
-    void read();
+    void read(true);
   });
+  setPendingSendIdentityRetry(client, read);
   void read();
   return () => {
     disposed = true;
     epoch++;
     offSignal();
     offConnected();
+    setPendingSendIdentityRetry(client, undefined);
   };
 }

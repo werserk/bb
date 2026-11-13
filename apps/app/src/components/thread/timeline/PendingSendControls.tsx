@@ -4,6 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@bb/shared-ui/button";
 import { useSendThreadMessage } from "@/hooks/mutations/thread-runtime-mutations";
 import {
+  pendingSendIdentityUnavailable,
+  retryPendingSendRecovery,
   pendingRecoveryStatus,
   pendingSendJournal,
   refreshPendingSends,
@@ -16,6 +18,7 @@ export function PendingSendControls({ threadId }: { threadId: string }) {
   const status = pendingRecoveryStatus(client),
     journal = pendingSendJournal(client);
   const entries = owner.list(threadId);
+  const identityUnavailable = pendingSendIdentityUnavailable(client);
   return (
     <>
       {status === "waiting" ? (
@@ -29,12 +32,23 @@ export function PendingSendControls({ threadId }: { threadId: string }) {
           </Button>
         </div>
       ) : null}
-      {entries.length > 0 &&
+      {(identityUnavailable || entries.length > 0) &&
       (status === "unavailable" || status === "unsaved") ? (
         <div role="status" className="text-muted-foreground text-sm">
           {status === "unsaved"
             ? "Not saved for reload"
             : "Reload recovery unavailable"}
+          {identityUnavailable ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void retryPendingSendRecovery(client).catch(() => {});
+              }}
+            >
+              Refresh
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {entries.length > 0 && status === "owned" ? (

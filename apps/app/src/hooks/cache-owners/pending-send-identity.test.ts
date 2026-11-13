@@ -7,6 +7,9 @@ import { makeSystemConfig } from "@/test/fixtures/system-config";
 import { systemConfigQueryKey } from "../queries/query-keys";
 import { bindPendingSendIdentity } from "./pending-send-identity";
 import {
+  pendingRecoveryStatus,
+  pendingSendIdentityUnavailable,
+  retryPendingSendRecovery,
   dispatchPendingSend,
   pendingSendOwner,
   pendingSendJournal,
@@ -17,7 +20,7 @@ import {
   applySendThreadMessageSuccess,
 } from "./thread-runtime-cache-owner";
 
-it("clears custody across real account signals and fences old receipts and status reads", async () => {
+it("clears custody across account payloads via mocked ws/sdk and fences old receipts and status reads", async () => {
   const client = createAppQueryClient();
   let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
   const off = vi.fn();
@@ -174,5 +177,334 @@ it("erases the owned account journal and rejects a late old-account Web Lock gra
     rpc.mockRestore();
     vi.unstubAllGlobals();
     client.clear();
+  }
+});
+
+function identityHarness() {
+  const client = createAppQueryClient();
+  window.sessionStorage.clear();
+  let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
+  let connect!: Parameters<typeof wsManager.onConnected>[0];
+  const reads: {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+  }[] = [];
+  const listener = vi
+    .spyOn(wsManager, "onPluginSignal")
+    .mockImplementation((fn) => {
+      signal = fn;
+      return vi.fn();
+    });
+  const connected = vi
+    .spyOn(wsManager, "onConnected")
+    .mockImplementation((fn) => {
+      connect = fn;
+      return vi.fn();
+    });
+  const rpc = vi.spyOn(sdk.plugins, "callRpc").mockImplementation(
+    () =>
+      new Promise((resolve, reject) => {
+        reads.push({ resolve, reject });
+      }),
+  );
+  const dispose = bindPendingSendIdentity(client);
+  client.setQueryData(systemConfigQueryKey(), makeSystemConfig());
+  const status = (userId: string, revision: number) => ({
+    state: "signed-in",
+    revision,
+    account: { userId, serverId: "server", baseUrl: "https://getbb.app" },
+  });
+  return {
+    client,
+    reads,
+    status,
+    reconnect: () => connect({ reconnected: true, disconnectedAt: Date.now() }),
+    emit: (status: unknown) =>
+      signal({
+        type: "plugin-signal",
+        pluginId: "bb-account",
+        channel: "account",
+        payload: { status },
+      }),
+    close: () => {
+      dispose();
+      listener.mockRestore();
+      connected.mockRestore();
+      rpc.mockRestore();
+      client.clear();
+    },
+  };
+}
+
+it("adopts initial account status without losing a send or rejecting its admitted receipt", async () => {
+  const h = identityHarness();
+  try {
+    const request = {
+      id: "thread-1",
+      clientSubmissionId: crypto.randomUUID(),
+      mode: "steer" as const,
+      input: [{ type: "text" as const, text: "boot send", mentions: [] }],
+    };
+    const transaction = await beginSendThreadMessageTransaction({
+      queryClient: h.client,
+      request,
+    });
+    let resolve!: (value: { ok: true; delivery: "sent" }) => void;
+    const dispatched = dispatchPendingSend(
+      h.client,
+      request.id,
+      request.clientSubmissionId,
+      request,
+      [],
+      () =>
+        new Promise<{ ok: true; delivery: "sent" }>((done) => {
+          resolve = done;
+        }),
+    );
+    await Promise.resolve();
+    const entry = pendingSendOwner(h.client).list()[0];
+    h.reads[0]!.resolve(h.status("a", 1));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    resolve({ ok: true, delivery: "sent" });
+    await expect(dispatched).resolves.toEqual({ ok: true, delivery: "sent" });
+    const timeline = vi
+      .spyOn(sdk.threads, "timeline")
+      .mockImplementation(() => new Promise(() => {}));
+    const queue = vi
+      .spyOn(sdk.threads.queuedMessages, "list")
+      .mockImplementation(() => new Promise(() => {}));
+    try {
+      applySendThreadMessageSuccess({
+        queryClient: h.client,
+        request,
+        transaction,
+        result: {
+          ok: true,
+          delivery: "sent",
+          requested: { requestId: "creq_0000000000", sequence: 12 },
+        },
+        realtimeConnected: true,
+      });
+      expect(pendingSendOwner(h.client).list()[0]?.state).toBe("sent");
+    } finally {
+      timeline.mockRestore();
+      queue.mockRestore();
+    }
+  } finally {
+    h.close();
+  }
+});
+
+it("preserves confirmed custody across profile-pending and same-account recovery, but clears on a true switch", async () => {
+  const h = identityHarness();
+  const grants: {
+    signal: AbortSignal;
+    callback: (lock: object | null) => Promise<void>;
+  }[] = [];
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (
+        _key: string,
+        options: { signal: AbortSignal },
+        callback: (lock: object | null) => Promise<void>,
+      ) => {
+        grants.push({ signal: options.signal, callback });
+      },
+    },
+  });
+  try {
+    h.emit(h.status("a", 1));
+    await beginSendThreadMessageTransaction({
+      queryClient: h.client,
+      request: {
+        id: "thread-1",
+        mode: "steer",
+        input: [{ type: "text", text: "owner A", mentions: [] }],
+      },
+    });
+    const entry = pendingSendOwner(h.client).list()[0];
+    const before = grants[0]!;
+    h.emit({ state: "profile-pending", revision: 2, account: null });
+    expect(before.signal.aborted).toBe(true);
+    await before.callback({});
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    expect(pendingRecoveryStatus(h.client)).toBe("unavailable");
+    expect(pendingSendIdentityUnavailable(h.client)).toBe(true);
+    h.emit(h.status("a", 3));
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    expect(grants).toHaveLength(2);
+    h.emit({ state: "profile-pending", revision: 4, account: null });
+    h.emit(h.status("b", 5));
+    expect(pendingSendOwner(h.client).list()).toEqual([]);
+    await grants[1]!.callback({});
+    expect(pendingSendOwner(h.client).list()).toEqual([]);
+  } finally {
+    h.close();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("retains sends on startup failure and retries only through explicit recovery or reconnect", async () => {
+  const h = identityHarness();
+  try {
+    await beginSendThreadMessageTransaction({
+      queryClient: h.client,
+      request: {
+        id: "thread-1",
+        mode: "steer",
+        input: [{ type: "text", text: "offline boot", mentions: [] }],
+      },
+    });
+    const entry = pendingSendOwner(h.client).list()[0];
+    h.reads[0]!.reject(Error("account not ready"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pendingRecoveryStatus(h.client)).toBe("unavailable");
+    expect(pendingSendIdentityUnavailable(h.client)).toBe(true);
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    expect(h.reads).toHaveLength(1);
+    const retry = retryPendingSendRecovery(h.client);
+    const repeated = retryPendingSendRecovery(h.client);
+    expect(h.reads).toHaveLength(2);
+    h.reads[1]!.resolve(h.status("a", 1));
+    await Promise.all([retry, repeated]);
+    expect(pendingSendIdentityUnavailable(h.client)).toBe(false);
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    h.reconnect();
+    expect(h.reads).toHaveLength(3);
+    h.reads[2]!.reject(Error("offline"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
+    expect(pendingSendIdentityUnavailable(h.client)).toBe(true);
+    h.reconnect();
+    h.reads[3]!.resolve(h.status("b", 2));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pendingSendOwner(h.client).list()).toEqual([]);
+  } finally {
+    h.close();
+  }
+});
+
+it("never recreates the previous namespace during reentrant reset notifications", async () => {
+  const h = identityHarness();
+  const names: string[] = [];
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (name: string) => {
+        names.push(name);
+      },
+    },
+  });
+  try {
+    h.emit(h.status("a", 1));
+    const before = names.length;
+    const owner = pendingSendOwner(h.client);
+    const stop = owner.subscribe(() => {
+      pendingSendJournal(h.client);
+    });
+    h.emit(h.status("b", 2));
+    stop();
+    expect(names.length).toBe(before + 1);
+    expect(names.at(-1)).toContain(
+      JSON.stringify(
+        JSON.stringify(["https://getbb.app", "b", "server"]),
+      ).slice(1, -1),
+    );
+    expect(names.at(-1)).not.toContain(
+      JSON.stringify(
+        JSON.stringify(["https://getbb.app", "a", "server"]),
+      ).slice(1, -1),
+    );
+    expect(owner.list()).toEqual([]);
+  } finally {
+    h.close();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps an owned journal through profile uncertainty and saves memory sends when the same identity returns", async () => {
+  const h = identityHarness();
+  const grants: ((lock: object | null) => Promise<void>)[] = [];
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (
+        _key: string,
+        _options: unknown,
+        callback: (lock: object | null) => Promise<void>,
+      ) => {
+        grants.push(callback);
+      },
+    },
+  });
+  try {
+    h.emit(h.status("a", 1));
+    void grants[0]!({});
+    await beginSendThreadMessageTransaction({
+      queryClient: h.client,
+      request: {
+        id: "thread-1",
+        mode: "steer",
+        input: [{ type: "text", text: "before uncertainty", mentions: [] }],
+      },
+    });
+    const journal = pendingSendJournal(h.client);
+    h.emit({ state: "profile-pending", revision: 2, account: null });
+    await beginSendThreadMessageTransaction({
+      queryClient: h.client,
+      request: {
+        id: "thread-1",
+        mode: "steer",
+        input: [{ type: "text", text: "during uncertainty", mentions: [] }],
+      },
+    });
+    expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
+      "during uncertainty",
+    );
+    h.emit(h.status("a", 3));
+    expect(pendingSendJournal(h.client)).toBe(journal);
+    expect(grants).toHaveLength(1);
+    expect(pendingSendOwner(h.client).list()).toHaveLength(2);
+    expect(Object.values(window.sessionStorage).join(" ")).toContain(
+      "during uncertainty",
+    );
+    h.emit({ state: "signed-out", revision: 4, account: null });
+    expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
+      "before uncertainty",
+    );
+    expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
+      "during uncertainty",
+    );
+    expect(pendingSendOwner(h.client).list()).toEqual([]);
+  } finally {
+    h.close();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("does not undo an explicit recovery Hide on reconnect to the same account", async () => {
+  const h = identityHarness();
+  const locks = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { locks: { request: locks } });
+  try {
+    h.emit(h.status("a", 1));
+    const journal = pendingSendJournal(h.client)!;
+    expect(journal.status).toBe("waiting");
+    journal.hide();
+    h.reconnect();
+    h.reads[1]!.resolve(h.status("a", 2));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pendingSendJournal(h.client)).toBe(journal);
+    expect(journal.status).toBe("hidden");
+    expect(locks).toHaveBeenCalledTimes(1);
+  } finally {
+    h.close();
+    vi.unstubAllGlobals();
   }
 });

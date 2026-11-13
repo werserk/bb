@@ -29,6 +29,10 @@ interface OwnerContext {
   journal?: PendingSendJournal;
   scope?: string;
   identity?: string | null;
+  identityPending: boolean;
+  resumeWaitingJournal: boolean;
+  identityRetry?: () => Promise<void>;
+  resetting: boolean;
   active: Map<string, Promise<void>>;
   followup: Set<string>;
   scheduled: Map<string, ReturnType<typeof setTimeout>>;
@@ -52,6 +56,9 @@ function context(
       applying: false,
       generation: 0,
       identity: initialIdentity,
+      identityPending: initialIdentity === null,
+      resumeWaitingJournal: false,
+      resetting: false,
     };
     owners.set(client, state);
     const current = state;
@@ -109,14 +116,16 @@ function context(
       }
     });
     current.owner.subscribe(() => {
-      if (current.journal) current.journal.save(current.owner.journalEntries());
+      if (current.journal && !current.identityPending && !current.resetting)
+        current.journal.save(current.owner.journalEntries());
     });
   }
   ensureJournal(client, state);
   return state;
 }
 function ensureJournal(client: QueryClient, state: OwnerContext) {
-  if (typeof window === "undefined" || state.identity === null) return;
+  if (typeof window === "undefined" || state.identityPending || state.resetting)
+    return;
   const config = client.getQueryData<SystemConfigResponse>(
     systemConfigQueryKey(),
   );
@@ -146,6 +155,7 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
     onChange: () => state.owner.notify(),
   });
   state.journal.start((entries) => {
+    if (state.identityPending || state.resetting) return;
     for (const entry of entries) {
       const parsed = state.owner.parseRecovered(entry);
       if (parsed) state.owner.begin(parsed);
@@ -159,20 +169,62 @@ function resetScope(state: OwnerContext) {
   state.followup.clear();
   for (const timer of state.scheduled.values()) clearTimeout(timer);
   state.scheduled.clear();
-  state.journal?.forget();
+  state.resumeWaitingJournal = false;
+  state.resetting = true;
+  const journal = state.journal;
   state.journal = undefined;
   state.scope = undefined;
-  state.owner.clear();
+  try {
+    journal?.forget();
+    state.owner.clear();
+  } finally {
+    state.resetting = false;
+  }
 }
 export function setPendingSendIdentity(
   client: QueryClient,
   identity: string | null,
 ) {
   const state = context(client, null);
-  if (state.identity === identity) return;
-  clearPendingSendScope(client);
+  if (identity === null) {
+    state.identityPending = true;
+    if (state.journal?.status === "waiting") {
+      state.resumeWaitingJournal = true;
+      state.journal.hide();
+    }
+    state.owner.notify();
+    return;
+  }
+  const previous = state.identity;
+  const resumed = state.identityPending;
   state.identity = identity;
+  state.identityPending = false;
+  if (previous != null && previous !== identity) clearPendingSendScope(client);
   ensureJournal(client, state);
+  if (resumed) {
+    if (state.resumeWaitingJournal && state.journal?.status === "hidden")
+      state.journal.refresh();
+    else state.journal?.save(state.owner.journalEntries());
+    state.resumeWaitingJournal = false;
+  }
+  state.owner.notify();
+}
+export function setPendingSendIdentityRetry(
+  client: QueryClient,
+  retry: (() => Promise<void>) | undefined,
+) {
+  const state = context(client, null);
+  state.identityRetry = retry;
+  state.owner.notify();
+}
+export function pendingSendIdentityUnavailable(client: QueryClient) {
+  const state = context(client);
+  return state.identityPending && state.identityRetry !== undefined;
+}
+export async function retryPendingSendRecovery(client: QueryClient) {
+  const state = context(client);
+  if (state.identityPending) await state.identityRetry?.();
+  else state.journal?.refresh();
 }
 export function pendingSendGeneration(client: QueryClient) {
   return context(client).generation;
@@ -241,7 +293,10 @@ export function usePendingSendOwner(client: QueryClient) {
   return owner;
 }
 export function pendingRecoveryStatus(client: QueryClient): JournalStatus {
-  return context(client).journal?.status ?? "unavailable";
+  const state = context(client);
+  return state.identityPending
+    ? "unavailable"
+    : (state.journal?.status ?? "unavailable");
 }
 export async function refreshPendingSends(
   client: QueryClient,

@@ -314,10 +314,12 @@ export function useThreadTimelineController({
     threadId,
     timelineRows,
   ).rows;
-  const nativeRowIds = new Set(timelineRows.map((row) => row.id));
-  const hasPendingContent = pendingRows.some(
-    (row) => !nativeRowIds.has(row.id),
-  );
+  const hasPendingContent =
+    pendingRows !== timelineRows &&
+    (() => {
+      const nativeRowIds = new Set(timelineRows.map((row) => row.id));
+      return pendingRows.some((row) => !nativeRowIds.has(row.id));
+    })();
   const timelineLoading =
     !hasPendingContent &&
     (latestTimelineQuery.isLoading ||
