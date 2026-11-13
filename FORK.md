@@ -113,8 +113,10 @@ wrapper uses a column layout instead of its intrinsic-width table so long prose
 and bottom-anchored chat retain their containing width and content floor. App CSS
 owns the shared 4px thumb / 8px hit policy, inset 1px from the right edge; visibility
 follows pane hover, keyboard focus and captured drag, never a scroll timer. Fine
-vertical resize targets are 6px, shifted 2px right of the boundary center, touching
-the scrollbar lane at boundary minus 1px. Coarse resize targets stay 32px. This is
+vertical resize targets are 6px, shifted 2px right of the divider's left edge,
+touching the scrollbar lane at that edge minus 1px even for a 1px divider. Coarse
+resize targets stay centered at 32px. Window pointer release and cancellation
+clear overlay drag visibility even when Radix never captured the pointer. This is
 an internal UI change, with no SDK, host, persistence or scrolling-physics change.
 
 Overlay is explicitly opted into by the app-local ReadingScrollArea, preserving

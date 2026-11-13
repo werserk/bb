@@ -41,7 +41,7 @@ export function usePanelCollapseTransitionsReady(
 export const PANEL_RESIZE_HANDLE_LAYER_CLASS = "z-[25]";
 
 export const PANEL_RESIZE_HIT_TARGET_CLASS =
-  "absolute inset-y-0 left-[calc(50%+2px)] z-10 w-[6px] -translate-x-1/2 touch-none cursor-col-resize pointer-coarse:w-8 bg-transparent";
+  "absolute inset-y-0 -left-px z-10 w-[6px] touch-none cursor-col-resize pointer-coarse:left-1/2 pointer-coarse:-translate-x-1/2 pointer-coarse:w-8 bg-transparent";
 
 export const PANEL_STACK_RESIZE_HIT_TARGET_CLASS =
   "absolute inset-x-0 top-1/2 z-10 h-[9px] -translate-y-1/2 touch-none cursor-row-resize pointer-coarse:h-8 bg-transparent";

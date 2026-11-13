@@ -323,7 +323,10 @@ ownership for overlay scrolling. The app-local `reading-scroll-area.tsx` bridges
 that existing internal primitive into sidebar, bottom-anchored chat and secondary
 reading slots without a new package or SDK export. `app.css` owns hover/focus/drag
 visibility and the 4px painted / 8px interactive scrollbar metric; fine vertical
-resize metrics live in `panelTransitionTokens.ts` and `SidebarChrome.tsx`. This
+resize metrics live in `panelTransitionTokens.ts` and `SidebarChrome.tsx`. The
+panel target follows the divider's left edge so 0px and 1px seams keep the same
+scrollbar adjacency; coarse targets remain centered. Window pointerup/cancel
+clears the shared primitive's drag visibility when capture was never acquired. This
 removes the old reserved gutter and scroll-activity visibility timer. Terminal,
 iframe, CSV and code viewports keep their specialized scroll ownership; Markdown
 file preview uses the common primitive at its existing scroll-owner boundary.

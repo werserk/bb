@@ -38,6 +38,16 @@ const ScrollArea = React.forwardRef<
     ref,
   ) => {
     const [dragging, setDragging] = React.useState(false);
+    React.useEffect(() => {
+      if (!dragging) return;
+      const release = () => setDragging(false);
+      window.addEventListener("pointerup", release);
+      window.addEventListener("pointercancel", release);
+      return () => {
+        window.removeEventListener("pointerup", release);
+        window.removeEventListener("pointercancel", release);
+      };
+    }, [dragging]);
     return (
       <ScrollAreaPrimitive.Root
         ref={ref}
