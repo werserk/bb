@@ -9,6 +9,7 @@ import {
 } from "@bb/db";
 import type { QueuedMessageWaitingOn } from "@bb/domain";
 import { afterEach, expect, it, vi } from "vitest";
+import { setPluginHookProvider } from "../../src/services/plugins/plugin-hook-registry.js";
 import * as events from "../../src/services/plugins/plugin-thread-events.js";
 import { recordQueuedMessageWait } from "../../src/services/threads/queue-waits.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
@@ -23,7 +24,10 @@ import {
 } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  setPluginHookProvider(undefined);
+  vi.restoreAllMocks();
+});
 
 function fixture(h: TestAppHarness) {
   const { host } = seedHostSession(h.deps);
@@ -197,6 +201,19 @@ it.each(["plugin", "host-offline"] as const)(
   "retains a one-shot %s wake behind an ordinary blocker",
   async (kind) => {
     await withTestHarness(async (h) => {
+      setPluginHookProvider({
+        listHooks: () => [
+          {
+            pluginId: "queue-gate",
+            handler: () => ({ action: "proceed" as const }),
+          },
+        ],
+        invokeHook: async (_pluginId, _label, run) => ({
+          ok: true,
+          value: await run(),
+        }),
+        decisionTimeoutMs: 10_000,
+      });
       const { thread, service, host } = fixture(h);
       const ordinary = seedQueuedMessage(h.deps, {
         threadId: thread.id,
