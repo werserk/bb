@@ -1,3 +1,4 @@
+import { prepareCachedQuery } from "../connection.js";
 import { markThreadPruningWork } from "./thread-pruning-work.js";
 import { isBeforeLatestThreadEvent } from "./event-pruning-guards.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
@@ -25,7 +26,6 @@ import {
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { prepareCachedQuery } from "../connection.js";
 import type {
   ClientTurnRequestId,
   PromptInput,
@@ -3762,11 +3762,24 @@ const isNotDiagnosticEvent = sql`(
   )
 )`;
 
+function prepareLatestThreadSequence(db: DbQueryConnection) {
+  return db
+    .select({ sequence: events.sequence })
+    .from(events)
+    .where(eq(events.threadId, placeholder("threadId")))
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .prepare();
+}
+
 export function getLatestThreadSequence(
   db: DbQueryConnection,
   args: GetLatestThreadSequenceArgs,
 ): number {
-  return getHighWaterMarks(db, [args.threadId])[args.threadId] ?? 0;
+  return (
+    prepareCachedQuery(db, prepareLatestThreadSequence).get({ ...args })
+      ?.sequence ?? 0
+  );
 }
 
 export function getActiveStoredTurnId(
@@ -3865,29 +3878,48 @@ export function isStoredTurnProviderCompactionRunning(
 }
 
 function prepareContextClearSequence(db: DbQueryConnection) {
-  return db.select({ sequence: events.sequence }).from(events).where(and(
-    eq(events.threadId, placeholder("threadId")),
-    eq(events.type, "system/operation"),
-    sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
-    sql`json_extract(${events.data}, '$.status') = 'completed'`,
-  )).orderBy(desc(events.sequence)).limit(1).prepare();
+  return db
+    .select({ sequence: events.sequence })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, placeholder("threadId")),
+        eq(events.type, "system/operation"),
+        sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
+        sql`json_extract(${events.data}, '$.status') = 'completed'`,
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .prepare();
 }
 
 function prepareBoundedContextClearSequence(db: DbQueryConnection) {
-  return db.select({ sequence: events.sequence }).from(events).where(and(
-    eq(events.threadId, placeholder("threadId")),
-    eq(events.type, "system/operation"),
-    sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
-    sql`json_extract(${events.data}, '$.status') = 'completed'`,
-    lte(events.sequence, placeholder("atOrBeforeSequence")),
-  )).orderBy(desc(events.sequence)).limit(1).prepare();
+  return db
+    .select({ sequence: events.sequence })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, placeholder("threadId")),
+        eq(events.type, "system/operation"),
+        sql`json_extract(${events.data}, '$.operation') = ${THREAD_CONTEXT_CLEAR_OPERATION}`,
+        sql`json_extract(${events.data}, '$.status') = 'completed'`,
+        lte(events.sequence, placeholder("atOrBeforeSequence")),
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .prepare();
 }
 
 export function getLatestCompletedThreadContextClearSequence(
   db: DbQueryConnection,
   args: GetLatestCompletedThreadContextClearSequenceArgs,
 ): number | null {
-  const build = args.atOrBeforeSequence === undefined ? prepareContextClearSequence : prepareBoundedContextClearSequence;
+  const build =
+    args.atOrBeforeSequence === undefined
+      ? prepareContextClearSequence
+      : prepareBoundedContextClearSequence;
   return prepareCachedQuery(db, build).get({ ...args })?.sequence ?? null;
 }
 
@@ -4706,22 +4738,51 @@ export function getLatestTurnRequestEventRow(
 }
 
 function preparePlanHistory(db: DbQueryConnection) {
-  return db.select(storedEventRowFields).from(events).where(and(
-    eq(events.threadId, placeholder("threadId")), gte(events.sequence, placeholder("boundary")),
-    sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
-  )).orderBy(desc(events.sequence)).limit(placeholder("limit")).prepare();
+  return db
+    .select(storedEventRowFields)
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, placeholder("threadId")),
+        gte(events.sequence, placeholder("boundary")),
+        sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(placeholder("limit"))
+    .prepare();
 }
 
 function prepareBoundedPlanHistory(db: DbQueryConnection) {
-  return db.select(storedEventRowFields).from(events).where(and(
-    eq(events.threadId, placeholder("threadId")), gte(events.sequence, placeholder("boundary")),
-    lte(events.sequence, placeholder("atOrBeforeSequence")),
-    sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
-  )).orderBy(desc(events.sequence)).limit(placeholder("limit")).prepare();
+  return db
+    .select(storedEventRowFields)
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, placeholder("threadId")),
+        gte(events.sequence, placeholder("boundary")),
+        lte(events.sequence, placeholder("atOrBeforeSequence")),
+        sql`((${events.itemKind} = 'planSteps' AND ${events.type} = 'item/completed') OR ${events.type} = 'turn/plan/updated')`,
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(placeholder("limit"))
+    .prepare();
 }
 
-export function listPlanHistoryEventRows(db: DbConnection, args: {threadId: string; boundary: number; atOrBeforeSequence?: number; limit: number}): StoredEventRow[] {
-  const build = args.atOrBeforeSequence === undefined ? preparePlanHistory : prepareBoundedPlanHistory;
+export function listPlanHistoryEventRows(
+  db: DbConnection,
+  args: {
+    threadId: string;
+    boundary: number;
+    atOrBeforeSequence?: number;
+    limit: number;
+  },
+): StoredEventRow[] {
+  const build =
+    args.atOrBeforeSequence === undefined
+      ? preparePlanHistory
+      : prepareBoundedPlanHistory;
   return prepareCachedQuery(db, build).all(args);
 }
 

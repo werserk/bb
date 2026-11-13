@@ -1,3 +1,4 @@
+import { prepareCachedQuery } from "../connection.js";
 import { requireQuestionResponseDeliverable } from "./conversation-questions.js";
 import { markQuestionResolutionSubmitted } from "./question-resolution-events.js";
 import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
@@ -20,6 +21,7 @@ import {
   ne,
   notInArray,
   or,
+  placeholder,
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -1709,7 +1711,8 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
   }
 
   for (const row of existingRows) {
-    if (row.payloadKind === "questionResponse") markQuestionResolutionSubmitted(db, row.id);
+    if (row.payloadKind === "questionResponse")
+      markQuestionResolutionSubmitted(db, row.id);
     if (row.payloadKind === "questionResponse" && row.questionId !== null)
       db.update(conversationQuestions)
         .set({ dispatchedAt: Date.now(), updatedAt: Date.now() })
@@ -1839,10 +1842,46 @@ export interface QueuedThreadMessageCounts {
  * a workspace with tens of thousands of threads builds its sidebar from one
  * call.
  */
+function prepareSingleThreadQueueCounts(
+  db: DbQueryConnection,
+  excludeService: boolean,
+) {
+  return db
+    .select({
+      threadId: queuedThreadMessages.threadId,
+      queuedMessageCount: count(queuedThreadMessages.id),
+      failedQueuedMessageCount: count(
+        sql`CASE WHEN ${inArray(queuedThreadMessages.state, [...QUEUED_MESSAGE_FAILED_STATES])} THEN 1 END`,
+      ),
+    })
+    .from(queuedThreadMessages)
+    .where(
+      and(
+        eq(queuedThreadMessages.threadId, placeholder("threadId")),
+        liveQueuedThreadMessage(),
+        excludeService ? isNull(queuedThreadMessages.serviceTurn) : undefined,
+      ),
+    )
+    .groupBy(queuedThreadMessages.threadId)
+    .prepare();
+}
+const prepareAllQueueCounts = (db: DbQueryConnection) =>
+  prepareSingleThreadQueueCounts(db, false);
+const preparePublicQueueCounts = (db: DbQueryConnection) =>
+  prepareSingleThreadQueueCounts(db, true);
+
 export function listQueuedThreadMessageCountsByThreadIds(
   db: DbQueryConnection,
   args: { threadIds: readonly string[]; includeService?: boolean },
 ): QueuedThreadMessageCounts[] {
+  if (args.threadIds.length === 1) {
+    return prepareCachedQuery(
+      db,
+      args.includeService === false
+        ? preparePublicQueueCounts
+        : prepareAllQueueCounts,
+    ).all({ threadId: args.threadIds[0] });
+  }
   return queryInSqliteVariableBatches({
     dedupeKey: (threadId) => threadId,
     fixedVariableCount: 1 + QUEUED_MESSAGE_FAILED_STATES.length,

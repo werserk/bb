@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { prepareCachedQuery } from "../connection.js";
+import { and, desc, eq, inArray, isNotNull, placeholder } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { PendingInteractionStatus } from "@bb/domain";
 import type { DbConnection, DbTransaction } from "../connection.js";
@@ -234,10 +235,33 @@ export function hasTurnBoundActivePendingInteractionForThread(
   );
 }
 
+function prepareActiveThreadInteractions(db: PendingInteractionReadConnection) {
+  return db
+    .select()
+    .from(pendingInteractions)
+    .where(
+      and(
+        eq(pendingInteractions.threadId, placeholder("threadId")),
+        inArray(pendingInteractions.status, ["pending", "resolving"]),
+      ),
+    )
+    .orderBy(desc(pendingInteractions.createdAt))
+    .prepare();
+}
+
 export function listPendingInteractionsByThread(
   db: PendingInteractionReadConnection,
   args: ListPendingInteractionsArgs,
 ): PendingInteractionRow[] {
+  if (
+    args.statuses?.length === 2 &&
+    args.statuses.includes("pending") &&
+    args.statuses.includes("resolving")
+  ) {
+    return prepareCachedQuery(db, prepareActiveThreadInteractions).all({
+      threadId: args.threadId,
+    });
+  }
   return db
     .select()
     .from(pendingInteractions)

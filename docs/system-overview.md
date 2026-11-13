@@ -360,3 +360,22 @@ ReadingScrollArea opts into that overlay policy; other shared ScrollArea consume
 retain their previous defaults. The internal FilePreviewHostScrollContext shares
 existing host-slot ownership with FilePreview so a Markdown preview does not add
 a second viewport when its host already owns scrolling.
+
+### Prepared thread plan reads
+
+Canonical `readThreadPlan` keeps its per-thread SQLite transaction and fresh
+projection. Event revision, context-clear boundaries, bounded plan history,
+plan staleness and open-question summary queries reuse `prepareCachedQuery`'s
+connection-scoped statements with bound values. The queue-count singleton and
+pending/resolving interaction selectors use the same mechanism; general batch
+queue reads and other interaction status sets retain their existing paths.
+No plan result is cached, and no schema, public API or plugin change is required.
+
+The synthetic microbenchmark is `apps/server/scripts/benchmark-thread-plans.mjs`:
+run `node --conditions=source --import tsx apps/server/scripts/benchmark-thread-plans.mjs`
+after the server dependency build. It creates a migrated in-memory database with
+1400 idle threads, 15,120 completed snapshots, eight steps per snapshot and no
+pending interactions, performs five warmups and 30 measured passes through the
+server reader, and reports nearest-rank p50/p95 plus a projection checksum.
+Each pass refuses load1 >=16. It measures plan reading only, not the complete
+WProjects project-state build or HTTP/SDK overhead.

@@ -1,3 +1,4 @@
+import { prepareCachedQuery } from "../connection.js";
 import {
   and,
   asc,
@@ -8,6 +9,7 @@ import {
   isNotNull,
   lt,
   or,
+  placeholder,
   sql,
   type SQLWrapper,
 } from "drizzle-orm";
@@ -260,30 +262,39 @@ function openConversationQuestionPredicate(threadId: string | SQLWrapper) {
   );
 }
 
+function prepareOpenQuestionCount(db: DbQueryConnection) {
+  return db
+    .select({ total: count() })
+    .from(conversationQuestions)
+    .where(openConversationQuestionPredicate(placeholder("threadId")))
+    .prepare();
+}
+
+function prepareFirstOpenQuestion(db: DbQueryConnection) {
+  return db
+    .select({ id: conversationQuestions.id })
+    .from(conversationQuestions)
+    .where(openConversationQuestionPredicate(placeholder("threadId")))
+    .orderBy(
+      asc(conversationQuestions.createdAt),
+      asc(conversationQuestions.id),
+    )
+    .limit(1)
+    .prepare();
+}
+
 export function getOpenConversationQuestionSummary(
   db: DbQueryConnection,
   threadId: string,
 ): { total: number; firstQuestionId: string | null } {
-  const predicate = openConversationQuestionPredicate(threadId);
   const total =
-    db
-      .select({ total: count() })
-      .from(conversationQuestions)
-      .where(predicate)
-      .get()?.total ?? 0;
+    prepareCachedQuery(db, prepareOpenQuestionCount).get({ threadId })?.total ??
+    0;
   const firstQuestionId =
     total === 0
       ? null
-      : (db
-          .select({ id: conversationQuestions.id })
-          .from(conversationQuestions)
-          .where(predicate)
-          .orderBy(
-            asc(conversationQuestions.createdAt),
-            asc(conversationQuestions.id),
-          )
-          .limit(1)
-          .get()?.id ?? null);
+      : (prepareCachedQuery(db, prepareFirstOpenQuestion).get({ threadId })
+          ?.id ?? null);
   return { total, firstQuestionId };
 }
 
