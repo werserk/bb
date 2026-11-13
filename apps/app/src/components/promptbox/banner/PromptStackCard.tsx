@@ -4,6 +4,10 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import {
+  ComposerContextItem,
+  type ComposerContextFact,
+} from "../context/composer-context";
 import { cn } from "@bb/shared-ui/lib/utils";
 
 import {
@@ -30,6 +34,9 @@ export interface PromptStackCardProps {
   rootRef?: Ref<HTMLElement>;
   style?: CSSProperties;
   onKeyDown?: KeyboardEventHandler<HTMLElement>;
+  context?: Pick<ComposerContextFact, "label" | "icon" | "group" | "tone">;
+  contextSummary?: string | number;
+  onContextReveal?: () => void;
 }
 
 export function PromptStackCard({
@@ -39,22 +46,24 @@ export function PromptStackCard({
   rootRef,
   style,
   onKeyDown,
+  context,
+  contextSummary,
+  onContextReveal,
 }: PromptStackCardProps) {
-  if (ariaLabel) {
-    return (
-      <section
-        ref={rootRef}
-        aria-label={ariaLabel}
-        className={cn(BASE_CHROME, className)}
-        style={style}
-        onKeyDown={onKeyDown}
-      >
-        {children}
-      </section>
-    );
-  }
-  return (
+  const content = ariaLabel ? (
+    <section
+      ref={rootRef}
+      data-composer-context-card=""
+      aria-label={ariaLabel}
+      className={cn(BASE_CHROME, className)}
+      style={style}
+      onKeyDown={onKeyDown}
+    >
+      {children}
+    </section>
+  ) : (
     <div
+      data-composer-context-card=""
       ref={rootRef as Ref<HTMLDivElement>}
       className={cn(BASE_CHROME, className)}
       style={style}
@@ -62,5 +71,19 @@ export function PromptStackCard({
     >
       {children}
     </div>
+  );
+  return (
+    <ComposerContextItem
+      id={ariaLabel ?? "context"}
+      {...(context ?? {
+        label: ariaLabel ?? "Context",
+        icon: "Info",
+        group: "context",
+      })}
+      summary={contextSummary}
+      onReveal={onContextReveal}
+    >
+      {content}
+    </ComposerContextItem>
   );
 }

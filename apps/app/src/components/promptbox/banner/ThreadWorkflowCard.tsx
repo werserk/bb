@@ -92,6 +92,7 @@ export function ThreadWorkflowCard({
   return (
     <PromptStackCard
       ariaLabel="Workflow"
+      context={{ label: "Workflow", icon: "Workflow", group: "work" }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >

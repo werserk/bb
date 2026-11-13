@@ -64,6 +64,10 @@ export function CollapsibleActiveStackCard({
   return (
     <PromptStackCard
       ariaLabel={cardAriaLabel}
+      context={{ label: cardAriaLabel, icon: iconName, group: "work" }}
+      onContextReveal={() => {
+        if (!isExpanded) onToggle();
+      }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >

@@ -199,6 +199,11 @@ export function ThreadBackgroundCommandsCard({
     <PromptStackCard
       rootRef={cardRef}
       ariaLabel={groupLabel}
+      context={{ label: groupLabel, icon: "Terminal", group: "work" }}
+      contextSummary={commands.length}
+      onContextReveal={() => {
+        if (!isExpanded) onToggle();
+      }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >

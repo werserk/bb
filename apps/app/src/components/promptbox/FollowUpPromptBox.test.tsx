@@ -10,6 +10,11 @@ import {
 } from "@testing-library/react";
 import { Profiler, startTransition, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+  ComposerContextItem,
+} from "./context/composer-context";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import {
   resetPluginSlotStoreForTest,
@@ -1605,4 +1610,84 @@ describe("FollowUpPromptBox", () => {
 
     expect(screen.getByTestId("prompt-box")).toBe(initialPromptBox);
   });
+});
+
+it("retains the narrow editor while focus moves through the attached context and collapses after leaving it", async () => {
+  mocks.isCompactViewport = true;
+  render(
+    <>
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            icon="ListTodo"
+            group="work"
+          >
+            <button>Inspect plan step</button>
+          </ComposerContextItem>
+        </ComposerContextSources>
+        <FollowUpPromptBox
+          {...createFollowUpPromptBoxProps({ kind: "ready" })}
+        />
+      </ComposerContextProvider>
+      <button>Outside context</button>
+    </>,
+  );
+  const input = screen.getByRole("textbox", { name: "Follow-up prompt" });
+  act(() => input.focus());
+  const toggle = screen.getByRole("button", { name: "Toggle thread context" });
+  act(() => toggle.focus());
+  fireEvent.click(toggle);
+  const detail = screen.getByRole("button", { name: "Inspect plan step" });
+  act(() => detail.focus());
+  await act(async () => {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+  });
+  expect(screen.getByTestId("prompt-box").getAttribute("data-compact")).toBe(
+    "false",
+  );
+  act(() => screen.getByRole("button", { name: "Outside context" }).focus());
+  await waitFor(() =>
+    expect(screen.getByTestId("prompt-box").getAttribute("data-compact")).toBe(
+      "true",
+    ),
+  );
+});
+
+it("measures a context summary arriving after the footer mounts before the draft changes", async () => {
+  const height = vi
+    .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("composer-context-strip") ? 32 : 0;
+    });
+  try {
+    render(
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            icon="ListTodo"
+            group="work"
+          >
+            <p>Current plan</p>
+          </ComposerContextItem>
+        </ComposerContextSources>
+        <FollowUpPromptBox
+          {...createFollowUpPromptBoxProps({ kind: "ready" })}
+          stack={<></>}
+        />
+      </ComposerContextProvider>,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("prompt-box").getAttribute("data-min-height"),
+      ).toBe("71"),
+    );
+  } finally {
+    height.mockRestore();
+  }
 });

@@ -1,3 +1,8 @@
+import { ComposerContextDock } from "./context/ComposerContextDock";
+import {
+  ComposerContextSources,
+  useComposerContextStore,
+} from "./context/composer-context";
 import { flushSync } from "react-dom";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import { Button } from "@bb/shared-ui/button";
@@ -14,7 +19,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type RefObject,
+  type Ref,
 } from "react";
 import type {
   PromptTextMention,
@@ -200,6 +205,7 @@ function FollowUpPromptBoxStackOnly({
   FollowUpPromptBoxProps,
   "stack" | "pluginComposerHost" | "pluginComposerScope"
 >) {
+  const contextStore = useComposerContextStore();
   const composerScope =
     pluginComposerScope ?? pluginComposerHost?.scope ?? null;
   const hostDraft = usePluginComposerHostDraft(pluginComposerHost ?? null);
@@ -306,6 +312,7 @@ function FollowUpPromptBoxWithComposer({
       : (pluginComposerHost ?? undefined),
     composerScope ? composerScopeIdentity(composerScope) : null,
   );
+  const contextStore = useComposerContextStore();
   const isCompactViewport = useIsCompactViewport();
   const isPointerCoarse = usePointerCoarse();
   const composerInteractionRef = useRef<HTMLDivElement>(null);
@@ -498,7 +505,11 @@ function FollowUpPromptBoxWithComposer({
         const composerElement = composerInteractionRef.current;
         if (!composerElement) return;
 
-        if (composerElement.contains(document.activeElement)) return;
+        if (
+          composerElement.contains(document.activeElement) ||
+          contextStore?.contains(document.activeElement)
+        )
+          return;
 
         if (pressedComposerControlRef.current) {
           deferredControlFocusLossRef.current = scheduleFocusLoss;
@@ -569,6 +580,7 @@ function FollowUpPromptBoxWithComposer({
     [
       cancelPendingFocusExpansion,
       cancelPendingFocusLoss,
+      contextStore,
       isCompactViewport,
       isPointerCoarse,
       setInteractionExpanded,
@@ -669,6 +681,14 @@ function FollowUpPromptBoxWithComposer({
     setStackHeight(measured);
   }, []);
 
+  const contextSummaryRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      stackRef.current = element;
+      applyStackHeight(element?.offsetHeight ?? 0);
+    },
+    [applyStackHeight],
+  );
+
   useLayoutEffect(() => {
     const element = stackRef.current;
     if (element) {
@@ -710,7 +730,7 @@ function FollowUpPromptBoxWithComposer({
       data-follow-up-composer-footer-visible={
         isCompactViewport && isEditorExpanded ? "" : undefined
       }
-      onBlurCapture={scheduleCollapseAfterFocusLoss}
+      onBlurCapture={contextStore ? undefined : scheduleCollapseAfterFocusLoss}
       onFocusCapture={handleComposerFocus}
       onPointerDownCapture={handleComposerPointerDown}
     >
@@ -846,7 +866,8 @@ function FollowUpPromptBoxWithComposer({
           pendingInteraction={pendingInteraction}
           showScrollToBottomButton={showScrollToBottomButton}
           stack={stack}
-          stackRef={stackRef}
+          stackRef={contextStore ? contextSummaryRef : stackRef}
+          onContextBlur={scheduleCollapseAfterFocusLoss}
         />
       }
     />
@@ -861,7 +882,8 @@ interface DefaultFollowUpComposerProps {
   pendingInteraction?: ReactNode;
   showScrollToBottomButton: boolean;
   stack: ReactNode | null;
-  stackRef: RefObject<HTMLDivElement | null>;
+  stackRef: Ref<HTMLDivElement>;
+  onContextBlur: (event: ReactFocusEvent) => void;
 }
 
 function DefaultFollowUpComposer({
@@ -873,7 +895,39 @@ function DefaultFollowUpComposer({
   showScrollToBottomButton,
   stack,
   stackRef,
+  onContextBlur,
 }: DefaultFollowUpComposerProps) {
+  const contextStore = useComposerContextStore();
+  if (contextStore)
+    return (
+      <>
+        {showScrollToBottomButton && (
+          <ThreadTimelineScrollToBottomButton active={active} />
+        )}
+        <div
+          data-app-composer=""
+          data-app-composer-role={isPrimaryComposer ? "primary" : "secondary"}
+          data-promptbox-shell=""
+        >
+          {pendingInteraction}
+          <ComposerContextDock
+            summaryRef={stackRef}
+            onBlurCapture={onContextBlur}
+            sources={
+              <ComposerContextSources>
+                {hasPluginComposerScope ? (
+                  <ComposerBannersSlot>{stack}</ComposerBannersSlot>
+                ) : (
+                  stack
+                )}
+              </ComposerContextSources>
+            }
+          >
+            <div data-follow-up-composer-anchor="">{composerElement}</div>
+          </ComposerContextDock>
+        </div>
+      </>
+    );
   return (
     <>
       {showScrollToBottomButton ? (

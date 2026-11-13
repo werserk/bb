@@ -1397,7 +1397,9 @@ export function QueuedMessagesList({
     };
     measure();
     const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
     observer?.observe(list);
     return () => observer?.disconnect();
   }, [queuedMessages, inlineEditorActive, mode]);
@@ -1800,6 +1802,9 @@ export function QueuedMessagesList({
     <PromptStackCard
       rootRef={surfaceRef}
       ariaLabel="Queued messages"
+      context={{ label: "Queue", icon: "ListView", group: "queue" }}
+      contextSummary={queuedMessages.length}
+      onContextReveal={() => onExpandedChange(true)}
       style={{ height: surfaceHeight }}
       className={cn(
         "relative z-10 flex min-h-0 flex-col overflow-hidden bg-surface-raised-solid shadow-lift",
@@ -1811,7 +1816,10 @@ export function QueuedMessagesList({
     >
       <header
         data-queued-messages-mode={mode}
-        className={cn("flex shrink-0", isExpanded && "border-b border-border/35")}
+        className={cn(
+          "flex shrink-0",
+          isExpanded && "border-b border-border/35",
+        )}
       >
         <button
           ref={focus.triggerRef}

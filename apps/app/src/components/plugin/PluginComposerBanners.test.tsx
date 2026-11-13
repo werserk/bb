@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
-import { useEffect } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -227,3 +233,57 @@ describe("ComposerBannersSlot", () => {
     expect(view.container.textContent).toBe("Plugin rowBB row");
   });
 });
+
+it.each(["bare", "card"] as const)(
+  "does not contribute an empty %s extension and follows its actual rendered content",
+  async (chrome) => {
+    const change = { show: (_next: boolean) => {} };
+    function ConditionalBanner() {
+      const [shown, setShown] = useState(false);
+      change.show = setShown;
+      return shown ? (
+        <button onClick={() => setShown(false)}>Dismiss extension</button>
+      ) : null;
+    }
+    setPluginSlotRegistrations(
+      "conditional",
+      registrations([
+        {
+          id: "conditional",
+          banners: [
+            {
+              id: "banner",
+              chrome: chrome === "bare" ? "bare" : undefined,
+              component: ConditionalBanner,
+            },
+          ],
+        },
+      ]),
+    );
+    const { ComposerContextProvider, ComposerContextSources } =
+      await import("@/components/promptbox/context/composer-context");
+    const { ComposerContextDock } =
+      await import("@/components/promptbox/context/ComposerContextDock");
+    const { act } = await import("@testing-library/react");
+    render(
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          <ComposerBannersSlot view={composerView("t1")} />
+        </ComposerContextSources>
+        <ComposerContextDock>
+          <textarea aria-label="Draft" />
+        </ComposerContextDock>
+      </ComposerContextProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "conditional" })).toBeNull();
+    act(() => change.show(true));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "conditional" })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "conditional" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss extension" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "conditional" })).toBeNull(),
+    );
+  },
+);

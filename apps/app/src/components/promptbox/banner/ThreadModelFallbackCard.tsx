@@ -46,7 +46,16 @@ export function ThreadModelFallbackCard({
   }
 
   return (
-    <PromptStackCard ariaLabel="Model fallback" className="overflow-hidden">
+    <PromptStackCard
+      ariaLabel="Model fallback"
+      context={{
+        label: "Model fallback",
+        icon: "AlertCircle",
+        group: "attention",
+        tone: "attention",
+      }}
+      className="overflow-hidden"
+    >
       <div
         role="status"
         aria-live="polite"

@@ -313,7 +313,15 @@ function ActiveChildThreadsCard({
   const summary = `${waiting} needs you · ${working.length} working`;
   if (items.length === 0) return null;
   return (
-    <PromptStackCard ariaLabel="Child threads" className="overflow-hidden">
+    <PromptStackCard
+      ariaLabel="Child threads"
+      context={{ label: "Child threads", icon: "ChildThread", group: "work" }}
+      contextSummary={items.length}
+      onContextReveal={() => {
+        if (!isExpanded) onToggle();
+      }}
+      className="overflow-hidden"
+    >
       <button
         ref={focus.triggerRef}
         type="button"
@@ -565,6 +573,12 @@ function ReadOnlyContextBanner({
   return (
     <PromptStackCard
       ariaLabel="Thread history"
+      context={{
+        label: "Thread unavailable",
+        icon: "Info",
+        group: "attention",
+        tone: "attention",
+      }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
@@ -666,6 +680,11 @@ function WritableContextBanner({
       {entries.length > 0 ? (
         <PromptStackCard
           ariaLabel="Thread context before sending"
+          context={{
+            label: "Changes & context",
+            icon: "GitBranch",
+            group: "context",
+          }}
           className="overflow-hidden"
           style={{ minHeight: PROMPT_CONTEXT_BANNER_COLLAPSED_HEIGHT }}
         >

@@ -1,3 +1,12 @@
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+  ComposerContextItem,
+} from "./context/composer-context";
+import { ComposerPlanSteps } from "./context/ThreadComposerPlan";
+import { ThreadTodoCard } from "./banner/ThreadTodoCard";
+import { ThreadChildThreadsBanner } from "./banner/ThreadPromptContextBanner";
+import type { PlanSnapshotView } from "@bb/domain";
 import "../../../.ladle/composer-plugin";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type {
@@ -439,20 +448,20 @@ const contextBannerElement: ReactNode = dirtyContextBannerSection ? (
       mergeBase: gitSegmentFixtureMergeBase(),
     }}
   >
-  <ThreadPromptContextBanner
-    input={{
-      threadId: "thr_story",
-      projectId: "proj_story",
-      environment: null,
-    }}
-    core={{
-      parentThread: null,
-    }}
-    archivedSection={null}
-    environmentGoneSection={null}
-    expandedSegment={null}
-    onToggleSegment={noop}
-  />
+    <ThreadPromptContextBanner
+      input={{
+        threadId: "thr_story",
+        projectId: "proj_story",
+        environment: null,
+      }}
+      core={{
+        parentThread: null,
+      }}
+      archivedSection={null}
+      environmentGoneSection={null}
+      expandedSegment={null}
+      onToggleSegment={noop}
+    />
   </GitSegmentFixtureProvider>
 ) : null;
 
@@ -1053,5 +1062,173 @@ export function EnvironmentSummary() {
         {destroyedEnvironmentSummary}
       </StoryRow>
     </StoryCard>
+  );
+}
+
+const contextPlanFixture: PlanSnapshotView = {
+  sourceSeq: 1,
+  updatedAt: STORY_NOW,
+  items: [
+    {
+      id: "inspect",
+      text: "Проверить исходные панели и их владельцев",
+      status: "completed",
+      interactionIds: [],
+    },
+    {
+      id: "design",
+      text: "Согласовать компактную структуру",
+      status: "completed",
+      interactionIds: [],
+    },
+    {
+      id: "build",
+      text: "Общий composer и раскрытие контекста",
+      status: "in_progress",
+      interactionIds: [],
+    },
+    {
+      id: "test",
+      text: "Проверить узкую панель и длинные заголовки",
+      status: "pending",
+      interactionIds: [],
+    },
+    {
+      id: "screens",
+      text: "Снять before / after",
+      status: "pending",
+      interactionIds: [],
+    },
+    {
+      id: "review",
+      text: "Передать коммит на независимое ревью",
+      status: "pending",
+      interactionIds: [],
+    },
+  ],
+};
+function ContextFixtureScene({ after }: { after: boolean }) {
+  const [childrenExpanded, setChildrenExpanded] = useState(false);
+  const content = (
+    <div
+      className="@container/thread-chat mx-auto w-full max-w-3xl bg-background p-4"
+      style={{ height: 650 }}
+    >
+      <header className="flex h-8 items-center gap-3 border-b border-border pb-3 text-sm font-medium">
+        UI-правки: кнопки шапки, счётчики тредов, средний клик, ресайзеры
+      </header>
+      <div className="h-72 overflow-hidden py-5 text-sm">
+        <p className="ml-12 rounded-xl bg-muted p-3">
+          Постоянно дёргается высота панели чата из-за появления текста. Лучше
+          куда-то вправо его переместить, чтобы композиция элементов не
+          менялась.
+        </p>
+        <p className="py-5">
+          Проверяю общий overlay и геометрию ползунков на плотной сцене.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Edited card-stability.test.tsx +20
+        </p>
+      </div>
+      {after ? (
+        <ComposerContextSources>
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            summary="2/6"
+            group="work"
+            icon="ListTodo"
+          >
+            <ComposerPlanSteps
+              snapshot={contextPlanFixture}
+              executing
+              onQuestion={noop}
+            />
+          </ComposerContextItem>
+          <ComposerContextItem
+            id="questions"
+            label="Questions unavailable"
+            group="attention"
+            tone="error"
+            icon="AlertCircle"
+          >
+            <p className="text-xs text-destructive-text">
+              Questions unavailable
+            </p>
+            <p className="my-2 text-xs text-muted-foreground">
+              Failed to fetch open questions. Existing questions may still need
+              your answer.
+            </p>
+            <button
+              type="button"
+              className="rounded border border-border px-2 py-1 text-xs"
+            >
+              Retry
+            </button>
+          </ComposerContextItem>
+        </ComposerContextSources>
+      ) : (
+        <>
+          <ThreadTodoCard
+            threadId="thr_story"
+            placement="overlay"
+            snapshot={contextPlanFixture}
+            earlier={false}
+            narrow
+            executing
+            interactions={[]}
+            compact
+          />
+          <p className="py-2 text-xs text-destructive-text">
+            Questions unavailable · Retry
+          </p>
+        </>
+      )}
+      <Row
+        submitMode={{ kind: "ready" }}
+        initialMessage=""
+        stack={
+          <>
+            <ThreadChildThreadsBanner
+              childThreads={{
+                items: Array.from({ length: 12 }, (_, i) => ({
+                  id: `child-${i}`,
+                  title: [
+                    "Статусы в UI пропадают: механизм обновления",
+                    "Ядро: быстрое чтение в изолированной лаборатории",
+                    "UI-правки: кнопки шапки, счётчики тредов, средний клик, ресайзеры",
+                  ][i % 3]!,
+                  href: `/threads/child-${i}`,
+                  needsOwnerAttention: i === 3,
+                })),
+              }}
+              isExpanded={childrenExpanded}
+              onExpandedChange={setChildrenExpanded}
+            />
+            {contextBannerElement}
+          </>
+        }
+        queuedMessages={queuedMessages}
+      />
+    </div>
+  );
+  return after ? (
+    <ComposerContextProvider>{content}</ComposerContextProvider>
+  ) : (
+    content
+  );
+}
+export function ComposerContextBefore() {
+  return (
+    <ModelPickerStoryQueryProvider>
+      <ContextFixtureScene after={false} />
+    </ModelPickerStoryQueryProvider>
+  );
+}
+export function ComposerContextAfter() {
+  return (
+    <ModelPickerStoryQueryProvider>
+      <ContextFixtureScene after />
+    </ModelPickerStoryQueryProvider>
   );
 }

@@ -87,6 +87,12 @@ export function ThreadMachineStatusBanner({
   return (
     <PromptStackCard
       ariaLabel="Machine status"
+      context={{
+        label: "Machine status",
+        icon: "AlertCircle",
+        group: "attention",
+        tone: "attention",
+      }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >

@@ -23,6 +23,9 @@ This monorepo contains the packaged app plus the runtime services it bundles:
 `import { BBSdk } from "bb-app"`. See
 [`packages/bb-app`](../packages/bb-app/README.md#scripting-with-the-sdk).
 
+The web thread footer composition is described in
+[Composer context](composer-context.md).
+
 ## Pinned Dependencies
 
 Some dependencies are pinned to an exact version for reasons that are not

@@ -1,4 +1,8 @@
 import { ReadingScrollArea } from "@/components/ui/reading-scroll-area";
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+} from "@/components/promptbox/context/composer-context";
 import { threadNeedsOwnerAttention } from "@bb/client-core";
 import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
 import { QuestionFallback } from "@/components/thread/user-questions/QuestionFallback";
@@ -605,13 +609,15 @@ export function ThreadScreen({
               footerClassName="chat-prompt-box"
               footer={
                 <>
-                  {plan}
-                  <QuestionNavigator
-                    threadId={thread.id}
-                    onReturnToComposer={() =>
-                      requestComposerFocus(draftStorageKey)
-                    }
-                  />
+                  <ComposerContextSources>
+                    {plan}
+                    <QuestionNavigator
+                      threadId={thread.id}
+                      onReturnToComposer={() =>
+                        requestComposerFocus(draftStorageKey)
+                      }
+                    />
+                  </ComposerContextSources>
                   {promptArea}
                 </>
               }
@@ -646,13 +652,15 @@ export function ThreadScreen({
               presentation={presentation}
               promptArea={
                 <>
-                  {plan}
-                  <QuestionNavigator
-                    threadId={thread.id}
-                    onReturnToComposer={() =>
-                      requestComposerFocus(draftStorageKey)
-                    }
-                  />
+                  <ComposerContextSources>
+                    {plan}
+                    <QuestionNavigator
+                      threadId={thread.id}
+                      onReturnToComposer={() =>
+                        requestComposerFocus(draftStorageKey)
+                      }
+                    />
+                  </ComposerContextSources>
                   {promptArea}
                 </>
               }
@@ -696,17 +704,19 @@ export function ThreadScreen({
         thread.archivedAt !== null || presentation.kind === "transcript"
       }
     >
-      <NativeQuestionFocusProvider key={thread.id}>
-        <div
-          className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
-          data-thread-chat=""
-        >
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
-            {presentation.kind === "transcript" && plan}
+      <ComposerContextProvider key={thread.id}>
+        <NativeQuestionFocusProvider>
+          <div
+            className="@container/thread-chat relative flex min-h-0 min-w-0 flex-1 flex-col"
+            data-thread-chat=""
+          >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chat}</div>
+              {presentation.kind === "transcript" && plan}
+            </div>
           </div>
-        </div>
-      </NativeQuestionFocusProvider>
+        </NativeQuestionFocusProvider>
+      </ComposerContextProvider>
     </QuestionNavigationProvider>
   );
 }

@@ -12,7 +12,16 @@ export function ProviderRequirementBanner({
   action: ReactNode;
 }) {
   return (
-    <PromptStackCard ariaLabel={title} className="@container overflow-hidden">
+    <PromptStackCard
+      ariaLabel={title}
+      context={{
+        label: title,
+        icon: "AlertCircle",
+        group: "attention",
+        tone: "attention",
+      }}
+      className="@container overflow-hidden"
+    >
       <div
         role="alert"
         className="flex flex-col gap-2 px-3 py-2.5 @md:flex-row @md:items-center @md:gap-3"
