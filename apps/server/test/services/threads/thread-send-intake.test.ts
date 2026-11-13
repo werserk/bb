@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import {
   createQueuedThreadMessageInTransaction, getThreadSendIntake, projectAttachmentThreads,
-  projects, recordProjectAttachment, reserveThreadSendIntake, readThreadSendIntakePage, deleteThread,
+  projects, recordProjectAttachment, reserveThreadSendIntake, readThreadSendIntakePage, deleteThread, deleteProject, updateHost,
 } from "@bb/db";
 import { createDeferredPromise } from "@bb/test-helpers";
 import type { SendMessageRequest } from "@bb/server-contract";
@@ -107,6 +107,52 @@ describe("raw send intake custody", () => {
         expect(getThreadSendIntake(h.db, head.id)).toBeNull();
         expect(getThreadSendIntake(h.db, following.id)).toBeNull();
         expect(execute).not.toHaveBeenCalled();
+      } finally { service.stop(); }
+    });
+  });
+
+  it.each(["project", "host"] as const)("settles vanished-row waiters after a committed %s notification without retiring surviving threads", async signal => {
+    await withTestHarness(async h => {
+      const { host, project, thread } = seed(h);
+      const other = seed(h);
+      const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+      const service = createThreadSendIntakeService(h.deps, execute, () => false);
+      try {
+        const row = await service.admit(payload(), thread);
+        const survivor = await service.admit(payload(), other.thread);
+        let outcome: PromiseSettledResult<unknown> | undefined;
+        let surviving = true;
+        const result = Promise.allSettled([service.wait(row.id)]).then(([value]) => { outcome = value; });
+        const live = Promise.allSettled([service.wait(survivor.id)]).then(() => { surviving = false; });
+        const remove = (tx: typeof h.db) => {
+          if (signal === "project") expect(deleteProject(tx, h.deps.hub, project.id)).toBe(true);
+          else {
+            tx.delete(projects).where(eq(projects.id, project.id)).run();
+            updateHost(tx, h.deps.hub, host.id, { destroyedAt: Date.now() });
+          }
+        };
+        expect(() => h.db.transaction(tx => {
+          remove(tx);
+          throw new Error("rollback cascade");
+        })).toThrow("rollback cascade");
+        await Promise.resolve();
+        expect(outcome).toBeUndefined();
+        expect(getThreadSendIntake(h.db, row.id)?.state).toBe("pending");
+        h.db.transaction(tx => {
+          remove(tx);
+          expect(outcome).toBeUndefined();
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(outcome).toMatchObject({ status: "rejected", reason: { status: 503,
+          body: { code: "intake_not_deliverable" } } });
+        expect(surviving).toBe(true);
+        expect(getThreadSendIntake(h.db, row.id)).toBeNull();
+        expect(getThreadSendIntake(h.db, survivor.id)?.state).toBe("pending");
+        expect(execute).not.toHaveBeenCalled();
+        await result;
+        service.stop();
+        await live;
       } finally { service.stop(); }
     });
   });

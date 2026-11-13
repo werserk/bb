@@ -174,6 +174,9 @@ export function createThreadSendIntakeService(
   const unsubscribeDeleted = deps.hub.onChangedMessage(message => {
     if (message.entity === "thread" && message.changes.includes("thread-deleted"))
       afterCommit(deps.db, () => worker.changed(message.id));
+    if ((message.entity === "project" && message.changes.includes("project-deleted")) ||
+      (message.entity === "host" && message.changes.includes("host-disconnected")))
+      afterCommit(deps.db, () => worker.changed(message.id));
   });
 
   return {
