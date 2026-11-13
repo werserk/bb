@@ -106,7 +106,7 @@ export function useRetainedThreadTabContainer({
     const live = attached && outlet?.element.isConnected;
     container.dataset.retainedFixedTabBody = tabId;
     container.className =
-      "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background";
+      "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-panel";
     container.hidden = !live && !bridge;
     container.inert = !live;
     container.setAttribute("aria-hidden", String(!live));
