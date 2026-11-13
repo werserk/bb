@@ -171,6 +171,11 @@ export function createThreadSendIntakeService(
     report: (error, id) => deps.logger.warn({ err: error, intakeId: id }, "Pending send preparation stopped; custody retained"),
   });
 
+  const unsubscribeDeleted = deps.hub.onChangedMessage(message => {
+    if (message.entity === "thread" && message.changes.includes("thread-deleted"))
+      afterCommit(deps.db, () => worker.changed(message.id));
+  });
+
   return {
     recover: worker.recover,
     async admit(payload: SendMessageRequest, thread: Thread): Promise<ThreadSendIntakeRow> {
@@ -266,6 +271,6 @@ export function createThreadSendIntakeService(
         throw error;
       }
     },
-    stop() { stopped = true; worker.stop(); },
+    stop() { stopped = true; unsubscribeDeleted(); worker.stop(); },
   };
 }

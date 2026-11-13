@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createDeferredPromise } from "@bb/test-helpers";
 import {
   createProject, createThread, upsertHost, noopNotifier, reserveThreadSendIntake,
   finaliseThreadSendIntake, claimThreadSendIntake, getThreadSendIntake,
-  mutateThreadSendIntake, rejectThreadSendIntake, type ThreadSendIntakeClaim,
+  mutateThreadSendIntake, rejectThreadSendIntake, deleteThread, threadSendIntakes, type ThreadSendIntakeClaim,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { createSendIntakeWorker } from "../../../src/services/threads/send-intake-worker.js";
@@ -25,13 +26,14 @@ function fixture(execute: Parameters<typeof createSendIntakeWorker>[0]["execute"
   const host = upsertHost(db, noopNotifier, { name: "worker-host" });
   const { project } = createProject(db, noopNotifier, { name: "worker-project", source: { type: "local_path", hostId: host.id, path: "/worker" } });
   const thread = createThread(db, noopNotifier, { projectId: project.id, providerId: "codex", status: "error" });
-  const worker = createSendIntakeWorker({ db, isReady, execute, prepare: prepare ?? (async () => {}), notify: vi.fn(), report: vi.fn() });
+  const report = vi.fn();
+  const worker = createSendIntakeWorker({ db, isReady, execute, prepare: prepare ?? (async () => {}), notify: vi.fn(), report });
   cleanups.push(worker.stop);
   const add = (id: string, threadId = thread.id, staging = false) => {
     reserveThreadSendIntake(db, { id, threadId, clientSubmissionId: null, envelope: "{}", fingerprint: id, now: Date.now() });
     if (!staging) db.transaction(tx => finaliseThreadSendIntake(tx, { id, envelope: "{}", attachmentPaths: [], admissionReceipt: null, now: Date.now() }));
   };
-  return { db, thread, project, worker, add };
+  return { db, thread, project, worker, add, report };
 }
 const sent = { ok: true, delivery: "sent" } as const;
 
@@ -177,6 +179,58 @@ describe("send intake worker", () => {
     await expect(f.worker.wait("held")).resolves.toEqual(receipts.get("held"));
     await expect(f.worker.wait("following")).resolves.toEqual(receipts.get("following"));
     expect(executed).toEqual(["held", "following"]);
+  });
+
+  it.each(["changed", "empty-head"] as const)("retires all vanished-row waiters after a real thread cascade through %s", async trigger => {
+    const execute = vi.fn(async () => sent);
+    const f = fixture(execute);
+    f.add("head"); f.add("following");
+    const otherThread = createThread(f.db, noopNotifier, { projectId: f.project.id, providerId: "codex", status: "error" });
+    f.add("unrelated", otherThread.id);
+    let otherSettled = false;
+    const unrelated = Promise.allSettled([f.worker.wait("unrelated")]).then(outcomes => { otherSettled = true; return outcomes; });
+    const result = Promise.allSettled([f.worker.wait("head"), f.worker.wait("following")]);
+    expect(deleteThread(f.db, noopNotifier, f.thread.id)).toBe(true);
+    expect(getThreadSendIntake(f.db, "head")).toBeNull();
+    expect(getThreadSendIntake(f.db, "following")).toBeNull();
+    if (trigger === "changed") f.worker.changed(f.thread.id, "head");
+    else f.worker.wake(f.thread.id);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toEqual([
+      { status: "rejected", reason: expect.objectContaining({ status: 503, body: expect.objectContaining({ code: "intake_not_deliverable" }) }) },
+      { status: "rejected", reason: expect.objectContaining({ status: 503, body: expect.objectContaining({ code: "intake_not_deliverable" }) }) },
+    ]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(f.report).not.toHaveBeenCalled();
+    expect(otherSettled).toBe(false);
+    expect(getThreadSendIntake(f.db, "unrelated")?.state).toBe("pending");
+    expect(vi.getTimerCount()).toBe(0);
+    f.worker.stop();
+    expect(await unrelated).toEqual([{ status: "rejected", reason: expect.objectContaining({ message: "Intake worker stopped; custody retained" }) }]);
+  });
+
+  it.each(["{", "", JSON.stringify({ ok: true, delivery: "sent", requested: { requestId: "invalid", sequence: 1 } })])("rejects and retires malformed stored receipt waiters without changing custody: %j", async nativeReceipt => {
+    const execute = vi.fn(async () => sent);
+    const f = fixture(execute, undefined, () => false);
+    f.add("corrupt");
+    const result = Promise.allSettled([f.worker.wait("corrupt"), f.worker.wait("corrupt")]);
+    f.db.update(threadSendIntakes).set({ nativeReceipt }).where(eq(threadSendIntakes.id, "corrupt")).run();
+    const retained = getThreadSendIntake(f.db, "corrupt");
+    expect(() => f.worker.changed(f.thread.id, "corrupt")).not.toThrow();
+    const blocked = { status: "rejected", reason: expect.objectContaining({ status: 409,
+      body: expect.objectContaining({ code: "intake_blocked", details: { intakeId: "corrupt", blockerId: "corrupt", custodyRetained: true } }) }) };
+    expect(await result).toEqual([blocked, blocked]);
+    expect(f.report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "Stored send intake receipt is invalid" }), "corrupt");
+    f.worker.changed(f.thread.id, "corrupt");
+    expect(f.report).toHaveBeenCalledTimes(1);
+    const replay = f.worker.wait("corrupt");
+    await expect(replay).rejects.toMatchObject({ status: 409, body: { code: "intake_blocked" } });
+    expect(f.report).toHaveBeenCalledTimes(2);
+    f.worker.changed(f.thread.id, "corrupt");
+    expect(f.report).toHaveBeenCalledTimes(2);
+    expect(getThreadSendIntake(f.db, "corrupt")).toEqual(retained);
+    expect(execute).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("retains a timed-out sealed head and fences its late continuation while followers stay blocked", async () => {

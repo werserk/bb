@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import {
   createQueuedThreadMessageInTransaction, getThreadSendIntake, projectAttachmentThreads,
-  projects, recordProjectAttachment, reserveThreadSendIntake, readThreadSendIntakePage,
+  projects, recordProjectAttachment, reserveThreadSendIntake, readThreadSendIntakePage, deleteThread,
 } from "@bb/db";
 import { createDeferredPromise } from "@bb/test-helpers";
 import type { SendMessageRequest } from "@bb/server-contract";
@@ -72,6 +72,40 @@ describe("raw send intake custody", () => {
           action: { kind: "cancel" } })).rejects.toMatchObject({ status: 503 });
         await expect(service.admit(payload(), thread)).rejects.toMatchObject({ status: 503 });
         expect(getThreadSendIntake(h.db, row.id)).toEqual(retained);
+        expect(execute).not.toHaveBeenCalled();
+      } finally { service.stop(); }
+    });
+  });
+
+  it("settles deleted-thread legacy waiters only after the real cascade commits, even before readiness", async () => {
+    await withTestHarness(async h => {
+      const { thread } = seed(h);
+      const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+      const service = createThreadSendIntakeService(h.deps, execute, () => false);
+      try {
+        const head = await service.admit(payload(), thread);
+        const following = await service.admit(payload(), thread);
+        let settled = false;
+        const result = Promise.allSettled([service.wait(head.id), service.wait(following.id)]).then(outcomes => {
+          settled = true; return outcomes;
+        });
+        expect(() => h.db.transaction(tx => {
+          expect(deleteThread(tx, h.deps.hub, thread.id)).toBe(true);
+          throw new Error("rollback thread deletion");
+        })).toThrow("rollback thread deletion");
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        expect(getThreadSendIntake(h.db, head.id)?.state).toBe("pending");
+        expect(getThreadSendIntake(h.db, following.id)?.state).toBe("pending");
+        h.db.transaction(tx => {
+          expect(deleteThread(tx, h.deps.hub, thread.id)).toBe(true);
+          expect(settled).toBe(false);
+        });
+        const deleted = { status: "rejected", reason: expect.objectContaining({ status: 503,
+          body: expect.objectContaining({ code: "intake_not_deliverable" }) }) };
+        expect(await result).toEqual([deleted, deleted]);
+        expect(getThreadSendIntake(h.db, head.id)).toBeNull();
+        expect(getThreadSendIntake(h.db, following.id)).toBeNull();
         expect(execute).not.toHaveBeenCalled();
       } finally { service.stop(); }
     });

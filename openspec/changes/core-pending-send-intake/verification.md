@@ -56,3 +56,22 @@ The failing fixture supplied invalid creq_held/creq_following IDs to a receipt s
 S2–S5 remain explicit risks in design.md. Generator/copy/binding is NOT implemented: the four-file offline proposal did not establish the complete launched core closure. Checked source routes include Desktop ASAR/unpacked main/bridge, bb-app installed-newer update delegation, computed plugin/SDK loads and executable copied assets/plugins added after the proposed server generator. Full path/line evidence and the missing load/selection-inventory boundary are retained in intake-A/addendum15-followup-1/OFFLINE-ENTRY-BOUNDARY.md in the author thread storage. No complete-closure or packaged compatibility assertion is emitted. Missing descriptor remains incompatible for C; the FIRST A-containing release build still requires a sound generator. A standalone source build is not a release proof, and was not reached in this commission.
 
 Historical full-server RED,14 exact .161 six-file matched signatures and full-only scrollback anomaly remain unchanged. Isolated base16/16 does not resolve that anomaly. No new full server/DB loops, package, image extraction, live or ops edits occurred.
+
+## Addendum16 continuation and waiter-retirement delta
+
+The subsequent authorised finite continuation verified frozen5e539ea2: typecheck8/8(cache7,load3.54,exit0,1.984s), corrected worker17/17(Turbo10/10,cache8,load3.29,exit0,4.445s), isolated candidate scrollback16/16(Turbo10/10,cache5,load2.28,exit0,43.817s), standalone core build62/62(cache6,load4.65,exit0,50.717s). This supersedes the S1 test-correction missing status above; its earlier red log remains. The isolated scrollback PASS does not resolve historical full-only failure or grant a baseline classification.
+
+During that build the parent commissioned narrow D1/D2 fixes. The running build completed before any source edit. D1 now settles vanished-row waiters through changed/empty-head paths and subscribes to the real thread-deleted hub event afterCommit, removing the subscription on stop. D2 catches malformed stored native receipt JSON/schema, including empty text; all current listeners reject with truthful retained-custody409 and unregister before a content-free diagnostic. Neither fix changes a row, invents a handoff, resends or bypasses a failed lane. D3 abandoned-client lifetime remains unchanged.
+
+Fresh serial guarded delta checks:
+
+| Phase | Actual result | Boundary |
+|---|---|---|
+| intake-161-add16-typecheck-1 | exit0,load10.76,Turbo8/8,cache7,2.212s | Server fresh; DB/contract unchanged cached |
+| intake-161-add16-affected-1 | exit0,load9.40,worker22/22+service7/7;Turbo10/10,cache0,46.591s | Real SQLite cascade/empty head, unrelated thread preservation, production delete signal/outer rollback, malformed JSON/empty/schema, listener retirement/replay, prior healthy60s/tail/failed409/stop assertions; no unhandled section |
+| intake-161-add16-build-1 | exit0,load9.13,Turbo62/62,cache60,6.676s | Server+bb-app fresh; standalone root core filters; no package/Desktop proof |
+| intake-161-add16-openspec-1 | exit1,load8.19,pinned1.14.3,1pass/1fail | Actual A spec-format defect: no delta sections, no Scenario blocks; four warnings/two errors. Chain stopped |
+
+Strict failure belongs to change/core-pending-send-intake, introduced by A. The only .161 baseline change instant-question-answer passed and all its files are byte-identical to that base. This is not a baseline label or an all-green result. The author retained a minimal format-only repair proposal in intake-A/addendum16-fix-1/SPEC-FORMAT-REPAIR.patch in thread storage; it is not applied/validated. No further heavy phase followed red. Build regenerated42 tracked PWA PNG outputs in the first build; their bytes/hashes were preserved separately and only those owned generated outputs restored to HEAD. The second app build was cached; no PNG delta is included.
+
+All commands used the same finite45min fresh load1<16/nice19/ionice-c3 wrapper, one phase at a time. Raw logs/results/source manifests are retained in the author storage. Runtime inputs were unchanged after gates; this evidence paragraph adds no product behavior. Same-reviewer D1/D2 verdict, strict format repair, descriptor/direct-managed profile, B/C integration and packaged/live proof remain missing. No full server/DB/base14 repetition, descriptor research/implementation, Daily/Legacy/install/package/lab/browser/main/push/release was performed.

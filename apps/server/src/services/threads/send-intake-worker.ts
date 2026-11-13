@@ -56,13 +56,20 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
     if (!listeners) return;
     const row = getThreadSendIntake(deps.db, id);
     if (row?.state === "transferred" && awaitingInlineResult.has(id)) return;
-    if (row?.nativeReceipt) {
-      const outcome: unknown = JSON.parse(row.nativeReceipt);
-      const rejection = readIntakeErrorOutcome(outcome);
-      if (rejection) for (const listener of listeners) listener.reject(rejection);
-      else {
-        const receipt = sendMessageResponseSchema.parse(outcome);
-        for (const listener of listeners) listener.resolve(receipt);
+    if (row && row.nativeReceipt !== null) {
+      try {
+        const outcome: unknown = JSON.parse(row.nativeReceipt);
+        const rejection = readIntakeErrorOutcome(outcome);
+        if (rejection) for (const listener of listeners) listener.reject(rejection);
+        else {
+          const receipt = sendMessageResponseSchema.parse(outcome);
+          for (const listener of listeners) listener.resolve(receipt);
+        }
+      } catch {
+        waiters.delete(id);
+        for (const listener of listeners) listener.reject(intakeBlockedError(id, row.id));
+        deps.report(new Error("Stored send intake receipt is invalid"), id);
+        return;
       }
     } else if (row?.state === "failed") {
       for (const listener of listeners) listener.reject(intakeBlockedError(id, row.id));
@@ -103,12 +110,16 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
     if (running.get(threadId) === slot) running.delete(threadId);
   }
 
-  function changed(threadId: string, id: string, failure?: Error) {
+  function changed(threadId: string, id?: string, failure?: Error) {
     if (stopped) return;
-    deps.notify(threadId);
-    settle(id, failure);
+    if (id !== undefined) {
+      deps.notify(threadId);
+      settle(id, failure);
+    }
     for (const waitingId of waiters.keys()) {
-      if (waitingId !== id && getThreadSendIntake(deps.db, waitingId)?.threadId === threadId) settle(waitingId);
+      if (waitingId === id) continue;
+      const row = getThreadSendIntake(deps.db, waitingId);
+      if (!row || row.threadId === threadId) settle(waitingId);
     }
   }
 
@@ -162,7 +173,7 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
     let head: ThreadSendIntakeRow | undefined;
     try {
       head = listThreadSendIntakes(deps.db, threadId, 1)[0];
-      if (!head) return;
+      if (!head) { changed(threadId); return; }
       if (head.state === "staging") {
         await deps.prepare(head);
         if (stopped || slot.invalidated) return;
@@ -173,7 +184,7 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
       if (!claim) {
         const pending = listThreadSendIntakes(deps.db, threadId, 1)[0];
         if (pending?.state === "preparing" && pending.leaseExpiresAt !== null) waitForLease(threadId, pending.leaseExpiresAt);
-        if (pending) changed(threadId, pending.id);
+        changed(threadId, pending?.id);
         return;
       }
       const renew = () => {
