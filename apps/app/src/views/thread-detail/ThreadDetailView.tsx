@@ -1611,16 +1611,32 @@ function ThreadDetailViewInternal(
     ? formatWorkspaceCheckoutDisplay({ checkout: workspaceStatus.checkout })
     : undefined;
   const threadTitle = getThreadDisplayTitle(thread);
-  const workspaceOpenAction =
+  const workspaceOpenActions =
     workspaceOpenPath && preferredDirectoryTarget
-      ? {
-          label: `Open in ${preferredDirectoryTarget.label}`,
-          run: () =>
-            openPathInPreferredDirectoryTarget({
+      ? [
+          preferredDirectoryTarget,
+          ...directoryOpenTargets.filter(
+            (target) => target.id !== preferredDirectoryTarget.id,
+          ),
+        ].map((target) => ({
+          id: target.id,
+          label: `Open workspace in ${target.label}`,
+          run: async () => {
+            if (target.id === preferredDirectoryTarget.id) {
+              await openPathInPreferredDirectoryTarget({
+                lineNumber: null,
+                path: workspaceOpenPath,
+              });
+              return;
+            }
+            await openPathInDirectoryTarget({
               lineNumber: null,
               path: workspaceOpenPath,
-            }),
-        }
+              rememberTarget: true,
+              targetId: target.id,
+            });
+          },
+        }))
       : undefined;
   const threadActionTarget = toThreadActionTarget(
     thread,
@@ -1694,7 +1710,7 @@ function ThreadDetailViewInternal(
       threadTitle={threadTitle}
       contextCardButton={<ThreadContextCardHeaderButton />}
       workspaceOpenButton={workspaceOpenButton}
-      workspaceOpenAction={workspaceOpenAction}
+      workspaceOpenActions={workspaceOpenActions}
     />
   );
   const threadScreen = (

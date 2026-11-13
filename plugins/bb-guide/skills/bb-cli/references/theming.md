@@ -100,29 +100,36 @@ semantic** tokens; the rest derive.
 
 **Anchors — set first; everything below keys off them:**
 
-| token      | drives                                                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--canvas` | base surface: page/content background, cards, popovers, sidebar, and (via mixes) every neutral fill, border, and chrome surface |
-| `--ink`    | base text/foreground color, and the strength of every neutral fill/border (ink mixed into canvas)                               |
+| token      | drives                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `--canvas` | default content background, cards, popovers, and the neutral fill/border ramp                     |
+| `--ink`    | base text/foreground color, and the strength of every neutral fill/border (ink mixed into canvas) |
 
-**Surfaces & chrome — auto-derive from `--canvas`/`--ink`; leave alone unless you want one element to differ:**
+**Surfaces & chrome — content defaults to `--canvas`; frame surfaces follow `--background`/`--ink`:**
 
-| token                                                                       | drives                                                                        | derives           |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------- |
-| `--background`                                                              | main content-area background                                                  | `= --canvas`      |
-| `--card`, `--popover`                                                       | card surfaces; dropdown/menu/popover/tooltip surfaces                         | `= --canvas`      |
-| `--secondary`, `--accent`                                                   | subtle fills: secondary buttons, hovered list rows, highlights                | ink 8%            |
-| `--muted`                                                                   | muted fill: badges, chips, inset blocks                                       | ink 11%           |
-| `--border`                                                                  | default component borders (cards, dividers)                                   | ink 14%           |
-| `--border-hairline`                                                         | the finest 1px separators                                                     | ink ~15%          |
-| `--border-seam`                                                             | resizable app-shell boundaries: sidebar↔content, split panes, and side panels | ink ~10%          |
-| `--border-seam-vertical`                                                    | compatibility alias for `--border-seam`; prefer the orientation-neutral token | `= --border-seam` |
-| `--input`                                                                   | input/control field borders                                                   | ink ~30%          |
-| `--surface-recessed`                                                        | sunken inset wells (code/diagram backgrounds)                                 | translucent ink   |
-| `--surface-raised`                                                          | faintly lifted panels                                                         | translucent ink   |
-| `--surface-scrim`                                                           | **frosted top bars** — the thread/page header (`bg-surface-scrim`, blurred)   | canvas 92%        |
-| `--state-hover`, `--state-active`                                           | translucent hover / pressed overlays on rows & buttons                        | translucent ink   |
-| `--sidebar`, `--sidebar-foreground`, `--sidebar-accent`, `--sidebar-border` | left sidebar surface, its text, hovered items, borders                        | canvas/ink mixes  |
+| token                                                          | drives                                                                        | derives                                                   |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `--background`                                                 | main content-area background                                                  | `= --canvas`                                              |
+| `--chrome`                                                     | headers and app chrome                                                        | dark: background L − 0.05; light: ink 6% over background  |
+| `--panel`                                                      | sidebar and right-panel bodies                                                | dark: background L − 0.025; light: ink 3% over background |
+| `--card`, `--popover`                                          | card surfaces; dropdown/menu/popover/tooltip surfaces                         | `= --canvas`                                              |
+| `--secondary`, `--accent`                                      | subtle fills: secondary buttons, hovered list rows, highlights                | ink 8%                                                    |
+| `--muted`                                                      | muted fill: badges, chips, inset blocks                                       | ink 11%                                                   |
+| `--border`                                                     | default component borders (cards, dividers)                                   | ink 14%                                                   |
+| `--border-hairline`                                            | the finest 1px separators                                                     | ink ~15%                                                  |
+| `--border-seam`                                                | resizable app-shell boundaries: sidebar↔content, split panes, and side panels | ink ~10%                                                  |
+| `--border-seam-vertical`                                       | compatibility alias for `--border-seam`; prefer the orientation-neutral token | `= --border-seam`                                         |
+| `--input`                                                      | input/control field borders                                                   | ink ~30%                                                  |
+| `--surface-recessed`                                           | sunken inset wells (code/diagram backgrounds)                                 | translucent ink                                           |
+| `--surface-raised`                                             | faintly lifted panels                                                         | translucent ink                                           |
+| `--surface-scrim`                                              | translucent overlay surfaces                                                  | canvas 92%                                                |
+| `--state-hover`, `--state-active`                              | translucent hover / pressed overlays on rows & buttons                        | translucent ink                                           |
+| `--sidebar-foreground`, `--sidebar-accent`, `--sidebar-border` | sidebar text, hovered items, borders                                          | canvas/ink mixes                                          |
+
+A theme can override `--chrome` and `--panel` directly. Otherwise both derive
+from the timeline's `--background`, including when it differs from `--canvas`.
+The sidebar locally binds the legacy `--sidebar` surface to `--panel`, so a
+theme's old `--sidebar` override cannot separate it from the right-panel body.
 
 **Accent — set `--primary` (+ foreground); these follow it:**
 

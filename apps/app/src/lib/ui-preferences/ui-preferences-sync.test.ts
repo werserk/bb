@@ -11,6 +11,7 @@ import type { UiPreferencesResponse } from "@bb/server-contract";
 import { invalidateUiPreferences } from "@/hooks/cache-owners/system-cache-effects";
 import { uiPreferencesQueryOptions } from "@/hooks/queries/system-queries";
 import { createSyncedPreferenceAtom } from "./synced-preference-atom";
+import { setHeaderPin } from "@/views/thread-detail/threadHeaderPreferences";
 import {
   hasPendingUiPreferenceWrite,
   reconcileUiPreferences,
@@ -337,6 +338,70 @@ describe("ui preferences sync", () => {
       value: "machine",
     });
   });
+
+  it.each([
+    {
+      pinned: true,
+      initial: ["gone/action"],
+      fresh: ["gone/action", "wprojects/threads", "other/action"],
+      expected: ["gone/action", "wprojects/threads", "other/action"],
+      writes: 1,
+    },
+    {
+      pinned: false,
+      initial: ["gone/action", "wprojects/threads"],
+      fresh: ["gone/action", "other/action"],
+      expected: ["gone/action", "other/action"],
+      writes: 1,
+    },
+    {
+      pinned: true,
+      initial: ["gone/action"],
+      fresh: ["gone/action", "other/action"],
+      expected: ["gone/action", "other/action", "wprojects/threads"],
+      writes: 2,
+    },
+  ])(
+    "preserves the requested header pin state ($pinned) after a two-window 409",
+    async ({ pinned, initial, fresh, expected, writes }) => {
+      const queryClient = new QueryClient();
+      const store = createStore();
+      const pinnedAtom = createSyncedPreferenceAtom("threadHeader.pinned");
+      setCachedUiPreferences(
+        queryClient,
+        serverResponse({
+          "threadHeader.pinned": { revision: 1, value: initial },
+        }),
+      );
+      startUiPreferencesSync({ queryClient, store });
+      mocks.set.mockRejectedValueOnce(conflict(2));
+      mocks.list.mockResolvedValueOnce(
+        serverResponse({
+          "threadHeader.pinned": { revision: 2, value: fresh },
+        }),
+      );
+
+      store.set(pinnedAtom, (keys) =>
+        setHeaderPin(keys, "wprojects/threads", pinned),
+      );
+      await waitForUiPreferenceWrites();
+
+      expect(mocks.set).toHaveBeenCalledTimes(writes);
+      expect(mocks.set).toHaveBeenNthCalledWith(1, {
+        expectedRevision: 1,
+        key: "threadHeader.pinned",
+        value: setHeaderPin(initial, "wprojects/threads", pinned),
+      });
+      if (writes === 2) {
+        expect(mocks.set).toHaveBeenLastCalledWith({
+          expectedRevision: 2,
+          key: "threadHeader.pinned",
+          value: expected,
+        });
+      }
+      expect(store.get(pinnedAtom)).toEqual(expected);
+    },
+  );
 
   it("retries a plain value write with the fresh revision after a conflict", async () => {
     const { modeAtom, queryClient, store } = createHarness();

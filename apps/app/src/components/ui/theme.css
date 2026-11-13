@@ -151,6 +151,10 @@
 }
 
 @layer components {
+  [data-sidebar="panel"] {
+    --sidebar: var(--panel);
+  }
+
   [data-sidebar-sticky-stack] {
     /*
      * SidebarContent owns scrolling. This stack owns sticky padding, row
@@ -475,8 +479,8 @@
   --canvas: oklch(1 0 0);
   --ink: oklch(0.3211 0 0);
   --background: var(--canvas);
-  --chrome: color-mix(in oklch, var(--ink) 6%, var(--canvas));
-  --panel: color-mix(in oklch, var(--ink) 3%, var(--canvas));
+  --chrome: color-mix(in oklch, var(--ink) 6%, var(--background));
+  --panel: color-mix(in oklch, var(--ink) 3%, var(--background));
   --foreground: var(--ink);
   /* Card and popover are flush with the canvas — elevation is conveyed by
    * border + shadow, not a surface tint, so floating menus, raised cards, and
@@ -607,7 +611,7 @@
   );
   --sidebar: var(--panel);
   --sidebar-foreground: var(--ink);
-  --sidebar-accent: color-mix(in oklch, var(--ink) 14%, var(--canvas));
+  --sidebar-accent: color-mix(in oklch, var(--ink) 16%, var(--canvas));
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: color-mix(in oklch, var(--ink) 14%, var(--canvas));
   /* Search-match highlight: a manilla-folder tint over the canvas. Chromatic on
@@ -721,8 +725,8 @@
    * follows by an imperceptible amount. */
   --ink: oklch(0.81 0 0);
   --background: var(--canvas);
-  --chrome: oklch(from var(--canvas) calc(l - 0.05) c h);
-  --panel: oklch(from var(--canvas) calc(l - 0.025) c h);
+  --chrome: oklch(from var(--background) calc(l - 0.05) c h);
+  --panel: oklch(from var(--background) calc(l - 0.025) c h);
   --foreground: var(--ink);
   /* Card and popover stay flush with the canvas here too — elevation comes from
    * border + shadow. The lift ramp below uses larger steps than light so the

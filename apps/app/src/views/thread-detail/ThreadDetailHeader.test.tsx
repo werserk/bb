@@ -15,6 +15,7 @@ import {
 } from "@/lib/plugin-slots";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDefaultStore } from "jotai";
+import { DropdownMenu, DropdownMenuContent } from "@bb/shared-ui/dropdown-menu";
 import { threadHeaderPinnedAtom } from "./threadHeaderPreferences";
 import { ThreadDetailHeader } from "./ThreadDetailHeader";
 import { PaneContext, type PaneContextValue } from "./PaneContext";
@@ -365,74 +366,95 @@ describe("ThreadDetailHeader", () => {
     ).toBeNull();
   });
 
-  it("moves secondary controls into overflow for narrow split panes", () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      bottom: 40,
-      height: 40,
-      left: 0,
-      right: 360,
-      top: 0,
-      width: 360,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    getDefaultStore().set(threadHeaderPinnedAtom, [
-      "bb--core/commit",
-      "bb--core/open",
-    ]);
-    const splitContext: PaneContextValue = {
-      ...PANE_CONTEXT,
-      isFocused: true,
-      isSplitPane: true,
-      beginPaneDrag: vi.fn(),
-    };
+  it.each([
+    { compact: false, width: 360 },
+    { compact: true, width: 720 },
+  ])(
+    "folds pinned actions into In header at $width px (compact: $compact)",
+    async ({ compact, width }) => {
+      viewportState.isCompactViewport = compact;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        bottom: 40,
+        height: 40,
+        left: 0,
+        right: width,
+        top: 0,
+        width,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      getDefaultStore().set(threadHeaderPinnedAtom, [
+        "bb--core/commit",
+        "bb--core/open",
+      ]);
+      render(
+        <>
+          <HeaderActionCollectors />
+          <PaneContext.Provider
+            value={{
+              ...PANE_CONTEXT,
+              isSplitPane: true,
+              beginPaneDrag: vi.fn(),
+            }}
+          >
+            <ThreadDetailHeader
+              actionsMenu={({ headerContributions }) => (
+                <DropdownMenu defaultOpen modal={false}>
+                  <DropdownMenuContent>
+                    {headerContributions}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              isSecondaryPanelOpen={false}
+              onClosePane={vi.fn()}
+              onToggleSecondaryPanel={vi.fn()}
+              thread={THREAD_TARGET}
+              threadTitle="Narrow split"
+              workspaceOpenButton={<button>Open workspace</button>}
+              workspaceOpenActions={[
+                {
+                  id: "code",
+                  label: "Open workspace in VS Code",
+                  run: vi.fn(),
+                },
+                {
+                  id: "terminal",
+                  label: "Open workspace in Terminal",
+                  run: vi.fn(),
+                },
+              ]}
+            />
+          </PaneContext.Provider>
+        </>,
+      );
 
-    render(
-      <>
-        <HeaderActionCollectors />
-        <PaneContext.Provider value={splitContext}>
-          <ThreadDetailHeader
-            actionsMenu={({ includeResponsiveActions, headerActions }) => (
-              <>
-                <span>Thread menu</span>
-                {includeResponsiveActions ? (
-                  <span>Responsive menu actions</span>
-                ) : null}
-                {includeResponsiveActions
-                  ? headerActions.map(({ key, action }) => (
-                      <span key={key}>{`menu: ${action.label}`}</span>
-                    ))
-                  : null}
-              </>
-            )}
-            isSecondaryPanelOpen={false}
-            onClosePane={vi.fn()}
-            onToggleSecondaryPanel={vi.fn()}
-            thread={THREAD_TARGET}
-            threadTitle="Narrow split"
-            workspaceOpenButton={<button>Open workspace</button>}
-          />
-        </PaneContext.Provider>
-      </>,
-    );
+      expect(await screen.findByText("In header")).not.toBeNull();
+      expect(screen.queryByText("More actions")).toBeNull();
+      expect(screen.getByRole("menuitem", { name: "Commit" })).not.toBeNull();
+      expect(
+        screen.getByRole("menuitem", { name: "Open workspace in VS Code" }),
+      ).not.toBeNull();
+      expect(
+        screen.getByRole("menuitem", { name: "Open workspace in Terminal" }),
+      ).not.toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Open workspace" }),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: "Commit" })).toBeNull();
+      const closePane = screen.getByRole("button", { name: "Close pane" });
+      expect(closePane.classList).toContain("header-pane-action-button");
+      const closeIcon = closePane.querySelector(
+        '[data-icon="CloseThreadPane"]',
+      );
+      expect(closeIcon?.querySelectorAll("path")).toHaveLength(1);
+      expect(closeIcon?.querySelector("path")?.getAttribute("d")).toContain(
+        "M18 6L6.00081 17.9992",
+      );
+    },
+  );
 
-    expect(screen.queryByText("Open workspace")).toBeNull();
-    expect(screen.queryByText("Commit")).toBeNull();
-    expect(screen.getByText("Thread menu")).not.toBeNull();
-    expect(screen.getByText("Responsive menu actions")).not.toBeNull();
-    expect(screen.getByText("menu: Commit")).not.toBeNull();
-    const closePane = screen.getByRole("button", { name: "Close pane" });
-    expect(closePane.classList).toContain("header-pane-action-button");
-    const closeIcon = closePane.querySelector('[data-icon="CloseThreadPane"]');
-    expect(closeIcon).not.toBeNull();
-    expect(closeIcon?.querySelectorAll("path")).toHaveLength(1);
-    expect(closeIcon?.querySelector("path")?.getAttribute("d")).toContain(
-      "M18 6L6.00081 17.9992",
-    );
-  });
-
-  it("keeps responsive controls inline and out of the menu for wide split panes", () => {
+  it("keeps wide split pins inline and also lists them in In header", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       bottom: 40,
       height: 40,
@@ -448,30 +470,17 @@ describe("ThreadDetailHeader", () => {
       "bb--core/commit",
       "bb--core/open",
     ]);
-    const splitContext: PaneContextValue = {
-      ...PANE_CONTEXT,
-      isFocused: true,
-      isSplitPane: true,
-      beginPaneDrag: vi.fn(),
-    };
-
     render(
       <>
         <HeaderActionCollectors />
-        <PaneContext.Provider value={splitContext}>
+        <PaneContext.Provider
+          value={{ ...PANE_CONTEXT, isSplitPane: true, beginPaneDrag: vi.fn() }}
+        >
           <ThreadDetailHeader
-            actionsMenu={({ includeResponsiveActions, headerActions }) => (
-              <>
-                <span>Thread menu</span>
-                {includeResponsiveActions ? (
-                  <span>Responsive menu actions</span>
-                ) : null}
-                {includeResponsiveActions
-                  ? headerActions.map(({ key, action }) => (
-                      <span key={key}>{`menu: ${action.label}`}</span>
-                    ))
-                  : null}
-              </>
+            actionsMenu={({ headerContributions }) => (
+              <DropdownMenu defaultOpen modal={false}>
+                <DropdownMenuContent>{headerContributions}</DropdownMenuContent>
+              </DropdownMenu>
             )}
             isSecondaryPanelOpen={false}
             onClosePane={vi.fn()}
@@ -484,11 +493,49 @@ describe("ThreadDetailHeader", () => {
       </>,
     );
 
-    expect(screen.getByText("Open workspace")).not.toBeNull();
-    expect(screen.getByText("Commit")).not.toBeNull();
-    expect(screen.getByText("Thread menu")).not.toBeNull();
-    expect(screen.queryByText("Responsive menu actions")).toBeNull();
-    expect(screen.queryByText("menu: Commit")).toBeNull();
+    expect(await screen.findByText("In header")).not.toBeNull();
+    expect(screen.queryByText("More actions")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open workspace" }),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Commit" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Commit" })).not.toBeNull();
+  });
+
+  it("offers every workspace target in More actions when Open is unpinned", async () => {
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={({ headerContributions }) => (
+            <DropdownMenu defaultOpen modal={false}>
+              <DropdownMenuContent>{headerContributions}</DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          isSecondaryPanelOpen={false}
+          onToggleSecondaryPanel={vi.fn()}
+          thread={THREAD_TARGET}
+          threadTitle="Unpinned Open"
+          workspaceOpenButton={<button>Open workspace</button>}
+          workspaceOpenActions={[
+            { id: "code", label: "Open workspace in VS Code", run: vi.fn() },
+            {
+              id: "terminal",
+              label: "Open workspace in Terminal",
+              run: vi.fn(),
+            },
+          ]}
+        />
+      </PaneContext.Provider>,
+    );
+    expect(await screen.findByText("More actions")).not.toBeNull();
+    expect(screen.queryByText("In header")).toBeNull();
+    expect(
+      screen.getByRole("menuitem", { name: "Open workspace in VS Code" }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("menuitem", { name: "Open workspace in Terminal" }),
+    ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Open workspace" })).toBeNull();
   });
 
   it("keeps each of several header actions independently enabled in pinned order", async () => {

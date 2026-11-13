@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useLayoutEffect, useRef } from "react";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -7,21 +7,35 @@ import {
 import { Icon } from "@bb/shared-ui/icon";
 import type { PluginBoundThreadAction } from "@get-bb/plugin-sdk";
 
+export interface HeaderMenuAction {
+  id: string;
+  label: string;
+  run: () => void | Promise<void>;
+}
+
 export interface HeaderContribution {
   key: string;
   label: string;
   action: PluginBoundThreadAction;
+  menuActions?: readonly HeaderMenuAction[];
 }
 
 export function ThreadHeaderContributionsMenu({
   pinned,
   more,
-  onToggle,
+  onPinChange,
 }: {
   pinned: HeaderContribution[];
   more: HeaderContribution[];
-  onToggle: (key: string) => void;
+  onPinChange: (key: string, pinned: boolean) => void;
 }) {
+  const pinButtons = useRef(new Map<string, HTMLButtonElement>());
+  const pendingFocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pendingFocus.current === null) return;
+    pinButtons.current.get(pendingFocus.current)?.focus();
+    pendingFocus.current = null;
+  });
   return (
     <>
       {[
@@ -31,38 +45,51 @@ export function ThreadHeaderContributionsMenu({
         items.length === 0 ? null : (
           <Fragment key={label}>
             <DropdownMenuLabel>{label}</DropdownMenuLabel>
-            {items.map((item) => {
+            {items.flatMap((item) => {
               const pinLabel = isPinned ? "Unpin from header" : "Pin to header";
-              return (
-                <div key={item.key} className="flex items-center gap-1">
-                  <DropdownMenuItem
-                    className="min-w-0 flex-1"
-                    disabled={item.action.disabled}
-                    onSelect={() => void item.action.run()}
-                  >
-                    <Icon name={item.action.icon} aria-hidden />
-                    <span className="truncate">{item.label}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    asChild
-                    className="size-6 shrink-0 justify-center p-0"
-                    aria-label={`${pinLabel}: ${item.label}`}
-                    title={pinLabel}
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      onToggle(item.key);
-                    }}
-                  >
-                    <button type="button">
-                      <Icon
-                        name="Pin"
-                        className={isPinned ? "fill-current" : undefined}
-                        aria-hidden
-                      />
-                    </button>
-                  </DropdownMenuItem>
-                </div>
-              );
+              const actions = item.menuActions ?? [
+                { id: "default", label: item.label, run: item.action.run },
+              ];
+              return actions.map((action) => {
+                const rowKey = `${item.key}/${action.id}`;
+                return (
+                  <div key={rowKey} className="flex items-center gap-1">
+                    <DropdownMenuItem
+                      className="min-w-0 flex-1"
+                      disabled={item.action.disabled}
+                      onSelect={() => void action.run()}
+                    >
+                      <Icon name={item.action.icon} aria-hidden />
+                      <span className="truncate">{action.label}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="size-6 shrink-0 justify-center p-0"
+                      aria-label={`${pinLabel}: ${action.label}`}
+                      title={pinLabel}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        pendingFocus.current = rowKey;
+                        onPinChange(item.key, !isPinned);
+                      }}
+                    >
+                      <button
+                        type="button"
+                        ref={(button) => {
+                          if (button) pinButtons.current.set(rowKey, button);
+                          else pinButtons.current.delete(rowKey);
+                        }}
+                      >
+                        <Icon
+                          name="Pin"
+                          className={isPinned ? "fill-current" : undefined}
+                          aria-hidden
+                        />
+                      </button>
+                    </DropdownMenuItem>
+                  </div>
+                );
+              });
             })}
             <DropdownMenuSeparator />
           </Fragment>

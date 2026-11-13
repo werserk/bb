@@ -10,10 +10,7 @@ import {
 } from "react";
 import { Button } from "@bb/shared-ui/button";
 import { useAtomValue } from "jotai";
-import type {
-  PluginThreadActionEntry,
-  PluginThreadActionTarget,
-} from "@get-bb/plugin-sdk";
+import type { PluginThreadActionTarget } from "@get-bb/plugin-sdk";
 import { COARSE_POINTER_TOOLBAR_ACTION_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { Icon } from "@bb/shared-ui/icon";
 import { useAtom } from "jotai";
@@ -22,13 +19,14 @@ import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import {
   threadHeaderPinnedAtom,
-  toggleHeaderPin,
+  setHeaderPin,
   partitionHeaderContributions,
   activateHeaderComponent,
 } from "./threadHeaderPreferences";
 import {
   ThreadHeaderContributionsMenu,
   type HeaderContribution,
+  type HeaderMenuAction,
 } from "./ThreadHeaderContributionsMenu";
 import {
   AppPageHeader,
@@ -79,8 +77,6 @@ const NARROW_SPLIT_HEADER_MAX_WIDTH = 560;
 
 export interface ThreadDetailHeaderActionsMenuArgs {
   headerContributions: ReactNode;
-  includeResponsiveActions: boolean;
-  headerActions: readonly PluginThreadActionEntry[];
   requestRename: (threadId: string) => void;
   onCloseAutoFocus: (event: Event) => void;
 }
@@ -94,7 +90,7 @@ interface ThreadDetailHeaderProps {
   thread: PluginThreadActionTarget;
   threadTitle: string;
   workspaceOpenButton?: ReactNode;
-  workspaceOpenAction?: { label: string; run: () => void | Promise<unknown> };
+  workspaceOpenActions?: readonly HeaderMenuAction[];
 }
 
 export function ThreadDetailHeader({
@@ -105,7 +101,7 @@ export function ThreadDetailHeader({
   thread,
   threadTitle,
   workspaceOpenButton,
-  workspaceOpenAction,
+  workspaceOpenActions,
   contextCardButton,
 }: ThreadDetailHeaderProps) {
   const isCompactViewport = useIsCompactViewport();
@@ -142,12 +138,13 @@ export function ThreadDetailHeader({
       ? [
           {
             key: "bb--core/open",
-            label: workspaceOpenAction?.label ?? "Open workspace",
+            label: "Open workspace",
+            menuActions: workspaceOpenActions,
             action: {
-              label: workspaceOpenAction?.label ?? "Open workspace",
+              label: "Open workspace",
               icon: "FolderOpen" as const,
               run: async () => {
-                if (workspaceOpenAction) await workspaceOpenAction.run();
+                await workspaceOpenActions?.[0]?.run();
               },
             },
           },
@@ -297,13 +294,13 @@ export function ThreadDetailHeader({
               <ThreadHeaderContributionsMenu
                 pinned={pinned}
                 more={more}
-                onToggle={(key) =>
-                  setPinnedKeys((previous) => toggleHeaderPin(previous, key))
+                onPinChange={(key, pinned) =>
+                  setPinnedKeys((previous) =>
+                    setHeaderPin(previous, key, pinned),
+                  )
                 }
               />
             ),
-            includeResponsiveActions: usesResponsiveActionOverflow,
-            headerActions,
             requestRename: requestRenameFromMenu,
             onCloseAutoFocus: handleActionsMenuCloseAutoFocus,
           })}

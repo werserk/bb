@@ -62,6 +62,13 @@ function variableValue(block: string, token: string): string {
 }
 
 function parseOklch(value: string): OklchColor {
+  const gray = value.match(/^#([\da-f]{2})\1\1$/i);
+  if (gray) {
+    const encoded = Number.parseInt(gray[1], 16) / 255;
+    const linear =
+      encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+    return { lightness: Math.cbrt(linear), chroma: 0, hueDegrees: 0 };
+  }
   const match = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/);
   const lightness = match?.[1];
   const chroma = match?.[2];
@@ -465,26 +472,32 @@ describe("theme.css shimmer paint scope", () => {
 });
 
 describe("theme.css frame surfaces", () => {
-  function surface(mode: (typeof MODES)[number], token: string): OklchColor {
+  function surface(
+    mode: (typeof MODES)[number],
+    token: string,
+    overrides: Record<string, string> = {},
+  ): OklchColor {
     const block = modeBlock(mode);
-    const value = variableValue(block, token);
+    const value = overrides[token] ?? variableValue(block, token);
     const alias = value.match(/^var\(--([a-z-]+)\)$/);
-    if (alias) return surface(mode, alias[1]);
+    if (alias) return surface(mode, alias[1], overrides);
     const relative = value.match(
-      /^oklch\(from var\(--canvas\) calc\(l - ([\d.]+)\) c h\)$/,
+      /^oklch\(from var\(--([a-z-]+)\) calc\(l - ([\d.]+)\) c h\)$/,
     );
-    const canvas = parseOklch(variableValue(block, "canvas"));
-    if (relative)
-      return { ...canvas, lightness: canvas.lightness - Number(relative[1]) };
+    if (relative) {
+      const anchor = surface(mode, relative[1], overrides);
+      return { ...anchor, lightness: anchor.lightness - Number(relative[2]) };
+    }
     const mix = value.match(
-      /^color-mix\(in oklch, var\(--ink\) ([\d.]+)%, var\(--canvas\)\)$/,
+      /^color-mix\(in oklch, var\(--ink\) ([\d.]+)%, var\(--([a-z-]+)\)\)$/,
     );
     if (!mix) return parseOklch(value);
-    const ink = parseOklch(variableValue(block, "ink"));
+    const anchor = surface(mode, mix[2], overrides);
+    const ink = surface(mode, "ink", overrides);
     const weight = Number(mix[1]) / 100;
     return {
-      ...canvas,
-      lightness: canvas.lightness * (1 - weight) + ink.lightness * weight,
+      ...anchor,
+      lightness: anchor.lightness * (1 - weight) + ink.lightness * weight,
     };
   }
 
@@ -520,5 +533,44 @@ describe("theme.css frame surfaces", () => {
     expect(surface("dark", "chrome").lightness).toBeCloseTo(0.145);
     expect(surface("dark", "panel").lightness).toBeCloseTo(0.17);
     expect(surface("dark", "background").lightness).toBeCloseTo(0.195);
+  });
+
+  it("keeps the light selected sidebar fill distinct from its border", () => {
+    const steps = rampSteps(modeBlock("light"));
+    expect(steps.get("sidebar-accent")).toBeGreaterThan(
+      steps.get("sidebar-border")!,
+    );
+  });
+
+  it("anchors Rubik frame surfaces to the timeline instead of its darker canvas", () => {
+    const rubik = {
+      canvas: "#0a0a0a",
+      background: "#101010",
+      sidebar: "#101010",
+      ink: "#f5f5f5",
+    };
+    const timeline = surface("dark", "background", rubik);
+    const chrome = surface("dark", "chrome", rubik);
+    const panel = surface("dark", "panel", rubik);
+    expect(chrome.lightness).toBeCloseTo(timeline.lightness - 0.05);
+    expect(panel.lightness).toBeCloseTo(timeline.lightness - 0.025);
+    expect(chrome.lightness).toBeLessThan(panel.lightness);
+    expect(panel.lightness).toBeLessThan(timeline.lightness);
+    const sidebarRule = css.match(
+      /\[data-sidebar="panel"\]\s*\{([^}]*)\}/,
+    )?.[1];
+    expect(sidebarRule).toMatch(/--sidebar:\s*var\(--panel\);/);
+    expect(
+      surface("dark", "sidebar", { ...rubik, sidebar: "var(--panel)" }),
+    ).toEqual(panel);
+  });
+
+  it("accepts explicit chrome and panel theme overrides", () => {
+    const overrides = {
+      chrome: "oklch(0.12 0 0)",
+      panel: "oklch(0.15 0 0)",
+    };
+    expect(surface("dark", "chrome", overrides).lightness).toBe(0.12);
+    expect(surface("dark", "sidebar", overrides).lightness).toBe(0.15);
   });
 });

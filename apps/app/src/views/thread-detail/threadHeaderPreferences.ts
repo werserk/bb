@@ -4,10 +4,13 @@ export const threadHeaderPinnedAtom = createSyncedPreferenceAtom(
   "threadHeader.pinned",
 );
 
-export function toggleHeaderPin(keys: string[], key: string): string[] {
-  return keys.includes(key)
-    ? keys.filter((value) => value !== key)
-    : [...keys, key];
+export function setHeaderPin(
+  keys: string[],
+  key: string,
+  pinned: boolean,
+): string[] {
+  if (!pinned) return keys.filter((value) => value !== key);
+  return keys.includes(key) ? keys : [...keys, key];
 }
 
 export function partitionHeaderContributions<T extends { key: string }>(
