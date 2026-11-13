@@ -71,8 +71,19 @@ generation and AbortSignal. Recovery never resends automatically. Journal failur
 leave memory sending available with a reload warning. Scope includes origin,
 primary host and server data root; an actual scope change disposes recovery and
 clears the in-memory owner. Query garbage collection/removal does not clear custody.
-An explicit clearPendingSendScope boundary is available for logout. Its behavior
-is unit-tested; actual auth/logout integration remains unproven.
+The production app query client installs `bindPendingSendIdentity` before rendering.
+It reads the built-in `bb-account.v1.status` RPC and consumes the existing
+`bb-account` / `account` realtime signal broadcast by AccountService on sign-in,
+sign-out, pairing adoption and credential invalidation. Reconnect rereads status;
+ordinary transport disconnect does not discard custody. Identity uses base URL,
+user ID and server ID, not profile names or every profile revision. Unknown identity
+blocks journal restoration, while memory sends remain available. Logout or an actual
+identity change calls `clearPendingSendScope`, forgets only owned journal custody,
+aborts pending Web Lock waits and increments the generation. Old status reads,
+reconciliation results and send/send-now receipts cannot affect the new identity.
+The journal key includes that identity, origin, primary host and data root. There
+is no separate core logout UI; the account plugin owns that action. Unit integration
+covers the actual signal/RPC boundary; live account-switch proof remains separate.
 
 ## Verification and delivery boundary
 
@@ -82,9 +93,26 @@ proofs and stored-format P/C/P/stock rehearsal. Unit mocks do not prove those.
 Release/rollback/install, main merge, push and PR are outside builder authority.
 Core-host-contract release remains owner-only.
 
-The plugin-owned fork patch ledger is outside this builder's authorized write
-scope. Proposed row for the controller to apply there:
+The plugin-owned fork patch ledger was updated in plugin commit
+`aff9603fad23d7adc47be72089386a02efbc488b`. Core does not maintain a second draft row.
 
-| Patch                | Change                    | Paths in core                                                                                                                                                                                                                     | Migrations / protocol                            | Upstream status           | Retire when                                                                                                    | State                                                                        |
-| -------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Pending send overlay | core-pending-send-overlay | domain/event and queue types; server-contract/SDK send and snapshot DTOs; DB queue ID assignment; server send/queue/provision/lineage; thread-view user projection; client-core overlay/journal; app mutation/cache/render owners | none; optional stored JSON and derived queue IDs | downstream, not published | upstream has equivalent continuously visible owner send custody and causal queue/request/reload reconciliation | isolated candidate; review/runtime/compatibility proof pending; not released |
+## Follow-up review dispositions
+
+| Review item                   | Disposition and evidence                                                                                                                                                        | Remaining risk / owner                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| R1 same-sequence recovery     | Fixed: represented unresolved custody retires through observe, including journal entries; regression test                                                                       | Live trace: lab controller                                                      |
+| R2 grouping                   | Fixed: settled queue filtering goes through adjacency repair; regression test                                                                                                   | None identified                                                                 |
+| R3 empty queue reference      | Fixed: stable owner fallback arrays; queue hook passes absence through; projection identity test                                                                                | Query observer result objects follow normal TanStack semantics                  |
+| R4 legacy subscription tag    | Fixed: legacy joint cache replacement syncs the applied tag; M1 batch remains intact                                                                                            | Old-server live proof: lab controller                                           |
+| R5 observe cost               | Identity index cached weakly per immutable native rows array; each push builds it once, repeated queue pushes use indexed membership. 100k-row measurement retained in test log | Cold indexing is O(visible rows); live frames: lab controller                   |
+| R6 / A1.7 multi-ID retry      | Production retry test covers accepted/unaccepted sources, two IDs in distinct original groups and two aliases; continuation retains all IDs at group zero                       | Live continuation: lab controller                                               |
+| R6 / A1.8 contract allowlist  | Retained explicit baseline repair: pendingTodos.planId and timeline steps.id were already emitted but omitted from contract enumeration                                         | Removing these would restore a known baseline failure; reviewer checks scope    |
+| R6 / A1.9 UUID casing         | Normalize through the shared ingress schema before deriving keys and dedup identity                                                                                             | No migration; previously persisted uppercase values are not rewritten           |
+| R6 / A1.10 length heuristic   | Fixed: detect added row identities even if one canonical row is hidden; pending content no longer suppresses timeline error                                                     | Runtime frame proof: lab controller                                             |
+| R6 / A1.11 mutation variables | Fixed: WeakMap prepares a copied request shared by lifecycle and mutationFn; original variables are unchanged                                                                   | Existing explicit-ID callers keep their identity                                |
+| R6 / A1.12 legacy baseline    | Fixed: absent queue cache stays undefined rather than an authoritative empty baseline                                                                                           | Unknown pre-send queue content stays visible until M1 joint handoff             |
+| R6 / A1.13 CLI snapshot size  | Deferred: debug command retains explicit server validation at 200 IDs; app reconciliation already chunks                                                                        | No custody risk; CLI batching follow-up belongs to parent, no silent truncation |
+| R7 final-tree evidence        | Final source freeze precedes affected/full app checks and typecheck/build; report identifies exact tree and known baseline failures                                             | Independent review and packaged live proof belong to parent                     |
+
+No release readiness is inferred from unit/typecheck/build evidence. Stored-format,
+Chrome/Electron Web Locks and packaged native/embedded proof remain separate gates.

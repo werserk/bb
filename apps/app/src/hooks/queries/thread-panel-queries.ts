@@ -114,12 +114,7 @@ export function useThreadQueuedMessages(
   const client = useQueryClient();
   usePendingSendOwner(client);
   const result = useQuery(threadQueuedMessagesQueryOptions(id, options));
-  const queue = composePendingSends(
-    client,
-    id,
-    undefined,
-    result.data ?? [],
-  ).queue;
+  const queue = composePendingSends(client, id, undefined, result.data).queue;
   return {
     ...result,
     data: result.data === undefined && queue.length === 0 ? undefined : queue,

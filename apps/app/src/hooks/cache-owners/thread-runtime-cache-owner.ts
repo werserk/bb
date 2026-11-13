@@ -1,3 +1,5 @@
+import { prepareSendRequest } from "../mutations/mutation-request-types";
+import { pendingSendGeneration } from "./pending-send-owner";
 import {
   pendingSendOwner,
   refreshPendingSends,
@@ -218,6 +220,7 @@ interface SendThreadMessageAcceptedTurnTransaction {
   kind: "accepted-turn";
   optimisticCreatedAt: number;
   optimisticRowId: string;
+  generation: number;
   prediction: ThreadEntityPrediction;
 }
 
@@ -245,6 +248,7 @@ export interface RemoveQueuedMessageTransaction {
   optimisticCreatedAt: number | null;
   optimisticQueueDataUpdateCount: number;
   optimisticRowId: string | null;
+  sendGeneration?: number;
   prediction: ThreadEntityPrediction | null;
   previousQueuedMessages: ThreadQueuedMessageListResponse | undefined;
 }
@@ -611,7 +615,8 @@ export async function beginSendThreadMessageTransaction({
   queryClient,
   request,
 }: SendThreadMessageTransactionArgs): Promise<SendThreadMessageTransaction> {
-  request.clientSubmissionId ??= crypto.randomUUID();
+  const prepared = prepareSendRequest(request);
+  request = prepared;
   const createdAt = Date.now();
   const row = buildOptimisticUserMessageRow({
     createdAt,
@@ -623,22 +628,21 @@ export async function beginSendThreadMessageTransaction({
   row.id = `pending-send-${request.clientSubmissionId}`;
   pendingSendOwner(queryClient).begin(
     newPendingSend({
-      id: request.clientSubmissionId,
+      id: prepared.clientSubmissionId,
       threadId: request.id,
       row,
-      submissionIds: [request.clientSubmissionId],
+      submissionIds: [prepared.clientSubmissionId],
       queueIds: [],
       queueRows: [],
       afterSequence:
         queryClient.getQueryData<ThreadTimelineResponse>(
           threadTimelineQueryKey(request.id),
         )?.maxSeq ?? 0,
-      legacyQueueBaselineIds:
-        queryClient
-          .getQueryData<ThreadQueuedMessageListResponse>(
-            threadQueuedMessagesQueryKey(request.id),
-          )
-          ?.map((row) => row.id) ?? [],
+      legacyQueueBaselineIds: queryClient
+        .getQueryData<ThreadQueuedMessageListResponse>(
+          threadQueuedMessagesQueryKey(request.id),
+        )
+        ?.map((row) => row.id),
       request,
     }),
   );
@@ -646,6 +650,7 @@ export async function beginSendThreadMessageTransaction({
     kind: "accepted-turn",
     optimisticCreatedAt: createdAt,
     optimisticRowId: row.id,
+    generation: pendingSendGeneration(queryClient),
     prediction: predictAcceptedTurnThreadState({
       createdAt,
       queryClient,
@@ -658,6 +663,12 @@ export function rollbackSendThreadMessageTransaction({
   request,
   transaction,
 }: RollbackSendThreadMessageTransactionArgs): void {
+  if (
+    transaction?.kind === "accepted-turn" &&
+    transaction.generation !== pendingSendGeneration(queryClient)
+  )
+    return;
+  request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).fail(
       request.id,
@@ -674,6 +685,12 @@ export function applySendThreadMessageSuccess({
   transaction,
   realtimeConnected,
 }: ApplySendThreadMessageSuccessArgs): void {
+  if (
+    transaction?.kind === "accepted-turn" &&
+    transaction.generation !== pendingSendGeneration(queryClient)
+  )
+    return;
+  request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).receipt(
       request.id,
@@ -684,12 +701,11 @@ export function applySendThreadMessageSuccess({
           queryClient.getQueryData<ThreadTimelineResponse>(
             threadTimelineQueryKey(request.id),
           )?.maxSeq ?? 0,
-        queueIds:
-          queryClient
-            .getQueryData<ThreadQueuedMessageListResponse>(
-              threadQueuedMessagesQueryKey(request.id),
-            )
-            ?.map((row) => row.id) ?? [],
+        queueIds: queryClient
+          .getQueryData<ThreadQueuedMessageListResponse>(
+            threadQueuedMessagesQueryKey(request.id),
+          )
+          ?.map((row) => row.id),
       },
     );
   if (transaction?.kind === "accepted-turn") {
@@ -852,6 +868,7 @@ export async function beginSendQueuedMessageTransaction({
     optimisticCreatedAt: Date.now(),
     optimisticQueueDataUpdateCount: 0,
     optimisticRowId: pending.id,
+    sendGeneration: pendingSendGeneration(queryClient),
     prediction: null,
     previousQueuedMessages,
   };
@@ -861,6 +878,11 @@ export function rollbackRemoveQueuedMessageTransaction({
   request,
   transaction,
 }: RollbackRemoveQueuedMessageTransactionArgs): void {
+  if (
+    transaction?.sendGeneration !== undefined &&
+    transaction.sendGeneration !== pendingSendGeneration(queryClient)
+  )
+    return;
   if (transaction?.optimisticRowId?.startsWith("queue:")) {
     pendingSendOwner(queryClient).restoreQueue(
       request.id,
@@ -885,6 +907,11 @@ export function applyQueuedMessageSendResult({
   result,
   transaction,
 }: ApplyQueuedMessageSendResultArgs): void {
+  if (
+    transaction?.sendGeneration !== undefined &&
+    transaction.sendGeneration !== pendingSendGeneration(queryClient)
+  )
+    return;
   if (transaction?.optimisticRowId)
     pendingSendOwner(queryClient).receipt(
       request.id,
@@ -895,12 +922,11 @@ export function applyQueuedMessageSendResult({
           queryClient.getQueryData<ThreadTimelineResponse>(
             threadTimelineQueryKey(request.id),
           )?.maxSeq ?? 0,
-        queueIds:
-          queryClient
-            .getQueryData<ThreadQueuedMessageListResponse>(
-              threadQueuedMessagesQueryKey(request.id),
-            )
-            ?.map((row) => row.id) ?? [],
+        queueIds: queryClient
+          .getQueryData<ThreadQueuedMessageListResponse>(
+            threadQueuedMessagesQueryKey(request.id),
+          )
+          ?.map((row) => row.id),
       },
     );
   void refreshPendingSends(queryClient, request.id).catch(() => {});

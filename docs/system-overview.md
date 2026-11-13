@@ -526,3 +526,14 @@ after authoritative timeline merging and queue reads; they do not enter those
 caches. Legacy handoff requires a joint post-receipt timeline/queue read. Optional
 session recovery uses exclusive Web Locks with cancellable reload acquisition.
 No database migration, index, daemon protocol or dependency change is introduced.
+
+### Pending-send identity boundary
+
+The production app query client binds `pending-send-identity.ts` before render.
+The built-in account plugin remains the identity authority: its existing status
+RPC initializes journal scope and its account realtime signals clear custody on
+logout, pairing/account changes and credential revocation. Reconnect checks status;
+network loss preserves pending sends. Unknown identity disables journal restoration.
+The pending owner fences old reads and mutation receipts by scope generation and
+keeps account identity in the journal key. See [pending send overlay](pending-send-overlay.md)
+for causal legacy handoff, lock ownership and review dispositions.

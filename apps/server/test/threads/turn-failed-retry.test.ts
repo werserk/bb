@@ -1447,6 +1447,18 @@ it.each([true, false])(
         `identified-retry-${accepted}`,
         id,
       );
+      const secondId = crypto.randomUUID();
+      const event = turnRequests(harness, thread.id)[0]!;
+      harness.db.run(
+        sql`UPDATE events SET data=${JSON.stringify({
+          ...JSON.parse(event.data),
+          clientSubmissions: [
+            { id, inputGroupIndex: 0 },
+            { id: secondId, inputGroupIndex: 1 },
+          ],
+          sourceQueuedMessageIds: ["q-first", "q-second"],
+        })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+      );
       if (accepted)
         seedInputAccepted(harness, {
           environmentId: environment.id,
@@ -1460,7 +1472,11 @@ it.each([true, false])(
       });
       expect(result.delivery).toBe("sent");
       const retry = JSON.parse(turnRequests(harness, thread.id).at(-1)!.data);
-      expect(retry.clientSubmissions).toEqual([{ id, inputGroupIndex: 0 }]);
+      expect(retry.clientSubmissions).toEqual([
+        { id, inputGroupIndex: 0 },
+        { id: secondId, inputGroupIndex: 0 },
+      ]);
+      expect(retry.sourceQueuedMessageIds).toEqual(["q-first", "q-second"]);
       expect(
         retry.input.every(
           (input: { visibility?: string }) => input.visibility === "agent-only",

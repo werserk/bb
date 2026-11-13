@@ -516,3 +516,22 @@ it("offers unresolved custody after a failed legacy handoff read", async () => {
     client.clear();
   }
 });
+
+it("keeps projection identity stable without a loaded queue", async () => {
+  const client = createAppQueryClient();
+  const request = {
+    id: "thread-1",
+    mode: "steer" as const,
+    input: [{ type: "text" as const, text: "owner", mentions: [] }],
+  };
+  await beginSendThreadMessageTransaction({ queryClient: client, request });
+  const rows: import("@bb/server-contract").TimelineRow[] = [];
+  expect(composePendingSends(client, request.id, rows)).toBe(
+    composePendingSends(client, request.id, rows),
+  );
+  expect(request).not.toHaveProperty("clientSubmissionId");
+  expect(
+    pendingSendOwner(client).list()[0]?.legacyQueueBaselineIds,
+  ).toBeUndefined();
+  client.clear();
+});

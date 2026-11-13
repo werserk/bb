@@ -900,3 +900,78 @@ it("only clones the ancestry changed by deferral suppression", () => {
   owner.hide("thread-1", "pending");
   expect(owner.project("thread-1", rows, queue).rows).toBe(rows);
 });
+
+it("retires unresolved custody when the same receipt sequence arrives canonically", () => {
+  const owner = new PendingSendOverlay();
+  const row = userRow({ id: "pending", sequence: 0 });
+  owner.begin({
+    id: "one",
+    threadId: "thread-1",
+    row,
+    submissionIds: ["one"],
+    queueIds: [],
+    queueRows: [],
+    state: "sent",
+    sequence: 12,
+  });
+  owner.readFailed("thread-1");
+  const canonical = {
+    ...userRow({ id: "canonical", sequence: 12 }),
+    clientSubmissionIds: ["one"],
+  };
+  owner.observe("thread-1", [canonical], []);
+  expect(owner.list()).toEqual([]);
+  expect(owner.journalEntries()).toEqual([]);
+});
+
+it("measures observe over 100k rows with lingering custody", () => {
+  const owner = new PendingSendOverlay();
+  owner.begin({
+    id: "one",
+    threadId: "thread-1",
+    row: userRow({ id: "pending", sequence: 0 }),
+    submissionIds: ["one"],
+    queueIds: [],
+    queueRows: [],
+    state: "failed",
+    sequence: 0,
+  });
+  const rows = Array.from({ length: 100_000 }, (_, i) =>
+    userRow({ id: `row-${i}`, sequence: i + 1 }),
+  );
+  const samples = Array.from({ length: 20 }, () => {
+    const start = performance.now();
+    owner.observe("thread-1", rows, []);
+    return performance.now() - start;
+  }).sort((a, b) => a - b);
+  console.log(
+    "observe-100k-ms",
+    JSON.stringify({ p50: samples[10], p95: samples[19], max: samples[19] }),
+  );
+  expect(owner.list()).toHaveLength(1);
+});
+
+it("repairs grouping when a settled queue member disappears with no remaining custody", () => {
+  const owner = new PendingSendOverlay();
+  const first = { ...importQueue("first", []), groupWithNext: true };
+  const second = importQueue("second", ["one"]);
+  owner.begin({
+    id: "one",
+    threadId: "thread-1",
+    row: userRow({ id: "p", sequence: 0 }),
+    submissionIds: ["one"],
+    queueIds: ["second"],
+    queueRows: [second],
+    state: "sent",
+    sequence: 12,
+  });
+  owner.observe(
+    "thread-1",
+    [{ ...userRow({ id: "c", sequence: 12 }), clientSubmissionIds: ["one"] }],
+    [],
+  );
+  expect(owner.list()).toEqual([]);
+  expect(owner.project("thread-1", [], [first, second]).queue).toEqual([
+    { ...first, groupWithNext: false },
+  ]);
+});

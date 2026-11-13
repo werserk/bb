@@ -19,20 +19,29 @@ import {
   type ThreadTimelineResponse,
 } from "@bb/server-contract";
 import type { ThreadQueuedMessage } from "@bb/domain";
-import { COMPACT_THREAD_TIMELINE_SEGMENT_LIMIT } from "./thread-timeline-push-owner";
+import {
+  syncThreadTimelineSubscriptionTag,
+  COMPACT_THREAD_TIMELINE_SEGMENT_LIMIT,
+} from "./thread-timeline-push-owner";
 
 interface OwnerContext {
   owner: PendingSendOverlay;
   journal?: PendingSendJournal;
   scope?: string;
+  identity?: string | null;
   active: Map<string, Promise<void>>;
   followup: Set<string>;
   scheduled: Map<string, ReturnType<typeof setTimeout>>;
   applying: boolean;
   generation: number;
 }
+const emptyRows: import("@bb/server-contract").TimelineRow[] = [];
+const emptyQueue: ThreadQueuedMessage[] = [];
 const owners = new WeakMap<QueryClient, OwnerContext>();
-function context(client: QueryClient): OwnerContext {
+function context(
+  client: QueryClient,
+  initialIdentity?: string | null,
+): OwnerContext {
   let state = owners.get(client);
   if (!state) {
     state = {
@@ -42,6 +51,7 @@ function context(client: QueryClient): OwnerContext {
       scheduled: new Map(),
       applying: false,
       generation: 0,
+      identity: initialIdentity,
     };
     owners.set(client, state);
     const current = state;
@@ -106,7 +116,7 @@ function context(client: QueryClient): OwnerContext {
   return state;
 }
 function ensureJournal(client: QueryClient, state: OwnerContext) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || state.identity === null) return;
   const config = client.getQueryData<SystemConfigResponse>(
     systemConfigQueryKey(),
   );
@@ -115,6 +125,7 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
     window.location.origin,
     config.primaryHostId,
     config.dataDir,
+    state.identity,
   ]);
   if (state.scope === scope) return;
   if (state.scope !== undefined) resetScope(state);
@@ -123,7 +134,7 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
   try {
     storage = window.sessionStorage;
   } catch {}
-  const navigation = performance.getEntriesByType("navigation")[0];
+  const navigation = performance.getEntriesByType?.("navigation")[0];
   state.journal = new PendingSendJournal({
     key: `bb-pending-send/${scope}`,
     reload:
@@ -143,6 +154,7 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
 }
 function resetScope(state: OwnerContext) {
   state.generation++;
+  sends.delete(state.owner);
   state.active.clear();
   state.followup.clear();
   for (const timer of state.scheduled.values()) clearTimeout(timer);
@@ -151,6 +163,19 @@ function resetScope(state: OwnerContext) {
   state.journal = undefined;
   state.scope = undefined;
   state.owner.clear();
+}
+export function setPendingSendIdentity(
+  client: QueryClient,
+  identity: string | null,
+) {
+  const state = context(client, null);
+  if (state.identity === identity) return;
+  clearPendingSendScope(client);
+  state.identity = identity;
+  ensureJournal(client, state);
+}
+export function pendingSendGeneration(client: QueryClient) {
+  return context(client).generation;
 }
 export function clearPendingSendScope(client: QueryClient) {
   const state = owners.get(client);
@@ -323,6 +348,15 @@ export async function refreshPendingSends(
               ? previous
               : observedTimeline,
           );
+        const appliedTimeline = client.getQueryData<ThreadTimelineResponse>(
+          threadTimelineQueryKey(threadId),
+        );
+        if (appliedTimeline && appliedTimeline !== previous)
+          syncThreadTimelineSubscriptionTag(
+            client,
+            threadId,
+            appliedTimeline.tag,
+          );
         const latestQueue = snapshots.at(-1)?.data.rows ?? queue;
         client.setQueryData(
           threadQueuedMessagesQueryKey(threadId),
@@ -381,12 +415,12 @@ export function composePendingSends(
       client.getQueryData<ThreadTimelineResponse>(
         threadTimelineQueryKey(threadId),
       )?.rows ??
-      [],
+      emptyRows,
     queue ??
       client.getQueryData<ThreadQueuedMessage[]>(
         threadQueuedMessagesQueryKey(threadId),
       ) ??
-      [],
+      emptyQueue,
   );
 }
 export function newPendingSend(
@@ -431,8 +465,19 @@ export function dispatchPendingSend(
       return current.result;
     }
   }
+  const state = context(client);
+  const generation = state.generation;
   const result = Promise.resolve()
-    .then(send)
+    .then(() => {
+      if (state.generation !== generation)
+        throw Error("Pending send scope changed");
+      return send();
+    })
+    .then((result) => {
+      if (state.generation !== generation)
+        throw Error("Pending send scope changed");
+      return result;
+    })
     .finally(() => {
       for (const key of keys) active!.delete(key);
     });

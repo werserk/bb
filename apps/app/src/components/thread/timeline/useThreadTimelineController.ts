@@ -314,7 +314,10 @@ export function useThreadTimelineController({
     threadId,
     timelineRows,
   ).rows;
-  const hasPendingContent = pendingRows.length > timelineRows.length;
+  const nativeRowIds = new Set(timelineRows.map((row) => row.id));
+  const hasPendingContent = pendingRows.some(
+    (row) => !nativeRowIds.has(row.id),
+  );
   const timelineLoading =
     !hasPendingContent &&
     (latestTimelineQuery.isLoading ||
@@ -326,9 +329,7 @@ export function useThreadTimelineController({
     hasThreadTimelineUnseenEvents(queryClient, threadId) &&
     timelineRows.length > 0;
   const timelineError =
-    hasPendingContent ||
-    timelineLoading ||
-    timelineQueryState.status !== "unavailable"
+    timelineLoading || timelineQueryState.status !== "unavailable"
       ? null
       : latestTimelineQuery.error;
 

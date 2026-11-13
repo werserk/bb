@@ -1,3 +1,5 @@
+import { prepareSendRequest } from "./mutation-request-types";
+import { pendingSendGeneration } from "../cache-owners/pending-send-owner";
 import { sendMessageResponseSchema } from "@bb/server-contract";
 import {
   dispatchPendingSend,
@@ -176,8 +178,9 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
       lifecycleOperation: "send_message",
       showErrorToast: false,
     },
-    mutationFn: async ({ id, ...request }: SendThreadMessageMutationRequest) =>
-      dispatchPendingSend(
+    mutationFn: async (variables: SendThreadMessageMutationRequest) => {
+      const { id, ...request } = prepareSendRequest(variables);
+      return dispatchPendingSend(
         queryClient,
         id,
         request.clientSubmissionId ?? crypto.randomUUID(),
@@ -195,14 +198,21 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
             throw new Error("Unrecognized submission receipt");
           return receipt;
         },
-      ),
+      );
+    },
     onMutate: async (variables): Promise<SendThreadMessageTransaction> =>
       beginSendThreadMessageTransaction({
         queryClient,
         request: variables,
       }),
     onError: (_error, variables, context) => {
-      if (!context) return;
+      if (
+        !context ||
+        (context.kind === "accepted-turn" &&
+          context.generation !== pendingSendGeneration(queryClient))
+      )
+        return;
+      variables = prepareSendRequest(variables);
       if (variables.clientSubmissionId && _error instanceof BbHttpError) {
         if (_error.code === "submission_already_admitted") {
           const parsed = z

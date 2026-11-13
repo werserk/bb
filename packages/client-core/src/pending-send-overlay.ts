@@ -40,6 +40,10 @@ export interface PendingSendProjection {
 }
 
 export class PendingSendOverlay {
+  private observedRows = new WeakMap<
+    TimelineRow[],
+    Map<string, TimelineUserConversationRow[]>
+  >();
   private projections = new WeakMap<
     TimelineRow[],
     WeakMap<
@@ -64,6 +68,7 @@ export class PendingSendOverlay {
     this.changed();
   }
   clear() {
+    this.observedRows = new WeakMap();
     this.entries.clear();
     this.settledQueues.clear();
     this.freshness.clear();
@@ -208,7 +213,7 @@ export class PendingSendOverlay {
     threadId: string,
     id: string,
     receipt: SendMessageResponse,
-    legacyBaseline?: { maxSeq: number; queueIds: string[] },
+    legacyBaseline?: { maxSeq: number; queueIds?: string[] },
   ) {
     const entry = this.entries.get(`${threadId}/${id}`);
     if (!entry) return;
@@ -277,31 +282,42 @@ export class PendingSendOverlay {
     options: { allowHandoff?: boolean } = {},
   ) {
     let changed = false;
-    const users: TimelineUserConversationRow[] = [];
-    const visit = (items: TimelineRow[]) => {
-      for (const row of items) {
-        if (
-          row.kind === "conversation" &&
-          row.role === "user" &&
-          row.threadId === threadId
-        )
-          users.push(row);
-        if (row.kind === "turn" && row.children) visit(row.children);
-      }
-    };
-    visit(rows);
-    for (const entry of this.list(threadId)) {
-      const matching = users.filter(
+    if (this.list(threadId).length === 0) return;
+    let index = this.observedRows.get(rows);
+    if (!index) {
+      index = new Map();
+      const visit = (items: TimelineRow[]) => {
+        for (const row of items) {
+          if (row.kind === "conversation" && row.role === "user") {
+            for (const key of [
+              ...(row.clientSubmissionIds ?? []).map((id) => `s/${id}`),
+              ...(row.sourceQueuedMessageIds ?? []).map((id) => `q/${id}`),
+            ]) {
+              const matches = index!.get(key) ?? [];
+              matches.push(row);
+              index!.set(key, matches);
+            }
+          }
+          if (row.kind === "turn" && row.children) visit(row.children);
+        }
+      };
+      visit(rows);
+      this.observedRows.set(rows, index);
+    }
+    const matchingRows = (entry: PendingSend) =>
+      [
+        ...new Set([
+          ...entry.submissionIds.flatMap((id) => index.get(`s/${id}`) ?? []),
+          ...entry.queueIds.flatMap((id) => index.get(`q/${id}`) ?? []),
+        ]),
+      ].filter(
         (row) =>
+          row.threadId === threadId &&
           (!entry.deferredRequestId ||
-            row.submissionRequestId !== entry.deferredRequestId) &&
-          (entry.submissionIds.some((id) =>
-            row.clientSubmissionIds?.includes(id),
-          ) ||
-            entry.queueIds.some((id) =>
-              row.sourceQueuedMessageIds?.includes(id),
-            )),
+            row.submissionRequestId !== entry.deferredRequestId),
       );
+    for (const entry of this.list(threadId)) {
+      const matching = matchingRows(entry);
       const deferred = queue.find((row) => {
         if (row.payload.kind !== "deferredSteer") return false;
         const source = row.payload.sourceRequestId;
@@ -360,7 +376,7 @@ export class PendingSendOverlay {
     for (const entry of options.allowHandoff === false
       ? []
       : this.list(threadId)) {
-      const canonical = users.filter(
+      const canonical = matchingRows(entry).filter(
         (row) =>
           (!entry.deferredRequestId ||
             row.submissionRequestId !== entry.deferredRequestId) &&
@@ -374,7 +390,10 @@ export class PendingSendOverlay {
           entry.queueIds.every((id) =>
             canonical.some((row) => row.sourceQueuedMessageIds?.includes(id)),
           );
-      if (represented && entry.state === "sent") {
+      if (
+        represented &&
+        (entry.state === "sent" || entry.state === "unresolved")
+      ) {
         this.settle(entry);
         changed = true;
       }
@@ -517,7 +536,11 @@ export class PendingSendOverlay {
     };
     if (
       entries.length === 0 &&
-      queue.every((row) => row.payload.kind !== "deferredSteer")
+      queue.every(
+        (row) =>
+          row.payload.kind !== "deferredSteer" &&
+          !this.settledQueues.has(`${threadId}/${row.id}`),
+      )
     ) {
       const visibleQueue = queue.filter(
         (row) => !this.settledQueues.has(`${threadId}/${row.id}`),
