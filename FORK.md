@@ -76,6 +76,7 @@ Sidebar and page-chat scrollers reserve
 scrollbars there remain 8px. Firefox uses its native thin scrollbar metric.
 The two right-panel seam targets and the sidebar target use 9px for fine pointers
 around the 1px seam, preserving 32px coarse targets. Hover feedback waits 200ms;
-only pointer-down starts resizing. Right-panel separators remain keyboard-focusable.
+only pointer-down starts resizing. Right-panel separators retain the upstream
+pointer-only focus policy and remain outside the tab order.
 Plugin-owned scrollers need their own external gutter; core does not pad their
 inner content or change Markdown table breakout policy.

@@ -1154,7 +1154,7 @@ function SecondaryPanelResizeHandle({
       disabled={!isOpen || isConversationCollapsed}
       data-panel-resize-snap-handle=""
       hitAreaMargins={{ coarse: 0, fine: 0 }}
-      tabIndex={isOpen && !isConversationCollapsed ? 0 : -1}
+      tabIndex={-1}
       className={cn(
         "group relative shrink-0 overflow-visible transition-[width,opacity,background-color]",
         PANEL_RESIZE_HANDLE_LAYER_CLASS,
@@ -1163,7 +1163,7 @@ function SecondaryPanelResizeHandle({
         matchesSplitDividers
           ? [
               dividerClass,
-              "hover:bg-ring/40 hover:[transition-delay:0ms,0ms,200ms] focus-visible:bg-ring/40",
+              "hover:bg-ring/40 hover:[transition-delay:0ms,0ms,200ms]",
               isOpen && !isConversationCollapsed
                 ? "w-px opacity-100"
                 : "pointer-events-none w-0 opacity-0",

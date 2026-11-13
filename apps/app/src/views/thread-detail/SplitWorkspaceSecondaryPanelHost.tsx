@@ -285,9 +285,9 @@ export function SplitWorkspaceSecondaryPanelHost({
                   disabled={!isOpen}
                   data-panel-resize-snap-handle=""
                   hitAreaMargins={{ coarse: 0, fine: 0 }}
-                  tabIndex={isOpen ? 0 : -1}
+                  tabIndex={-1}
                   className={cn(
-                    "relative shrink-0 overflow-visible transition-[width,opacity,background-color] hover:bg-ring/40 hover:[transition-delay:0ms,0ms,200ms] focus-visible:bg-ring/40 data-[dragging=true]:bg-ring/40 data-[dragging=true]:!delay-0",
+                    "relative shrink-0 overflow-visible transition-[width,opacity,background-color] hover:bg-ring/40 hover:[transition-delay:0ms,0ms,200ms] data-[dragging=true]:bg-ring/40 data-[dragging=true]:!delay-0",
                     isSidebarFramed ? "bg-border" : "bg-border-seam",
                     PANEL_RESIZE_HANDLE_LAYER_CLASS,
                     PANEL_COLLAPSE_TRANSITION_CLASS,
