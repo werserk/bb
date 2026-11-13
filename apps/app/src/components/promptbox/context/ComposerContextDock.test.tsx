@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createContext, useContext, useState } from "react";
 import {
   ComposerContextProvider,
   ComposerContextSources,
   ComposerContextItem,
+  useComposerContextStore,
+  type ComposerContextStore,
 } from "./composer-context";
 import { ComposerContextDock } from "./ComposerContextDock";
 
@@ -145,4 +147,112 @@ it("leaves Escape in the editor alone when the disclosure is closed", () => {
   draft.focus();
   fireEvent.keyDown(draft, { key: "Escape" });
   expect(document.activeElement).toBe(draft);
+});
+
+it("keeps plan and native questions in the overview even when other sources mount first", () => {
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <ComposerContextItem
+          id="children"
+          label="Child threads"
+          icon="ChildThread"
+          group="work"
+        >
+          <p>Children detail</p>
+        </ComposerContextItem>
+        <ComposerContextItem
+          id="machine"
+          label="Machine status"
+          icon="Info"
+          group="attention"
+          tone="error"
+        >
+          <p>Machine detail</p>
+        </ComposerContextItem>
+        <ComposerContextItem
+          id="plan"
+          label="Plan"
+          icon="ListTodo"
+          group="work"
+          overview
+        >
+          <p>Preferred plan</p>
+        </ComposerContextItem>
+        <ComposerContextItem
+          id="questions"
+          label="Needs you"
+          icon="MessageQuestion"
+          group="attention"
+          tone="attention"
+          overview
+        >
+          <p>Native question links</p>
+        </ComposerContextItem>
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Toggle thread context" }),
+  );
+  expect(screen.getByText("Preferred plan").closest("section")?.hidden).toBe(
+    false,
+  );
+  expect(
+    screen.getByText("Native question links").closest("section")?.hidden,
+  ).toBe(false);
+  expect(screen.getByText("Children detail").closest("section")?.hidden).toBe(
+    true,
+  );
+  expect(screen.getByText("Machine detail").closest("section")?.hidden).toBe(
+    true,
+  );
+  const footer = screen.getByRole("contentinfo", {
+    name: "All thread context sections",
+  });
+  expect(footer.textContent).toContain("Machine status");
+  expect(footer.textContent).toContain("Child threads");
+});
+
+it("updates native detail content without republishing unchanged summary metadata", () => {
+  const observed: { store: ComposerContextStore | null } = { store: null };
+  function Source({ tick, summary }: { tick: number; summary: number }) {
+    observed.store = useComposerContextStore();
+    return (
+      <ComposerContextSources>
+        <ComposerContextItem
+          id="questions"
+          label="Needs you"
+          icon="MessageQuestion"
+          group="attention"
+          summary={summary}
+        >
+          <p>Countdown {tick}</p>
+        </ComposerContextItem>
+      </ComposerContextSources>
+    );
+  }
+  const fixture = (tick: number, summary: number) => (
+    <ComposerContextProvider>
+      <Source tick={tick} summary={summary} />
+      <ComposerContextDock>
+        <textarea />
+      </ComposerContextDock>
+    </ComposerContextProvider>
+  );
+  const { rerender } = render(fixture(60, 2));
+  if (!observed.store) throw new Error("Missing store");
+  const listener = vi.fn();
+  const unsubscribe = observed.store.subscribe(listener);
+  rerender(fixture(59, 2));
+  expect(listener).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Needs you: 2" }));
+  expect(screen.getByText("Countdown 59")).toBeTruthy();
+  rerender(fixture(58, 3));
+  expect(listener).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Needs you: 3" })).toBeTruthy();
+  unsubscribe();
 });

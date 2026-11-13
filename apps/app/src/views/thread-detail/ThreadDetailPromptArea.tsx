@@ -2352,6 +2352,7 @@ export function ThreadDetailPromptArea({
   const bottomContent = (
     <FollowUpPromptBox
       id={composerId}
+      contextHost
       attachments={bottomAttachmentsConfig}
       stack={pendingInteractionNode ? pendingInteractionStack : promptStack}
       pendingInteraction={pendingInteractionNode}

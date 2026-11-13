@@ -78,8 +78,19 @@ export function ComposerContextDock({
   const panel = useRef<HTMLDivElement>(null);
   const disclosure = useRef<HTMLButtonElement>(null);
   const active = entries.find((entry) => entry.id === selected);
-  const main = entries.find((entry) => entry.group === "work");
-  const attention = entries.find((entry) => entry.group === "attention");
+  const prioritized = [...entries].sort(
+    (a, b) =>
+      Number(Boolean(b.overview)) - Number(Boolean(a.overview)) ||
+      Number(b.tone === "error") - Number(a.tone === "error") ||
+      Number(b.tone === "attention") - Number(a.tone === "attention"),
+  );
+  const main = prioritized.find((entry) => entry.group === "work");
+  const attention = prioritized.find((entry) => entry.group === "attention");
+  const bodyEntries = [
+    ...(main ? [main] : []),
+    ...(attention ? [attention] : []),
+    ...entries.filter((entry) => entry !== main && entry !== attention),
+  ];
   const overview = active === undefined;
   const open = (id: string | null, button: HTMLButtonElement) => {
     trigger.current = button;
@@ -203,7 +214,7 @@ export function ComposerContextDock({
                 overview && "composer-context-overview",
               )}
             >
-              {entries.map((entry) => (
+              {bodyEntries.map((entry) => (
                 <ContextBody
                   key={entry.id}
                   entry={entry}

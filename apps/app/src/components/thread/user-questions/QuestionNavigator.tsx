@@ -122,6 +122,7 @@ export function QuestionNavigator({
   return (
     <ComposerContextItem
       id="questions"
+      overview
       label={
         expired || query.isError
           ? "Questions unavailable"

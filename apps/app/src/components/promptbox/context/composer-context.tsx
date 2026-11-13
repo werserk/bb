@@ -20,6 +20,7 @@ export interface ComposerContextFact {
   group: "work" | "attention" | "queue" | "context";
   tone?: "attention" | "error";
   onReveal?: () => void;
+  overview?: boolean;
 }
 export interface ComposerContextEntry extends ComposerContextFact {
   element: HTMLDivElement;
@@ -112,7 +113,17 @@ export function ComposerContextItem({
 }) {
   const store = useComposerContextSource();
   const instanceId = useId();
-  const id = `${fact.id}/${instanceId}`;
+  const {
+    id: sourceId,
+    label,
+    summary,
+    icon,
+    group,
+    tone,
+    onReveal,
+    overview,
+  } = fact;
+  const id = `${sourceId}/${instanceId}`;
   const [element] = useState(() =>
     typeof document === "undefined" ? null : document.createElement("div"),
   );
@@ -121,7 +132,19 @@ export function ComposerContextItem({
     const content = contentRef?.current;
     let present = content ? content.hasChildNodes() : contentRef === undefined;
     const update = () => {
-      if (present) store.set({ ...fact, id, sourceId: fact.id, element });
+      if (present)
+        store.set({
+          id,
+          sourceId,
+          element,
+          label,
+          summary,
+          icon,
+          group,
+          tone,
+          onReveal,
+          overview,
+        });
       else store.remove(id);
     };
     update();
@@ -134,7 +157,20 @@ export function ComposerContextItem({
     });
     observer.observe(content, { childList: true });
     return () => observer.disconnect();
-  });
+  }, [
+    store,
+    element,
+    contentRef,
+    id,
+    sourceId,
+    label,
+    summary,
+    icon,
+    group,
+    tone,
+    onReveal,
+    overview,
+  ]);
   useLayoutEffect(
     () => () => {
       store?.remove(id);

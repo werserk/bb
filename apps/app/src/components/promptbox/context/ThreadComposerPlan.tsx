@@ -188,6 +188,7 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
   return (
     <ComposerContextItem
       id="plan"
+      overview
       label={
         result.status === "error"
           ? "Plan unavailable"

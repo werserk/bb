@@ -188,6 +188,7 @@ export interface FollowUpPromptBoxProps {
   isPrimaryComposer?: boolean;
   showScrollToBottomButton?: boolean;
   pendingInteraction?: ReactNode;
+  contextHost?: boolean;
 }
 
 type FollowUpPromptBoxWithComposerProps = Omit<
@@ -201,11 +202,13 @@ function FollowUpPromptBoxStackOnly({
   stack,
   pluginComposerHost,
   pluginComposerScope,
+  contextHost = false,
 }: Pick<
   FollowUpPromptBoxProps,
-  "stack" | "pluginComposerHost" | "pluginComposerScope"
+  "stack" | "pluginComposerHost" | "pluginComposerScope" | "contextHost"
 >) {
-  const contextStore = useComposerContextStore();
+  const threadContextStore = useComposerContextStore();
+  const contextStore = contextHost ? threadContextStore : null;
   const composerScope =
     pluginComposerScope ?? pluginComposerHost?.scope ?? null;
   const hostDraft = usePluginComposerHostDraft(pluginComposerHost ?? null);
@@ -261,6 +264,7 @@ function FollowUpPromptBoxWithComposer({
   isPrimaryComposer = true,
   showScrollToBottomButton = true,
   pendingInteraction = null,
+  contextHost = false,
 }: FollowUpPromptBoxWithComposerProps) {
   const submitMode = composer.submitMode;
   const hasPendingInteraction =
@@ -312,7 +316,8 @@ function FollowUpPromptBoxWithComposer({
       : (pluginComposerHost ?? undefined),
     composerScope ? composerScopeIdentity(composerScope) : null,
   );
-  const contextStore = useComposerContextStore();
+  const threadContextStore = useComposerContextStore();
+  const contextStore = contextHost ? threadContextStore : null;
   const isCompactViewport = useIsCompactViewport();
   const isPointerCoarse = usePointerCoarse();
   const composerInteractionRef = useRef<HTMLDivElement>(null);
@@ -863,6 +868,7 @@ function FollowUpPromptBoxWithComposer({
             composerScope !== null && !suppressPluginComposerCustomizations
           }
           isPrimaryComposer={isPrimaryComposer}
+          contextHost={contextHost}
           pendingInteraction={pendingInteraction}
           showScrollToBottomButton={showScrollToBottomButton}
           stack={stack}
@@ -884,6 +890,7 @@ interface DefaultFollowUpComposerProps {
   stack: ReactNode | null;
   stackRef: Ref<HTMLDivElement>;
   onContextBlur: (event: ReactFocusEvent) => void;
+  contextHost: boolean;
 }
 
 function DefaultFollowUpComposer({
@@ -896,8 +903,10 @@ function DefaultFollowUpComposer({
   stack,
   stackRef,
   onContextBlur,
+  contextHost,
 }: DefaultFollowUpComposerProps) {
-  const contextStore = useComposerContextStore();
+  const threadContextStore = useComposerContextStore();
+  const contextStore = contextHost ? threadContextStore : null;
   if (contextStore)
     return (
       <>
@@ -965,6 +974,7 @@ export const FollowUpPromptBox = memo(function FollowUpPromptBox(
         stack={props.stack}
         pluginComposerHost={props.pluginComposerHost}
         pluginComposerScope={props.pluginComposerScope}
+        contextHost={props.contextHost}
       />
     );
   }

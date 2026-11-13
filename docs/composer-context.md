@@ -7,7 +7,9 @@ height. A full thread and an embedded panel use the same composition.
 `ThreadScreen` owns one `ComposerContextProvider` per thread. Only the footer plan,
 question navigator and `FollowUpPromptBox` banner sources enter
 `ComposerContextSources`. Transcript content and active native approval/question
-editors are outside the passive collection scope.
+editors are outside the passive collection scope. Only the footer composer opts
+into `contextHost`; sent-message and queued-message editors cannot attach a
+second dock or replace its focus/navigation handlers.
 
 `ComposerContextItem` registers typed presentation metadata and renders its native
 content into a stable portal target. `ComposerContextDock` places those targets in
@@ -19,7 +21,10 @@ cannot become a second host for the thread's context. Unmounting a source remove
 its fact, and changing threads replaces the store. No context facts are persisted.
 
 Native stack cards pass explicit category/icon metadata through `PromptStackCard`;
-uncategorized extension content has an accessible context fallback. No labels or
+uncategorized extension content has an accessible context fallback. The plan and
+native question navigator explicitly opt into the overview; mount order does not
+let child threads or machine status replace them. Native detail rerenders publish
+summary metadata only when that metadata changes. No labels or
 rendered text are parsed to infer product state. The extension host observes its
 own content root for child presence, matching the native empty-card behavior:
 a plugin returning null, or a dialog that only portals elsewhere, creates no badge. Bundled Git/PR context segments and

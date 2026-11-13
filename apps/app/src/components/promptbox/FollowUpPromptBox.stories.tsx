@@ -555,6 +555,7 @@ const queuedMessagesWithReasons: readonly ThreadQueuedMessage[] = [
 type RowPermission = Parameters<typeof FollowUpPromptBox>[0]["permission"];
 
 interface RowConfig {
+  contextHost?: boolean;
   initialMessage?: string;
   initialMentions?: PromptTextMention[];
   submitMode: FollowUpSubmitMode;
@@ -613,6 +614,7 @@ function Row({
   permission = basePermission,
   activePromptMode = null,
   readOnly = false,
+  contextHost = false,
 }: RowConfig) {
   const [message, setMessage] = useState(initialMessage);
   const [queueExpanded, setQueueExpanded] = useState(true);
@@ -785,6 +787,7 @@ function Row({
   return (
     <PromptStage>
       <FollowUpPromptBox
+        contextHost={contextHost}
         attachments={attachmentsBase}
         stack={resolvedStack}
         composer={
@@ -1134,6 +1137,7 @@ function ContextFixtureScene({ after }: { after: boolean }) {
         <ComposerContextSources>
           <ComposerContextItem
             id="plan"
+            overview
             label="Plan"
             summary="2/6"
             group="work"
@@ -1147,6 +1151,7 @@ function ContextFixtureScene({ after }: { after: boolean }) {
           </ComposerContextItem>
           <ComposerContextItem
             id="questions"
+            overview
             label="Questions unavailable"
             group="attention"
             tone="error"
@@ -1185,6 +1190,7 @@ function ContextFixtureScene({ after }: { after: boolean }) {
         </>
       )}
       <Row
+        contextHost={after}
         submitMode={{ kind: "ready" }}
         initialMessage=""
         stack={

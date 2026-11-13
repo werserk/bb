@@ -8,12 +8,14 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { Profiler, startTransition, type ReactNode } from "react";
+import { Profiler, startTransition, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComposerContextProvider,
   ComposerContextSources,
   ComposerContextItem,
+  useComposerContextStore,
 } from "./context/composer-context";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import {
@@ -1628,6 +1630,7 @@ it("retains the narrow editor while focus moves through the attached context and
           </ComposerContextItem>
         </ComposerContextSources>
         <FollowUpPromptBox
+          contextHost
           {...createFollowUpPromptBoxProps({ kind: "ready" })}
         />
       </ComposerContextProvider>
@@ -1677,6 +1680,7 @@ it("measures a context summary arriving after the footer mounts before the draft
           </ComposerContextItem>
         </ComposerContextSources>
         <FollowUpPromptBox
+          contextHost
           {...createFollowUpPromptBoxProps({ kind: "ready" })}
           stack={<></>}
         />
@@ -1689,5 +1693,75 @@ it("measures a context summary arriving after the footer mounts before the draft
     );
   } finally {
     height.mockRestore();
+  }
+});
+
+it("keeps the footer dock connected after a sent-message editor opens and unmounts", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  function Controls() {
+    const store = useComposerContextStore();
+    const [editing, setEditing] = useState(false);
+    return (
+      <>
+        <button onClick={() => setEditing(!editing)}>Toggle sent editor</button>
+        <button onClick={() => store?.reveal("plan")}>
+          Reveal native plan
+        </button>
+        <button onClick={() => store?.dismiss()}>
+          Navigate to native question
+        </button>
+        {editing &&
+          createPortal(
+            <FollowUpPromptBox
+              {...createFollowUpPromptBoxProps({ kind: "ready" })}
+              isPrimaryComposer={false}
+              showScrollToBottomButton={false}
+            />,
+            host,
+          )}
+      </>
+    );
+  }
+  try {
+    render(
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            icon="ListTodo"
+            group="work"
+          >
+            <p>Native plan details</p>
+          </ComposerContextItem>
+        </ComposerContextSources>
+        <FollowUpPromptBox
+          {...createFollowUpPromptBoxProps({ kind: "ready" })}
+          contextHost
+        />
+        <Controls />
+      </ComposerContextProvider>,
+    );
+    const draft = screen.getByLabelText<HTMLInputElement>("Follow-up prompt");
+    draft.value = "Keep the footer draft";
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sent editor" }));
+    expect(
+      screen.getAllByRole("toolbar", { name: "Thread context summary" }),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sent editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal native plan" }));
+    expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Navigate to native question" }),
+    );
+    expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Reveal native plan" }));
+    expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+    expect(screen.getByLabelText("Follow-up prompt")).toBe(draft);
+    expect(draft.value).toBe("Keep the footer draft");
+  } finally {
+    cleanup();
+    host.remove();
   }
 });
