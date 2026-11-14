@@ -62,16 +62,19 @@ export function buildMarkdownHostFileImageRouting({
   path,
   rootPath,
   hostId,
+  linkRouting,
 }: {
   path: string;
   rootPath: string;
   hostId: string | null;
+  linkRouting?: MarkdownLinkRouting;
 }): MarkdownLinkRouting | undefined {
   if (hostId === null) return undefined;
   return buildMarkdownFileImageRouting({
     path,
     rootPath,
     threadId: null,
+    linkRouting,
     resolveRelativeSrc: (_relativePath, absolutePath) =>
       buildHostFileContentUrl(hostId, absolutePath),
   });

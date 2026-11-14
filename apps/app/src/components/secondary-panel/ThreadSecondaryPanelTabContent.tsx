@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/markdown-file-image-routing";
 import { getAbsoluteDirname } from "@bb/shared-ui/lib/absolute-file-path";
 
-
 interface WorkspaceFilePreviewTabContentProps {
   activePath: string;
   isPanelOpen: boolean;
@@ -80,6 +79,7 @@ interface HostScopedFilePreviewTabContentProps {
   hostId: string;
   isPanelOpen: boolean;
   lineRange: FilePreviewLineRange | null;
+  markdownLinkRouting?: MarkdownLinkRouting;
   onOpenInEditor?: (path: string) => void;
 }
 
@@ -290,6 +290,7 @@ export function HostScopedFilePreviewTabContent({
   hostId,
   isPanelOpen,
   lineRange,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   onOpenInEditor,
 }: HostScopedFilePreviewTabContentProps) {
   const hostFilePreviewQuery = useHostFilePreview(hostId, activePath, {
@@ -300,8 +301,9 @@ export function HostScopedFilePreviewTabContent({
       path: activePath,
       rootPath: getAbsoluteDirname({ path: activePath }),
       hostId,
+      linkRouting: callerMarkdownLinkRouting,
     });
-  }, [activePath, hostId]);
+  }, [activePath, callerMarkdownLinkRouting, hostId]);
   return (
     <SecondaryPanelFilePreview
       {...filePreviewQueryProps(hostFilePreviewQuery)}

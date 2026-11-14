@@ -24,9 +24,12 @@ import {
   type LocalFileViewerTarget,
 } from "@/lib/local-file-viewer-target";
 import { getThreadRoutePath } from "@/lib/route-paths";
-import { openArtifactPopup } from "@/lib/artifact-activation";
 import type { MarkdownLinkRouting } from "@/components/ui/markdown-link-routing.js";
 import { getAbsoluteDirname } from "@bb/shared-ui/lib/absolute-file-path";
+import {
+  buildNativeMarkdownLinkRouting,
+  NATIVE_DOCUMENT_ROOT,
+} from "./native-markdown-link-routing";
 import { isPdfPath, PdfViewerFrame } from "./PdfViewerFrame";
 
 const WORKING_TREE_SOURCE = { kind: "working-tree" } as const;
@@ -48,58 +51,41 @@ function getDownloadUrl(target: LocalFileViewerTarget): string {
       );
 }
 
-// Virtual root of a native namespace: a relative Markdown link resolves from the
-// document's own directory and can never leave the namespace (thread storage / working tree).
-const NATIVE_DOCUMENT_ROOT = "/__bb_markdown_file_root__";
-
-type NativeNamespaceTarget = Exclude<LocalFileViewerTarget, { kind: "host" }>;
-
-// Native (non-scoped) Markdown body: a relative link replaces this one popup with the
-// linked file of the same namespace, so the owning thread, chat and context follow it.
-// Modified clicks, line ranges, editor targets and non-artifact files keep the anchor.
 function useNativeMarkdownLinkRouting(
-  target: NativeNamespaceTarget,
+  target: LocalFileViewerTarget,
   context: string | undefined,
 ): MarkdownLinkRouting {
-  const kind = target.kind;
+  const { kind, relativePath } = target;
   const namespaceId =
-    target.kind === "thread-storage" ? target.threadId : target.environmentId;
-  const relativePath = target.relativePath;
+    target.kind === "thread-storage"
+      ? target.threadId
+      : target.kind === "workspace"
+        ? target.environmentId
+        : target.hostId;
   return useMemo(() => {
-    const documentPath = `${NATIVE_DOCUMENT_ROOT}/${relativePath.replace(/^\/+/u, "")}`;
-    return {
-      localFile: {
-        absoluteLinks: { kind: "contained", rootPath: NATIVE_DOCUMENT_ROOT },
-        relativeLinks: {
-          baseDir: getAbsoluteDirname({ path: documentPath }),
-          rootPath: NATIVE_DOCUMENT_ROOT,
-        },
-        onOpenLink: (link) => {
-          if (
-            link.ordinaryActivation !== true ||
-            link.openTargetId !== null ||
-            link.lineRange !== null ||
-            !link.path.startsWith(`${NATIVE_DOCUMENT_ROOT}/`)
-          )
-            return false;
-          const path = link.path.slice(NATIVE_DOCUMENT_ROOT.length + 1);
-          return openArtifactPopup(
-            {
-              target:
-                kind === "thread-storage"
-                  ? { kind, threadId: namespaceId, path }
-                  : { kind: "workspace", environmentId: namespaceId, path },
-              location: null,
-            },
-            context,
-          );
-        },
+    if (kind === "host") {
+      return buildNativeMarkdownLinkRouting({
+        documentPath: relativePath,
+        rootPath: getAbsoluteDirname({ path: relativePath }),
+        toTarget: (path) => ({ kind, hostId: namespaceId, path }),
+        context,
+      });
+    }
+    return buildNativeMarkdownLinkRouting({
+      documentPath: `${NATIVE_DOCUMENT_ROOT}/${relativePath.replace(/^\/+/u, "")}`,
+      rootPath: NATIVE_DOCUMENT_ROOT,
+      toTarget: (path) => {
+        const rootRelative = path.slice(NATIVE_DOCUMENT_ROOT.length + 1);
+        return kind === "thread-storage"
+          ? { kind, threadId: namespaceId, path: rootRelative }
+          : { kind, environmentId: namespaceId, path: rootRelative };
       },
-    };
+      context,
+    });
   }, [context, kind, namespaceId, relativePath]);
 }
 
-function NativeFilePreviewBody({ target }: { target: NativeNamespaceTarget }) {
+function NativeFilePreviewBody({ target }: { target: LocalFileViewerTarget }) {
   const thread = useThread(
     target.kind === "thread-storage" ? target.threadId : "",
   );
@@ -107,6 +93,17 @@ function NativeFilePreviewBody({ target }: { target: NativeNamespaceTarget }) {
     target,
     thread.data?.title ?? undefined,
   );
+  if (target.kind === "host") {
+    return (
+      <HostScopedFilePreviewTabContent
+        activePath={target.path}
+        hostId={target.hostId}
+        isPanelOpen
+        lineRange={target.lineRange}
+        markdownLinkRouting={routing}
+      />
+    );
+  }
   if (target.kind === "thread-storage") {
     return (
       <ThreadStorageFilePreviewTabContent
@@ -142,15 +139,6 @@ function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
       <PdfViewerFrame
         title={getFileName(target.path)}
         url={getDownloadUrl(target)}
-      />
-    );
-  if (target.kind === "host")
-    return (
-      <HostScopedFilePreviewTabContent
-        activePath={target.path}
-        hostId={target.hostId}
-        isPanelOpen
-        lineRange={target.lineRange}
       />
     );
   if (isPdfPath(target.relativePath)) {

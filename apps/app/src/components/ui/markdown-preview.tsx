@@ -363,6 +363,7 @@ function areMarkdownLocalFileLinkRoutingsEqual({
   if (previous === undefined || next === undefined) return false;
   return (
     previous.onOpenLink === next.onOpenLink &&
+    previous.preserveAnchorHref === next.preserveAnchorHref &&
     areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
       next: next.absoluteLinks,
       previous: previous.absoluteLinks,
@@ -549,7 +550,11 @@ function buildLocalAwareUrlTransform({
   localImageRouting,
 }: BuildLocalAwareUrlTransformArgs): UrlTransform {
   return (value, key, node) => {
-    if (key === "href" && localFileRouting !== undefined) {
+    if (
+      key === "href" &&
+      localFileRouting !== undefined &&
+      localFileRouting.preserveAnchorHref !== true
+    ) {
       const localFile = resolveMarkdownLocalFileTarget(
         value,
         localFileRouting.absoluteLinks,
@@ -597,6 +602,7 @@ function resolveInlineCodeFileHref({
 }): string | null {
   if (
     localFileRouting === undefined ||
+    localFileRouting.preserveAnchorHref === true ||
     codeText.length === 0 ||
     /\s/u.test(codeText)
   ) {
@@ -699,14 +705,19 @@ function MarkdownAnchor({
           localFileRouting.relativeLinks,
         )?.link ?? null)
       : null;
-  const anchorHref = buildLocalFileAnchorHref(localFileLink, rewrittenHref);
+  const preserveAnchorHref = localFileRouting?.preserveAnchorHref === true;
+  const anchorHref = preserveAnchorHref
+    ? rewrittenHref
+    : buildLocalFileAnchorHref(localFileLink, rewrittenHref);
   const getContextMenuItems = useContext(MarkdownLocalFileContextMenuContext);
   const openTargets = useContext(MarkdownLocalFileOpenTargetsContext);
   if (!anchorHref) {
     return <span>{children}</span>;
   }
   const contextMenuItems =
-    localFileLink !== null && getContextMenuItems !== null
+    localFileLink !== null &&
+    !preserveAnchorHref &&
+    getContextMenuItems !== null
       ? getContextMenuItems(localFileLink)
       : null;
   const openTarget =
@@ -739,7 +750,10 @@ function MarkdownAnchor({
     if (
       linkRouting?.onOpenLink &&
       rewrittenHref &&
-      linkRouting.onOpenLink({ href: rewrittenHref })
+      linkRouting.onOpenLink({
+        href: rewrittenHref,
+        ordinaryActivation: isOrdinaryFileActivation(event),
+      })
     ) {
       event.preventDefault();
       return;
@@ -765,7 +779,7 @@ function MarkdownAnchor({
           handleAnchorClick(event);
       }}
     >
-      {localFileLink
+      {localFileLink && !preserveAnchorHref
         ? appendMarkdownLinkIcon(
             children,
             openTarget === undefined ? (

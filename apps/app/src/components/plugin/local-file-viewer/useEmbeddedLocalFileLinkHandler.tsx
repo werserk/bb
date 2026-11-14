@@ -10,7 +10,7 @@ import { resolveEmbeddedLocalFileTarget } from "@/lib/embedded-local-file-target
 import { resolveHomeThread } from "@/lib/local-file-viewer-target";
 import { openCoreModal } from "@/lib/modal-host";
 
-function showUnavailable(path: string): void {
+export function showUnavailable(path: string): void {
   appToast.error("Can't open this file here", {
     description: path,
     action: {
