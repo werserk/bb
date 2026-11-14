@@ -124,22 +124,22 @@ describe("raw send intake custody", () => {
         let surviving = true;
         const result = Promise.allSettled([service.wait(row.id)]).then(([value]) => { outcome = value; });
         const live = Promise.allSettled([service.wait(survivor.id)]).then(() => { surviving = false; });
-        const remove = (tx: typeof h.db) => {
-          if (signal === "project") expect(deleteProject(tx, h.deps.hub, project.id)).toBe(true);
+        const remove = () => {
+          if (signal === "project") expect(deleteProject(h.db, h.deps.hub, project.id)).toBe(true);
           else {
-            tx.delete(projects).where(eq(projects.id, project.id)).run();
-            updateHost(tx, h.deps.hub, host.id, { destroyedAt: Date.now() });
+            h.db.delete(projects).where(eq(projects.id, project.id)).run();
+            updateHost(h.db, h.deps.hub, host.id, { destroyedAt: Date.now() });
           }
         };
-        expect(() => h.db.transaction(tx => {
-          remove(tx);
+        expect(() => h.db.transaction(() => {
+          remove();
           throw new Error("rollback cascade");
         })).toThrow("rollback cascade");
         await Promise.resolve();
         expect(outcome).toBeUndefined();
         expect(getThreadSendIntake(h.db, row.id)?.state).toBe("pending");
-        h.db.transaction(tx => {
-          remove(tx);
+        h.db.transaction(() => {
+          remove();
           expect(outcome).toBeUndefined();
         });
         await Promise.resolve();
