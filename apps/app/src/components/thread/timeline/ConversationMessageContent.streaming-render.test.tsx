@@ -193,6 +193,7 @@ describe("assistant streaming Markdown rendering", () => {
       path: "/workspace/My File.ts",
       lineRange: { startLineNumber: 12, endLineNumber: 12 },
       openTargetId: null,
+      ordinaryActivation: true,
     });
     expect(
       screen.getByRole("link", { name: "Related thread" }).getAttribute("href"),

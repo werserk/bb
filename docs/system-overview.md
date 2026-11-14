@@ -115,9 +115,10 @@ share `artifact-activation.ts`; imperative calls remain panel intents unless the
 carry the versioned restrictive artifact option. The existing modal supports
 workspace, actual owning-thread storage and host targets; only storage attaches a
 chat. In the native workspace, storage and host Markdown body an ordinary relative link
-resolves from the document's own directory inside its namespace (host: the actual host)
-and replaces the same popup with the linked file (owning thread and context follow); the
-rendered anchor keeps its authored href. Modified clicks, line ranges, editor targets and
+resolves from the document's own directory inside its namespace and replaces the same
+popup with the linked file (owning thread and context follow). A host document stays on
+its actual host and is contained to its own directory, so a link above that directory is
+unavailable. The rendered anchor keeps its authored href. Modified clicks, line ranges, editor targets and
 non-artifact files keep the plain anchor; an ordinary click on an artifact link that
 cannot resolve shows the existing "Can't open this file here" toast with Copy path.
 Fixed-tab and retained-host navigation are unchanged.
