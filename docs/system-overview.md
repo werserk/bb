@@ -114,7 +114,10 @@ Ordinary supported native, semantic, embedded and contextual document activation
 share `artifact-activation.ts`; imperative calls remain panel intents unless they
 carry the versioned restrictive artifact option. The existing modal supports
 workspace, actual owning-thread storage and host targets; only storage attaches a
-chat. Fixed-tab and retained-host navigation are unchanged.
+chat. In the native workspace and storage Markdown body a relative link resolves from
+the document's own directory inside its namespace and replaces the same popup with the
+linked file (owning thread and context follow); modified clicks, line ranges and
+non-artifact files keep the plain anchor. Fixed-tab and retained-host navigation are unchanged.
 
 Markdown and absolute-path attachment leaves carry ephemeral ordinary-activation
 metadata through the existing message and embedded ThreadChat callbacks. The
