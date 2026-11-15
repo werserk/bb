@@ -55,6 +55,7 @@ export class PendingSendOverlay {
   private settledQueues = new Set<string>();
   private entries = new Map<string, PendingSend>();
   private listeners = new Set<() => void>();
+  private entrySnapshot: readonly PendingSend[] = [];
   private revision = 0;
   private clock = 0;
   subscribe = (listener: () => void) => {
@@ -64,6 +65,7 @@ export class PendingSendOverlay {
     };
   };
   getSnapshot = () => this.revision;
+  getEntriesSnapshot = () => this.entrySnapshot;
   notify() {
     this.changed();
   }
@@ -113,6 +115,7 @@ export class PendingSendOverlay {
   }
   private changed() {
     this.projections = new WeakMap();
+    this.entrySnapshot = this.list().map((entry) => ({ ...entry }));
     this.revision++;
     for (const listener of this.listeners) listener();
   }

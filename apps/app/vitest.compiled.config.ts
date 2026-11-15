@@ -42,6 +42,7 @@ export default defineWorkspaceTestConfig({
         "src/components/thread/pending-interactions/plan-editor-ownership.test.tsx",
         "src/views/thread-detail/thread-plan-focus.test.tsx",
         "src/views/thread-detail/ThreadPlanCard.test.tsx",
+        "src/views/thread-detail/ThreadScreen.pending-send.test.tsx",
         "src/views/thread-detail/ThreadPlanSteps.native-focus.test.tsx",
       ],
     }),

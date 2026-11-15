@@ -10,6 +10,7 @@ import {
   pendingSendJournal,
   refreshPendingSends,
   usePendingSendOwner,
+  usePendingSendEntries,
 } from "@/hooks/cache-owners/pending-send-owner";
 
 export function PendingSendControls({ threadId }: { threadId: string }) {
@@ -69,20 +70,20 @@ export function PendingSendPresentation({
   children: ReactNode;
 }) {
   const client = useQueryClient();
-  const owner = usePendingSendOwner(client);
-  const revision = owner.getSnapshot();
+  const snapshot = usePendingSendEntries(client, threadId);
   const value = useMemo(() => {
     const entries = new Map(
-      owner
-        .list(threadId)
-        .filter((entry) => entry.state !== "queued")
+      snapshot
+        .filter(
+          (entry) => entry.threadId === threadId && entry.state !== "queued",
+        )
         .map((entry) => [entry.row.id, entry]),
     );
     return (rowId: string) => {
       const entry = entries.get(rowId);
       return entry ? <PendingSendEntryControls entry={entry} /> : null;
     };
-  }, [owner, threadId, revision]);
+  }, [snapshot, threadId]);
   return (
     <PendingSendPresentationContext.Provider value={value}>
       {children}
