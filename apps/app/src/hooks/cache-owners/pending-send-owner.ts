@@ -287,17 +287,36 @@ export function pendingSendOwner(client: QueryClient) {
 export function pendingSendJournal(client: QueryClient) {
   return context(client).journal;
 }
+export function usePendingSendSnapshot(client: QueryClient, threadId: string) {
+  const owner = pendingSendOwner(client);
+  const read = useMemo(() => {
+    let revision = -1;
+    let snapshot:
+      | {
+          entries: readonly PendingSend[];
+          recoveryStatus: JournalStatus;
+          journal: PendingSendJournal | undefined;
+          identityUnavailable: boolean;
+        }
+      | undefined;
+    return () => {
+      const current = owner.getSnapshot();
+      if (!snapshot || revision !== current) {
+        snapshot = {
+          entries: owner.getEntriesSnapshot(),
+          recoveryStatus: pendingRecoveryStatus(client),
+          journal: pendingSendJournal(client),
+          identityUnavailable: pendingSendIdentityUnavailable(client),
+        };
+        revision = current;
+      }
+      return snapshot;
+    };
+  }, [client, owner, threadId]);
+  return useSyncExternalStore(owner.subscribe, read, read);
+}
 export function usePendingSendEntries(client: QueryClient, threadId: string) {
-  const owner = usePendingSendOwner(client);
-  const entries = useSyncExternalStore(
-    owner.subscribe,
-    owner.getEntriesSnapshot,
-    owner.getEntriesSnapshot,
-  );
-  return useMemo(
-    () => entries.filter((entry) => entry.threadId === threadId),
-    [entries, threadId],
-  );
+  return usePendingSendSnapshot(client, threadId).entries;
 }
 export function usePendingSendOwner(client: QueryClient) {
   const owner = pendingSendOwner(client);

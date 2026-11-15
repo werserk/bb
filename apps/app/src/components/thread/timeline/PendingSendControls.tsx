@@ -4,22 +4,22 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@bb/shared-ui/button";
 import { useSendThreadMessage } from "@/hooks/mutations/thread-runtime-mutations";
 import {
-  pendingSendIdentityUnavailable,
   retryPendingSendRecovery,
-  pendingRecoveryStatus,
-  pendingSendJournal,
   refreshPendingSends,
   usePendingSendOwner,
   usePendingSendEntries,
+  usePendingSendSnapshot,
 } from "@/hooks/cache-owners/pending-send-owner";
 
 export function PendingSendControls({ threadId }: { threadId: string }) {
   const client = useQueryClient();
-  const owner = usePendingSendOwner(client);
-  const status = pendingRecoveryStatus(client),
-    journal = pendingSendJournal(client);
-  const entries = owner.list(threadId);
-  const identityUnavailable = pendingSendIdentityUnavailable(client);
+  const snapshot = usePendingSendSnapshot(client, threadId);
+  const status = snapshot.recoveryStatus,
+    journal = snapshot.journal;
+  const entries = snapshot.entries.filter(
+    (entry) => entry.threadId === threadId,
+  );
+  const identityUnavailable = snapshot.identityUnavailable;
   return (
     <>
       {status === "waiting" ? (

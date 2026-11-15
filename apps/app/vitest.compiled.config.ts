@@ -43,6 +43,7 @@ export default defineWorkspaceTestConfig({
         "src/views/thread-detail/thread-plan-focus.test.tsx",
         "src/views/thread-detail/ThreadPlanCard.test.tsx",
         "src/views/thread-detail/ThreadScreen.pending-send.test.tsx",
+        "src/components/thread/timeline/PendingSendControls.banners.test.tsx",
         "src/views/thread-detail/ThreadPlanSteps.native-focus.test.tsx",
       ],
     }),
