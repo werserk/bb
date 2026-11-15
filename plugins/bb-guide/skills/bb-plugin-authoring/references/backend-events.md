@@ -49,10 +49,8 @@ failure never reached a turn), `errorInfo` (the failure's `ProviderErrorInfo`:
 the provider's report, or the typed code of a request rejected at the door;
 null when neither carried one), `inputAccepted` (whether the provider took the
 input before failing), `rateLimits` (the latest `ProviderRateLimitState`, null
-without windows), `attemptNumber` (1 on a first failure, 2 on the first
-retry's), `originPluginId` (the plugin that sent the message through
-`threads.send` or `threads.spawn`; null for a user, agent, core, or retry) and
-optional `experimental_serviceTurn` (authenticated hidden-turn descriptor).
+without windows), `attemptNumber` (1 on a first failure, 2 on the first retry's), `originPluginId` (the plugin that sent the message through
+`threads.send` or `threads.spawn`; null for a user, agent, core, or retry) and optional `experimental_serviceTurn` (authenticated hidden-turn descriptor).
 No thread DTO and no message copy: a retry is asked for BY REFERENCE:
 
 ```ts

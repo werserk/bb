@@ -1082,6 +1082,9 @@ describe("plugin tools reach thread runtime config", () => {
     expect(command.dynamicTools.map((tool) => tool.name)).toEqual([
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
       "bb_update_plan",
+      "bb_ask_question",
+      "bb_resolve_question",
+      "bb_list_questions",
       "demo_lookup",
       "quiet_tool",
     ]);
@@ -1257,11 +1260,17 @@ describe("plugin tools reach thread runtime config", () => {
     expect(alphaCommand.dynamicTools.map((tool) => tool.name)).toEqual([
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
       "bb_update_plan",
+      "bb_ask_question",
+      "bb_resolve_question",
+      "bb_list_questions",
       "alpha_tool",
     ]);
     expect(betaCommand.dynamicTools.map((tool) => tool.name)).toEqual([
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
       "bb_update_plan",
+      "bb_ask_question",
+      "bb_resolve_question",
+      "bb_list_questions",
       "beta_tool",
     ]);
     expect(
@@ -1332,6 +1341,9 @@ describe("plugin tools reach thread runtime config", () => {
     expect(sideCommand.dynamicTools.map((tool) => tool.name)).toEqual([
       "update_environment_directory",
       "bb_update_plan",
+      "bb_ask_question",
+      "bb_resolve_question",
+      "bb_list_questions",
       "alpha_tool",
     ]);
     expect(sideCommand.instructions).toContain(
@@ -1378,6 +1390,9 @@ describe("plugin tools reach thread runtime config", () => {
     ).toEqual([
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
       "bb_update_plan",
+      "bb_ask_question",
+      "bb_resolve_question",
+      "bb_list_questions",
       "beta_tool",
     ]);
     expect(

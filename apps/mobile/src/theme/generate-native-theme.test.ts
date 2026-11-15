@@ -305,6 +305,19 @@ describe("generate-native-theme", () => {
     ]);
   });
 
+  it("resolves oklch relative colors that only lower lightness", () => {
+    const model = buildNativeThemeModel({
+      themeCss: MINIMAL_THEME_CSS.replace(
+        "--radius: 8px;",
+        "--radius: 8px; --chrome: oklch(from var(--canvas) calc(l - 0.05) c h);",
+      ),
+      mobileCss: MINIMAL_MOBILE_CSS,
+      paletteCss: emptyPalettes(),
+    });
+    const light = model.themes.get("default")?.light;
+    expect(lightness(light?.chrome ?? "")).toBeCloseTo(0.95, 2);
+  });
+
   it("layers the mobile @theme type ramp over the web's touch scale", () => {
     const model = buildNativeThemeModel({
       themeCss: `

@@ -229,6 +229,9 @@ describe("thread runtime config", () => {
             name: "update_environment_directory",
           }),
           expect.objectContaining({ name: "bb_update_plan" }),
+          expect.objectContaining({ name: "bb_ask_question" }),
+          expect.objectContaining({ name: "bb_resolve_question" }),
+          expect.objectContaining({ name: "bb_list_questions" }),
         ]);
         expect(startCommand.instructions).toContain(
           "update_environment_directory",
@@ -256,6 +259,9 @@ describe("thread runtime config", () => {
             name: "update_environment_directory",
           }),
           expect.objectContaining({ name: "bb_update_plan" }),
+          expect.objectContaining({ name: "bb_ask_question" }),
+          expect.objectContaining({ name: "bb_resolve_question" }),
+          expect.objectContaining({ name: "bb_list_questions" }),
         ]);
         expect(submitCommand.resumeContext.instructions).toContain(
           "update_environment_directory",
@@ -318,6 +324,9 @@ describe("thread runtime config", () => {
           name: "update_environment_directory",
         }),
         expect.objectContaining({ name: "bb_update_plan" }),
+        expect.objectContaining({ name: "bb_ask_question" }),
+        expect.objectContaining({ name: "bb_resolve_question" }),
+        expect.objectContaining({ name: "bb_list_questions" }),
       ]);
       expect(startCommand.instructions).toContain(
         "update_environment_directory",
@@ -345,6 +354,9 @@ describe("thread runtime config", () => {
           name: "update_environment_directory",
         }),
         expect.objectContaining({ name: "bb_update_plan" }),
+        expect.objectContaining({ name: "bb_ask_question" }),
+        expect.objectContaining({ name: "bb_resolve_question" }),
+        expect.objectContaining({ name: "bb_list_questions" }),
       ]);
       expect(submitCommand.resumeContext.instructions).toContain(
         "update_environment_directory",
@@ -912,6 +924,9 @@ describe("thread runtime config", () => {
           }),
         }),
         expect.objectContaining({ name: "bb_update_plan" }),
+        expect.objectContaining({ name: "bb_ask_question" }),
+        expect.objectContaining({ name: "bb_resolve_question" }),
+        expect.objectContaining({ name: "bb_list_questions" }),
       ]);
       expect(runtimeConfig.instructions).not.toContain(
         "You are working inside bb, an agentic IDE",

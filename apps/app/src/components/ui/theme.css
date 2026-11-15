@@ -725,8 +725,8 @@
    * follows by an imperceptible amount. */
   --ink: oklch(0.81 0 0);
   --background: var(--canvas);
-  --chrome: color-mix(in oklch, oklch(0 0 0) 25.6%, var(--background));
-  --panel: color-mix(in oklch, oklch(0 0 0) 12.8%, var(--background));
+  --chrome: oklch(from var(--background) calc(l - 0.05) c h);
+  --panel: oklch(from var(--background) calc(l - 0.025) c h);
   --foreground: var(--ink);
   /* Card and popover stay flush with the canvas here too — elevation comes from
    * border + shadow. The lift ramp below uses larger steps than light so the

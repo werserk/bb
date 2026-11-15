@@ -108,7 +108,7 @@ describe("child thread notifications", () => {
     );
   });
 
-  it("renders multiple child outcomes with each completed child's result text", () => {
+  it("renders multiple child outcomes as status-only bullet lines", () => {
     const message = renderBatchMessage({
       items: [
         {
@@ -129,96 +129,21 @@ describe("child thread notifications", () => {
           terminalOutput: "Deploy script failed on preflight.",
           turnStatus: "failed",
         },
-        {
-          activeWorkflowCount: 0,
-          childThread: testThread({
-            id: "thr_child_three",
-            title: "Update docs",
-          }),
-          terminalOutput: null,
-          turnStatus: "completed",
-        },
       ],
     });
 
     expect(message).toContain(
       [
+        "[bb system]",
+        "",
         "Child thread updates:",
         "",
-        "- @thread:thr_child_one completed:",
-        "",
-        "Checkout flow is fixed.",
-        "",
+        "- @thread:thr_child_one completed.",
         "- @thread:thr_child_two failed.",
-        "",
-        "- @thread:thr_child_three completed:",
-        "",
-        "No final output was recorded.",
       ].join("\n"),
     );
+    expect(message).not.toContain("Checkout flow is fixed.");
     expect(message).not.toContain("Deploy script failed on preflight.");
-  });
-
-  it("F6 truncates each raw result once and bounds a large batch", () => {
-    const items = Array.from({ length: 30 }, (_, n) => ({
-      activeWorkflowCount: 0,
-      childThread: testThread({ id: `leaf_${n}`, title: `leaf${n}` }),
-      terminalOutput: "x".repeat(10000),
-      turnStatus: "completed" as const,
-    }));
-    const pair = renderBatchMessage({ items: items.slice(0, 2) });
-    const omitted = [...pair.matchAll(/(\d+) characters omitted/g)].map((m) =>
-      Number(m[1]),
-    );
-    expect(omitted).toHaveLength(2);
-    expect(omitted.every((n) => n > 7000)).toBe(true);
-    expect(renderBatchMessage({ items }).length).toBeLessThan(9500);
-  });
-
-  it("keeps a batch of long results inside one total bound", () => {
-    const long = (mark: string) =>
-      `${mark}-head ${"x".repeat(5_000)} ${mark}-tail`;
-    const items = ["a", "b", "c", "d", "e", "f"].map((mark) => ({
-      activeWorkflowCount: 0,
-      childThread: testThread({ id: `thr_child_${mark}`, title: mark }),
-      terminalOutput: long(mark),
-      turnStatus: "completed" as const,
-    }));
-    const message = renderBatchMessage({ items });
-
-    expect(message.length).toBeLessThan(9_000);
-    for (const mark of ["a", "b", "c", "d", "e", "f"]) {
-      expect(message).toContain(`${mark}-head`);
-      expect(message).toContain(`${mark}-tail`);
-    }
-  });
-
-  it("renders status-only bullet lines when no child completed with a result", () => {
-    const message = renderBatchMessage({
-      items: [
-        {
-          activeWorkflowCount: 0,
-          childThread: testThread({ id: "thr_child_one", title: "One" }),
-          terminalOutput: "ignored",
-          turnStatus: "failed",
-        },
-        {
-          activeWorkflowCount: 0,
-          childThread: testThread({ id: "thr_child_two", title: "Two" }),
-          terminalOutput: "ignored",
-          turnStatus: "failed",
-        },
-      ],
-    });
-
-    expect(message).toContain(
-      [
-        "Child thread updates:",
-        "",
-        "- @thread:thr_child_one failed.",
-        "- @thread:thr_child_two failed.",
-      ].join("\n"),
-    );
   });
 
   it("builds mention ranges for batched outcome thread references", () => {
@@ -407,10 +332,7 @@ describe("child thread notifications", () => {
       [
         "Child thread updates:",
         "",
-        "- @thread:thr_child_one completed, with 2 workflows still running:",
-        "",
-        "Kicked off two workflows.",
-        "",
+        "- @thread:thr_child_one completed, with 2 workflows still running.",
         "- @thread:thr_child_two failed.",
         "",
         "Threads with a workflow still running have not finished; they will report again when their workflow does.",

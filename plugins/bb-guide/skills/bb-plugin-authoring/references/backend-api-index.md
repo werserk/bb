@@ -4,14 +4,7 @@ Check imports here, behavior in the Plugin Guide, and signatures in the installe
 
 ## `@get-bb/plugin-sdk`
 
-The inherited fork's native-plan and structured-composer contracts also export
-`FocusThreadPlanArgs`, `PlanOwnAttention`, `PlanSnapshotView`, `PlanStepStatus`,
-`PlanStepView`, `ThreadPlanView`, `ThreadPlansResult`, `ThreadPlanStepsProps`,
-`ComposerStructuredDraft` and `PluginSidebarThreadActions`. The app runtime
-exports `experimental_ThreadPlanSteps`, `experimental_useThreadPlans` and
-`experimental_focusThreadPlan`; consult the installed declarations for
-its props and keep plan ownership in the native host.
-
+- Fork native-plan and structured-composer exports: `FocusThreadPlanArgs`, `PlanOwnAttention`, `PlanSnapshotView`, `PlanStepStatus`, `PlanStepView`, `ThreadPlanView`, `ThreadPlansResult`, `ThreadPlanStepsProps`, `ComposerStructuredDraft`, `PluginSidebarThreadActions`, `ExperimentalQuestionResolution`, `ExperimentalQuestionResolutionScopeContext`, `ExperimentalQuestionResolutionScopeDecision`, `ExperimentalQuestionResolutionScopePolicy`; the app runtime adds `experimental_ThreadPlanSteps`, `experimental_useThreadPlans`, `experimental_focusThreadPlan` (see the installed declarations; plan ownership stays in the native host).
 - `PLUGIN_CLI_OUTPUT_MAX_BYTES`
 - `defineRpcContract`
 - `experimental_defineHostEntry`
@@ -23,10 +16,6 @@ its props and keep plan ownership in the native host.
 - `BbContext`
 - `BbNavigate`
 - `BbPluginApi`
-- `ExperimentalQuestionResolution`
-- `ExperimentalQuestionResolutionScopeContext`
-- `ExperimentalQuestionResolutionScopeDecision`
-- `ExperimentalQuestionResolutionScopePolicy`
 - `CodeOverflowMode`
 - `ComposerCustomization`
 - `ComposerPlusMenuItem`

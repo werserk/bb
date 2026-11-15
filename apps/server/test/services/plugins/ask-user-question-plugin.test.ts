@@ -83,20 +83,16 @@ describe("ask-user-question builtin plugin", () => {
     return command.dynamicTools;
   }
 
-  it("advertises the tool to codex", async () => {
+  it("withholds the tool from codex, which asks through bb_ask_question", async () => {
     const tools = await dynamicToolsFor({
       providerId: "codex",
       model: "gpt-5.6",
       label: "codex-project",
     });
-    const tool = tools.find(
-      (candidate) => candidate.name === "AskUserQuestion",
-    );
+    const names = tools.map((candidate) => candidate.name);
 
-    expect(tool).toBeDefined();
-    expect(tool?.description).toContain(
-      "Use this tool only when you are blocked on a decision that is genuinely the user's to make",
-    );
+    expect(names).not.toContain("AskUserQuestion");
+    expect(names).toContain("bb_ask_question");
   });
 
   it("withholds the tool from claude-code, which asks natively", async () => {

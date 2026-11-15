@@ -225,6 +225,17 @@ function parseMixOperand(input: string): MixOperand | null {
 
 function parseColorValue(input: string): Color | null {
   const value = input.trim();
+  const relative = value.match(
+    /^oklch\(from\s+(.+?)\s+calc\(l\s*-\s*([\d.]+)\)\s+c\s+h\)$/s,
+  );
+  if (relative) {
+    const base = parseColorValue(relative[1] ?? "");
+    if (base === null) {
+      throw new Error(`relative color base is not a color: ${value}`);
+    }
+    const anchor = toOklch(base);
+    return { ...anchor, l: anchor.l - Number(relative[2]) };
+  }
   const mix = value.match(/^color-mix\((.*)\)$/s);
   if (!mix) {
     const parsed = parse(value);
