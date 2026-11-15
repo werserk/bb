@@ -34,6 +34,21 @@ const hiddenServiceTurn = {
 } as const;
 
 describe("fork thread status rules", () => {
+  it("preserves raw native interaction state alongside question attention", () => {
+    const plugin = toPluginSidebarThread(
+      makeThreadListEntry({
+        id: "thr_1",
+        projectId: "proj_1",
+        lastReadAt: 2,
+        latestAttentionAt: 2,
+        hasOpenQuestion: true,
+        hasPendingInteraction: false,
+      }),
+    );
+    expect(plugin.hasPendingInteraction).toBe(false);
+    expect(plugin.indicator).toBe("waiting-for-input");
+  });
+
   it("shows a thread with an open question card as waiting for input", () => {
     expect(indicatorFor({ hasOpenQuestion: true })).toBe("waiting-for-input");
   });

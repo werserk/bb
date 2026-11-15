@@ -3967,7 +3967,10 @@ group row, the threads it hides while collapsed, whether any of them holds a
 draft, and another plugin's row status) to `PluginThreadStatus`: the
 indicator, the row status when it shows in place of the indicator, the
 accessible label, and whether anything is working. Hidden threads add their
-attention and work; their queued messages do not count. The host installs the
+attention and work; their queued messages do not count. The optional input
+`indicator` preserves already-derived `waiting-for-input` attention from sidebar
+DTOs while leaving their raw native `hasPendingInteraction` unchanged. Unread
+errors still take priority; other indicators are recomputed. The host installs the
 function from `packages/plugin-sdk/src/internal/thread-status.ts`, so a plugin
 built against an older SDK still resolves with the running host's precedence.
 

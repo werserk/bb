@@ -23,6 +23,7 @@ interface ThreadSpec {
   unread?: boolean;
   parented?: boolean;
   pending?: boolean;
+  hasOpenQuestion?: boolean;
   queued?: ThreadQueuedWork;
   workflows?: number;
   backgroundAgents?: number;
@@ -57,6 +58,30 @@ const UNREAD_ERROR: ThreadSpec = { status: "error", unread: true };
 
 const CASES: StatusCase[] = [
   { name: "an idle read thread", thread: {}, indicator: "none" },
+  {
+    name: "an idle read thread with an open persistent question",
+    thread: { hasOpenQuestion: true },
+    indicator: "waiting-for-input",
+    isWorking: false,
+  },
+  {
+    name: "a closed persistent question",
+    thread: { hasOpenQuestion: false },
+    indicator: "none",
+  },
+  {
+    name: "an open persistent question over runtime and a row status",
+    thread: { ...RUNNING, hasOpenQuestion: true },
+    rowStatus: ROW_STATUS,
+    indicator: "waiting-for-input",
+    rowStatusShown: false,
+    isWorking: true,
+  },
+  {
+    name: "an unread error over an open persistent question",
+    thread: { ...UNREAD_ERROR, hasOpenQuestion: true },
+    indicator: "unread-error",
+  },
   { name: "an idle draft", thread: {}, draft: true, indicator: "draft" },
   ...(["active", "provisioning", "starting", "stopping"] as const).map(
     (runtime): StatusCase => ({
@@ -372,6 +397,32 @@ const CASES: StatusCase[] = [
     indicator: "working-draft",
   },
   {
+    name: "a collapsed parent with a descendant's open persistent question",
+    thread: {},
+    hidden: [{ parented: true, hasOpenQuestion: true }],
+    indicator: "waiting-for-input",
+    isWorking: false,
+  },
+  {
+    name: "a collapsed group with an open persistent question",
+    thread: null,
+    hidden: [{}, { hasOpenQuestion: true }],
+    indicator: "waiting-for-input",
+    isWorking: false,
+  },
+  {
+    name: "a collapsed group with only closed questions",
+    thread: null,
+    hidden: [{ hasOpenQuestion: false }],
+    indicator: "none",
+  },
+  {
+    name: "a collapsed group's unread error over an open persistent question",
+    thread: null,
+    hidden: [UNREAD_ERROR, { hasOpenQuestion: true }],
+    indicator: "unread-error",
+  },
+  {
     name: "an empty collapsed group",
     thread: null,
     hidden: [],
@@ -442,6 +493,7 @@ function toEntry(spec: ThreadSpec): ThreadListEntry {
     latestAttentionAt: 2,
     parentThreadId: spec.parented ? "thr_parent" : null,
     hasPendingInteraction: spec.pending ?? false,
+    hasOpenQuestion: spec.hasOpenQuestion ?? false,
     queuedWork: spec.queued ?? "none",
     activity: {
       activeWorkflowCount: spec.workflows ?? 0,

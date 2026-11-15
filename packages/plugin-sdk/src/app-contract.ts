@@ -1752,6 +1752,8 @@ export interface PluginThreadTitleProps {
 /**
  * The fields of a {@link PluginSidebarThread} that
  * {@link PluginSdkApp.experimental_resolveThreadStatus} reads.
+ * An optional indicator preserves derived waiting-for-input attention when
+ * resolving a sidebar DTO whose native interaction state remains raw.
  */
 export type PluginThreadStatusThread = Pick<
   PluginSidebarThread,
@@ -1762,7 +1764,8 @@ export type PluginThreadStatusThread = Pick<
   | "activity"
   | "isUnread"
   | "parentThreadId"
->;
+> &
+  Partial<Pick<PluginSidebarThread, "indicator">>;
 
 /** Input for {@link PluginSdkApp.experimental_resolveThreadStatus}. */
 export interface PluginThreadStatusInput {

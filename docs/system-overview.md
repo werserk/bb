@@ -272,6 +272,14 @@ ownership. Body and materials precede answer controls; answer/dismiss changes ar
 read through the same SDK path. Existing interaction-change notifications invalidate
 question data. Multiple cards do not create a provider wait or gate ordinary chat.
 
+`toThreadStatusThread` normalizes open persistent questions into owner attention.
+`toPluginSidebarThread` keeps raw native interaction state and the derived
+indicator as separate facts. The common SDK thread-status resolver accepts the
+optional existing indicator and retains its `waiting-for-input` attention when
+individual plugin rows or collapsed groups resolve the DTO again. Unread errors
+keep their higher priority; other indicators are recomputed from the input facts.
+This preserves question attention without redefining the native interaction field.
+
 Claude aliases native AskUserQuestion to the injected common tool and excludes the
 native tool only when the common tool is present. Codex native question calls receive
 an explicit redirect in those sessions; no answer or permission is manufactured.

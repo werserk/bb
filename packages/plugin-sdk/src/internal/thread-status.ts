@@ -87,7 +87,8 @@ function addThreadFlags(
   thread: PluginThreadStatusThread,
 ): void {
   const unreadDone = isUnreadDoneThread(thread);
-  flags.pending ||= thread.hasPendingInteraction;
+  flags.pending ||=
+    thread.hasPendingInteraction || thread.indicator === "waiting-for-input";
   flags.unreadError ||= unreadDone && thread.status === "error";
   flags.unreadSuccess ||= unreadDone && thread.status !== "error";
   flags.runtime ||= RUNNING_RUNTIME_STATUSES[thread.runtimeStatus];
