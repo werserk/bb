@@ -18,6 +18,8 @@
  */
 @theme inline {
   --color-background: var(--background);
+  --color-chrome: var(--chrome);
+  --color-panel: var(--panel);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);

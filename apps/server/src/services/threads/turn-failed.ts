@@ -201,6 +201,7 @@ export function buildTurnFailedEvent(
     inputAccepted: wasFailedTurnInputAccepted(db, { threadId, failed }),
     rateLimits: latestRateLimits(db, thread),
     attemptNumber: retryChain(failed.request).attemptNumber,
+    originPluginId: failed.request.originPluginId ?? null,
   };
 }
 

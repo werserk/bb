@@ -8,7 +8,6 @@ import {
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import { codexAsyncQuestionSchema } from "./extension-kinds.js";
-import type { CodexErrorInfo as GeneratedCodexErrorInfo } from "./generated/codex-app-server/schema/v2/CodexErrorInfo.js";
 
 const codexTurnStatusSchema = z.enum([
   "completed",
@@ -531,13 +530,18 @@ const codexErrorHttpStatusSchema = z
   })
   .strip();
 
-const codexErrorInfoSchema = z.union([
+const knownCodexErrorInfoSchema = z.union([
   z.literal("contextWindowExceeded"),
   z.literal("sessionBudgetExceeded"),
   z.literal("usageLimitExceeded"),
+  z.literal("rateLimitExceeded"),
+  z.literal("flexUnavailable"),
   z.literal("serverOverloaded"),
+  z.literal("modelNotFound"),
+  z.literal("policyCapacityUnavailable"),
   z.literal("cyberPolicy"),
   z.literal("misalignmentPolicyViolation"),
+  z.literal("tooManyDenials"),
   z.object({ httpConnectionFailed: codexErrorHttpStatusSchema }),
   z.object({ responseStreamConnectionFailed: codexErrorHttpStatusSchema }),
   z.literal("internalServerError"),
@@ -556,41 +560,27 @@ const codexErrorInfoSchema = z.union([
   }),
   z.literal("other"),
 ]);
-export type CodexErrorInfo = z.infer<typeof codexErrorInfoSchema>;
-const codexErrorInfoSchemaMatchesGenerated: GeneratedCodexErrorInfo extends CodexErrorInfo
-  ? CodexErrorInfo extends GeneratedCodexErrorInfo
-    ? true
-    : false
-  : false = true;
-void codexErrorInfoSchemaMatchesGenerated;
 
-function keepUnrecognizedCodexErrorInfo(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-  const info: unknown = Reflect.get(value, "codexErrorInfo");
-  if (info == null || codexErrorInfoSchema.safeParse(info).success) {
-    return value;
-  }
-  return {
-    ...value,
-    codexErrorInfo: "other",
-    unrecognizedCodexErrorInfo:
-      typeof info === "string" ? info : JSON.stringify(info).slice(0, 200),
-  };
-}
+const unrecognizedCodexErrorInfoSchema = z
+  .union([z.string(), z.record(z.string(), z.unknown())])
+  .transform((value) => ({
+    unrecognized:
+      typeof value === "string" ? value : (Object.keys(value)[0] ?? "unknown"),
+  }));
 
-const codexTurnErrorSchema = z.preprocess(
-  keepUnrecognizedCodexErrorInfo,
-  z
-    .object({
-      message: z.string(),
-      codexErrorInfo: codexErrorInfoSchema.nullish(),
-      unrecognizedCodexErrorInfo: z.string().optional(),
-      additionalDetails: z.string().nullish(),
-    })
-    .passthrough(),
-);
+const codexErrorInfoSchema = z.union([
+  knownCodexErrorInfoSchema,
+  unrecognizedCodexErrorInfoSchema,
+]);
+export type CodexErrorInfo = z.output<typeof codexErrorInfoSchema>;
+
+const codexTurnErrorSchema = z
+  .object({
+    message: z.string(),
+    codexErrorInfo: codexErrorInfoSchema.nullish(),
+    additionalDetails: z.string().nullish(),
+  })
+  .passthrough();
 
 export const codexTurnSchema = z
   .object({

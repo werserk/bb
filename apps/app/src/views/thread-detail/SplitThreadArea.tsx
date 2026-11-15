@@ -697,6 +697,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         content={currentContent}
         paneId={layout.focusedPaneId}
         onRequestClose={
+          currentContent.kind === "thread" ||
           currentContent.kind === "new-thread"
             ? null
             : () => closePane(layout.focusedPaneId)
@@ -737,7 +738,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
           secondaryPanelRegistry={null}
           reservesWindowPanelToggle={false}
           onClosePane={
-            singlePaneContent.kind === "new-thread" ? null : closePane
+            singlePaneContent.kind === "thread" ||
+            singlePaneContent.kind === "new-thread"
+              ? null
+              : closePane
           }
           isMaximized={false}
           onToggleMaximizePane={null}

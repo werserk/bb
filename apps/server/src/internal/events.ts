@@ -6,6 +6,7 @@ import {
   deriveStoredEventItemFields,
   getThread,
   getLatestThreadSequence,
+  isStoredTurnContextCompactionOnly,
   listStoredTurnCompletedKeys,
   listThreadEnvironmentAssignmentsOnHost,
   MissingStoredTurnStartedError,
@@ -44,7 +45,6 @@ import {
   isActivePruneTriggerThreadEventType,
   maybePruneActiveThreadEventHistory,
 } from "../services/system/event-pruning.js";
-import { armChildNoticeSettleGrace } from "../services/threads/child-notice-reconcile.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../services/threads/child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "../services/threads/thread-parent.js";
 import {
@@ -63,6 +63,7 @@ import {
 } from "../services/lib/error-log-fields.js";
 import { applyLoggedThreadLifecycleEvent } from "../services/threads/lifecycle-outcome.js";
 import { dropSettledThreadSessionOptionSelections } from "../services/threads/thread-session-options.js";
+import { rejectUnstartedTurnRequest } from "../services/threads/unconfirmed-turn-requests.js";
 import { rememberSessionModelCatalog } from "../services/providers/session-model-catalog.js";
 import { applyTurnCompletedEvent } from "./turn-completed-events.js";
 import {
@@ -240,8 +241,8 @@ interface AddParentTurnNotificationFollowUpArgs {
   failedParentNotificationThreadIds: Set<string>;
   followUps: EventEffectFollowUp[] | ParentTurnNotificationFollowUp[];
   thread: NonNullable<ReturnType<typeof getThread>>;
-  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
+  turnId: string | null;
   interruption?: ChildThreadOutcome["interruption"];
 }
 
@@ -251,14 +252,9 @@ interface ParentTurnNotificationFollowUp {
   projectId: string;
   parentThreadId: string;
   title: string | null;
-  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
+  turnId: string | null;
   interruption?: ChildThreadOutcome["interruption"];
-}
-
-interface BackgroundSettledFollowUp {
-  kind: "background-settled";
-  threadId: string;
 }
 
 interface QueuedMessageDispatchFollowUp {
@@ -278,7 +274,6 @@ interface EnvironmentDirectoryContinuationFollowUp {
 
 type EventEffectFollowUp =
   | EnvironmentDirectoryContinuationFollowUp
-  | BackgroundSettledFollowUp
   | ParentTurnNotificationFollowUp
   | QueuedMessageDispatchFollowUp;
 
@@ -414,8 +409,8 @@ function addParentTurnNotificationFollowUp(
     projectId: args.thread.projectId,
     parentThreadId: args.thread.parentThreadId,
     title: args.thread.title,
-    ...(args.turnId ? { turnId: args.turnId } : {}),
     turnStatus: args.turnStatus,
+    turnId: args.turnId,
     ...(args.interruption ? { interruption: args.interruption } : {}),
   });
 }
@@ -496,14 +491,6 @@ async function applyEventEffects(
         continue;
       }
 
-      if (event.type === "item/backgroundTask/completed") {
-        followUps.push({
-          kind: "background-settled",
-          threadId: entry.threadId,
-        });
-        continue;
-      }
-
       if (event.type === "turn/completed") {
         const turnId = requireThreadEventScopeTurnId({
           type: event.type,
@@ -559,13 +546,23 @@ async function applyEventEffects(
                 threadId: turnCompleted.thread.id,
                 turnId,
               }));
-          if (!alreadyHandledByCommandFailure && !manuallyStopped) {
+          const compactionOnly =
+            event.status === "completed" &&
+            isStoredTurnContextCompactionOnly(deps.db, {
+              threadId: turnCompleted.thread.id,
+              turnId,
+            });
+          if (
+            !alreadyHandledByCommandFailure &&
+            !manuallyStopped &&
+            !compactionOnly
+          ) {
             addParentTurnNotificationFollowUp({
               failedParentNotificationThreadIds,
               followUps: continuation ? deferredParentNotifications : followUps,
               thread: turnCompleted.thread,
-              turnId,
               turnStatus: event.status,
+              turnId,
               ...(interruption ? { interruption } : {}),
             });
           }
@@ -593,17 +590,23 @@ async function applyEventEffects(
 
       if (
         event.type === "system/error" &&
-        event.code === "provider_process_exited"
+        (event.code === "provider_process_exited" ||
+          event.code === "provider_turn_start_failed")
       ) {
         const thread = getThread(deps.db, entry.threadId);
         if (!thread) {
           continue;
         }
-        deps.pendingInteractions.interruptPendingInteractionsForThreadIds({
-          threadIds: [entry.threadId],
-          reason:
-            "Provider process exited while awaiting user interaction; retry the thread to continue",
-        });
+        if (event.code === "provider_process_exited") {
+          deps.pendingInteractions.interruptPendingInteractionsForThreadIds({
+            threadIds: [entry.threadId],
+            reason:
+              "Provider process exited while awaiting user interaction; retry the thread to continue",
+          });
+        }
+        if (event.scope.kind === "thread") {
+          rejectUnstartedTurnRequest(deps, entry.threadId);
+        }
         const outcome = applyLoggedThreadLifecycleEvent(deps, {
           event: { type: "run.failed" },
           threadId: entry.threadId,
@@ -614,6 +617,7 @@ async function applyEventEffects(
             followUps,
             thread,
             turnStatus: "failed",
+            turnId: null,
           });
         }
         continue;
@@ -646,15 +650,12 @@ async function executeEventFollowUpBestEffort(
             title: followUp.title,
           },
           parentThreadId: followUp.parentThreadId,
-          ...(followUp.turnId ? { turnId: followUp.turnId } : {}),
           turnStatus: followUp.turnStatus,
+          turnId: followUp.turnId,
           ...(followUp.interruption
             ? { interruption: followUp.interruption }
             : {}),
         });
-        return;
-      case "background-settled":
-        armChildNoticeSettleGrace(deps, followUp.threadId);
         return;
       case "queued-message-dispatch":
         await runQueuedMessageDispatch(deps, followUp.wake);

@@ -25,7 +25,6 @@ interface ThreadWaitCommandOptions {
   timeout?: string;
   pollInterval?: string;
   json?: boolean;
-  includeService?: boolean;
 }
 
 export function registerWaitCommand(
@@ -36,10 +35,6 @@ export function registerWaitCommand(
     .command("wait <id>")
     .description(
       "Wait for a thread status or event (defaults to --status idle)",
-    )
-    .option(
-      "--include-service",
-      "Control matching already includes service events",
     )
     .option("--status <status>", "Wait until the thread reaches this status")
     .option(

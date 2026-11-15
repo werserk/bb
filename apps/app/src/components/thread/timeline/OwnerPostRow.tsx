@@ -2,26 +2,13 @@ import type { TimelineOwnerPostRow } from "@bb/thread-view";
 import { ownerPostText } from "@bb/thread-view";
 import { ThreadMentionCardsContext } from "@/components/thread/ThreadMentionCard.js";
 import { ConversationMessageContent } from "./ConversationMessageContent.js";
-import type {
-  ThreadTimelineLinkHandler,
-  ThreadTimelineLocalFileLinkHandler,
-} from "./types.js";
 
 interface OwnerPostRowProps {
-  onOpenLink: ThreadTimelineLinkHandler | undefined;
-  onOpenLocalFileLink: ThreadTimelineLocalFileLinkHandler | undefined;
   projectId: string | undefined;
   row: TimelineOwnerPostRow;
-  workspaceRootPath: string | undefined;
 }
 
-export function OwnerPostRow({
-  onOpenLink,
-  onOpenLocalFileLink,
-  projectId,
-  row,
-  workspaceRootPath,
-}: OwnerPostRowProps) {
+export function OwnerPostRow({ projectId, row }: OwnerPostRowProps) {
   const pending = row.status === "pending";
   return (
     <div data-owner-post={pending ? "pending" : "completed"}>
@@ -39,8 +26,6 @@ export function OwnerPostRow({
           attachments={null}
           id={row.id}
           mobileActionDisplay="overflow"
-          onOpenLink={onOpenLink}
-          onOpenLocalFileLink={onOpenLocalFileLink}
           projectId={projectId}
           role="assistant"
           showActions={false}
@@ -49,7 +34,6 @@ export function OwnerPostRow({
           threadId={row.threadId}
           timestamp={row.startedAt}
           turnId={row.turnId}
-          workspaceRootPath={workspaceRootPath}
         />
       </ThreadMentionCardsContext.Provider>
     </div>

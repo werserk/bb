@@ -114,17 +114,18 @@ it("opens an unloaded question by ID and focuses only the requesting pane", asyn
 
 function QueuedAnswer() {
   const navigation = useQuestionNavigation()!;
+  const { registerQueuedAnswer } = navigation;
   const [expanded, setExpanded] = useState(false);
   useEffect(
     () =>
-      navigation.registerQueuedAnswer(qid, async () => {
+      registerQueuedAnswer(qid, async () => {
         setExpanded(true);
         await new Promise(requestAnimationFrame);
         return document.querySelector<HTMLElement>(
           "[data-fixture-queued-answer]",
         );
       }),
-    [navigation.registerQueuedAnswer],
+    [registerQueuedAnswer],
   );
   return (
     <>

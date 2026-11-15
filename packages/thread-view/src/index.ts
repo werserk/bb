@@ -1,4 +1,3 @@
-export { threadPresentationText } from "./presentation-strings.js";
 export { classifyServiceTurns } from "./service-turn-projection.js";
 export { formatThreadTimelineText } from "./format-timeline-text.js";
 export { parseAgentMessageEnvelope } from "./agent-message-envelope.js";
@@ -47,15 +46,16 @@ export {
 export { formatShellCommandForDisplay } from "./shell-command-display.js";
 export {
   getFileChangeAction,
-  isPatchMetadataLine,
+  getFileChangeDiffLines,
+  isPlainFileContentDiff,
 } from "./file-change-summary.js";
 export type { FileChangeAction } from "./file-change-summary.js";
 export {
   buildThreadTimelineFromEvents,
+  startThreadTimelineProjectionFold,
   buildThreadTimelineTurnDetailsFromEvents,
 } from "./build-thread-timeline.js";
 export { extractThreadTimelineActivePlanTurn } from "./active-prompt-mode-extraction.js";
-export { extractThreadTimelineGoal } from "./goal-snapshot-extraction.js";
 export {
   extractThreadProviderCommands,
   extractThreadSessionOptions,
@@ -82,6 +82,10 @@ export {
   MIN_AGENT_MESSAGE_DELTAS_FOR_SUMMARY_COMPACTION,
 } from "./summary-event-compaction.js";
 export type { ThreadEventWithMeta } from "./group-event-projection-turns.js";
+export {
+  resumeEventProjectionFold,
+  type EventProjectionFold,
+} from "./build-event-projection.js";
 
 export { extractThreadContextWindowUsage } from "./thread-context-window-usage.js";
 export {

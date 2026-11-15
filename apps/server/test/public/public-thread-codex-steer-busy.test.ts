@@ -38,7 +38,7 @@ import {
   closeConversationQuestion,
   readConversationQuestion,
 } from "../../src/services/threads/conversation-questions.js";
-import { deliverParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
+import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import { readDeferredSteerRequest } from "../../src/services/threads/deferred-steer.js";
 import { attemptDispatch } from "../../src/services/threads/dispatch-attempt.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
@@ -150,6 +150,7 @@ async function send(
   const thread = getThread(harness.db, threadId);
   if (thread === null) throw new Error("Missing thread");
   return attemptDispatch(harness.deps, {
+    systemNotice: null,
     thread,
     payload: {
       mode: "steer",
@@ -1304,8 +1305,8 @@ it.each(["system", "agent", "plugin", "owner"] as const)(
         result: {},
       }));
       if (kind === "system") {
-        await deliverParentSystemMessage(harness.deps, {
-          parentThread: thread,
+        await queueParentSystemMessage(harness.deps, {
+          parentThreadId: thread.id,
           input: [{ type: "text", text: "child result", mentions: [] }],
           systemMessageKind: "child-completed",
           systemMessageSubject: null,
@@ -1319,6 +1320,7 @@ it.each(["system", "agent", "plugin", "owner"] as const)(
               })
             : null;
         await attemptDispatch(harness.deps, {
+          systemNotice: null,
           thread,
           payload: {
             mode: "auto",

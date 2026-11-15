@@ -9,6 +9,10 @@ import { fetchWithAppSurface } from "@/lib/app-surface";
 import { sdk } from "@/lib/sdk";
 import { MarkdownPreview } from "../../ui/markdown-preview";
 import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
+import {
+  hydrateConversationQuestion,
+  invalidateConversationQuestions,
+} from "@/hooks/cache-owners/conversation-question-cache-owner";
 
 import {
   QuestionOriginalPrompts,
@@ -221,8 +225,9 @@ function QuestionDelivery({ question }: { question: ConversationQuestion }) {
       });
     },
     onSettled: () =>
-      client.invalidateQueries({
-        queryKey: conversationQuestionsQueryKey(question.threadId),
+      invalidateConversationQuestions({
+        queryClient: client,
+        threadId: question.threadId,
       }),
   });
   return (
@@ -295,7 +300,13 @@ export function ConversationQuestionCard({
             answers: request.answers,
           });
     },
-    onSuccess: (question) => client.setQueryData(queryKey, question),
+    onSuccess: (answered) =>
+      hydrateConversationQuestion({
+        queryClient: client,
+        threadId,
+        questionId,
+        question: answered,
+      }),
   });
   const question = query.data;
   const link = useQuestionLinkState(questionId, "answer");

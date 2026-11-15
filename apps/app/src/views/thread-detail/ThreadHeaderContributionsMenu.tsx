@@ -197,7 +197,6 @@ export function ThreadHeaderContributionsMenu({
                       asChild
                       className="size-6 shrink-0 justify-center p-0"
                       aria-label={`${pinLabel}: ${item.label}`}
-                      title={pinLabel}
                       onSelect={(event) => {
                         event.preventDefault();
                         pendingFocus.current = item.key;

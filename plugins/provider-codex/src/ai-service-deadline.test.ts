@@ -17,6 +17,7 @@ vi.mock("./ai/codex-auth.js", async (importOriginal) => ({
     accountId: "synthetic-test-account",
     accountEmail: null,
     expired: false,
+    planType: null,
     isFedrampAccount: false,
   }),
 }));

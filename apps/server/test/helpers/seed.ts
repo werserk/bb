@@ -272,7 +272,6 @@ export function seedQueuedMessage(
     permissionMode?: PermissionMode;
     senderThreadId?: string | null;
     serviceTier?: string;
-    /** Defaults to a row with no wait: an ordinary queued message. */
     waitingOn?: QueuedMessageWaitingOn | null;
     sendAt?: number | null;
   },
@@ -372,6 +371,7 @@ export function seedThreadRuntimeState(
     reasoningLevel?: string;
     sequenceStart?: number;
     serviceTier?: string;
+    serviceTurn?: Record<string, unknown>;
     threadId: string;
   },
 ): void {
@@ -395,6 +395,9 @@ export function seedThreadRuntimeState(
     data: {
       direction: "outbound",
       requestId: encodeClientTurnRequestIdNumber({ value: sequenceStart }),
+      ...(args.serviceTurn === undefined
+        ? {}
+        : { serviceTurn: args.serviceTurn }),
       input: [
         {
           type: "text",

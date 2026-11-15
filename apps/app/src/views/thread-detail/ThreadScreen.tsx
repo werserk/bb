@@ -36,8 +36,6 @@ import {
   type ThreadTimelineEditMessageTarget,
   type ThreadTimelineForkMessageHandler,
   type ThreadTimelineInlineMessageEditor,
-  type ThreadTimelineLinkHandler,
-  type ThreadTimelineLocalFileLinkHandler,
   type ThreadTimelineUnreadDividerPlacement,
   type TimelineTitleActionResolver,
   type UseThreadTimelineControllerResult,
@@ -104,8 +102,6 @@ export interface ThreadScreenTimelineHost {
   includePluginMessageActions: boolean;
   leadingContent?: ReactNode;
   onForkMessage?: ThreadTimelineForkMessageHandler;
-  onOpenLink?: ThreadTimelineLinkHandler;
-  onOpenLocalFileLink?: ThreadTimelineLocalFileLinkHandler;
   onTitleAction?: TimelineTitleActionResolver;
   unreadDividerAutoScroll: boolean;
   unreadDividerPlacement: ThreadTimelineUnreadDividerPlacement | null;
@@ -130,7 +126,6 @@ interface ThreadScreenProps {
   thread: ThreadResponse;
   timeline: UseThreadTimelineControllerResult;
   timelineHost: ThreadScreenTimelineHost;
-  workspaceRootPath: string | undefined;
 }
 
 interface SentMessageEditSession {
@@ -433,7 +428,6 @@ export function ThreadScreen({
   thread,
   timeline,
   timelineHost,
-  workspaceRootPath,
 }: ThreadScreenProps) {
   const systemConfigQuery = useSystemConfig();
   const contextCardInset = useThreadContextCardContentInset();
@@ -518,8 +512,6 @@ export function ThreadScreen({
         onMessageAddToChat={selectionAddToChat}
         onSelectionAddToChat={selectionAddToChat}
         onLoadOlderRows={timeline.loadOlderTimelineRows}
-        onOpenLink={timelineHost.onOpenLink}
-        onOpenLocalFileLink={timelineHost.onOpenLocalFileLink}
         onTitleAction={timelineHost.onTitleAction}
         projectId={projectId}
         resolveMentionLink={resolveMentionLink}
@@ -537,7 +529,6 @@ export function ThreadScreen({
         threadRuntimeDisplayStatus={thread.runtime.displayStatus}
         unreadDividerAutoScroll={timelineHost.unreadDividerAutoScroll}
         unreadDividerPlacement={timelineHost.unreadDividerPlacement}
-        workspaceRootPath={workspaceRootPath}
       />
     </SelectionAddToChatContext.Provider>
   );
@@ -577,7 +568,6 @@ export function ThreadScreen({
       pendingInteractions={pendingInteractions}
       queuedMessageCount={thread.queuedMessageCount}
       activePromptMode={timeline.activePromptMode}
-      goal={timeline.goal}
       providerCommands={timeline.providerCommands}
       sessionOptions={timeline.sessionOptions}
       modelFallback={timeline.modelFallback}

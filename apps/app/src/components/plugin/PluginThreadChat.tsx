@@ -1,4 +1,10 @@
-import { useCallback, useContext, useMemo, type ReactNode } from "react";
+import {
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   ThreadChatMessageAction,
@@ -16,13 +22,20 @@ import {
   useThreadTimelineController,
   type ThreadTimelineConsumerMessageAction,
   type ThreadTimelineForkMessageHandler,
+  type ThreadTimelineLocalFileLinkHandler,
 } from "@/components/thread/timeline";
-import { useThreadTimelineNavigation } from "@/components/thread/timeline/ThreadTimelineNavigationContext";
+import {
+  ThreadTimelineNavigationProvider,
+  useThreadTimelineNavigation,
+} from "@/components/thread/timeline/ThreadTimelineNavigationContext";
 import { useEmbeddedLocalFileLinkHandler } from "@/components/plugin/local-file-viewer/useEmbeddedLocalFileLinkHandler";
+import { useAppNavigationHost } from "@/lib/app-navigation-host";
+import { useThreadFileLinkOpener } from "@/hooks/useLocalFileLinkOpener";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { PluginComposerHostScopeProvider } from "@/components/plugin/plugin-composer-host";
 import { ThreadProviderContext } from "@/components/thread/thread-provider-context";
 import { useEnvironment } from "@/hooks/queries/environment-queries";
+import { useEnvironmentCheckoutDisplay } from "@/hooks/queries/git-plugin-queries";
 import { useSystemProviderInfo } from "@/hooks/queries/system-queries";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useMarkThreadRead } from "@/hooks/mutations/thread-state-mutations";
@@ -37,9 +50,6 @@ import {
 } from "@/lib/environment-workspace-display";
 import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
 import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
-import {
-  formatWorkspaceCheckoutDisplay,
-} from "@bb/shared-ui/lib/workspace-checkout-display";
 import { BbHttpError } from "@/lib/sdk";
 import { ThreadChatLoadingBody } from "@/components/thread/timeline/ThreadChatLoading";
 import {
@@ -175,10 +185,21 @@ function PluginThreadChatBody({
   const canUseHostFileNavigation =
     thread !== undefined &&
     thread.environmentId === timelineNavigation?.environmentId;
-  const onOpenLink = timelineNavigation?.onOpenLink;
-  const hostOnOpenLocalFileLink = canUseHostFileNavigation
-    ? timelineNavigation.onOpenLocalFileLink
-    : undefined;
+  const navigation = useAppNavigationHost();
+  const previewRejectedRef = useRef(false);
+  const openFilePreview = useCallback<typeof navigation.openFilePreview>(
+    (intent) => {
+      const opened = navigation.openFilePreview(intent);
+      if (!opened) previewRejectedRef.current = true;
+      return opened;
+    },
+    [navigation],
+  );
+  const threadFileLinkOpener = useThreadFileLinkOpener({
+    environment,
+    openFilePreview,
+    threadId: thread?.id,
+  }).openLink;
   const resolveHostMentionLink = canUseHostFileNavigation
     ? timelineNavigation.resolveMentionLink
     : undefined;
@@ -188,13 +209,28 @@ function PluginThreadChatBody({
       ? timelineNavigation.workspaceRootPath
       : undefined);
   const embeddedLocalFileLinks = useEmbeddedLocalFileLinkHandler({
-    enabled: hostOnOpenLocalFileLink === undefined && thread !== undefined,
+    enabled: thread !== undefined,
     environmentId: thread?.environmentId ?? null,
     threadId: thread?.id ?? null,
     workspaceRootPath: workspaceRootPath ?? null,
   });
-  const onOpenLocalFileLink =
-    hostOnOpenLocalFileLink ?? embeddedLocalFileLinks.onOpenLocalFileLink;
+  const embeddedOnOpenLocalFileLink =
+    embeddedLocalFileLinks.onOpenLocalFileLink;
+  const onOpenLocalFileLink = useCallback<ThreadTimelineLocalFileLinkHandler>(
+    (link) => {
+      previewRejectedRef.current = false;
+      const handled = threadFileLinkOpener(link);
+      if (
+        handled &&
+        previewRejectedRef.current &&
+        embeddedOnOpenLocalFileLink !== undefined
+      ) {
+        return embeddedOnOpenLocalFileLink(link);
+      }
+      return handled;
+    },
+    [embeddedOnOpenLocalFileLink, threadFileLinkOpener],
+  );
   const pluginId = useContext(PluginContext);
   const consumerMessageActions = useMemo<
     readonly ThreadTimelineConsumerMessageAction[] | undefined
@@ -273,15 +309,9 @@ function PluginThreadChatBody({
     isLocalDaemonHost,
     machineProviders,
   ]);
-  const environmentCheckout = environment?.branchName
-    ? formatWorkspaceCheckoutDisplay({
-        checkout: {
-          kind: "branch",
-          branchName: environment.branchName,
-          headSha: null,
-        },
-      })
-    : undefined;
+  const environmentCheckout = useEnvironmentCheckoutDisplay(
+    hasComposer && environment?.isGitRepo === true ? environment.id : null,
+  );
 
   const isThreadMissing =
     threadQuery.error instanceof BbHttpError &&
@@ -314,42 +344,48 @@ function PluginThreadChatBody({
   return (
     <ThreadProviderContext.Provider value={threadProviderContextValue}>
       <PluginComposerHostScopeProvider>
-        <ThreadScreen
-          composer={
-            hasComposer
-              ? {
-                  environmentCheckout,
-                  environmentChrome,
-                  focusRequest,
-                  contextEnvironmentId: null,
-                  permissionPolicy:
-                    permissionPolicy === "editable" ? "editable" : "snapshot",
-                }
-              : null
-          }
-          environment={environment}
-          presentation={presentation}
-          projectId={thread.projectId}
+        <ThreadTimelineNavigationProvider
+          environmentId={thread.environmentId}
+          hostId={environment?.hostId ?? null}
+          onOpenLocalFileLink={onOpenLocalFileLink}
           resolveMentionLink={resolveMentionLink}
-          thread={thread}
-          timeline={timeline}
-          timelineHost={{
-            consumerMessageActions,
-            environmentHostName:
-              environmentHost !== null &&
-              isHostAmbiguous(hasMultipleMachines, environmentHost.type)
-                ? environmentHost.name
-                : null,
-            includePluginMessageActions: false,
-            leadingContent,
-            onForkMessage: isForkAvailable ? handleForkMessage : undefined,
-            onOpenLink,
-            onOpenLocalFileLink,
-            unreadDividerAutoScroll: false,
-            unreadDividerPlacement: null,
-          }}
+          threadId={thread.id}
           workspaceRootPath={workspaceRootPath}
-        />
+        >
+          <ThreadScreen
+            composer={
+              hasComposer
+                ? {
+                    environmentCheckout,
+                    environmentChrome,
+                    focusRequest,
+                    contextEnvironmentId: null,
+                    permissionPolicy:
+                      permissionPolicy === "editable" ? "editable" : "snapshot",
+                  }
+                : null
+            }
+            environment={environment}
+            presentation={presentation}
+            projectId={thread.projectId}
+            resolveMentionLink={resolveMentionLink}
+            thread={thread}
+            timeline={timeline}
+            timelineHost={{
+              consumerMessageActions,
+              environmentHostName:
+                environmentHost !== null &&
+                isHostAmbiguous(hasMultipleMachines, environmentHost.type)
+                  ? environmentHost.name
+                  : null,
+              includePluginMessageActions: false,
+              leadingContent,
+              onForkMessage: isForkAvailable ? handleForkMessage : undefined,
+              unreadDividerAutoScroll: false,
+              unreadDividerPlacement: null,
+            }}
+          />
+        </ThreadTimelineNavigationProvider>
       </PluginComposerHostScopeProvider>
     </ThreadProviderContext.Provider>
   );

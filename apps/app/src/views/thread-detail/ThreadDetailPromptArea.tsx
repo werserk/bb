@@ -1,4 +1,5 @@
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
+import { visibleQueuedMessages } from "@/lib/queued-system-notice";
 import { useQueuedMessagesExpanded } from "@/components/promptbox/banner/queued-messages-expanded";
 import type { MachineRemovalStatus } from "@/lib/machine-removal-display";
 import { ThreadMachineStatus } from "@/components/promptbox/banner/ThreadMachineStatus";
@@ -19,7 +20,7 @@ import {
   getFollowUpPromptPlaceholder,
   getCompactFollowUpPromptPlaceholder,
 } from "@/components/promptbox/follow-up-placeholder";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { DEFAULT_SERVICE_TIER, PERSONAL_PROJECT_ID } from "@bb/domain";
 import type {
   PermissionMode,
   ReasoningLevel,
@@ -28,7 +29,6 @@ import type {
   PromptInput,
   ThreadQueuedMessage,
   ThreadTimelineActivePromptMode,
-  ThreadTimelineGoal,
   ThreadTimelineModelFallback,
   ThreadWithRuntime,
 } from "@bb/domain";
@@ -62,7 +62,6 @@ import {
   type ThreadPromptParentThreadSection,
   type ThreadPromptChildThreadsSection,
 } from "@/components/promptbox/banner/ThreadPromptContextBanner";
-import { ThreadGoalCard } from "@/components/promptbox/banner/ThreadGoalCard";
 import { ThreadPromptModeCard } from "@/components/promptbox/banner/ThreadPromptModeCard";
 import { ThreadWorkflowStack } from "@/components/promptbox/banner/ThreadWorkflowStack";
 import { ThreadBackgroundCommandsCard } from "@/components/promptbox/banner/ThreadBackgroundCommandsCard";
@@ -77,6 +76,7 @@ import {
   type SessionOptionChoices,
 } from "@/components/pickers/SessionOptionsMenu";
 import { useThreadSessionOptionChoices } from "./useThreadSessionOptionChoices";
+import { useDraftSubmission } from "./useDraftSubmission";
 import {
   LazyQueuedMessagesList,
   QueuedMessagesPendingCard,
@@ -105,7 +105,6 @@ import {
 import {
   useCreateThread,
   useCancelThreadPlan,
-  useClearThreadGoal,
   useStopThread,
 } from "@/hooks/mutations/thread-runtime-mutations";
 import {
@@ -203,7 +202,6 @@ interface ThreadDetailPromptAreaProps {
   projectId: string;
   resolveMentionLink: PromptMentionLinkResolver;
   activePromptMode: ThreadTimelineActivePromptMode | null;
-  goal: ThreadTimelineGoal | null;
   providerCommands: readonly ProviderCommand[] | null;
   sessionOptions: readonly ThreadTimelineSessionOption[] | null;
   modelFallback: ThreadTimelineModelFallback | null;
@@ -227,6 +225,7 @@ interface InlineDraftComposerOptions {
   draft: PromptDraftState;
   editFocusNonce: number;
   execution: FollowUpPromptBoxProps["execution"];
+  executionReadOnly: boolean;
   focusSessionKey: string | number;
   historyResetKey: string;
   isSubmitting: boolean;
@@ -234,6 +233,7 @@ interface InlineDraftComposerOptions {
   onEscape?: FollowUpComposerProps["onEscape"];
   onSelectHistoryEntry: (draft: PromptDraftState) => void;
   permission: FollowUpPromptBoxProps["permission"];
+  permissionReadOnly: boolean;
   pluginComposerHost: PluginComposerHost;
   promptActions: FollowUpPromptBoxProps["promptActions"];
   promptPlaceholder: string;
@@ -284,9 +284,9 @@ function buildInlineDraftComposer(options: InlineDraftComposerOptions) {
       environmentSummary={null}
       contextWindowUsage={null}
       execution={options.execution}
-      executionReadOnly
+      executionReadOnly={options.executionReadOnly}
       permission={options.permission}
-      permissionReadOnly
+      permissionReadOnly={options.permissionReadOnly}
       typeahead={options.typeahead}
       promptActions={options.promptActions}
       collapseResetKey={options.collapseResetKey}
@@ -409,7 +409,6 @@ export function ThreadDetailPromptArea({
   projectId,
   resolveMentionLink,
   activePromptMode,
-  goal,
   providerCommands,
   sessionOptions,
   modelFallback,
@@ -458,6 +457,10 @@ export function ThreadDetailPromptArea({
       ),
     [queuedMessagesQuery.data],
   );
+  const drawerQueuedMessages = useMemo(
+    () => visibleQueuedMessages(queuedMessages),
+    [queuedMessages],
+  );
   const queuedMessagesPending =
     queuedMessagesQuery.data === undefined && queuedMessageCount > 0;
   const queuedMessagesRef =
@@ -476,6 +479,7 @@ export function ThreadDetailPromptArea({
     inlineEditingQueuedMessage,
     inlineEditingQueuedMessageRef,
     commitInlineQueuedMessage,
+    updateInlineQueuedMessage,
     dismissInlineQueuedMessageEditor,
     beginEditQueuedMessage,
     queuedMessageDraftSession,
@@ -498,7 +502,6 @@ export function ThreadDetailPromptArea({
   );
   const stopThread = useStopThread();
   const cancelThreadPlan = useCancelThreadPlan();
-  const clearThreadGoal = useClearThreadGoal();
   const unarchiveThread = useUnarchiveThread();
   const restoreThreadEnvironment = useRestoreThreadEnvironment();
   const createThread = useCreateThread();
@@ -522,6 +525,9 @@ export function ThreadDetailPromptArea({
     inlineDraft: inlineEditingQueuedMessage?.draft ?? null,
     inlineSessionRef: inlineDraftSessionRef,
   });
+  const { isSubmitting: isDraftSubmitting, submitDraft } = useDraftSubmission(
+    promptDraft.storageKey,
+  );
   const subscribeInlineQueuedDraft = useComposerHostDraftNotifier(
     inlineEditingQueuedMessage?.draft ?? null,
   );
@@ -595,8 +601,6 @@ export function ThreadDetailPromptArea({
     string | null
   >(null);
   const [isChildThreadsExpanded, setIsChildThreadsExpanded] = useState(false);
-  const [isGoalExpanded, setIsGoalExpanded] = useState(false);
-  const [isPromptModeExpanded, setIsPromptModeExpanded] = useState(false);
   const [expandedWorkflowIds, setExpandedWorkflowIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -620,7 +624,8 @@ export function ThreadDetailPromptArea({
   const isWorkflowStackExpanded = workflowStackExpandedThreadId === thread.id;
   const [queueExpanded, setQueueExpanded] = useQueuedMessagesExpanded({
     threadId: thread.id,
-    queuedMessages,
+    queuedMessages:
+      queuedMessagesQuery.data === undefined ? null : drawerQueuedMessages,
   });
   const [isBackgroundCommandsExpanded, setIsBackgroundCommandsExpanded] =
     useState(false);
@@ -689,6 +694,7 @@ export function ThreadDetailPromptArea({
     modelLoadFailed,
     modelLoadError,
     reasoningOptions,
+    resolveReasoningForModel,
     permissionModeOptions,
     supportsPermissionModeSelection,
     supportsServiceTier,
@@ -920,6 +926,7 @@ export function ThreadDetailPromptArea({
     isUpdateQueuedMessagePending,
     sendQueuedMessageById,
     handleSaveInlineQueuedMessage,
+    handleChangeQueuedMessageSendTime,
     handleDeleteQueuedMessage,
     handleReorderQueuedMessage,
     handleSetQueuedMessageGroupBoundary,
@@ -939,18 +946,17 @@ export function ThreadDetailPromptArea({
     queuedMessageActionPending ||
     isFollowUpShortcutSending;
   const isFollowUpSubmitting =
+    isDraftSubmitting ||
     sendMessage.isPending ||
     createThread.isPending ||
     isFollowUpShortcutSending;
   const handleStopThread = useCallback(() => {
     stopThread.mutate(thread.id);
   }, [stopThread, thread.id]);
-  const handleCancelPlan = useCallback(() => {
-    cancelThreadPlan.mutate(thread.id);
-  }, [cancelThreadPlan, thread.id]);
-  const handleClearGoal = useCallback(() => {
-    clearThreadGoal.mutate(thread.id);
-  }, [clearThreadGoal, thread.id]);
+  const { mutateAsync: cancelThreadPlanAsync } = cancelThreadPlan;
+  const handleExitPlanMode = useCallback(async () => {
+    await cancelThreadPlanAsync(thread.id);
+  }, [cancelThreadPlanAsync, thread.id]);
   const submitMode = useMemo<FollowUpSubmitMode>(() => {
     if (isHandoffSelection && !isStopRequested) {
       if (effectiveSelectedModel.length > 0) {
@@ -1226,7 +1232,7 @@ export function ThreadDetailPromptArea({
     ],
   );
 
-  const handleSend = useCallback(
+  const submitFollowUpDraft = useCallback(
     async ({ sendAt, pluginSubmission }: ComposerSubmitExtras = {}) => {
       const submittedDraft = promptDraft.getCurrent();
       const submittedInput = promptDraftToInput(submittedDraft);
@@ -1313,6 +1319,11 @@ export function ThreadDetailPromptArea({
       runtimeDisplayStatus,
     ],
   );
+  const handleSend = useCallback(
+    (extras: ComposerSubmitExtras = {}) =>
+      submitDraft(() => submitFollowUpDraft(extras)),
+    [submitDraft, submitFollowUpDraft],
+  );
   const handleModifierSubmit = useCallback(
     async ({ sendAt, pluginSubmission }: ComposerSubmitExtras = {}) => {
       if (!canSubmitModifierShortcut) {
@@ -1332,27 +1343,31 @@ export function ThreadDetailPromptArea({
       }
 
       if (shortcutRequest.kind === "draft") {
-        promptDraft.clearIfCurrentMatches(submittedDraft);
-        setBottomAttachmentError(null);
-        await runWhileFollowUpShortcutSending(
-          setIsFollowUpShortcutSending,
-          async () => {
-            try {
-              await sendMessage.mutateAsync({
-                ...shortcutRequest.request,
-                ...(sendAt === undefined ? {} : { sendAt }),
-                ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
-              });
-            } catch (nextError) {
-              promptDraft.restoreIfEmpty(submittedDraft);
-              throw reportMutationError({
-                error: nextError,
-                fallbackMessage: "Failed to send message",
-                lifecycleOperation: "send_message",
-              });
-            }
-          },
-        );
+        await submitDraft(async () => {
+          promptDraft.clearIfCurrentMatches(submittedDraft);
+          setBottomAttachmentError(null);
+          await runWhileFollowUpShortcutSending(
+            setIsFollowUpShortcutSending,
+            async () => {
+              try {
+                await sendMessage.mutateAsync({
+                  ...shortcutRequest.request,
+                  ...(sendAt === undefined ? {} : { sendAt }),
+                  ...(pluginSubmission === undefined
+                    ? {}
+                    : { pluginSubmission }),
+                });
+              } catch (nextError) {
+                promptDraft.restoreIfEmpty(submittedDraft);
+                throw reportMutationError({
+                  error: nextError,
+                  fallbackMessage: "Failed to send message",
+                  lifecycleOperation: "send_message",
+                });
+              }
+            },
+          );
+        });
         return;
       }
 
@@ -1385,6 +1400,7 @@ export function ThreadDetailPromptArea({
       sendMessage,
       sendQueuedMessageById,
       setBottomAttachmentError,
+      submitDraft,
       thread.id,
     ],
   );
@@ -1626,17 +1642,49 @@ export function ThreadDetailPromptArea({
         ...compactExecutionConfig.model,
         active: { model: inlineEditingQueuedMessage.model },
         selected: inlineEditingQueuedMessage.model,
+        onChange: (model: string) =>
+          updateInlineQueuedMessage((current) =>
+            current
+              ? {
+                  ...current,
+                  model,
+                  reasoningLevel: resolveReasoningForModel(
+                    model,
+                    current.reasoningLevel,
+                  ).reasoningLevel,
+                }
+              : current,
+          ),
       },
       serviceTier: {
         ...compactExecutionConfig.serviceTier,
         value: inlineEditingQueuedMessage.serviceTier,
+        onChange: (serviceTier: ServiceTier | undefined) =>
+          updateInlineQueuedMessage((current) =>
+            current
+              ? { ...current, serviceTier: serviceTier ?? DEFAULT_SERVICE_TIER }
+              : current,
+          ),
       },
       reasoning: {
         ...compactExecutionConfig.reasoning,
         value: inlineEditingQueuedMessage.reasoningLevel,
+        options: resolveReasoningForModel(
+          inlineEditingQueuedMessage.model,
+          inlineEditingQueuedMessage.reasoningLevel,
+        ).reasoningOptions,
+        onChange: (reasoningLevel: ReasoningLevel) =>
+          updateInlineQueuedMessage((current) =>
+            current ? { ...current, reasoningLevel } : current,
+          ),
       },
     };
-  }, [compactExecutionConfig, inlineEditingQueuedMessage]);
+  }, [
+    compactExecutionConfig,
+    inlineEditingQueuedMessage,
+    resolveReasoningForModel,
+    updateInlineQueuedMessage,
+  ]);
 
   const bottomPermissionConfig = useMemo(
     () => ({
@@ -1660,9 +1708,20 @@ export function ThreadDetailPromptArea({
         ? {
             ...bottomPermissionConfig,
             value: inlineEditingQueuedMessage.permissionMode,
+            onChange: isPermissionSnapshot
+              ? ignorePermissionModeChange
+              : (permissionMode: PermissionMode) =>
+                  updateInlineQueuedMessage((current) =>
+                    current ? { ...current, permissionMode } : current,
+                  ),
           }
         : null,
-    [bottomPermissionConfig, inlineEditingQueuedMessage],
+    [
+      bottomPermissionConfig,
+      inlineEditingQueuedMessage,
+      isPermissionSnapshot,
+      updateInlineQueuedMessage,
+    ],
   );
 
   const environmentSummary = useMemo(
@@ -1725,30 +1784,10 @@ export function ThreadDetailPromptArea({
     () => (
       <ThreadPromptModeCard
         activePromptMode={activePromptMode}
-        isExitPending={cancelThreadPlan.isPending}
-        isExpanded={isPromptModeExpanded}
-        onExitPlanMode={handleCancelPlan}
-        onToggle={() => setIsPromptModeExpanded((value) => !value)}
+        onExitPlanMode={handleExitPlanMode}
       />
     ),
-    [
-      activePromptMode,
-      cancelThreadPlan.isPending,
-      handleCancelPlan,
-      isPromptModeExpanded,
-    ],
-  );
-  const activeGoalCard = useMemo(
-    () => (
-      <ThreadGoalCard
-        goal={goal}
-        isClearPending={clearThreadGoal.isPending}
-        isExpanded={isGoalExpanded}
-        onClearGoal={handleClearGoal}
-        onToggle={() => setIsGoalExpanded((value) => !value)}
-      />
-    ),
-    [clearThreadGoal.isPending, goal, handleClearGoal, isGoalExpanded],
+    [activePromptMode, handleExitPlanMode],
   );
   const inlineEditSessionId = inlineEditingQueuedMessage?.editSessionId ?? null;
   const inlineEditQueuedMessageId =
@@ -1851,6 +1890,7 @@ export function ThreadDetailPromptArea({
         draft: activeComposerDraft,
         editFocusNonce,
         execution: inlineExecutionConfig,
+        executionReadOnly: false,
         focusSessionKey: editSessionId,
         historyResetKey: `${thread.id}:${editSessionId}`,
         isSubmitting: isUpdateQueuedMessagePending,
@@ -1860,6 +1900,7 @@ export function ThreadDetailPromptArea({
             queuedMessagePluginComposerHost,
           ).restoreDraft(draft),
         permission: inlinePermissionConfig,
+        permissionReadOnly: isPermissionSnapshot,
         pluginComposerHost: queuedMessagePluginComposerHost,
         promptActions: inlinePromptActions,
         promptPlaceholder,
@@ -1887,6 +1928,7 @@ export function ThreadDetailPromptArea({
     inlineExecutionConfig,
     inlinePermissionConfig,
     isAttachingInlineFiles,
+    isPermissionSnapshot,
     inlinePendingUploads,
     isUpdateQueuedMessagePending,
     projectId,
@@ -1993,6 +2035,7 @@ export function ThreadDetailPromptArea({
           draft,
           editFocusNonce,
           execution: compactExecutionConfig,
+          executionReadOnly: true,
           focusSessionKey: operationId,
           historyResetKey: `${thread.id}:${operationId}`,
           isSubmitting: sentMessageEdit.isSubmitting,
@@ -2008,6 +2051,7 @@ export function ThreadDetailPromptArea({
               sentMessagePluginComposerHost,
             ).restoreDraft(nextDraft),
           permission: bottomPermissionConfig,
+          permissionReadOnly: true,
           pluginComposerHost: sentMessagePluginComposerHost,
           promptActions: inlinePromptActions,
           promptPlaceholder: "Edit message",
@@ -2066,7 +2110,6 @@ export function ThreadDetailPromptArea({
           onToggle={() => setIsBackgroundCommandsExpanded((value) => !value)}
         />
         {shouldHideComposer ? null : activePromptModeCard}
-        {shouldHideComposer ? null : activeGoalCard}
         {environmentHostId &&
         thread.archivedAt === null &&
         environmentGoneStatus === null ? (
@@ -2128,7 +2171,7 @@ export function ThreadDetailPromptArea({
         ) : (
           <LazyQueuedMessagesList
             attachedToComposer={true}
-            queuedMessages={queuedMessages}
+            queuedMessages={drawerQueuedMessages}
             resolveMentionLink={resolveMentionLink}
             inlineEditor={queuedMessageEditor ?? undefined}
             sendAction={shouldSteerWhenReady ? "steer-when-ready" : "send-now"}
@@ -2145,9 +2188,11 @@ export function ThreadDetailPromptArea({
             onReorder={handleReorderQueuedMessage}
             onSetGroupBoundary={handleSetQueuedMessageGroupBoundary}
             onEdit={beginEditQueuedMessage}
+            onChangeSendTime={handleChangeQueuedMessageSendTime}
             onDelete={handleDeleteQueuedMessage}
             expanded={queueExpanded}
             onExpandedChange={setQueueExpanded}
+            threadStatus={thread.status}
           />
         )}
       </>
@@ -2162,6 +2207,8 @@ export function ThreadDetailPromptArea({
       expandedBannerSegment,
       contextEnvironmentId,
       thread.projectId,
+      thread.status,
+      handleChangeQueuedMessageSendTime,
       handleDeleteQueuedMessage,
       beginEditQueuedMessage,
       handleReorderQueuedMessage,
@@ -2177,7 +2224,6 @@ export function ThreadDetailPromptArea({
       isUnarchiveCurrentThreadPending,
       isQueueMutationPending,
       queuedMessageEditor,
-      activeGoalCard,
       activePromptModeCard,
       activeWorkflows,
       isWorkflowStackExpanded,
@@ -2188,10 +2234,9 @@ export function ThreadDetailPromptArea({
       modelFallback,
       parentThreadSection,
       childThreadsSection,
-      orderedPendingInteractions,
       displayedProcessingQueuedMessage,
       queuedMessageCount,
-      queuedMessages,
+      drawerQueuedMessages,
       queuedMessagesPending,
       resolveMentionLink,
       runtimeDisplayStatus,
@@ -2229,19 +2274,14 @@ export function ThreadDetailPromptArea({
           onExpandedChange={setIsChildThreadsExpanded}
         />
         {activePromptMode ? activePromptModeCard : null}
-        {goal ? activeGoalCard : null}
       </>
     ),
     [
-      activeGoalCard,
       activePromptMode,
       activePromptModeCard,
       childThreadsBannerKey,
       childThreadsSection,
-      orderedPendingInteractions,
       isChildThreadsExpanded,
-      goal,
-      thread.id,
     ],
   );
 

@@ -23,6 +23,7 @@
     "packages/plugin-registry/r/",
     ".bb/skills/verify-bb/inventory.json",
     "packages/db/drizzle/meta/",
+    "packages/db/drizzle/fork/meta/",
     "packages/connect-db/migrations/meta/",
     "*.snapshot.json",
     "apps/mobile/ios/",

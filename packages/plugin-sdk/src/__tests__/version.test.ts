@@ -8,7 +8,7 @@ describe("plugin SDK compatibility version", () => {
       await readFile(new URL("../../package.json", import.meta.url), "utf8"),
     ) as { version: string };
 
-    expect(packageJson.version).toBe(PLUGIN_SDK_VERSION);
+    expect(packageJson.version.split("+", 1)[0]).toBe(PLUGIN_SDK_VERSION);
     expect(PLUGIN_SDK_VERSION).toMatch(/^0\./u);
   });
 });

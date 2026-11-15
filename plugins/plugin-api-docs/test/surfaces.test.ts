@@ -36,6 +36,7 @@ describe("product-map surfaces", () => {
       "thread-panel",
       "file-opener",
       "app-overlay",
+      "modal",
       "content-scripts",
     ];
     expect(surfaceIds("app-shell")).toEqual(ordered);

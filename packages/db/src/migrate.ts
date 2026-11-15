@@ -5,6 +5,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DbConnection } from "./connection.js";
 import {
+  adoptLegacyForkMigrationRows,
+  applyForkMigrations,
+} from "./fork-migrations.js";
+import {
   compatibleMigrationHashes,
   publishedMigrationWhensByTag,
 } from "./migration-history.js";
@@ -1411,6 +1415,8 @@ function validateAppliedMigrationHistory(
 
 export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
   const migrationsFolder = resolveMigrationsFolder();
+  // werserk fork: first, before anything reads upstream's ledger.
+  adoptLegacyForkMigrationRows(db, migrationsFolder);
   const sqlite = db.$client;
 
   const existingInstallation =
@@ -1469,4 +1475,7 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
   warnAboutFutureAppliedMigrations(db, options);
   validateAppliedMigrationHistory(db, migrationsFolder);
   validatePendingInteractionsSchema(db);
+  // werserk fork: last, so every upstream step and check runs on upstream's
+  // schema and a broken upstream history fails before any fork DDL runs.
+  applyForkMigrations(db, migrationsFolder);
 }

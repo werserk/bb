@@ -27,9 +27,12 @@ import {
 import { createSlowThreadTimelineBuildLogger } from "./timeline-build-log.js";
 import {
   buildThreadTimelineCacheKey,
+  buildThreadTimelineCacheRevision,
   createThreadTimelineCache,
 } from "./timeline-cache.js";
 import { clearTimelineOrderingContextCache } from "./timeline-context-order.js";
+import { forgetTimelineProjectionFolds } from "./timeline-projection-fold.js";
+import { forgetLatestTimelineSelections } from "./timeline-selection-memo.js";
 import { createTimelineServedWindowsCache } from "./timeline-served-windows-cache.js";
 import { timelineRowHash, timelineWindowTag } from "./timeline-window-tag.js";
 import { isCompactionOfferEnabled } from "./compaction-offer.js";
@@ -156,6 +159,9 @@ export function createThreadTimelineWindows(
         deps.providerRegistry,
         thread.providerId,
       ),
+      extensionStateKinds: Object.entries(
+        deps.providerRegistry.get(thread.providerId)?.info.extensionKinds ?? {},
+      ).flatMap(([kind, declared]) => (declared.state ? [kind] : [])),
       providerDisplayName,
       summarizeShellCommands: settings.summarizeShellCommands,
     };
@@ -163,12 +169,16 @@ export function createThreadTimelineWindows(
       thread.id,
       buildThreadTimelineCacheKey({
         threadId: thread.id,
+        page: request.page,
+        summaryOnly: request.summaryOnly,
+        deferContent: request.deferContent,
+        includeNestedRows: request.includeNestedRows,
+      }),
+      buildThreadTimelineCacheRevision({
         maxSeq,
         status: thread.status,
         surface: resolveThreadTimelineSurface(deps.db, thread, surfaceOptions)
           .cacheKey,
-        page: request.page,
-        summaryOnly: request.summaryOnly,
       }),
       () => {
         const { profile, response: built } = buildThreadTimelineWithProfile(
@@ -372,6 +382,8 @@ export function createThreadTimelineWindows(
     if (rewritten) {
       clearTimelineOrderingContextCache(deps.db);
     }
+    forgetLatestTimelineSelections(deps.db, message.id);
+    forgetTimelineProjectionFolds(deps.db, message.id);
     timelineCache.invalidateThread(message.id);
   });
 

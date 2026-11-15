@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "52fc633d-d1e3-4f3d-a0ee-26e8bda3269b",
-  "prevId": "a8264e10-c8c2-4ffb-afdf-c53f079e6c72",
+  "id": "78bdb439-f973-400a-8a92-3d57a5d420b5",
+  "prevId": "2ef2ba01-f0de-4e8b-b7c0-c7bc9dd47f3b",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -449,223 +449,6 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "conversation_questions": {
-      "name": "conversation_questions",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "source_turn_id": {
-          "name": "source_turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "source_call_id": {
-          "name": "source_call_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'open'"
-        },
-        "publication": {
-          "name": "publication",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "material_manifest": {
-          "name": "material_manifest",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "response": {
-          "name": "response",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "queued_message_id": {
-          "name": "queued_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dispatched_at": {
-          "name": "dispatched_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "conversation_questions_thread_created_idx": {
-          "name": "conversation_questions_thread_created_idx",
-          "columns": [
-            "thread_id",
-            "created_at",
-            "id"
-          ],
-          "isUnique": false
-        },
-        "conversation_questions_thread_status_idx": {
-          "name": "conversation_questions_thread_status_idx",
-          "columns": [
-            "thread_id",
-            "status"
-          ],
-          "isUnique": false
-        },
-        "conversation_questions_source_idx": {
-          "name": "conversation_questions_source_idx",
-          "columns": [
-            "thread_id",
-            "source_turn_id",
-            "source_call_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "conversation_questions_thread_id_threads_id_fk": {
-          "name": "conversation_questions_thread_id_threads_id_fk",
-          "tableFrom": "conversation_questions",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "conversation_questions_answer_custody": {
-          "name": "conversation_questions_answer_custody",
-          "value": "\"conversation_questions\".\"status\" != 'answered' OR (\"conversation_questions\".\"response\" IS NOT NULL AND \"conversation_questions\".\"queued_message_id\" IS NOT NULL)"
-        }
-      }
-    },
-    "diff_viewed_files": {
-      "name": "diff_viewed_files",
-      "columns": {
-        "environment_id": {
-          "name": "environment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target_key": {
-          "name": "target_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "diff_viewed_files_environment_id_environments_id_fk": {
-          "name": "diff_viewed_files_environment_id_environments_id_fk",
-          "tableFrom": "diff_viewed_files",
-          "tableTo": "environments",
-          "columnsFrom": [
-            "environment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "diff_viewed_files_environment_id_target_key_path_pk": {
-          "columns": [
-            "environment_id",
-            "target_key",
-            "path"
-          ],
-          "name": "diff_viewed_files_environment_id_target_key_path_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -3729,127 +3512,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "question_resolution_events": {
-      "name": "question_resolution_events",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target_kind": {
-          "name": "target_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "initial": {
-          "name": "initial",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "principal": {
-          "name": "principal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "operation_id": {
-          "name": "operation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "request": {
-          "name": "request",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attribution": {
-          "name": "attribution",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "question_resolution_operation_idx": {
-          "name": "question_resolution_operation_idx",
-          "columns": [
-            "principal",
-            "operation_id"
-          ],
-          "isUnique": true
-        },
-        "question_resolution_initial_idx": {
-          "name": "question_resolution_initial_idx",
-          "columns": [
-            "target_kind",
-            "target_id",
-            "revision"
-          ],
-          "isUnique": true,
-          "where": "\"question_resolution_events\".\"initial\" = 1"
-        },
-        "question_resolution_target_idx": {
-          "name": "question_resolution_target_idx",
-          "columns": [
-            "target_kind",
-            "target_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "question_resolution_events_thread_id_threads_id_fk": {
-          "name": "question_resolution_events_thread_id_threads_id_fk",
-          "tableFrom": "question_resolution_events",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "queued_thread_messages": {
       "name": "queued_thread_messages",
       "columns": {
@@ -3862,13 +3524,6 @@
         },
         "system_notice": {
           "name": "system_notice",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "service_turn": {
-          "name": "service_turn",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -4038,16 +3693,24 @@
           "notNull": false,
           "autoincrement": false
         },
-        "question_id": {
-          "name": "question_id",
+        "delivery_mode": {
+          "name": "delivery_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'steer'"
+        },
+        "coalesce_key": {
+          "name": "coalesce_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "question_revision": {
-          "name": "question_revision",
-          "type": "integer",
+        "coalesce_state": {
+          "name": "coalesce_state",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -4131,6 +3794,15 @@
             "id"
           ],
           "isUnique": false
+        },
+        "queued_thread_messages_coalesce_idx": {
+          "name": "queued_thread_messages_coalesce_idx",
+          "columns": [
+            "thread_id",
+            "coalesce_key"
+          ],
+          "isUnique": false,
+          "where": "\"queued_thread_messages\".\"coalesce_key\" IS NOT NULL"
         },
         "queued_thread_messages_wait_holder_idx": {
           "name": "queued_thread_messages_wait_holder_idx",
@@ -4423,6 +4095,15 @@
             "daemon_session_id"
           ],
           "isUnique": false
+        },
+        "terminal_sessions_exited_prune_idx": {
+          "name": "terminal_sessions_exited_prune_idx",
+          "columns": [
+            "updated_at",
+            "id"
+          ],
+          "isUnique": false,
+          "where": "\"terminal_sessions\".\"status\" = 'exited'"
         }
       },
       "foreignKeys": {
@@ -5176,6 +4857,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'starting'"
+        },
+        "status_changed_at": {
+          "name": "status_changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "startup_context": {
           "name": "startup_context",

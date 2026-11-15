@@ -99,35 +99,46 @@ export function resolveEmbeddedLocalFileTarget({
 }: ResolveEmbeddedLocalFileTargetArgs): EmbeddedLocalFileTarget {
   const resolution = resolveThreadLocalFileLink({
     fileOpenTargetIds: [],
-    hostFileLinksAvailable: false,
+    hostId: null,
     link: { ...link, openTargetId: null },
-    threadStorageRootPath,
-    workspaceRootPath: environmentId === null ? null : workspaceRootPath,
+    threadStorage:
+      threadStorageRootPath === null
+        ? null
+        : { rootPath: threadStorageRootPath, threadId },
+    workspace:
+      environmentId === null || workspaceRootPath === null
+        ? null
+        : { environmentId, rootPath: workspaceRootPath },
   });
 
   switch (resolution.kind) {
     case "app-route":
       return { kind: "app-route" };
-    case "open-workspace-path":
-      return environmentId === null
-        ? { kind: "unavailable", path: resolution.request.path }
-        : {
-            environmentId,
-            kind: "workspace",
-            lineRange: resolution.request.lineRange,
-            path: resolution.request.path,
-            relativePath: resolution.request.relativePath,
-          };
-    case "open-thread-storage-path":
-      return {
-        kind: "thread-storage",
-        lineRange: resolution.request.lineRange,
-        path: resolution.request.path,
-        relativePath: resolution.request.relativePath,
-        threadId,
-      };
+    case "preview": {
+      const { target } = resolution.options;
+      const { lineRange } = link;
+      const path = normalizeAbsoluteFilePath({ path: link.path });
+      if (path !== null && target.kind === "workspace") {
+        return {
+          environmentId: target.environmentId,
+          kind: "workspace",
+          lineRange,
+          path,
+          relativePath: target.path,
+        };
+      }
+      if (path !== null && target.kind === "thread-storage") {
+        return {
+          kind: "thread-storage",
+          lineRange,
+          path,
+          relativePath: target.path,
+          threadId: target.threadId,
+        };
+      }
+      return { kind: "unavailable", path: link.path };
+    }
     case "open-in-target":
-    case "open-host-path":
     case "error": {
       const linkPath = normalizeAbsoluteFilePath({ path: link.path });
       return (

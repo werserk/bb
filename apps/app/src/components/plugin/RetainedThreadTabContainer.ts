@@ -31,8 +31,6 @@ export function useRetainedThreadTabContainer({
   const anchor = useRef<Anchor | null>(null);
   const scroll = useRef<ScrollPosition[]>([]);
   const capture = (element: HTMLDivElement) => {
-    // Late layout cleanup can still name the removed outlet. Its zero geometry
-    // must never replace the last visible snapshot (including a real zero offset).
     if (
       !element.isConnected ||
       container.parentElement !== element ||
@@ -56,8 +54,6 @@ export function useRetainedThreadTabContainer({
       )
       .map((element) => {
         const viewport = element.getBoundingClientRect();
-        // A leaf anchors content rather than the group's outer box, whose top
-        // does not move when a temporary block above the visible row disappears.
         const node = [...element.querySelectorAll<HTMLElement>("*")].find(
           (child) => {
             if (child.childElementCount !== 0) return false;
@@ -102,7 +98,6 @@ export function useRetainedThreadTabContainer({
       parking.current.append(container);
   };
   useLayoutEffect(() => {
-    // Connectivity can change after render, before this layout effect runs.
     const live = attached && outlet?.element.isConnected;
     container.dataset.retainedFixedTabBody = tabId;
     container.className =
@@ -117,8 +112,6 @@ export function useRetainedThreadTabContainer({
         restoreScroll();
       }
       return () => {
-        // Capture before the next layout effect hides/parks the body. A late
-        // outlet cleanup may run after it is hidden and must keep this record.
         if (container.parentElement === outlet.element) capture(outlet.element);
       };
     }
@@ -149,8 +142,6 @@ export function useRetainedThreadTabContainer({
     };
     positionBridge();
     if (!bridge) return;
-    // Moving into the painted bridge resets descendant offsets just like an
-    // outlet move. Restore after its geometry exists, before the browser paints.
     restoreScroll();
     window.addEventListener("resize", positionBridge);
     const observer =

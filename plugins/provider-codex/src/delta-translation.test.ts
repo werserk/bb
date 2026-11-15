@@ -1651,11 +1651,16 @@ describe("codex error and warning translation", () => {
   });
 
   it.each([
-    ["sessionBudgetExceeded", "budget-exceeded"],
-    ["misalignmentPolicyViolation", "policy"],
+    ["sessionBudgetExceeded", "budget-exceeded", "sessionBudgetExceeded"],
+    ["misalignmentPolicyViolation", "policy", "misalignmentPolicyViolation"],
+    ["modelNotFound", "bad-request", "modelNotFound"],
+    ["rateLimitExceeded", "rate-limit", "rateLimitExceeded"],
+    ["flexUnavailable", "overloaded", "flexUnavailable"],
+    ["someFutureCode", "unknown", "someFutureCode"],
+    [{ someFutureVariant: { detail: 1 } }, "unknown", "someFutureVariant"],
   ] as const)(
-    "normalizes %s errors and failed turn completion",
-    (codexErrorInfo, category) => {
+    "normalizes %j errors and failed turn completion",
+    (codexErrorInfo, category, providerCode) => {
       const harness = createHarness();
 
       expect(
@@ -1677,7 +1682,7 @@ describe("codex error and warning translation", () => {
           scope: turnScope(harness.turnId("turn-1")),
           errorInfo: {
             category,
-            providerCode: codexErrorInfo,
+            providerCode,
             httpStatusCode: null,
           },
         }),
@@ -1714,7 +1719,7 @@ describe("codex error and warning translation", () => {
     const error = {
       message:
         "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
-      codexErrorInfo: "modelNotFound",
+      codexErrorInfo: "someFutureCode",
       additionalDetails: null,
       misalignment: null,
     };
@@ -1738,7 +1743,7 @@ describe("codex error and warning translation", () => {
         detail: error.message,
         errorInfo: {
           category: "unknown",
-          providerCode: "modelNotFound",
+          providerCode: "someFutureCode",
           httpStatusCode: null,
         },
       }),
@@ -1747,7 +1752,7 @@ describe("codex error and warning translation", () => {
       harness.translate({
         jsonrpc: "2.0",
         method: "error",
-        params: { error: { codexErrorInfo: "modelNotFound" }, threadId: "t1" },
+        params: { error: { codexErrorInfo: "someFutureCode" }, threadId: "t1" },
       }),
     ).toEqual([
       expect.objectContaining({ type: "provider/unhandled", rawType: "error" }),

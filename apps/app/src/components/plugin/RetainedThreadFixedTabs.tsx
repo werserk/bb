@@ -59,12 +59,13 @@ type Entry = {
 const slotKey = (slot: PluginThreadFixedTabSlot) =>
   JSON.stringify([slot.pluginId, slot.id, slot.generation]);
 
-function createRegistry() {
+function createRegistry(scope: string) {
   let entries = new Map<string, Entry>();
   let state: HostState | null = null;
   const listeners = new Set<() => void>();
   const stateListeners = new Set<() => void>();
   return {
+    scope,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
@@ -110,7 +111,7 @@ export function RetainedThreadFixedTabs({
   const fallbackId = useId();
   const pane = useOptionalPaneContext();
   const scope = JSON.stringify([pane?.paneId ?? fallbackId, projectId]);
-  const registry = useMemo(createRegistry, [scope]);
+  const registry = useMemo(() => createRegistry(scope), [scope]);
   const { tabs } = usePluginSlots();
   const slots = tabs
     .filter(isThreadTab)
@@ -146,20 +147,35 @@ export function RetainedThreadFixedTabs({
 export function useRetainedThreadTabHostState(state: HostState) {
   const registry = useContext(RetainedTabsContext);
   const pane = useOptionalPaneContext();
+  const {
+    threadId,
+    ready,
+    loading,
+    tabsReady,
+    open,
+    activeTabId,
+    environment,
+  } = state;
   useLayoutEffect(() => {
-    registry?.publishState(state);
+    registry?.publishState({
+      threadId,
+      ready,
+      loading,
+      tabsReady,
+      open,
+      activeTabId,
+      environment,
+    });
   }, [
     registry,
-    state.threadId,
-    state.ready,
-    state.loading,
-    state.tabsReady,
-    state.open,
-    state.activeTabId,
-    state.environment,
+    threadId,
+    ready,
+    loading,
+    tabsReady,
+    open,
+    activeTabId,
+    environment,
   ]);
-  // The split workspace renders its panel outside the originating pane tree.
-  // Transport the same registry and pane rather than creating another owner.
   return useCallback(
     (panel: ReactNode) => (
       <RetainedTabsContext.Provider value={registry}>
@@ -263,8 +279,6 @@ function Instance({
     pluginId: slot.pluginId,
     tabId: slot.id,
   }).id;
-  // Route props render before the layout-published host state. Keep presentation
-  // on that committed state; dispatch still fences against the latest route ref.
   const bodyThreadId = state?.threadId ?? threadId;
   const outlet = currentOutlet.current;
   const current = state !== null;
@@ -280,8 +294,6 @@ function Instance({
     outlet.element.isConnected &&
     outlet.visible
   );
-  // A new thread's visibility observer settles in layout. Preserve the previous
-  // selected body during that handoff, but never authorize old outlet actions.
   const pendingVisibility = !!(
     selected &&
     state.ready &&

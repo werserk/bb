@@ -15,6 +15,7 @@ import {
   recordedThreadExecutionOptionsSchema,
 } from "./shared-types.js";
 import { jsonValueSchema } from "./json-value.js";
+import { pluginIdSchema } from "./plugin-id.js";
 import { clientTurnRequestIdSchema } from "./protocol-ids.js";
 import {
   systemMessageKindSchema,
@@ -93,6 +94,7 @@ export const turnRequestEventDataSchema = z.object({
   source: z.enum(["spawn", "tell"]),
   initiator: threadTurnInitiatorSchema,
   senderThreadId: z.string().nullable(),
+  originPluginId: pluginIdSchema.optional(),
   systemMessageKind: systemMessageKindSchema.optional(),
   systemMessageSubject: systemMessageSubjectSchema.nullable().optional(),
   input: z.array(promptInputSchema),

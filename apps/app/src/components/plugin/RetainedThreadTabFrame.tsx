@@ -91,9 +91,6 @@ export function useRetainedThreadTabFrame() {
       const guardedTimeline = timeline
         ? {
             ...timeline,
-            onOpenLink: (...args: Parameters<typeof timeline.onOpenLink>) => {
-              return allowed() && timeline.onOpenLink(...args);
-            },
             onOpenLocalFileLink: (
               ...args: Parameters<typeof timeline.onOpenLocalFileLink>
             ) => {

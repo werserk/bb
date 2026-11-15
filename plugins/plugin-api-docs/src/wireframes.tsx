@@ -1392,6 +1392,24 @@ function AppShellWireframeBody({
           </span>
         </span>
       </Mark>
+
+      <Mark
+        id="modal"
+        label="Large modal drawn by bb"
+        className={cn(
+          "z-[6] flex h-14 w-52 flex-col justify-between rounded-md border border-border bg-popover px-3 py-2 text-foreground shadow-md",
+          mobile
+            ? "relative mb-4 ml-auto mr-4 shrink-0"
+            : "absolute right-1/3 top-1/3",
+        )}
+      >
+        <span className="block truncate font-medium">Create workspace</span>
+        <span className="flex justify-end">
+          <span className="rounded-md bg-foreground px-2 text-background">
+            Save
+          </span>
+        </span>
+      </Mark>
     </WindowFrame>
   );
 }
@@ -1415,7 +1433,7 @@ function ThreadContextCardMark({ compact }: { compact: boolean }) {
       id="thread-context-card"
       label={label}
       chip="corner-inset"
-      className="absolute right-4 top-4 block w-40 rounded-2xl border border-border bg-popover p-1 text-foreground"
+      className="absolute right-4 top-4 block w-40 rounded-md border border-border bg-popover p-1 text-foreground"
     >
       <span className="flex h-6.5 items-center gap-2 px-1.5">
         <MiniIcon icon="GitPullRequest" className="size-3.5" />

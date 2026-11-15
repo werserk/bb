@@ -13,6 +13,7 @@ import {
 } from "../services/system/event-pruning.js";
 import { applyLoggedThreadLifecycleEvent } from "../services/threads/lifecycle-outcome.js";
 import { shouldSilenceBackgroundTurnAttention } from "../services/threads/thread-attention-policy.js";
+import { rejectUnconfirmedSteersAfterTurnCompleted } from "../services/threads/unconfirmed-turn-requests.js";
 
 interface ApplyTurnCompletedEventResult {
   isRootTurnCompletion: boolean;
@@ -53,6 +54,7 @@ export function applyTurnCompletedEvent(
     return { isRootTurnCompletion, nextStatus: null, thread };
   }
 
+  rejectUnconfirmedSteersAfterTurnCompleted(deps, payload.threadId);
   const event = lifecycleEventForTurnCompletion(payload.status);
   const suppressIdleAttention =
     isServiceTurn(deps.db, payload.threadId, turnId) ||

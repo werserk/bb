@@ -25,10 +25,10 @@ import {
   readTerminalOutputLines,
   type ActiveThinking,
   type CompletedTurnDisplay,
+  type JsonValue,
   type Thread,
   type ThreadEventItemPresentation,
   type ThreadTimelineActivePromptMode,
-  type ThreadTimelineGoal,
   type ThreadTimelineModelFallback,
   type ThreadTimelinePendingTodos,
 } from "@bb/domain";
@@ -51,6 +51,9 @@ import { getFileChangeDiffStats } from "./file-change-summary.js";
 import { getEventProjectionMessageScopeTurnId } from "./message-scope.js";
 import {
   buildEventProjection,
+  finishEventProjectionFold,
+  startEventProjectionFold,
+  type EventProjectionFold,
   buildEventProjectionEntries,
   type ThreadEventWithMeta,
 } from "./build-event-projection.js";
@@ -71,8 +74,8 @@ import {
   extractThreadTimelineActivePromptMode,
   type PlanCommand,
 } from "./active-prompt-mode-extraction.js";
-import { extractThreadTimelineGoal } from "./goal-snapshot-extraction.js";
 import {
+  extractThreadExtensionStates,
   extractThreadProviderCommands,
   extractThreadSessionOptions,
 } from "./provider-state-extraction.js";
@@ -87,6 +90,7 @@ interface ThreadTimelineFromEventsBaseOptions {
   providerId?: string;
   providerDisplayName?: string;
   planCommand?: PlanCommand | null;
+  extensionStateKinds?: readonly string[];
   summarizeShellCommands: boolean;
   threadStatus: Thread["status"];
   threadName: string;
@@ -103,7 +107,41 @@ interface BuildThreadTimelineFromEventsArgs {
   contextWindowEvents: ThreadEventWithMeta[];
   headStateEvents?: ThreadEventWithMeta[];
   events: ThreadEventWithMeta[];
+  fold?: EventProjectionFold;
   options: ThreadTimelineFromEventsOptions;
+}
+
+type ThreadTimelineProjectionOptions = Parameters<
+  typeof buildEventProjection
+>[1];
+
+function threadTimelineProjectionOptions(
+  acceptedClientRequestContext: AcceptedClientRequestContext,
+  options: ThreadTimelineFromEventsOptions,
+): ThreadTimelineProjectionOptions {
+  return {
+    acceptedClientRequestContext,
+    includeDiagnosticOperations: options.includeDiagnosticOperations,
+    providerDisplayName: options.providerDisplayName,
+    threadStatus: options.threadStatus,
+    threadName: options.threadName,
+    turnMessageDetail: "full",
+  };
+}
+
+export function startThreadTimelineProjectionFold(
+  args: Pick<
+    BuildThreadTimelineFromEventsArgs,
+    "acceptedClientRequestContext" | "events" | "options"
+  >,
+): EventProjectionFold {
+  return startEventProjectionFold(
+    args.events,
+    threadTimelineProjectionOptions(
+      args.acceptedClientRequestContext,
+      args.options,
+    ),
+  );
 }
 
 export interface ThreadTimelineFromEventsResult {
@@ -113,7 +151,7 @@ export interface ThreadTimelineFromEventsResult {
   activeWorkflows: TimelineWorkflowWorkRow[];
   activeBackgroundCommands: TimelineWorkflowWorkRow[];
   contextWindowUsage: ThreadContextWindowUsage | null;
-  goal: ThreadTimelineGoal | null;
+  extensionStates: Record<string, JsonValue>;
   modelFallback: ThreadTimelineModelFallback | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
   providerCommands: ProviderCommand[] | null;
@@ -541,6 +579,7 @@ function convertMessage(
           status: message.status,
           callId: message.callId,
           command: message.command,
+          description: message.description,
           cwd: message.cwd,
           source: message.source,
           output: message.output,
@@ -1189,15 +1228,16 @@ export function buildThreadTimelineFromEvents(
       ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
       : args.events
   ).filter((event) => !hideService || !service.hides(event));
-  const projectionOptions = {
-    acceptedClientRequestContext: args.acceptedClientRequestContext,
-    includeDiagnosticOperations: args.options.includeDiagnosticOperations,
-    providerDisplayName: args.options.providerDisplayName,
-    threadStatus: args.options.threadStatus,
-    threadName: args.options.threadName,
-    turnMessageDetail: "full",
-  } satisfies Parameters<typeof buildEventProjection>[1];
-  const projection = buildEventProjection(args.events, projectionOptions);
+  const projection =
+    args.fold === undefined
+      ? buildEventProjection(
+          args.events,
+          threadTimelineProjectionOptions(
+            args.acceptedClientRequestContext,
+            args.options,
+          ),
+        )
+      : finishEventProjectionFold(args.fold, args.events);
   const activeThinking = projection.state.activeThinking;
   const serviceThinking =
     hideService &&
@@ -1279,9 +1319,12 @@ export function buildThreadTimelineFromEvents(
     contextWindowUsage: extractThreadContextWindowUsage(
       args.contextWindowEvents,
     ),
-    goal: !args.options.isLatestPage
-      ? null
-      : extractThreadTimelineGoal(stateEvents),
+    extensionStates: !args.options.isLatestPage
+      ? {}
+      : extractThreadExtensionStates(
+          stateEvents,
+          args.options.extensionStateKinds ?? [],
+        ),
     providerCommands: !args.options.isLatestPage
       ? null
       : extractThreadProviderCommands(stateEvents),

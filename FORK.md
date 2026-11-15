@@ -1,6 +1,6 @@
 # werserk/bb fork
 
-This is a maintained downstream fork of [get-bb/bb](https://github.com/get-bb/bb). `fork/main` starts at the upstream release tag `desktop-v0.48.1` and adds only downstream patches; it integrates upstream `desktop-v*` release tags, never upstream `main`. Architecture, branch model, release policy and the patch ledger live in the maintainer's repository: `docs/bb-fork/` in [werserk/bb-plugin-lab](https://github.com/werserk/bb-plugin-lab) (private).
+This is a maintained downstream fork of [get-bb/bb](https://github.com/get-bb/bb). `fork/main` started at the upstream release tag `desktop-v0.48.1`, now carries upstream `desktop-v0.49.0` merged in, and adds only downstream patches; it integrates upstream `desktop-v*` release tags, never upstream `main`. Architecture, branch model, release policy and the patch ledger live in the maintainer's repository: `docs/bb-fork/` in [werserk/bb-plugin-lab](https://github.com/werserk/bb-plugin-lab) (private).
 
 `apps/app/src/lib/synchronized-spinners.ts`, installed before React mounts in `main.tsx`, aligns native `spin` animations and pure full-turn animations on `.animate-spin` or working `.wp-status-mark` targets, including scoped plugin names, to a 1000ms document-timeline phase. Existing animations and later animation starts share the same path; reduced-motion and paused animations are left to CSS. It adds no render loop or DOM observer.
 
@@ -62,7 +62,7 @@ repeated injections before idle. All dispatch guards and transactional claims
 remain shared. See docs/system-overview.md and the instant-question-answer
 OpenSpec delta for the acceptance and stored-data compatibility contract.
 
-Claimed card answers alone set optional internal host turn.submit.injectOnly. Protocol260 requires the matching daemon through existing protocol self-update. The runtime checks bridge-negotiated steerMode; queue-mode ACP is refused before sending/cancelling. Legacy, system, agent and plugin commands omit the marker and keep their previous steering behavior. A withdrawn-before-refusal response is settled without requeueing or failing its active thread.
+Claimed card answers alone set optional internal host turn.submit.injectOnly. The daemon protocol (260 when added, 266 since the 0.49.0 merge) requires the matching daemon through existing protocol self-update. The runtime checks bridge-negotiated steerMode; queue-mode ACP is refused before sending/cancelling. Legacy, system, agent and plugin commands omit the marker and keep their previous steering behavior. A withdrawn-before-refusal response is settled without requeueing or failing its active thread.
 
 The approved UI A slice keeps sidebar New thread primary/split activation and
 adds middle-button browser-tab activation through the existing Navigation action.
@@ -79,9 +79,8 @@ navigation strips retain their explicit hidden-scrollbar policy.
 
 Core reading surfaces reserve an external 8px desktop gutter (20px for coarse
 pointers), using the shared --bb-panel-scrollbar-inset root token so plugin
-reading surfaces can use the same metric. panel-scroll-gutter covers shared chat
-viewports and native right-panel reading slots without padding their inner
-content. File previews receive their gutter once from the host slot; their
+reading surfaces can use the same metric. Shared chat viewports and native
+right-panel reading slots reserve it without padding their inner content. File previews receive their gutter once from the host slot; their
 Markdown, CSV and code bodies do not reserve a second gutter. Metadata owns its
 own viewport gutter. Browser New Tab keeps inline gutters without a bottom
 margin on its full-height body. Static PageShell surfaces outside panels keep
@@ -126,3 +125,19 @@ use ReadingScrollArea. FilePreviewHostScrollContext makes the existing host slot
 the sole Markdown scroll owner when it already scrolls; full-height slots let the
 preview own scrolling. This avoids an unbounded nested Radix viewport observed
 in the isolated candidate lab. No context or primitive is exported through SDK.
+
+## Upstream sync: desktop-v0.49.0
+
+The fork merged upstream `desktop-v0.49.0` on top of the daily build commit `53f5722472`. The owner's rule for the merge: where upstream now ships an equivalent, take upstream's and drop the fork's.
+
+- Dropped for upstream's version: all fork child-thread notice work (holding, settle grace, caps, truncation, render snapshots, the periodic reconcile, `child-notice-policy.ts`, `child-notice-reconcile.ts`, `child-notice-queries.ts`), the idle-provider fast path edits, the prompt-area goal card, and both `thread-activity` modules. Upstream delivers notices through the dispatcher and merges them with `coalesce_key` / `coalesce_state`.
+- Thread status glyphs come from upstream's single resolver (`packages/plugin-sdk/src/internal/thread-status.ts`). The fork's two rules live in one place, `toThreadStatusThread` in `apps/app/src/lib/plugin-sidebar-threads.ts`: an open question card counts as waiting for input, and a hidden service turn keeps its error and side work out of the glyph. `threadNeedsOwnerAttention` moved to `packages/client-core/src/thread/owner-attention.ts`.
+- Daemon protocol: upstream is at 264, the fork at 266. The comparison is ordered, so the fork's number must stay above upstream's; each sync sets it to upstream's number plus the fork's own bumps.
+- Database migrations. `packages/db/drizzle/` is byte-identical to upstream: journal, snapshots and SQL. The fork never adds or renumbers files there.
+  - Fork migrations live in `packages/db/drizzle/fork/`, with their own journal, and are recorded in their own ledger table `__bb_fork_migrations`. Upstream's `__drizzle_migrations` holds only upstream migrations.
+  - `migrate()` in `packages/db/src/migrate.ts` makes two fork calls, both in `packages/db/src/fork-migrations.ts`. First, before anything else, `adoptLegacyForkMigrationRows` moves fork rows that older builds wrote into `__drizzle_migrations` over to the fork ledger, matched by `when` and checked by hash. A hash mismatch throws and moves nothing. Last, after upstream's migrations and checks, `applyForkMigrations` applies pending fork migrations and throws if any fork migration is missing from the fork ledger or has a different hash.
+  - The six fork migrations were `0148`-`0153` in the main journal at `53f5722472`. They are now `drizzle/fork/0000`-`0005` with the same SQL bytes and the same `when`, so their ledger identity is unchanged.
+  - A new fork migration: change `packages/db/src/schema.ts`, then run `pnpm --filter @bb/db exec drizzle-kit generate --config drizzle.fork.config.ts`. Do not run `db:generate` (the default config) for a fork change: it would write the fork's schema into upstream's folder. Keep only the newest snapshot in `drizzle/fork/meta/`.
+  - A sync: take `packages/db/drizzle/` from the upstream tag unchanged. Then refresh the fork snapshot: run the fork generate command once; it writes upstream's new schema changes as a fork migration. Delete that SQL file and its journal entry, keep its snapshot as the only one in `drizzle/fork/meta/`, and check that a second run reports nothing to generate.
+  - Guard: `packages/db/test/fork-ledger.test.ts` builds the production shape forward (upstream to the fork base, then the fork six in the old ledger), migrates it, and compares the full schema with a fresh database. It fails if an upstream table rebuild drops a fork column.
+  - Rollback: once the merged build has started on a database, the previous build does not run on it. The previous build's Drizzle sees upstream's `0152` as its newest ledger row and tries to re-apply the fork six; the first `ALTER TABLE ... ADD service_turn` fails on the existing column, Drizzle rolls back, `migrate()` throws and startup fails, with the database unchanged. Its Viewed marks code would also fail, because upstream `0151` dropped `diff_viewed_files`. The only rollback path is restoring the database snapshot taken before the merged build's first start.

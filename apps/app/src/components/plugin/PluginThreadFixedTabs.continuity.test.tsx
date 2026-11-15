@@ -92,7 +92,6 @@ function Board({ threadId }: { threadId: string }) {
 }
 
 function install(optIn = true, useIdentity = () => identity) {
-  // jsdom provides real connectivity but no layout; model a connected body.
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
     function (this: HTMLElement) {
       return (this.isConnected
@@ -444,7 +443,9 @@ it("observes hook-driven identity changes with unchanged host props", async () =
   let update: (next: string) => void = () => {};
   function useIdentity() {
     const [value, setValue] = useState("coordinator");
-    update = setValue;
+    useEffect(() => {
+      update = setValue;
+    }, [setValue]);
     return value;
   }
   install(true, useIdentity);
@@ -476,7 +477,7 @@ function HostedSurface({
   leftThread?: string;
   leftReady?: boolean;
 }) {
-  const registry = useMemo(createPaneSecondaryPanelRegistry, []);
+  const registry = useMemo(() => createPaneSecondaryPanelRegistry(), []);
   const hosts = useMemo(
     () =>
       Object.fromEntries(

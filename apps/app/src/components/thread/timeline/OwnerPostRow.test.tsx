@@ -86,13 +86,7 @@ function renderPostTree(row: TimelineOwnerPostRow) {
             projectNamesById={new Map()}
             threadById={new Map()}
           >
-            <OwnerPostRow
-              onOpenLink={undefined}
-              onOpenLocalFileLink={undefined}
-              projectId="proj_1"
-              row={row}
-              workspaceRootPath={undefined}
-            />
+            <OwnerPostRow projectId="proj_1" row={row} />
           </ThreadTitleMentionResourcesProvider>
         </RouteNavigationProvider>
       </MemoryRouter>

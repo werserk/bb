@@ -1,8 +1,13 @@
+import {
+  capturePluginUse,
+  forgetPluginRecommendation,
+} from "./plugin-use-telemetry.js";
 import { rpcResponseTags } from "@get-bb/plugin-sdk/internal/rpc-tags";
 import type {
   PluginRpcDiscoveryQuery,
   PublishedPluginRpcMethod,
 } from "@bb/server-contract";
+import type Database from "better-sqlite3";
 import { watch } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -101,7 +106,7 @@ import {
 } from "../plugin-catalog/marketplace-manifest.js";
 import {
   getLastThreadErrorMessage,
-  getLastThreadOutput,
+  getLatestTurnFinalOutput,
 } from "../threads/thread-data.js";
 import { buildTurnFailedEvent } from "../threads/turn-failed.js";
 import {
@@ -243,6 +248,11 @@ export interface PluginStartOptions {
   hold: PluginLoadHold;
 }
 
+export interface OpenPluginDatabase {
+  database: Database.Database;
+  pluginId: string;
+}
+
 export interface PluginService {
   isBuiltin(id: string): boolean;
   events: PluginThreadEventEmitter;
@@ -295,6 +305,7 @@ export interface PluginService {
     | { outcome: "unavailable"; detail: string }
   >;
   installPath(path: string): Promise<InstalledPlugin>;
+  preservePathPluginsInside(directory: string): Promise<void>;
   checkForUpdates(id?: string): Promise<PluginUpdateCheckEntry[]>;
   startPeriodicUpdateChecks(): void;
   stopPeriodicUpdateChecks(): Promise<void>;
@@ -325,6 +336,11 @@ export interface PluginService {
    * and its waits clear.
    */
   isPluginExpectedToRun(id: string): boolean;
+  /**
+   * The open `storage.database()` handles of loaded plugins, for the hourly
+   * plugin database maintenance sweep.
+   */
+  listOpenPluginDatabases(): OpenPluginDatabase[];
   /**
    * Asset backing GET /plugins/:id/assets/app.{js,css}: a reader for its
    * bytes (app.js from disk, app.css as loaded, without the Tailwind rules the
@@ -744,6 +760,8 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     installPathSource,
     installedUpdateVersion,
     npmIntentForRow,
+    pathSourceNotice,
+    preservePathPluginsInside,
     provenanceForRow,
     reconcileBundled,
     registerInstalled,
@@ -1093,6 +1111,10 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           }),
           isOrphanedBuiltin: isOrphanedBuiltinRow(row),
           sourceDisplay: sourceDisplayForRow(row),
+          sourceNotice:
+            row.sourceKind === "path"
+              ? pathSourceNotice({ id: row.id, rootDir: row.rootDir })
+              : null,
           updateState: updateStateForRow(row),
           enabled: row.enabled,
           description:
@@ -1298,6 +1320,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     providerIds: ReadonlySet<string>,
   ): Promise<void> {
     deps.onPluginUnregistered?.(row.id);
+    forgetPluginRecommendation(deps.db, row.id);
     forgetPluginProviders(deps.db, row.id, providerIds);
     // The uninstalled tree is no longer reloadable, so stop the module
     // resolve hook from scanning it on every later import.
@@ -1434,7 +1457,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       emitThreadIdle(thread, options) {
         emitThreadEvent("thread.idle", () => ({
           thread: buildThreadDto(thread),
-          lastAssistantText: getLastThreadOutput(deps.db, thread.id),
+          lastAssistantText: getLatestTurnFinalOutput(deps.db, thread.id),
           ...(options?.attentionSkipped === true
             ? { experimental_attention: "skipped" as const }
             : {}),
@@ -1472,6 +1495,18 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         emitThreadEvent("thread.deleted", () => ({
           thread: buildThreadDto(thread),
         }));
+      },
+      emitThreadRead(threadId) {
+        emitThreadEvent("experimental_thread.read", () => {
+          const thread = getThread(deps.db, threadId);
+          if (
+            thread === null ||
+            (thread.lastReadAt ?? 0) < thread.latestAttentionAt
+          ) {
+            return null;
+          }
+          return { thread: buildThreadDto(thread) };
+        });
       },
       emitInteractionPending(thread, interaction) {
         emitThreadEvent("interaction.pending", () => ({
@@ -1571,6 +1606,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
                   bundled.rootDir,
                   deps.appVersion,
                   await getPluginBuildToolchain(deps),
+                  { minify: true, hostProvidedZod: true },
                 );
                 logPluginBuildWarnings({
                   dataDir: deps.dataDir,
@@ -1753,6 +1789,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         installPathSource(path, ROOT_PLUGIN_SOURCE_SELECTION),
       ),
 
+    preservePathPluginsInside: (directory) =>
+      withPluginOperationLock(REGISTRATION_MUTATION_KEY, () =>
+        preservePathPluginsInside(directory),
+      ),
+
     ...pluginUpdates,
 
     async remove(id) {
@@ -1856,6 +1897,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
 
         if (getInstalledPlugin(deps.db, id) === undefined) return undefined;
         if (!(await applyEnabled(id, enabled))) return undefined;
+        if (!enabled) forgetPluginRecommendation(deps.db, id);
         await syncCliSkill();
         notifyPluginsChanged();
         return list().find((p) => p.id === id);
@@ -1921,6 +1963,14 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       if (!loadPassActive) return false;
       const row = getInstalledPlugin(deps.db, id);
       return row !== undefined && getStatus(row).status === "starting";
+    },
+
+    listOpenPluginDatabases() {
+      return [...loaded].flatMap(([pluginId, plugin]) =>
+        plugin.handle.databaseHandles
+          .filter((database) => database.open)
+          .map((database) => ({ pluginId, database })),
+      );
     },
 
     getAppAsset(id, kind) {
@@ -2272,6 +2322,13 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
               "cli run() must return { exitCode: number, stdout?, stderr? }",
             );
           }
+          if (
+            result.exitCode === 0 &&
+            !argv.includes("--help") &&
+            !argv.includes("-h")
+          ) {
+            capturePluginUse(deps, id);
+          }
           return enforcePluginCliOutputLimit(
             {
               exitCode: result.exitCode,
@@ -2577,8 +2634,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         owner,
         `tool ${record.name}`,
         async () => {
-          const result = await record.execute(parsed.value, ctx);
-          return normalizeAgentToolResult(record.name, result);
+          const result = normalizeAgentToolResult(
+            record.name,
+            await record.execute(parsed.value, ctx),
+          );
+          if (result.success) capturePluginUse(deps, pluginId);
+          return result;
         },
       );
       if (outcome.ok) return outcome.value;

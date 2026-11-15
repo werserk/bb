@@ -25,7 +25,9 @@ it("upgrades old queue rows, retains the descriptor on restart, and permits old-
     db.$client.exec(
       "CREATE TEMP TABLE bb_migration_queued_message_groups (id TEXT PRIMARY KEY, group_with_next INTEGER NOT NULL); CREATE TEMP TABLE bb_migration_local_host (id TEXT PRIMARY KEY); CREATE TEMP TABLE bb_migration_existing_installation (existing INTEGER NOT NULL); INSERT INTO bb_migration_existing_installation VALUES (0)",
     );
-    for (const migration of migrations.slice(0, -1)) {
+    // werserk fork: every upstream migration and no fork one, so migrate()
+    // below adds service_turn to existing queue rows.
+    for (const migration of migrations) {
       for (const statement of migration.sql) db.$client.exec(statement);
       db.$client
         .prepare(

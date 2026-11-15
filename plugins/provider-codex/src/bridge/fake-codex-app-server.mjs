@@ -221,6 +221,7 @@ if (script?.launchLogPath) {
     `${JSON.stringify({
       args: process.argv.slice(2),
       poolToken: process.env.CODEX_POOL_AUTH_TOKEN ?? null,
+      codexHome: process.env.CODEX_HOME ?? null,
     })}\n`,
   );
 }

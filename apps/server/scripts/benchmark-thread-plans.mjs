@@ -23,7 +23,7 @@ try {
     Array.from({ length: 1400 }, (_, i) => {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
-        providerId: "codex",
+        providerId: "benchmark",
       });
       insertEvents(
         db,

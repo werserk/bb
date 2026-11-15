@@ -1,8 +1,6 @@
 # Backend API symbol index
 
-Use this index to check backend, host, AI-service, and test imports.
-Read the detailed backend references for behavior, fields, and examples.
-Read the installed declarations for exact current signatures.
+Check imports here, behavior in the Plugin Guide, and signatures in the installed declarations.
 
 ## `@get-bb/plugin-sdk`
 
@@ -17,6 +15,8 @@ its props and keep plan ownership in the native host.
 - `PLUGIN_CLI_OUTPUT_MAX_BYTES`
 - `defineRpcContract`
 - `experimental_defineHostEntry`
+- `experimental_joinHostPath`, `experimental_getHostPathDirname`, `experimental_getHostPathBasename`, `experimental_getRelativeHostPath`, `experimental_getHostPathComparisonKey`
+- `experimental_normalizeHostPath`, `experimental_resolveHostPath`, `experimental_isHostPathWithin`
 - `defineCli`
 - `cliCommand`
 - `PluginCliError`
@@ -214,7 +214,6 @@ its props and keep plan ownership in the native host.
 - `ExperimentalComposerThreadLink`
 - `ExperimentalComposerThreadLinks`
 - `ExperimentalComposerThreadRelation`
-- `ExperimentalComposerView`
 - `ExperimentalComposerVoice`
 - `ExperimentalDroppedThreadMention`
 - `ExperimentalFailedVoiceRecording`

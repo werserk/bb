@@ -253,6 +253,8 @@ it("commits the accepted answer and its question-bound outbox together or rolls 
         id: queueId,
         threadId: thread.id,
         expectedUpdatedAt: queued.updatedAt,
+        execution: null,
+        reschedule: null,
         content: [{ type: "text", text: "Different answer", mentions: [] }],
       }).kind,
     ).toBe("immutable");

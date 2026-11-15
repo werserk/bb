@@ -49,8 +49,8 @@ import {
   type ProjectMachineSetupCompletion,
   type ProjectMachineSetupDialogTarget,
 } from "@/components/dialogs/ProjectMachineSetupDialog";
-import { HEADER_ICON_BUTTON_CLASS } from "@/components/layout/AppPageHeader";
 import {
+  RIGHT_PANEL_TOGGLE_BUTTON_CLASS,
   RIGHT_PANEL_TOGGLE_ICON_NAME,
   RIGHT_PANEL_TOGGLE_SHORTCUT_HINT_CLASS,
 } from "@/components/secondary-panel/panelToggleControlState";
@@ -246,7 +246,7 @@ export function RootComposeRightPanelToggle({
       type="button"
       variant="ghost"
       size="icon"
-      className={cn(HEADER_ICON_BUTTON_CLASS, "relative")}
+      className={cn(RIGHT_PANEL_TOGGLE_BUTTON_CLASS, "relative")}
       aria-label={
         shortcut ? `${rightPanelLabel} (${shortcut.label})` : rightPanelLabel
       }
@@ -398,12 +398,14 @@ export function RootComposeView() {
   const location = useLocation();
   const navigate = useNavigate();
   const tabTarget = readSidebarComposeTarget(location.search);
+  const tabProjectId = tabTarget?.projectId ?? null;
+  const tabReuseEnvironmentId = tabTarget?.reuseEnvironmentId ?? null;
   const { navigateInPane } = usePaneContext();
   const [rootComposeProjectId, setRootComposeProjectId] =
     useRootComposeProjectId();
   useEffect(() => {
-    if (tabTarget === null) return;
-    setRootComposeProjectId(tabTarget.projectId);
+    if (tabProjectId === null) return;
+    setRootComposeProjectId(tabProjectId);
     const params = new URLSearchParams(location.search);
     params.delete("projectId");
     params.delete("reuseEnvironmentId");
@@ -412,17 +414,17 @@ export function RootComposeView() {
       replace: true,
       state: {
         focusPrompt: true,
-        ...(tabTarget.reuseEnvironmentId === null
+        ...(tabReuseEnvironmentId === null
           ? {}
-          : { reuseEnvironmentId: tabTarget.reuseEnvironmentId }),
+          : { reuseEnvironmentId: tabReuseEnvironmentId }),
       },
     });
   }, [
     location.search,
     navigate,
     setRootComposeProjectId,
-    tabTarget?.projectId,
-    tabTarget?.reuseEnvironmentId,
+    tabProjectId,
+    tabReuseEnvironmentId,
   ]);
   const createThread = useCreateThread();
   const [placement, setPlacement] = useRootComposePlacement();
@@ -953,7 +955,6 @@ function RootComposeSurface({
     drawerVisibility: secondaryPanelDrawerVisibility,
     isCompactViewport,
     isPersistedOpen: isPersistedSecondaryPanelOpen,
-    openPersistedHostFile: panelFiles.openHostFile,
     openPersistedPanel: setRootSecondaryPanel,
     openPersistedStorageFile: panelFiles.openStorageFile,
     openPersistedWorkspaceFile: panelFiles.openWorkspaceFile,
@@ -1413,10 +1414,15 @@ function RootComposeSurface({
     autoFocus: !isProviderCliBlocked,
     mentionMenuPlacement: isCompactViewport ? "top" : "bottom",
     banner: promptBanner,
-    blockedReason:
+    blocker:
       blockingProviderCliStatus === null
         ? undefined
-        : providerCliBlockedReason(blockingProviderCliStatus),
+        : {
+            message: providerCliBlockedReason(blockingProviderCliStatus),
+            reason: blockingProviderCliStatus.installed
+              ? "agent_update"
+              : "agent_missing",
+          },
     resolveMentionLink,
     pluginComposerHost,
     textEffects: promptTextEffects,

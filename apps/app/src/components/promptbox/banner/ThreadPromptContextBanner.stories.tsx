@@ -12,7 +12,7 @@ import {
 import {
   selectWorkspaceChangedFilesSection,
   type WorkspaceChangedFilesSection,
-} from "@bb/shared-ui/workspace-change-summary";
+} from "../../../../../../plugins/git/ui/workspace-change-summary";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import {
   GitSegmentFixtureProvider,
@@ -101,6 +101,12 @@ const dirtyUncommittedStatus: WorkspaceStatus = {
     headSha: null,
   },
   mergeBase: null,
+  allChanges: {
+    insertions: 312,
+    deletions: 47,
+    lineStatsComplete: true,
+    fileCount: promptboxBannerFiles.length,
+  },
 };
 
 const dirtyUncommittedManyFiles: WorkspaceFileStatus[] = [
@@ -240,6 +246,12 @@ const dirtyUncommittedManyStatus: WorkspaceStatus = {
     headSha: null,
   },
   mergeBase: null,
+  allChanges: {
+    insertions: 1284,
+    deletions: 312,
+    lineStatsComplete: true,
+    fileCount: dirtyUncommittedManyFiles.length,
+  },
 };
 
 const untrackedOnlyStatus: WorkspaceStatus = {
@@ -275,6 +287,12 @@ const untrackedOnlyStatus: WorkspaceStatus = {
     headSha: null,
   },
   mergeBase: null,
+  allChanges: {
+    insertions: 0,
+    deletions: 0,
+    lineStatsComplete: false,
+    fileCount: 2,
+  },
 };
 
 const committedUnmergedStatus: WorkspaceStatus = {
@@ -305,6 +323,12 @@ const committedUnmergedStatus: WorkspaceStatus = {
     hasCommittedUnmergedChanges: true,
     commits: [],
     files: promptboxBannerFiles.slice(0, 3),
+    insertions: 128,
+    deletions: 24,
+    lineStatsComplete: true,
+    fileCount: 3,
+  },
+  allChanges: {
     insertions: 128,
     deletions: 24,
     lineStatsComplete: true,

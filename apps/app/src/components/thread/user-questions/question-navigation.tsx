@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { conversationQuestionsQueryKey } from "@/hooks/queries/conversation-question-query-key";
+import { hydrateConversationQuestion } from "@/hooks/cache-owners/conversation-question-cache-owner";
 import { useLocation } from "react-router-dom";
 import { sdk } from "@/lib/sdk";
 import { flashSearchTarget } from "@/lib/search-flash";
@@ -147,10 +147,12 @@ export function QuestionNavigationProvider({
             signal: controller.signal,
           });
           controller.signal.throwIfAborted();
-          queryClient.setQueryData(
-            [...conversationQuestionsQueryKey(threadId), questionId],
+          hydrateConversationQuestion({
+            queryClient,
+            threadId,
+            questionId,
             question,
-          );
+          });
           const target = root.current?.querySelector<HTMLElement>(
             `[id="${elementId}"]`,
           );

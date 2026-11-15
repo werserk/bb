@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0f085aea-0d16-4eee-b977-cba782f9d494",
+  "id": "a6625a04-db66-4949-9ad2-66da7b1e11e2",
   "prevId": "a854cade-e8b1-4631-bc38-7512d8c40251",
   "tables": {
     "app_settings": {
@@ -3597,13 +3597,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "service_turn": {
-          "name": "service_turn",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "thread_id": {
           "name": "thread_id",
           "type": "text",
@@ -3767,6 +3760,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "delivery_mode": {
+          "name": "delivery_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'steer'"
         },
         "claimed_at": {
           "name": "claimed_at",

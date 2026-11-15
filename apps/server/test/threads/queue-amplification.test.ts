@@ -98,6 +98,7 @@ it.each([
       const emit = vi.spyOn(events, "emitPluginMessageQueued");
       const result = recordQueuedMessageWait(h.deps, {
         thread,
+        placement: "back",
         claimed: claims,
         waitingOn,
         sendAt,
@@ -116,6 +117,7 @@ it.each([
           requestedBy: null,
           payload: { kind: "inline" },
           systemNotice: null,
+          deliveryMode: "queue",
         },
       });
       expect(result?.id).toBe(service.id);
@@ -171,6 +173,7 @@ it("publishes a newly created wait even when other queued rows have the same rea
     const emit = vi.spyOn(events, "emitPluginMessageQueued");
     const result = recordQueuedMessageWait(h.deps, {
       thread,
+      placement: "back",
       claimed: null,
       waitingOn: { kind: "thread-busy" },
       sendAt: null,
@@ -189,6 +192,7 @@ it("publishes a newly created wait even when other queued rows have the same rea
         requestedBy: null,
         payload: { kind: "inline" },
         systemNotice: null,
+        deliveryMode: "queue",
       },
     });
     expect(result).not.toBeNull();

@@ -262,9 +262,9 @@ reused until configure succeeds. Calls use the current registered schema validat
 Instruction ordering is standard BB instructions, selected tools' static
 snippets, `contributeInstructions` output, `configure` dynamic instructions,
 data-dir user instructions, then workspace instructions. Tool snippets above
-4096 characters reject the registration; each callback contribution is
-truncated to 4096 characters, and a throwing `contributeInstructions` is
-logged and contributes nothing.
+4096 characters reject the registration; each `contributeInstructions` and
+`configure` result is truncated to 32768 characters, and a throwing
+`contributeInstructions` is logged and contributes nothing.
 
 ### bb.experimental_aiServices — titles, commit messages, and voice
 

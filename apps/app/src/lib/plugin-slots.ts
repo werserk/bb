@@ -7,6 +7,7 @@ import type {
   ComposerCustomization,
   ExperimentalAppOverlayRegistration,
   ExperimentalModalRegistration,
+  InternalDoNotUseSetupGuideSectionRegistration,
   ExperimentalCodeFenceRendererRegistration,
   PluginDiffRendererRegistration,
   ExperimentalComposerRegistration,
@@ -55,6 +56,7 @@ export interface PluginRegistrationSet {
   settingsSections: readonly PluginSettingsSectionRegistration[];
   appOverlays?: readonly ExperimentalAppOverlayRegistration[];
   modals?: readonly ExperimentalModalRegistration[];
+  setupGuideSections?: readonly InternalDoNotUseSetupGuideSectionRegistration[];
   navPanels: readonly LegacyNavPanelRegistration[];
   tabs?: readonly ExperimentalTabRegistration[];
   threadPanelActions: readonly LegacyThreadPanelActionRegistration[];
@@ -107,6 +109,8 @@ export interface ExperimentalAppOverlaySlot
   extends ExperimentalAppOverlayRegistration, PluginSlotBase {}
 export interface ExperimentalModalSlot
   extends ExperimentalModalRegistration, PluginSlotBase {}
+export interface PluginSetupGuideSectionSlot
+  extends InternalDoNotUseSetupGuideSectionRegistration, PluginSlotBase {}
 export interface PluginNavPanelSlot
   extends PluginNavPanelRegistration, PluginSlotBase {}
 export type PluginTabSlot = ExperimentalTabRegistration & PluginSlotBase;
@@ -193,6 +197,7 @@ export interface PluginSlotSnapshot {
   settingsSections: readonly PluginSettingsSectionSlot[];
   appOverlays: readonly ExperimentalAppOverlaySlot[];
   modals: readonly ExperimentalModalSlot[];
+  setupGuideSections: readonly PluginSetupGuideSectionSlot[];
   navPanels: readonly PluginNavPanelSlot[];
   tabs: readonly PluginTabSlot[];
   threadPanelActions: readonly PluginThreadPanelActionSlot[];
@@ -233,6 +238,7 @@ export const EMPTY_PLUGIN_SLOT_SNAPSHOT: PluginSlotSnapshot = {
   settingsSections: [],
   appOverlays: [],
   modals: [],
+  setupGuideSections: [],
   navPanels: [],
   tabs: coreTabs,
   threadPanelActions: [],
@@ -280,6 +286,7 @@ const SLOT_KINDS: readonly SlotKind[] = [
   "settingsSections",
   "appOverlays",
   "modals",
+  "setupGuideSections",
   "navPanels",
   "tabs",
   "threadPanelActions",
@@ -366,6 +373,7 @@ function flattenRegistrations(
     settingsSections: stamp(set.settingsSections),
     appOverlays: stamp(set.appOverlays),
     modals: stamp(set.modals),
+    setupGuideSections: stamp(set.setupGuideSections),
     navPanels: stamp(set.navPanels),
     tabs: stamp(tabs),
     threadPanelActions: stamp(

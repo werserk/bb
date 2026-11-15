@@ -51,7 +51,7 @@ const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   {
     reason:
-      "Service descriptors and human inspection options are additive; older persisted rows have none. Plan reasons and actors are optional native provider facts. Plan staleness is absent until a later root turn provides stale evidence.",
+      "Service descriptors and human inspection options are additive; older persisted rows have none. Plan identifiers, reasons and actors are optional native provider facts; plans from providers or older rows without them omit the identifiers. Plan staleness is absent until a later root turn provides stale evidence.",
     fields: [
       "sendMessageRequestSchema.serviceTurn",
       "sendMessageRequestSchema.serviceTurn.automaticRedelivery",
@@ -62,11 +62,14 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadTimelineQuerySchema.includeService",
       "threadTimelineResponseSchema.pendingTodos.items.actor",
       "threadTimelineResponseSchema.pendingTodos.items.note",
+      "threadTimelineResponseSchema.pendingTodos.planId",
       "threadTimelineResponseSchema.pendingTodos.staleSince",
       "threadTimelineResponseSchema.rows.steps.actor",
+      "threadTimelineResponseSchema.rows.steps.id",
       "threadTimelineResponseSchema.rows.steps.note",
       "threadTimelineResponseSchema.serviceTurn",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.actor",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.id",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.note",
     ],
   },
@@ -82,6 +85,10 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes.interruption.cause",
       "threadTimelineResponseSchema.rows.systemMessageSubject.outcomes.turnId",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.systemMessageSubject.outcomes.turnId",
+      "sendQueuedMessageResponseSchema.queuedMessage.systemNotice.subject.outcomes",
+      "sendQueuedMessageResponseSchema.queuedMessage.systemNotice.subject.outcomes.interruption",
+      "sendQueuedMessageResponseSchema.queuedMessage.systemNotice.subject.outcomes.interruption.cause",
+      "sendQueuedMessageResponseSchema.queuedMessage.systemNotice.subject.outcomes.turnId",
     ],
   },
   {
@@ -524,10 +531,11 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "System provider lookups may target a host indirectly or directly, omit provider id to use the host default, omit the project when no project checkout should scope the model list, and omit capability to return the full roster.",
+      "System provider lookups may target a host indirectly or directly, omit provider id to use the host default, omit the project when no project checkout should scope the model list, omit preferCached to wait for model discovery instead of answering a cached model-load failure, and omit capability to return the full roster.",
     fields: [
       "systemExecutionOptionsQuerySchema.environmentId",
       "systemExecutionOptionsQuerySchema.hostId",
+      "systemExecutionOptionsQuerySchema.preferCached",
       "systemExecutionOptionsQuerySchema.projectId",
       "systemExecutionOptionsQuerySchema.providerId",
       "systemExecutionOptionsQuerySchema.selectedModel",
@@ -822,18 +830,6 @@ describe("git branch name contract", () => {
       }).success,
     ).toBe(false);
     expect(updateEnvironmentRequestSchema.safeParse({}).success).toBe(false);
-    expect(
-      contract.environmentDiffQuerySchema.safeParse({
-        target: "all",
-        mergeBaseBranch: "origin/main",
-      }).success,
-    ).toBe(true);
-    expect(
-      contract.environmentDiffQuerySchema.safeParse({
-        target: "all",
-        mergeBaseBranch: "origin/main lock",
-      }).success,
-    ).toBe(false);
   });
 });
 
@@ -1211,7 +1207,6 @@ describe("server-contract canonical schemas", () => {
             activeBackgroundAgentCount: 0,
             activeBackgroundCommandCount: 0,
             activePlanModeCount: 0,
-            activeGoalCount: 0,
           },
           hasPendingInteraction: true,
           hasOpenQuestion: false,

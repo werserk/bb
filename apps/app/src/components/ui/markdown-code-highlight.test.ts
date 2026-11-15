@@ -36,7 +36,7 @@ describe("highlightMarkdownCode", () => {
     },
   );
 
-  it.each([null, "ruby"])(
+  it.each([null, "elixir"])(
     "keeps the JavaScript lexer for a fence with language %j",
     (language) => {
       const html = highlightMarkdownCode({

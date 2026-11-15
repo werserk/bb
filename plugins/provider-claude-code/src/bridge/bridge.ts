@@ -327,6 +327,7 @@ interface SessionConstructionConfig {
 }
 
 interface ClaudeLiveSessionSettings {
+  commandDescriptionsEnabled: boolean;
   fullAccessApprovalsEnabled: boolean;
   memoryEnabled: boolean;
   model?: string;
@@ -867,6 +868,9 @@ async function applyLiveSessionSettings(
     });
   }
 
+  threadSession.translator.configureCommandDescriptions(
+    next.commandDescriptionsEnabled,
+  );
   threadSession.attachment.liveSettings = next;
 }
 
@@ -1129,6 +1133,7 @@ function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
+    commandDescriptionsEnabled: params.commandDescriptionsEnabled ?? false,
     fullAccessApprovalsEnabled: params.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? true,
     ...(params.model !== undefined ? { model: params.model } : {}),
@@ -1148,6 +1153,8 @@ function withTurnLiveSessionSettings(
   const model = params.model ?? current.model;
   const reasoningLevel = params.reasoningLevel ?? current.reasoningLevel;
   return {
+    commandDescriptionsEnabled:
+      params.commandDescriptionsEnabled ?? current.commandDescriptionsEnabled,
     fullAccessApprovalsEnabled:
       params.fullAccessApprovalsEnabled ?? current.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? current.memoryEnabled,
@@ -1232,6 +1239,8 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const translator = createClaudeDeltaTranslator({
     cwd: attachment.sessionConstructionConfig.sessionOptions.cwd,
     sandboxEnabled: attachment.sessionOptions.sandbox?.enabled === true,
+    commandDescriptionsEnabled:
+      attachment.liveSettings.commandDescriptionsEnabled,
   });
   translator.configureInjectedTools(
     (attachment.sessionConstructionConfig.dynamicTools ?? []).map((tool) => ({
@@ -1805,6 +1814,12 @@ function createOnSdkDone(
     if (!threadSession) return;
 
     threadSession.streamEnded = true;
+    sendThreadDeltas(
+      args.threadIdRef.current,
+      threadSession.translator.buildBackgroundTaskSettlementDeltas(
+        args.threadIdRef.current,
+      ),
+    );
     resolvePendingSessionWork(
       threadSession,
       "Claude SDK stream ended before pending work completed",
@@ -2595,6 +2610,7 @@ async function handleThreadFork(
     forkedProviderThreadId = await forkClaudeSession({
       configDirectory: claudeConfigDirectory(
         buildSessionEnv(readConfigEnvOverrides(params.config)),
+        params.cwd,
       ),
       sourceSessionId: params.sourceProviderThreadId,
       upToMessageId: params.sourceProviderCheckpointId,
@@ -2706,8 +2722,6 @@ async function runTurnInput(
       threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}`;
     }
     if (threadSession.toolOrigin.turnId !== undefined) {
-      // Register the query origin before it can call tools. Input acceptance
-      // still waits for the SDK to consume the prompt below.
       sendThreadDeltas(params.threadId, [
         { kind: "turn.open", providerTurnId: threadSession.toolOrigin.turnId },
       ]);

@@ -3,7 +3,6 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { useRetainedThreadTabContainer } from "./RetainedThreadTabContainer";
 afterEach(cleanup);
-// jsdom has no layout; connectivity remains real, rectangles model visible bodies.
 const laidOut = (element: HTMLElement) => {
   element.getClientRects = () =>
     [new DOMRect(0, 0, 300, 800)] as unknown as DOMRectList;
@@ -34,7 +33,6 @@ it("restores the same visible content across a transient block above it", () => 
   row.getBoundingClientRect = () =>
     new DOMRect(0, 337 + extra - scroller.scrollTop, 100, 20);
   act(() => hook.result.current.capture(first));
-  // Browser reparenting loses the offset, while parked content gains a block.
   const append = second.append.bind(second);
   second.append = (...nodes) => {
     append(...nodes);
@@ -44,7 +42,6 @@ it("restores the same visible content across a transient block above it", () => 
   hook.rerender({ outlet: second });
   expect(row.getBoundingClientRect().top).toBe(20);
   expect(scroller.scrollTop).toBe(379);
-  // Native anchoring compensates when the transient block disappears.
   extra = 0;
   scroller.scrollTop -= 62;
   expect(scroller.scrollTop).toBe(317);
@@ -111,7 +108,6 @@ it("captures the last visible position before parking hides the scroller", () =>
     new DOMRect(0, 337 - scroller.scrollTop, 100, 20);
   hook.rerender({ attached: false });
   scroller.scrollTop = 0;
-  // A late detach notification after hiding must not poison the saved position.
   act(() => hook.result.current.capture(outlet));
   hook.rerender({ attached: true });
   expect(scroller.scrollTop).toBe(317);
