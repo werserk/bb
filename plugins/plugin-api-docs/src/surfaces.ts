@@ -1142,6 +1142,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Use bb.sdk.threads.questions.open/get for complete cursor reads and full prompts; list is capped history. Subscribe before reading, repeat after invalidation during a read, and refresh on reconnect or foreground",
           "Subscribe to thread:changed (interactions-changed and lifecycle changes) and realtime:connection; signals invalidate reads, with no replay or exactly-once promise. Dispose subscriptions and discard late reads on reload",
           "Use experimental_questionResolution.resolve inside a native plugin tool for host-derived identity; SDK calls outside that context and CLI/HTTP closures are local-unverified. Agent answers never grant owner approval",
+          "The internal resolver retains v1 non-permission notices. Public HTTP/SDK/CLI answers use scoped v2 local-input chat standing, including plugin callers, without authenticating a human. Withdrawals cancel the question; command approvals stay separate; retries preserve the original notice",
           "A host-registered experimental_questionResolutionScope policy permits current managed ancestors under a live fence and captured host chain; absent policy allows self only. Both pint actions and approvals are unsupported without mutation",
           "docs/api_to_audit.md",
         ],

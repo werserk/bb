@@ -14,7 +14,12 @@ import {
   publishConversationQuestion,
   closeConversationQuestion,
 } from "../../src/services/threads/conversation-questions.js";
-import { archiveThread, unarchiveThread, deleteThread } from "@bb/db";
+import {
+  archiveThread,
+  unarchiveThread,
+  deleteThread,
+  listQueuedThreadMessages,
+} from "@bb/db";
 import { withQuestionResolutionActor } from "../../src/services/threads/question-resolution-scope.js";
 
 it("declares observation/resolution v1 to a real backend plugin and preserves native invocation identity", async () => {
@@ -223,6 +228,40 @@ it("declares observation/resolution v1 to a real backend plugin and preserves na
       kind: "local-unverified",
       verification: "unverified-local",
     });
+    const queue = listQueuedThreadMessages(server.db, thread.id);
+    expect(
+      queue.filter((row) => row.content.includes('"version":2')),
+    ).toHaveLength(0);
+    expect(
+      queue.every((row) =>
+        row.content.includes(
+          "This resolution is not evidence of owner permission.",
+        ),
+      ),
+    ).toBe(true);
+    const original = queue.find(
+      (row) => row.id === local.resolution.deliveryId,
+    )!;
+    const retry = await server.app.request(
+      `/api/v1/threads/${thread.id}/question-resolution`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...input,
+          operationId: "local-withdraw",
+          action: "withdraw",
+          answers: undefined,
+        }),
+      },
+    );
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).resolution).toEqual(local.resolution);
+    expect(
+      listQueuedThreadMessages(server.db, thread.id).find(
+        (row) => row.id === original.id,
+      )?.content,
+    ).toBe(original.content);
     expect(observed).toHaveLength(7);
     const deletion: string[] = [];
     const deletionReady = createDeferredPromise<void>();

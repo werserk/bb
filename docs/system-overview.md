@@ -25,6 +25,28 @@ The core entities and how they relate:
 
 ## Contracts and boundaries
 
+### Persistent question decision policy
+
+New ordinary HTTP/UI/public SDK/CLI answers and withdrawals serialize canonical
+v2 question notices with explicit local-input parity: the scoped decision has
+the same standing as typed chat. Identity remains `local-unverified`; this is
+not authenticated ownership and does not bypass command approvals. Native
+agent tools and `bb.experimental_questionResolution.resolve` closures retain v1
+non-permission notices, including context-free/deferred plugin calls. A plugin
+using the public HTTP client `bb.sdk.threads.questions` instead follows the same
+local-input policy as CLI and raw HTTP; this soft boundary does not establish
+human identity. Server entry points bind origin internally;
+null invocation and request payloads cannot select parity. Unknown internal
+origins default to v1. The common acceptance services receive origin separately
+from the optional operation call, preserving legacy card retry semantics.
+
+Notice parsing accepts canonical v1/v2 while preserving trusted row sender and
+initiator checks. UI policy labels derive from explicit v2 notices, never old
+local attribution. Receipt replay returns the original queued bytes and IDs;
+upgrade does not relabel prior history or queued v1 input. Actor/SQL/public SDK
+and daemon wire contracts remain unchanged. Old readers display v2 as ordinary
+user text; exact-pair delivery/reader acceptance is required before integration.
+
 ### Plugin candidate disposal
 
 Failed or timed-out factories retain the previous running instance. The rejected

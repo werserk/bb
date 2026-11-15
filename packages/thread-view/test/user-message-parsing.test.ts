@@ -660,3 +660,67 @@ it.each(["agent", "user"] as const)(
     });
   },
 );
+
+it.each(["user", "agent"] as const)(
+  "keeps row provenance for local v2 text carried by %s",
+  (initiator) => {
+    const text = serializeQuestionResolutionNotice({
+      version: 2,
+      decisionPolicy: "local-input-parity",
+      questionId: "qst_23456789ab",
+      revision: 1,
+      publication: {
+        body: "Context",
+        materials: [],
+        questions: [
+          {
+            id: "choice",
+            prompt: "Which?",
+            multiSelect: false,
+            allowFreeText: true,
+            required: true,
+            options: [{ value: "a", label: "A" }],
+          },
+        ],
+      },
+      materialManifest: {
+        hostId: null,
+        storageRootPath: null,
+        materials: [],
+        files: [],
+      },
+      resolution: {
+        id: "qres_v2",
+        targetKind: "qst",
+        targetId: "qst_23456789ab",
+        threadId: "thread-1",
+        revision: 1,
+        operationId: "local",
+        action: "answer",
+        actor: { kind: "local-unverified", verification: "unverified-local" },
+        reason: "Selected",
+        acceptedAt: 1,
+        answers: { choice: { selected: ["a"] } },
+      },
+    });
+    const factory = createTimelineEventFactory({ threadId: "thread-1" });
+    const { event, meta } = decodeThreadEventRow(
+      factory.clientTurnRequested({
+        initiator,
+        senderThreadId: initiator === "agent" ? SENDER_THREAD_ID : null,
+        target: { kind: "new-turn" },
+        text,
+      }),
+    );
+    const message = parseUsersFromClientRequest({
+      decoded: event,
+      meta,
+      options: standardProjectionOptions,
+    })[0];
+    expect(message).toMatchObject({
+      text,
+      initiator,
+      senderThreadId: initiator === "agent" ? SENDER_THREAD_ID : null,
+    });
+  },
+);

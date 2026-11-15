@@ -57,7 +57,9 @@ export function registerThreadInteractionRoutes(
         "invalid_request",
         "Question target does not match its route",
       );
-    return context.json(await resolveQuestion(deps, input, null));
+    return context.json(
+      await resolveQuestion(deps, input, null, "local-input"),
+    );
   });
 
   const questionTarget = (threadId: string, rawId: string) => {
@@ -107,13 +109,18 @@ export function registerThreadInteractionRoutes(
   );
   post(routes.answerQuestion, async (context, payload) =>
     context.json(
-      await answerConversationQuestion(deps, {
-        ...questionTarget(
-          context.req.param("id"),
-          context.req.param("questionId"),
-        ),
-        ...payload,
-      }),
+      await answerConversationQuestion(
+        deps,
+        {
+          ...questionTarget(
+            context.req.param("id"),
+            context.req.param("questionId"),
+          ),
+          ...payload,
+        },
+        undefined,
+        "local-input",
+      ),
     ),
   );
   post(routes.dismissQuestion, async (context, payload) =>
@@ -130,14 +137,19 @@ export function registerThreadInteractionRoutes(
   );
   post(routes.withdrawQuestion, async (context, payload) =>
     context.json(
-      await closeConversationQuestion(deps, {
-        ...questionTarget(
-          context.req.param("id"),
-          context.req.param("questionId"),
-        ),
-        ...payload,
-        action: "withdraw",
-      }),
+      await closeConversationQuestion(
+        deps,
+        {
+          ...questionTarget(
+            context.req.param("id"),
+            context.req.param("questionId"),
+          ),
+          ...payload,
+          action: "withdraw",
+        },
+        undefined,
+        "local-input",
+      ),
     ),
   );
   post(routes.plans, (context, payload) => {

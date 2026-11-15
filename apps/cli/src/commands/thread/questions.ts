@@ -32,7 +32,7 @@ export function registerQuestionCommands(
   questions
     .command("resolve")
     .description(
-      "Resolve a qst revision with an operationId and reason; local CLI attribution is unverified, never owner approval",
+      "Resolve a qst revision with an operationId and reason; local identity is unverified; answers have scoped chat standing, withdrawals cancel the question; command approvals remain separate",
     )
     .requiredOption(
       "--file <path>",

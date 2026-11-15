@@ -72,6 +72,19 @@ export function QuestionResponseBody({
             : "Attribution unavailable"}
         </p>
       )}
+      {response.decisionPolicy === "local-input-parity" ? (
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <p>
+            {response.resolution?.action === "withdraw"
+              ? "Local withdrawal · question cancelled"
+              : "Local answer · same standing as chat"}
+          </p>
+          <p>
+            Identity is not independently verified. Applies only to this
+            question and revision.
+          </p>
+        </div>
+      ) : null}
       {response.resolution?.action !== "withdraw" ? (
         <QuestionAnswers
           publication={response.publication}

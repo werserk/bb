@@ -4682,7 +4682,13 @@ variables and claimed JSON/header identities cannot upgrade attribution. The
 native `bb_list_questions` and `bb_resolve_question` tools use the same scope and
 resolution services. All operations require revision, operationId and reason;
 identical normalized retries return the original principal-bound resolution and
-delivery receipt. A new resolution never authorizes an owner-reserved action.
+delivery receipt. New local-input HTTP/SDK/CLI answers have the same scoped
+standing as typed chat, without independently verified identity; withdrawals
+cancel the question rather than answer or approve it. The
+`bb.experimental_questionResolution.resolve` closure retains v1 non-permission
+notices, including context-free/deferred calls. A plugin using `bb.sdk` uses the
+public HTTP path and its local-input policy instead. Neither policy bypasses
+command or permission approvals, and replay preserves the original notice.
 
 `bb.experimental_questionResolutionScope.register(policy)` installs one managed
 policy with a disposer, also disposed when its plugin unloads. It receives

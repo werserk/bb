@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseQuestionResolutionNotice } from "@bb/domain";
 import { createConversationQuestion, listQueuedThreadMessages } from "@bb/db";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -352,6 +353,12 @@ describe("native question resolution", () => {
         const queue = listQueuedThreadMessages(h.db, thread.id);
         expect(queue).toHaveLength(1);
         expect(queue[0]!.senderThreadId).toBe(thread.id);
+        expect(
+          parseQuestionResolutionNotice(JSON.parse(queue[0]!.content)[0].text),
+        ).toMatchObject({
+          version: 1,
+          resolution: { actor: { kind: "agent", threadId: thread.id } },
+        });
         expect(queue[0]!.content).toContain(
           action === "answer" ? "Answered by" : "Withdrawn by",
         );
@@ -448,15 +455,23 @@ it.each(["answer", "withdraw"] as const)(
           ? { answers: { choice: { selected: ["a"] } } }
           : {}),
       };
-      const invoke = () =>
+      const invoke = (extra = {}) =>
         h.app.request(`/api/v1/threads/${thread.id}/question-resolution`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "X-BB-Thread-ID": "thr_coordinator",
           },
-          body: JSON.stringify(input),
+          body: JSON.stringify({ ...input, ...extra }),
         });
+      for (const extra of [
+        { origin: "local-input" },
+        { decisionPolicy: "local-input-parity" },
+        { actor: { kind: "owner" } },
+      ]) {
+        expect((await invoke(extra)).status).toBe(400);
+        expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(0);
+      }
       const first = await invoke();
       expect(first.status).toBe(200);
       const receipt = await first.json();
@@ -464,10 +479,24 @@ it.each(["answer", "withdraw"] as const)(
         kind: "local-unverified",
         verification: "unverified-local",
       });
+      const notice = parseQuestionResolutionNotice(
+        JSON.parse(listQueuedThreadMessages(h.db, thread.id)[0]!.content)[0]
+          .text,
+      );
+      expect(notice).toMatchObject({
+        version: 2,
+        decisionPolicy: "local-input-parity",
+        resolution: { action, actor: { kind: "local-unverified" } },
+      });
+      const originalBytes = listQueuedThreadMessages(h.db, thread.id)[0]!
+        .content;
       expect((await (await invoke()).json()).resolution).toEqual(
         receipt.resolution,
       );
       expect(listQueuedThreadMessages(h.db, thread.id)).toHaveLength(1);
+      expect(listQueuedThreadMessages(h.db, thread.id)[0]!.content).toBe(
+        originalBytes,
+      );
     });
   },
 );
@@ -603,3 +632,57 @@ it("accepts one winner when a live self agent and a local answer race", async ()
     expect(current.resolutionAttribution?.deliveryId).toBe(queue[0]!.id);
   });
 });
+
+it.each(["unknown", "plugin", "local-input"] as const)(
+  "keeps origin %s server-owned across replay",
+  async (origin) => {
+    const { resolveQuestion } =
+      await import("../../src/services/threads/question-resolution.js");
+    await withTestHarness(async (h) => {
+      const { thread } = seedThreadFixture(h, { thread: { status: "active" } });
+      seedThreadRuntimeState(h.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "p",
+      });
+      const question = createConversationQuestion(h.db, {
+        threadId: thread.id,
+        sourceTurnId: null,
+        sourceCallId: null,
+        publication: JSON.stringify(publication),
+        materialManifest: JSON.stringify({
+          hostId: null,
+          storageRootPath: null,
+          materials: [],
+          files: [],
+        }),
+      })!;
+      const input = {
+        threadId: thread.id,
+        questionId: question.id,
+        revision: 1,
+        operationId: "stable",
+        action: "answer",
+        reason: "Selected",
+        answers: { choice: { selected: ["a"] } },
+      };
+      const first = await resolveQuestion(h.deps, input, null, origin);
+      const queued = listQueuedThreadMessages(h.db, thread.id)[0]!;
+      expect(
+        parseQuestionResolutionNotice(JSON.parse(queued.content)[0].text)
+          ?.version,
+      ).toBe(origin === "local-input" ? 2 : 1);
+      const retry = await resolveQuestion(h.deps, input, null, "local-input");
+      expect(retry.resolution).toEqual(first.resolution);
+      expect(listQueuedThreadMessages(h.db, thread.id)).toEqual([queued]);
+      await expect(
+        resolveQuestion(
+          h.deps,
+          { ...input, origin: "local-input" },
+          null,
+          "plugin",
+        ),
+      ).rejects.toThrow();
+    });
+  },
+);

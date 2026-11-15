@@ -2373,7 +2373,7 @@ export type ExperimentalQuestionResolutionScopePolicy = (
 export interface ExperimentalQuestionResolution {
   /** Version 1 binds complete questions.open reads, postcommit thread:changed invalidation, reconnect refresh, and qst resolution. Unknown or missing versions are unsupported. */
   readonly version: 1;
-  /** Host-derived native invocation context is used only inside the invoking plugin tool. Calls elsewhere are local-unverified. Both pint actions are unsupported. */
+  /** Host-derived native invocation context is used only inside the invoking plugin tool. Calls elsewhere are local-unverified. This closure retains v1 non-permission notices; public bb.sdk HTTP question calls follow local-input chat policy instead. Both pint actions are unsupported. */
   resolve(input: QuestionResolutionInput): Promise<QuestionResolutionResult>;
 }
 

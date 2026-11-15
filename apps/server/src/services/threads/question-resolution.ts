@@ -8,6 +8,7 @@ import {
   answerConversationQuestion,
   closeConversationQuestion,
   readQuestionResolutionDelivery,
+  type QuestionResolutionOrigin,
 } from "./conversation-questions.js";
 import type { QuestionResolutionInvocation } from "./question-resolution-scope.js";
 
@@ -15,6 +16,7 @@ export async function resolveQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   input: unknown,
   invocation: QuestionResolutionInvocation | null,
+  origin: QuestionResolutionOrigin = "unknown",
 ): Promise<QuestionResolutionResult> {
   const request = questionResolutionInputSchema.parse(input);
   if (!request.questionId)
@@ -39,11 +41,13 @@ export async function resolveQuestion(
           deps,
           { ...ref, answers: request.answers },
           call,
+          origin,
         )
       : await closeConversationQuestion(
           deps,
           { ...ref, action: "withdraw" },
           call,
+          origin,
         );
   const resolution = question.resolutionHistory.find(
     (event) =>

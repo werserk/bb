@@ -35,6 +35,7 @@ export interface QuestionResponseSnapshot {
   materialManifest: ReturnType<typeof questionMaterialManifestSchema.parse>;
   answers: ConversationQuestion["response"];
   resolution: QuestionResolutionNotice["resolution"] | null;
+  decisionPolicy: "local-input-parity" | null;
 }
 
 export function parseQuestionResponse(
@@ -54,6 +55,7 @@ export function parseQuestionResponse(
             )
           : null,
       resolution: notice.resolution,
+      decisionPolicy: notice.version === 2 ? notice.decisionPolicy : null,
     };
 
   const match =
@@ -91,6 +93,7 @@ export function parseQuestionResponse(
       materialManifest,
       answers,
       resolution: null,
+      decisionPolicy: null,
     };
   } catch {
     return null;
