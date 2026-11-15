@@ -5420,9 +5420,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.93.0
         version: 0.93.0(zod@4.6.7)
-      '@bb/agent-runtime':
-        specifier: workspace:*
-        version: link:../../packages/agent-runtime
       '@bb/plugin-build':
         specifier: workspace:*
         version: link:../../packages/plugin-build

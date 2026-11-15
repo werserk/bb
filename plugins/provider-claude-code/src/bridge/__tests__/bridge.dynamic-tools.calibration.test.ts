@@ -1,4 +1,3 @@
-import { RuntimeTurnState } from "@bb/agent-runtime/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { buildSessionOptions } from "../session-options.js";
@@ -273,6 +272,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function createActiveTurnTracker() {
+  const activeTurnIdByThreadId = new Map<string, string>();
+  return {
+    getActiveTurnId(threadId: string): string | null {
+      return activeTurnIdByThreadId.get(threadId) ?? null;
+    },
+    observe(event: ThreadEvent): void {
+      if (event.type !== "turn/started" && event.type !== "turn/completed")
+        return;
+      if (event.scope.kind !== "turn")
+        throw new Error(`${event.type} without a turn scope`);
+      if (event.type === "turn/started" && !event.parentToolCallId) {
+        activeTurnIdByThreadId.set(event.threadId, event.scope.turnId);
+      }
+      if (
+        event.type === "turn/completed" &&
+        activeTurnIdByThreadId.get(event.threadId) === event.scope.turnId
+      ) {
+        activeTurnIdByThreadId.delete(event.threadId);
+      }
+    },
+  };
+}
+
 interface ApprovalExchange {
   payload: unknown;
   turnId: string | null;
@@ -293,7 +316,7 @@ async function replay(args: { workspaceDir: string }): Promise<ReplayResult> {
   const bridge = createBridgeJsonRpcTestHarness(handleLine);
   const events: ThreadEvent[] = [];
   const origins = new Map<string, string | undefined>();
-  const turnState = new RuntimeTurnState();
+  const turnState = createActiveTurnTracker();
   const client = new Client({ name: "origin-calibration", version: "1" });
   let drained = 0;
   let providerThreadId = "calibration-session";
