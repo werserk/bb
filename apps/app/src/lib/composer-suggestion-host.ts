@@ -1,4 +1,4 @@
-import type { ThreadEventRow } from "@bb/domain";
+import type { PendingInteraction, ThreadEventRow } from "@bb/domain";
 import type { ThreadTimelineResponse } from "@bb/server-contract";
 
 export function composerSuggestionContext(
@@ -6,14 +6,14 @@ export function composerSuggestionContext(
     | Pick<ThreadTimelineResponse, "tag" | "maxSeq" | "contextBoundarySeq">
     | undefined,
   lifecycle: string,
-  questions: readonly { id: string }[],
+  interactions: readonly Pick<PendingInteraction, "id" | "payload">[],
   queued: number,
   connected: boolean,
   events: readonly ThreadEventRow[] = [],
-  openQuestions:
-    | { total: number; readRevision: string }
-    | undefined = undefined,
 ) {
+  const approvals = interactions.filter(
+    (interaction) => interaction.payload.kind !== "user_question",
+  );
   const ordered = [...events].sort((a, b) => b.seq - a.seq);
   const root = ordered.find(
     (event) => event.type === "turn/started" && !event.data.parentToolCallId,
@@ -37,23 +37,19 @@ export function composerSuggestionContext(
       timeline?.tag,
       timeline?.maxSeq,
       timeline?.contextBoundarySeq,
-      openQuestions?.readRevision,
-      openQuestions?.total,
       root?.id,
       completed?.id,
       lifecycle,
-      questions.map((q) => q.id),
+      approvals.map((interaction) => interaction.id),
       queued,
       connected,
     ]),
     eligible:
-      openQuestions !== undefined &&
-      openQuestions.total === 0 &&
       timeline !== undefined &&
       connected &&
       lifecycle === "idle" &&
       queued === 0 &&
-      questions.length === 0 &&
+      approvals.length === 0 &&
       completed?.type === "turn/completed" &&
       completed.data.status === "completed" &&
       completed.seq > (timeline.contextBoundarySeq ?? -1) &&

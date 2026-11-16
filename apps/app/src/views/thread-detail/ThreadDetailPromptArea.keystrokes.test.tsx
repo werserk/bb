@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { promptAreaMocks as mocks } from "@/test/thread-detail-prompt-area-harness";
 import type {
   PendingInteraction,
@@ -37,6 +38,9 @@ import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import { ThreadDetailPromptArea } from "./ThreadDetailPromptArea";
 
 const shellProbeRenders = vi.fn();
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 const PROJECT_ID = "proj_keystrokes";
 
@@ -122,37 +126,39 @@ function buildPromptArea({
   pendingInteractions = [],
 }: RenderPromptAreaArgs) {
   return (
-    <PluginComposerHostScopeProvider>
-      <ShellProbe />
-      <PublishedHostDraftProbe />
-      <ThreadDetailPromptArea
-        activeBackgroundCommands={[]}
-        activePromptMode={null}
-        activeWorkflows={[]}
-        childThreadsSection={null}
-        composerFocusRequestKey={0}
-        composerId="thread-detail-follow-up-composer"
-        isPrimaryComposer
-        permissionPolicy="editable"
-        canRestoreEnvironment={false}
-        environmentGoneStatus={null}
-        providerCommands={null}
-        sessionOptions={null}
-        modelFallback={null}
-        parentThreadSection={null}
-        pendingInteractions={pendingInteractions}
-        queuedMessageCount={0}
-        projectId={PROJECT_ID}
-        contextEnvironmentId={null}
-        resolveMentionLink={() => null}
-        sendMessage={{
-          isPending: false,
-          mutateAsync: mocks.sendMessageMutateAsync,
-        }}
-        steerActiveThreadOnEnter={false}
-        thread={thread}
-      />
-    </PluginComposerHostScopeProvider>
+    <QueryClientProvider client={queryClient}>
+      <PluginComposerHostScopeProvider>
+        <ShellProbe />
+        <PublishedHostDraftProbe />
+        <ThreadDetailPromptArea
+          activeBackgroundCommands={[]}
+          activePromptMode={null}
+          activeWorkflows={[]}
+          childThreadsSection={null}
+          composerFocusRequestKey={0}
+          composerId="thread-detail-follow-up-composer"
+          isPrimaryComposer
+          permissionPolicy="editable"
+          canRestoreEnvironment={false}
+          environmentGoneStatus={null}
+          providerCommands={null}
+          sessionOptions={null}
+          modelFallback={null}
+          parentThreadSection={null}
+          pendingInteractions={pendingInteractions}
+          queuedMessageCount={0}
+          projectId={PROJECT_ID}
+          contextEnvironmentId={null}
+          resolveMentionLink={() => null}
+          sendMessage={{
+            isPending: false,
+            mutateAsync: mocks.sendMessageMutateAsync,
+          }}
+          steerActiveThreadOnEnter={false}
+          thread={thread}
+        />
+      </PluginComposerHostScopeProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -180,6 +186,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  queryClient.clear();
   cleanup();
   window.localStorage.clear();
   vi.clearAllMocks();

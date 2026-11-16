@@ -9,35 +9,33 @@ export async function readContext(
   signal?: AbortSignal,
   options: { allowActive?: boolean; memory?: TaskMemory | null } = {},
 ) {
-  const [thread, timeline, questions, interactions, events] = await Promise.all(
-    [
-      bb.sdk.threads.get({ threadId, signal }),
-      bb.sdk.threads.timeline({
-        threadId,
-        segmentLimit: "40",
-        includeNestedRows: "true",
-        includeService: "false",
-        signal,
-      }),
-      bb.sdk.threads.questions.open({ threadId, limit: 1, signal }),
-      bb.sdk.threads.interactions.list({ threadId, signal }),
-      bb.sdk.threads.events.list({
-        threadId,
-        signal,
-        types: ["turn/started", "turn/completed", "system/thread/interrupted"],
-        order: "desc",
-        limit: "64",
-      }),
-    ],
-  );
+  const [thread, timeline, interactions, events] = await Promise.all([
+    bb.sdk.threads.get({ threadId, signal }),
+    bb.sdk.threads.timeline({
+      threadId,
+      segmentLimit: "40",
+      includeNestedRows: "true",
+      includeService: "false",
+      signal,
+    }),
+    bb.sdk.threads.interactions.list({ threadId, signal }),
+    bb.sdk.threads.events.list({
+      threadId,
+      signal,
+      types: ["turn/started", "turn/completed", "system/thread/interrupted"],
+      order: "desc",
+      limit: "64",
+    }),
+  ]);
   if (
     (thread.status !== "idle" &&
       !(options.allowActive && thread.status === "active")) ||
     thread.archivedAt !== null ||
     thread.deletedAt !== null ||
     thread.queuedMessageCount > 0 ||
-    questions.total > 0 ||
-    interactions.length > 0
+    interactions.some(
+      (interaction) => interaction.payload.kind !== "user_question",
+    )
   )
     return null;
   const start = events.find(

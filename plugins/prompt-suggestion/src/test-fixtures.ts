@@ -8,6 +8,7 @@ export function fixture(
     turnId?: string;
     status?: "completed" | "failed";
     openQuestion?: boolean;
+    interaction?: "question" | "approval";
     turnRow?: boolean;
     providerId?: string;
   } = {},
@@ -112,7 +113,45 @@ export function fixture(
             readRevision: "q",
           }),
         },
-        interactions: { list: async () => [] },
+        interactions: {
+          list: async () =>
+            options.interaction
+              ? [
+                  {
+                    id: "interaction",
+                    threadId: "thread",
+                    turnId: "turn",
+                    providerId: "codex",
+                    providerThreadId: "p",
+                    providerRequestId: "r",
+                    status: "pending" as const,
+                    statusReason: null,
+                    createdAt: 1,
+                    resolvedAt: null,
+                    resolution: null,
+                    payload:
+                      options.interaction === "question"
+                        ? { kind: "user_question" as const, questions: [] }
+                        : {
+                            kind: "approval" as const,
+                            subject: {
+                              kind: "command" as const,
+                              itemId: "cmd",
+                              command: "echo ok",
+                              cwd: null,
+                              actions: [],
+                              sessionGrant: null,
+                            },
+                            reason: null,
+                            availableDecisions: [
+                              "allow_once" as const,
+                              "deny" as const,
+                            ],
+                          },
+                  },
+                ]
+              : [],
+        },
         events: {
           list: async () => [
             {

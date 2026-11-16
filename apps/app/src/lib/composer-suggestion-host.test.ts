@@ -21,7 +21,6 @@ const completed: ThreadEventRow = {
   data: { providerThreadId: "provider", status: "completed" },
 };
 const events = [completed, started];
-const questions = { total: 0, readRevision: "questions-1" };
 const timeline = { tag: "tag", maxSeq: 3, contextBoundarySeq: null };
 describe("suggestion host eligibility", () => {
   it("requires authoritative successful root completion even for flat timelines", () => {
@@ -33,29 +32,13 @@ describe("suggestion host eligibility", () => {
         .eligible,
     ).toBe(false);
     expect(
-      composerSuggestionContext(
-        timeline,
-        "idle",
-        [],
-        0,
-        true,
-        events,
-        questions,
-      ).eligible,
+      composerSuggestionContext(timeline, "idle", [], 0, true, events).eligible,
     ).toBe(true);
     expect(
-      composerSuggestionContext(
-        timeline,
-        "idle",
-        [],
-        0,
-        true,
-        [
-          { ...completed, data: { ...completed.data, status: "interrupted" } },
-          started,
-        ],
-        questions,
-      ).eligible,
+      composerSuggestionContext(timeline, "idle", [], 0, true, [
+        { ...completed, data: { ...completed.data, status: "interrupted" } },
+        started,
+      ]).eligible,
     ).toBe(false);
   });
   it("rejects a newer root turn and ignores a nested turn completion", () => {
@@ -66,15 +49,10 @@ describe("suggestion host eligibility", () => {
       scope: { kind: "turn", turnId: "new" },
     };
     expect(
-      composerSuggestionContext(
-        timeline,
-        "idle",
-        [],
-        0,
-        true,
-        [newer, ...events],
-        questions,
-      ).eligible,
+      composerSuggestionContext(timeline, "idle", [], 0, true, [
+        newer,
+        ...events,
+      ]).eligible,
     ).toBe(false);
     const nested = {
       ...newer,
@@ -87,7 +65,7 @@ describe("suggestion host eligibility", () => {
       ]).completedTurnId,
     ).toBe("turn");
   });
-  it("invalidates independent question, queue, lifecycle and connection changes", () => {
+  it("invalidates independent approval, queue, lifecycle and connection changes", () => {
     const ready = composerSuggestionContext(
       timeline,
       "idle",
@@ -95,45 +73,36 @@ describe("suggestion host eligibility", () => {
       0,
       true,
       events,
-      questions,
     );
     for (const blocked of [
       composerSuggestionContext(
         timeline,
         "idle",
-        [{ id: "question" }],
+        [
+          {
+            id: "approval",
+            payload: {
+              kind: "approval",
+              subject: {
+                kind: "command",
+                itemId: "cmd",
+                command: "echo ok",
+                cwd: null,
+                actions: [],
+                sessionGrant: null,
+              },
+              reason: null,
+              availableDecisions: ["allow_once", "deny"],
+            },
+          },
+        ],
         0,
         true,
         events,
-        questions,
       ),
-      composerSuggestionContext(
-        timeline,
-        "idle",
-        [],
-        1,
-        true,
-        events,
-        questions,
-      ),
-      composerSuggestionContext(
-        timeline,
-        "active",
-        [],
-        0,
-        true,
-        events,
-        questions,
-      ),
-      composerSuggestionContext(
-        timeline,
-        "idle",
-        [],
-        0,
-        false,
-        events,
-        questions,
-      ),
+      composerSuggestionContext(timeline, "idle", [], 1, true, events),
+      composerSuggestionContext(timeline, "active", [], 0, true, events),
+      composerSuggestionContext(timeline, "idle", [], 0, false, events),
       composerSuggestionContext(
         { ...timeline, contextBoundarySeq: 3 },
         "idle",
@@ -141,7 +110,6 @@ describe("suggestion host eligibility", () => {
         0,
         true,
         events,
-        questions,
       ),
     ]) {
       expect(blocked.eligible).toBe(false);
@@ -150,7 +118,7 @@ describe("suggestion host eligibility", () => {
   });
 });
 
-it("fails closed without durable-question knowledge and revisions survive a close", () => {
+it("keeps suggestions eligible and stable while native questions open and close", () => {
   const ready = composerSuggestionContext(
     timeline,
     "idle",
@@ -158,32 +126,18 @@ it("fails closed without durable-question knowledge and revisions survive a clos
     0,
     true,
     events,
-    questions,
   );
-  expect(ready.eligible).toBe(true);
-  expect(
-    composerSuggestionContext(timeline, "idle", [], 0, true, events).eligible,
-  ).toBe(false);
   const open = composerSuggestionContext(
     timeline,
     "idle",
-    [],
+    [{ id: "question", payload: { kind: "user_question", questions: [] } }],
     0,
     true,
     events,
-    { total: 1, readRevision: "questions-2" },
   );
-  expect(open.eligible).toBe(false);
-  expect(open.contextRevision).not.toBe(ready.contextRevision);
-  const closed = composerSuggestionContext(
-    timeline,
-    "idle",
-    [],
-    0,
-    true,
-    events,
-    { total: 0, readRevision: "questions-3" },
-  );
-  expect(closed.eligible).toBe(true);
-  expect(closed.contextRevision).not.toBe(ready.contextRevision);
+  expect(ready.eligible).toBe(true);
+  expect(open).toEqual(ready);
+  expect(
+    composerSuggestionContext(timeline, "idle", [], 0, true, events),
+  ).toEqual(ready);
 });

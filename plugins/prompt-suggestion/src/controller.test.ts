@@ -52,6 +52,33 @@ describe("generation admission and cancellation", () => {
       }
     },
   );
+  it("finishes generation when a question opens during the request", async () => {
+    const options: { openQuestion: boolean; interaction?: "question" } = {
+      openQuestion: false,
+    };
+    const host = fixture(options);
+    const model = await installGenerator(host.bb, async () => {
+      options.openQuestion = true;
+      options.interaction = "question";
+      return JSON.stringify({
+        kind: "suggestion",
+        text: "Clarify the remaining work.",
+      });
+    });
+    const service = createService(host.bb, () =>
+      settingsSchema.parse({ enabled: true, model, maxRequestsPerHour: 1 }),
+    );
+    try {
+      expect(await service.suggest(input)).toEqual({
+        kind: "suggestion",
+        text: "Clarify the remaining work.",
+      });
+      expect(service.diagnostics().requests).toBe(1);
+    } finally {
+      service.reset();
+      await host.harness.lifecycle.dispose();
+    }
+  });
   it("rejects a stale expected turn before a model request", async () => {
     const host = fixture();
     const service = createService(host.bb, () =>

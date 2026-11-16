@@ -15,10 +15,23 @@ describe("canonical suggestion context", () => {
       }
     },
   );
+  it("allows open conversation questions without reading their status", async () => {
+    const host = fixture({ openQuestion: true, interaction: "question" });
+    host.bb.sdk.threads.questions.open = async () => {
+      throw new Error("Question status is irrelevant");
+    };
+    try {
+      expect((await readContext(host.bb, "thread", 24000))?.eligible).toBe(
+        true,
+      );
+    } finally {
+      await host.harness.lifecycle.dispose();
+    }
+  });
   it.each([
     { status: "failed" as const },
     { queued: 1 },
-    { openQuestion: true },
+    { interaction: "approval" as const },
   ])("rejects non-actionable state %j", async (options) => {
     const host = fixture(options);
     try {

@@ -1,4 +1,3 @@
-import { useComposerSuggestionQuestions } from "@/hooks/queries/composer-suggestion-questions";
 import { useQuery } from "@tanstack/react-query";
 import { sdk } from "@/lib/sdk";
 import { composerSuggestionContext } from "@/lib/composer-suggestion-host";
@@ -1138,10 +1137,6 @@ export function ThreadDetailPromptArea({
     staleTime: Infinity,
     gcTime: 0,
   });
-  const suggestionQuestions = useComposerSuggestionQuestions(
-    thread.id,
-    suggestionConnection === "connected",
-  );
   const suggestionContext = composerSuggestionContext(
     suggestionTimeline.data,
     thread.status,
@@ -1149,7 +1144,6 @@ export function ThreadDetailPromptArea({
     queuedMessagesQuery.data === undefined ? 1 : queuedMessages.length,
     suggestionConnection === "connected",
     suggestionEvents.data,
-    suggestionQuestions,
   );
   const suggestionTurnId = suggestionContext.completedTurnId;
   const suggestionRevision = suggestionContext.contextRevision;

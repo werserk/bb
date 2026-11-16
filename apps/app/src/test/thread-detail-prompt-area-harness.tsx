@@ -722,6 +722,7 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
 }));
 
 vi.mock("@/hooks/queries/thread-panel-queries", () => ({
+  useThreadTimeline: () => ({ data: undefined }),
   useThreadPromptHistory: (threadId: string, options: unknown) => {
     promptAreaMocks.useThreadPromptHistory(threadId, options);
     return { data: [] };
