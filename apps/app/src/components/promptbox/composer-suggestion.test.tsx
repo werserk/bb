@@ -94,3 +94,33 @@ describe("suggestion keys", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 });
+
+it.each(["pending", "error", "none"])(
+  "never accepts or submits %s progress text",
+  (phase) => {
+    const { controller, replace, submit } = setup();
+    controller.dismiss();
+    const snapshot = controller.getSnapshot().snapshot!;
+    controller.experimental_begin("progress", snapshot);
+    if (phase !== "pending")
+      controller.experimental_finish(
+        "progress",
+        snapshot,
+        phase === "error" ? "failed" : null,
+      );
+    for (const key of ["Tab", "Enter"]) {
+      expect(
+        handleComposerSuggestionKey(
+          new KeyboardEvent("keydown", { key }),
+          controller,
+          false,
+          true,
+          submit,
+        ),
+      ).toBe(false);
+    }
+    expect(acceptComposerSuggestion(controller)).toBe(false);
+    expect(replace).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  },
+);

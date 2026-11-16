@@ -215,11 +215,9 @@ it("keeps plan and native questions in the overview even when other sources moun
   expect(screen.getByText("Machine detail").closest("section")?.hidden).toBe(
     true,
   );
-  const footer = screen.getByRole("contentinfo", {
-    name: "All thread context sections",
-  });
-  expect(footer.textContent).toContain("Machine status");
-  expect(footer.textContent).toContain("Child threads");
+  expect(screen.queryByRole("contentinfo")).toBeNull();
+  expect(screen.getByRole("button", { name: "Machine status" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Child threads" })).toBeTruthy();
 });
 
 it("updates native detail content without republishing unchanged summary metadata", () => {
@@ -283,27 +281,37 @@ it("toggles the selected summary, switches sections and preserves draft and clic
   expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
 });
 
-it("keeps footer section buttons as selectors and returns focus to the summary used to close", () => {
+it("labels counted sections and keeps attention visible while switching", () => {
   render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  expect(plan.textContent).toContain("Plan");
+  fireEvent.click(plan);
+  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Queue: 3" }));
+  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
   const disclosure = screen.getByRole("button", {
     name: "Toggle thread context",
   });
   fireEvent.click(disclosure);
-  const footer = screen.getByRole("contentinfo", {
-    name: "All thread context sections",
-  });
-  const footerQueue = within(footer).getByRole("button", { name: "Queue3" });
-  fireEvent.click(footerQueue);
-  fireEvent.click(footerQueue);
-  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
-  const summaryQueue = screen.getByRole("button", { name: "Queue: 3" });
-  fireEvent.click(summaryQueue);
-  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
-  expect(document.activeElement).toBe(summaryQueue);
-  fireEvent.click(summaryQueue);
-  fireEvent.click(disclosure);
   expect(document.activeElement).toBe(disclosure);
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+});
+
+it("moves keyboard focus between summary buttons without changing the selected section", () => {
+  render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  const queue = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.click(plan);
+  plan.focus();
+  fireEvent.keyDown(plan, { key: "ArrowRight" });
+  expect(document.activeElement).toBe(queue);
+  expect(plan.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.keyDown(queue, { key: "Home" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Questions unavailable" }),
+  );
+  fireEvent.keyDown(document.activeElement!, { key: "End" });
+  expect(document.activeElement).toBe(queue);
 });
 
 it("keeps programmatic reveal force-open when the same section is already selected", () => {
@@ -341,27 +349,39 @@ it("keeps programmatic reveal force-open when the same section is already select
   expect(document.activeElement).toBe(plan);
 });
 
-it.each(["header", "escape"])(
-  "returns focus outside the panel after footer selection and %s close",
-  (method) => {
-    render(<Fixture />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle thread context" }),
-    );
-    const footer = screen.getByRole("contentinfo", {
-      name: "All thread context sections",
-    });
-    const footerQueue = within(footer).getByRole("button", { name: "Queue3" });
-    fireEvent.click(footerQueue);
-    footerQueue.focus();
-    if (method === "header")
-      fireEvent.click(
-        screen.getByRole("button", { name: "Collapse thread context" }),
-      );
-    else fireEvent.keyDown(footerQueue, { key: "Escape" });
-    expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Queue: 3" }),
-    );
-  },
-);
+it("opens overflow sections and returns Escape focus to the external disclosure", () => {
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        {Array.from({ length: 7 }, (_, index) => (
+          <ComposerContextItem
+            key={index}
+            id={`item-${index}`}
+            label={`Context ${index}`}
+            icon="Info"
+            group="context"
+          >
+            <button>Action {index}</button>
+          </ComposerContextItem>
+        ))}
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  const disclosure = screen.getByRole("button", {
+    name: "Toggle thread context",
+  });
+  expect(disclosure.textContent).toContain("+2");
+  fireEvent.click(disclosure);
+  const overflow = screen.getByRole("navigation", {
+    name: "More thread context sections",
+  });
+  fireEvent.click(within(overflow).getByRole("button", { name: "Context 6" }));
+  const action = screen.getByRole("button", { name: "Action 6" });
+  action.focus();
+  fireEvent.keyDown(action, { key: "Escape" });
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(disclosure);
+});

@@ -63,6 +63,7 @@ import {
   ThreadTitle,
   useThreadTitleDisplayText,
 } from "@/components/thread/ThreadTitleMentions";
+import { useComposerContextSource } from "../context/composer-context";
 import { childThreadNoun } from "@/lib/child-thread-copy";
 import { SIDEBAR_WORKING_STATUS_COLOR_CLASS } from "@bb/shared-ui/sidebar-row-classes";
 
@@ -307,11 +308,39 @@ function ActiveChildThreadsCard({
   onToggle: () => void;
 }) {
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+  const compact = useComposerContextSource() !== null;
   const items = childThreadsSection.items;
   const waiting = items.filter((item) => item.needsOwnerAttention).length;
   const working = items.filter((item) => !item.needsOwnerAttention);
   const summary = `${waiting} needs you · ${working.length} working`;
   if (items.length === 0) return null;
+  const list = (
+    <ul
+      className={
+        compact
+          ? "space-y-1"
+          : "max-h-40 space-y-0.5 overflow-y-auto px-3 pt-1.5"
+      }
+    >
+      {items.map((item) => (
+        <li key={item.id} className="text-xs">
+          <NavLink to={item.href} className={CHILD_THREAD_ROW_CLASS}>
+            <Icon
+              name={item.needsOwnerAttention ? "CircleQuestion" : "Loading"}
+              className={cn(
+                "size-3.5 shrink-0",
+                !item.needsOwnerAttention &&
+                  "animate-spin motion-reduce:animate-none",
+                !item.needsOwnerAttention && SIDEBAR_WORKING_STATUS_COLOR_CLASS,
+              )}
+              aria-label={item.needsOwnerAttention ? "Needs you" : "Working"}
+            />
+            <ThreadTitle title={item.title} tooltip className="flex-1" />
+          </NavLink>
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <PromptStackCard
       ariaLabel="Child threads"
@@ -330,13 +359,17 @@ function ActiveChildThreadsCard({
         aria-controls={SECTION_IDS.childThreads.body}
         aria-label={`${items.length} active ${childThreadNoun(items.length)} · ${waiting} needs you`}
         onClick={focus.onTriggerClick}
-        className={activityRowClass(
-          "active",
-          cn(
-            PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-            PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-          ),
-        )}
+        className={
+          compact
+            ? "hidden"
+            : activityRowClass(
+                "active",
+                cn(
+                  PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
+                  PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
+                ),
+              )
+        }
       >
         <Icon
           name={waiting > 0 ? "CircleQuestion" : "ChildThread"}
@@ -353,42 +386,25 @@ function ActiveChildThreadsCard({
         </span>
         <PromptStackCountSlot count={items.length} />
       </button>
-      <AnimatedBody
-        collapsedBorder="reserve"
-        id={SECTION_IDS.childThreads.body}
-        labelledBy={SECTION_IDS.childThreads.toggle}
-        isExpanded={isExpanded}
-      >
-        <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pt-1.5">
-          {items.map((item) => (
-            <li key={item.id} className="text-xs">
-              <NavLink to={item.href} className={CHILD_THREAD_ROW_CLASS}>
-                <Icon
-                  name={item.needsOwnerAttention ? "CircleQuestion" : "Loading"}
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    !item.needsOwnerAttention &&
-                      "animate-spin motion-reduce:animate-none",
-                    !item.needsOwnerAttention &&
-                      SIDEBAR_WORKING_STATUS_COLOR_CLASS,
-                  )}
-                  aria-label={
-                    item.needsOwnerAttention ? "Needs you" : "Working"
-                  }
-                />
-                <ThreadTitle title={item.title} tooltip className="flex-1" />
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-        <PromptStackCollapseRow
-          buttonRef={focus.collapseRef}
-          className="rounded-none"
-          controlsId={SECTION_IDS.childThreads.body}
-          label={`Collapse ${items.length} ${childThreadNoun(items.length)}`}
-          onCollapse={focus.onCollapseClick}
-        />
-      </AnimatedBody>
+      {compact ? (
+        list
+      ) : (
+        <AnimatedBody
+          collapsedBorder="reserve"
+          id={SECTION_IDS.childThreads.body}
+          labelledBy={SECTION_IDS.childThreads.toggle}
+          isExpanded={isExpanded}
+        >
+          {list}
+          <PromptStackCollapseRow
+            buttonRef={focus.collapseRef}
+            className="rounded-none"
+            controlsId={SECTION_IDS.childThreads.body}
+            label={`Collapse ${items.length} ${childThreadNoun(items.length)}`}
+            onCollapse={focus.onCollapseClick}
+          />
+        </AnimatedBody>
+      )}
     </PromptStackCard>
   );
 }

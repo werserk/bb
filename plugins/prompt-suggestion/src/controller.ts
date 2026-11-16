@@ -49,9 +49,10 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       return { kind: "unavailable" as const, reason: "rate_limited" };
     const controller = new AbortController();
     active.set(input.requestId, { token: input.token, controller });
+    const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
     const signal = AbortSignal.any([
       controller.signal,
-      AbortSignal.timeout(settings.timeoutMs),
+      timeoutSignal,
       ...(callerSignal ? [callerSignal] : []),
     ]);
     const revision = configRevision;
@@ -115,7 +116,11 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       else counters.errors++;
       return {
         kind: "unavailable" as const,
-        reason: signal.aborted ? "cancelled" : "generation_failed",
+        reason: timeoutSignal.aborted
+          ? "timeout"
+          : signal.aborted
+            ? "cancelled"
+            : "generation_failed",
       };
     } finally {
       active.delete(input.requestId);

@@ -16,7 +16,7 @@ function SuggestionController() {
   return <ConnectedSuggestionController controller={controller} />;
 }
 
-function ConnectedSuggestionController({
+export function ConnectedSuggestionController({
   controller,
 }: {
   controller: experimental_ComposerSuggestionController;
@@ -46,6 +46,7 @@ function ConnectedSuggestionController({
     const requestId = crypto.randomUUID();
     const token = crypto.randomUUID();
     let cancelled = false;
+    if (!controller.experimental_begin(requestId, snapshot)) return;
     void rpc
       .call("suggest", {
         threadId: snapshot.threadId,
@@ -55,10 +56,26 @@ function ConnectedSuggestionController({
         expectedTurnId: snapshot.completedTurnId,
       })
       .then((result) => {
-        if (!cancelled && result.kind === "suggestion")
+        if (cancelled) return;
+        if (result.kind === "suggestion") {
           controller.show({ requestId, snapshot, text: result.text });
+        } else {
+          controller.experimental_finish(
+            requestId,
+            snapshot,
+            result.kind === "unavailable" &&
+              result.reason === "generation_failed"
+              ? "failed"
+              : result.kind === "unavailable" && result.reason === "timeout"
+                ? "timeout"
+                : null,
+          );
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled)
+          controller.experimental_finish(requestId, snapshot, "failed");
+      });
     return () => {
       cancelled = true;
       controller.clear(requestId);

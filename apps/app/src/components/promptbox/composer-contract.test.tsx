@@ -392,12 +392,20 @@ function registerProbePlugin() {
   );
 }
 
-function renderSurface(surface: Surface) {
+function renderSurface(surface: Surface, suggestions = false) {
   const store = createDraftStore(
     surface.scope,
     `contract:${surface.name}`,
     surface.pluginSubmit !== "rejects",
   );
+  if (suggestions) {
+    store.setText("", []);
+    store.host.suggestionContext = {
+      contextRevision: "one",
+      completedTurnId: "turn",
+      eligible: true,
+    };
+  }
   const onSubmit = vi.fn();
   const onModifierSubmit = vi.fn();
   function Harness() {
@@ -634,4 +642,51 @@ describe.each(COMPOSERS)("$name", (composer) => {
       );
     });
   });
+});
+
+it("expands collapsed composer for pending and error suggestion feedback", async () => {
+  await registerComposerPlugin();
+  const { store } = renderSurface(SURFACES[0]!, true);
+  const box = await composerBox();
+  act(() => focusPaneComposer(screen.getByTestId("pane")));
+  const composer = await listedComposer();
+  const controller = composer.experimental_suggestions;
+  await waitFor(() => expect(controller.getSnapshot().eligible).toBe(true));
+  fireEvent.click(screen.getByLabelText("Collapse prompt box"));
+  await waitFor(() =>
+    expect(box.querySelector("[data-promptbox-collapsed]")).not.toBeNull(),
+  );
+  const snapshot = controller.getSnapshot().snapshot!;
+  act(() => {
+    controller.experimental_begin("progress", snapshot);
+  });
+  expect(box.querySelector("[data-promptbox-collapsed]")).toBeNull();
+  expect(box.querySelector("[data-promptbox-compact]")).toBeNull();
+  expect(
+    screen.getByRole("status", { name: "Preparing suggestion" }),
+  ).toBeTruthy();
+  expect(store.draft().text).toBe("");
+  act(() => {
+    controller.experimental_finish("progress", snapshot, "failed");
+  });
+  expect(box.querySelector("[data-promptbox-collapsed]")).toBeNull();
+  const details = screen
+    .getByLabelText("Suggestion error details")
+    .closest("details")!;
+  const summary = screen.getByLabelText("Suggestion error details");
+  const press = new MouseEvent("mousedown", {
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    summary.dispatchEvent(press);
+  });
+  expect(press.defaultPrevented).toBe(false);
+  fireEvent.click(summary);
+  expect(details.open).toBe(true);
+  act(() => {
+    controller.clear("progress");
+  });
+  expect(box.querySelector("[data-promptbox-collapsed]")).not.toBeNull();
+  expect(screen.queryByLabelText("Suggestion error details")).toBeNull();
 });

@@ -16,34 +16,72 @@
   border-radius: 12px 12px 0 0;
   background: var(--background);
 }
-.composer-context-strip > button {
+.composer-context-tabs {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composer-context-tabs > button,
+.composer-context-disclosure {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  height: 26px;
-  border-radius: 4px;
-  padding: 0 6px;
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   white-space: nowrap;
   font-size: var(--text-xs);
 }
-.composer-context-strip > button > span {
+.composer-context-label {
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.composer-context-strip > button:hover,
-.composer-context-strip > button[aria-expanded="true"] {
+.composer-context-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  opacity: 0.8;
+}
+.composer-context-tabs > button:hover,
+.composer-context-disclosure:hover {
   background: var(--accent);
   color: var(--foreground);
 }
-.composer-context-strip > button:focus-visible,
+.composer-context-tabs > button[aria-expanded="true"] {
+  border-color: var(--border);
+  border-top-color: transparent;
+  border-radius: 0 0 6px 6px;
+  background: var(--surface-raised-solid, var(--background));
+  box-shadow: inset 0 -2px 0 var(--muted-foreground);
+  color: var(--foreground);
+}
+.composer-context-tabs
+  > button[data-context-tone="error"][aria-expanded="true"] {
+  box-shadow: inset 0 -2px 0 var(--destructive-text);
+  color: var(--destructive-text);
+}
+.composer-context-tabs
+  > button[data-context-tone="attention"][aria-expanded="true"] {
+  box-shadow: inset 0 -2px 0 var(--attention);
+  color: var(--attention);
+}
+.composer-context-tabs > button:focus-visible,
+.composer-context-disclosure:focus-visible,
 .composer-context-panel button:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
-.composer-context-strip > .composer-context-disclosure {
-  flex-shrink: 0;
+.composer-context-disclosure {
   margin-left: auto;
+  padding: 0 4px;
+  min-width: 32px;
+  justify-content: center;
+  color: var(--muted-foreground);
 }
 .composer-context-dock[data-context-present]
   :where([data-follow-up-composer-anchor] [data-promptbox]) {
@@ -78,78 +116,44 @@
   border-top-right-radius: 0;
   border-top-color: color-mix(in oklab, var(--border) 35%, transparent);
 }
-.composer-context-heading {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 42px;
-  padding: 0 14px;
-  font-size: var(--text-xs);
-}
-.composer-context-heading > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  color: var(--muted-foreground);
-}
 .composer-context-canvas {
-  max-height: min(208px, 35dvh);
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 14px 12px;
+  padding: 12px 14px;
   scrollbar-width: thin;
-}
-.composer-context-overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 18px;
 }
 .composer-context-section {
   min-width: 0;
 }
-.composer-context-section > h3 {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 6px 0 10px;
-  color: var(--muted-foreground);
-  font-size: var(--text-2xs);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.composer-context-section[data-context-group="attention"] {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid color-mix(in oklab, var(--attention) 25%, transparent);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--attention) 6%, transparent);
 }
-.composer-context-section[data-context-group="attention"] > h3 {
-  color: var(--attention);
+.composer-context-section[data-context-group="attention"][data-context-tone="error"] {
+  border-color: color-mix(in oklab, var(--destructive-text) 25%, transparent);
+  background: color-mix(in oklab, var(--destructive-text) 6%, transparent);
 }
-.composer-context-overview
-  > .composer-context-section[data-context-group="attention"] {
-  padding-left: 18px;
-  border-left: 1px solid color-mix(in oklab, var(--border) 35%, transparent);
+.composer-context-section:last-child {
+  margin-bottom: 0;
 }
-.composer-context-footer {
-  flex-shrink: 0;
+.composer-context-more {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  min-height: 32px;
-  padding: 5px 14px;
-  border-top: 1px solid color-mix(in oklab, var(--border) 35%, transparent);
+  gap: 6px;
+  padding: 0 14px 12px;
 }
-.composer-context-footer:empty {
-  display: none;
-}
-.composer-context-footer > button {
+.composer-context-more > button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-2xs);
-  color: var(--muted-foreground);
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  font-size: var(--text-xs);
 }
 .composer-context-section :where([data-composer-context-card]) {
   margin: 0;
@@ -161,32 +165,61 @@
 .composer-context-section :where([data-composer-context-card] p) {
   overflow-wrap: anywhere;
 }
-@container composer-context (max-width: 470px) {
-  .composer-context-overview {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
+.composer-context-plan progress {
+  display: block;
+  height: 3px;
+  border: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--accent);
+  color: var(--success);
+  accent-color: var(--success);
+}
+.composer-context-plan progress::-webkit-progress-bar {
+  background: var(--accent);
+}
+.composer-context-plan progress::-webkit-progress-value {
+  background: var(--success);
+}
+.composer-context-plan progress::-moz-progress-bar {
+  background: var(--success);
+}
+@container composer-dock (max-width: 470px) {
+  .composer-context-strip {
+    padding: 0 4px;
   }
-  .composer-context-overview
-    > .composer-context-section[data-context-group="attention"] {
-    order: -1;
-    padding-left: 0;
-    border-left: 0;
-  }
-  .composer-context-strip > button {
-    padding: 0 3px;
+  .composer-context-tabs > button {
+    padding: 0 6px;
     gap: 4px;
+  }
+  .composer-context-tabs
+    > button:not([data-context-category="attention"])
+    .composer-context-label {
+    display: none;
+  }
+  .composer-context-tabs > button[data-context-tone] .composer-context-label {
+    display: inline;
+    max-width: 100px;
   }
 }
-
-@container composer-dock (max-width: 470px) {
-  .composer-context-strip > button {
-    padding: 0 4px;
-    gap: 4px;
+@media (prefers-reduced-motion: no-preference) {
+  .composer-context-panel[data-state="open"] {
+    animation: composer-context-appear 140ms ease-out;
   }
-  .composer-context-strip > button[data-context-count] {
-    flex-shrink: 0;
+  .composer-context-panel[data-state="closed"] {
+    animation: composer-context-appear 100ms ease-in reverse;
   }
-  .composer-context-strip > button[data-context-category="context"] > span {
-    display: none;
+  .composer-context-section:not([hidden]) {
+    animation: composer-context-appear 120ms ease-out;
+  }
+  @keyframes composer-context-appear {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }

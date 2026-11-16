@@ -13,7 +13,7 @@ second dock or replace its focus/navigation handlers.
 
 `ComposerContextItem` registers typed presentation metadata and renders its native
 content into a stable portal target. `ComposerContextDock` places those targets in
-a structured work/attention overview or a selected section. Native React providers,
+a compact work/attention overview or a selected section with attention. Native React providers,
 local state, handlers and data subscriptions remain with each source. Closing the
 disclosure detaches its content targets; it does not unmount their native React
 subtrees. Store/source scopes end inside a contribution, so an inline queue editor
@@ -52,13 +52,23 @@ and the existing footer, question, plugin and banner integration suites.
 production composer, queue, child-thread and context renderers. These scenes are
 frontend fixtures, not live-server or release acceptance.
 
-Clicking a selected summary section collapses its disclosure and leaves focus on
-that summary button, including when the section was selected from the panel
-footer. Clicking another summary section switches the content without closing.
-Footer buttons remain selectors; programmatic focus/reveal always opens its
-section. The main disclosure button closes to itself, while Escape and the header
-collapse action restore the recorded opening control. Footer selection records
-the matching summary button (or main disclosure for sections not in the summary)
-as its external return target. The panel uses the shared
-popover layer (z-index 50), above the split workspace panel controls (40), and its
-header actions have 32px hit targets.
+The Ledger strip labels each section and renders counts in tabular numerals.
+Selected buttons join the raised panel visually; hover and keyboard focus remain
+distinct. On narrow composers secondary labels yield to icons and counts while
+accessible names and title hints retain the full label. Horizontal overflow stays
+inside the strip, and sources beyond its five summaries are selectable through
+its +N disclosure. Arrow keys, Home and End move between summary controls without
+changing the selected section.
+
+Clicking the selected summary collapses the panel and returns focus to that
+button. Clicking another switches content in place. Escape restores the opening
+summary, or the main disclosure for overflow selections. Programmatic reveal
+always opens the requested section. The preferred attention source remains visible
+beside any selected content. Native question actions still hand focus to their
+existing form owner.
+
+The panel has no duplicate title bar or footer navigation. The child-thread source
+omits its internal disclosure chrome only inside the dock; its native rendering
+elsewhere is unchanged. The panel uses the shared popover layer (z-index 50),
+above split workspace controls (40). The external disclosure has a 32px hit target.
+Opening and section switching use short fades only when reduced motion is off.
