@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { createContext, useContext, useLayoutEffect, useState } from "react";
 import {
   ComposerContextProvider,
@@ -253,3 +259,109 @@ it("updates native detail content without republishing unchanged summary metadat
   expect(listener).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Needs you: 3" })).toBeTruthy();
 });
+
+it("toggles the selected summary, switches sections and preserves draft and clicked-button focus", () => {
+  render(<Fixture />);
+  const draft = screen.getByRole("textbox", { name: "Draft" });
+  fireEvent.change(draft, { target: { value: "Unsaved draft" } });
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  const queue = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.click(plan);
+  expect(plan.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(plan);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(plan);
+  fireEvent.click(plan);
+  fireEvent.click(queue);
+  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+  expect(queue.getAttribute("aria-expanded")).toBe("true");
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(queue);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(queue);
+  expect(screen.getByRole("textbox", { name: "Draft" })).toBe(draft);
+  expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
+});
+
+it("keeps footer section buttons as selectors and returns focus to the summary used to close", () => {
+  render(<Fixture />);
+  const disclosure = screen.getByRole("button", {
+    name: "Toggle thread context",
+  });
+  fireEvent.click(disclosure);
+  const footer = screen.getByRole("contentinfo", {
+    name: "All thread context sections",
+  });
+  const footerQueue = within(footer).getByRole("button", { name: "Queue3" });
+  fireEvent.click(footerQueue);
+  fireEvent.click(footerQueue);
+  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+  const summaryQueue = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.click(summaryQueue);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(summaryQueue);
+  fireEvent.click(summaryQueue);
+  fireEvent.click(disclosure);
+  expect(document.activeElement).toBe(disclosure);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+});
+
+it("keeps programmatic reveal force-open when the same section is already selected", () => {
+  function Reveal() {
+    const store = useComposerContextStore();
+    return <button onClick={() => store?.reveal("plan")}>Reveal plan</button>;
+  }
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <ComposerContextItem
+          id="plan"
+          label="Plan"
+          icon="ListTodo"
+          group="work"
+        >
+          <p>Current work</p>
+        </ComposerContextItem>
+      </ComposerContextSources>
+      <Reveal />
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  const reveal = screen.getByRole("button", { name: "Reveal plan" });
+  fireEvent.click(reveal);
+  fireEvent.click(reveal);
+  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+  const plan = within(screen.getByRole("toolbar")).getByRole("button", {
+    name: "Plan",
+  });
+  fireEvent.click(plan);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(plan);
+});
+
+it.each(["header", "escape"])(
+  "returns focus outside the panel after footer selection and %s close",
+  (method) => {
+    render(<Fixture />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle thread context" }),
+    );
+    const footer = screen.getByRole("contentinfo", {
+      name: "All thread context sections",
+    });
+    const footerQueue = within(footer).getByRole("button", { name: "Queue3" });
+    fireEvent.click(footerQueue);
+    footerQueue.focus();
+    if (method === "header")
+      fireEvent.click(
+        screen.getByRole("button", { name: "Collapse thread context" }),
+      );
+    else fireEvent.keyDown(footerQueue, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Queue: 3" }),
+    );
+  },
+);

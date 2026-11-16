@@ -51,3 +51,14 @@ and the existing footer, question, plugin and banner integration suites.
 `FollowUpPromptBox.stories.tsx` provides the Before/After component scenes with the
 production composer, queue, child-thread and context renderers. These scenes are
 frontend fixtures, not live-server or release acceptance.
+
+Clicking a selected summary section collapses its disclosure and leaves focus on
+that summary button, including when the section was selected from the panel
+footer. Clicking another summary section switches the content without closing.
+Footer buttons remain selectors; programmatic focus/reveal always opens its
+section. The main disclosure button closes to itself, while Escape and the header
+collapse action restore the recorded opening control. Footer selection records
+the matching summary button (or main disclosure for sections not in the summary)
+as its external return target. The panel uses the shared
+popover layer (z-index 50), above the split workspace panel controls (40), and its
+header actions have 32px hit targets.

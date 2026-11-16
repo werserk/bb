@@ -55,7 +55,7 @@
 .composer-context-panel {
   container-type: inline-size;
   container-name: composer-context;
-  z-index: 20;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   max-height: min(
@@ -91,8 +91,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   border-radius: 4px;
   color: var(--muted-foreground);
 }

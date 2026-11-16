@@ -74,6 +74,7 @@ export function ComposerContextDock({
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  const summaryButtons = useRef(new Map<string, HTMLButtonElement>());
   const panelId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const disclosure = useRef<HTMLButtonElement>(null);
@@ -108,6 +109,14 @@ export function ComposerContextDock({
       ? trigger.current
       : disclosure.current
     )?.focus({ preventScroll: true });
+  };
+  const toggleSection = (id: string, button: HTMLButtonElement) => {
+    if (expanded && active?.id === id) {
+      trigger.current = button;
+      close();
+    } else {
+      open(id, button);
+    }
   };
   useLayoutEffect(() => {
     if (!store) return;
@@ -203,6 +212,7 @@ export function ComposerContextDock({
                 type="button"
                 className="ml-auto"
                 aria-label="Collapse thread context"
+                title="Collapse thread context (Esc)"
                 onClick={close}
               >
                 <Icon name="ChevronDown" className="size-3.5" aria-hidden />
@@ -239,7 +249,14 @@ export function ComposerContextDock({
                   <button
                     key={entry.id}
                     type="button"
-                    onClick={(event) => open(entry.id, event.currentTarget)}
+                    onClick={(event) =>
+                      open(
+                        entry.id,
+                        summaryButtons.current.get(entry.id) ??
+                          disclosure.current ??
+                          event.currentTarget,
+                      )
+                    }
                   >
                     <Icon name={entry.icon} className="size-3" aria-hidden />
                     {entry.label}
@@ -263,6 +280,10 @@ export function ComposerContextDock({
                 <button
                   type="button"
                   key={entry.id}
+                  ref={(button) => {
+                    if (button) summaryButtons.current.set(entry.id, button);
+                    else summaryButtons.current.delete(entry.id);
+                  }}
                   data-context-count={
                     (entry.summary !== undefined &&
                       entry.group !== "attention" &&
@@ -284,7 +305,10 @@ export function ComposerContextDock({
                         ? "text-attention"
                         : "text-muted-foreground",
                   )}
-                  onClick={(event) => open(entry.id, event.currentTarget)}
+                  title={`${expanded && active?.id === entry.id ? "Collapse" : "Show"} ${entry.label}`}
+                  onClick={(event) =>
+                    toggleSection(entry.id, event.currentTarget)
+                  }
                 >
                   <Icon
                     name={entry.icon}
@@ -313,9 +337,17 @@ export function ComposerContextDock({
                 aria-label="Toggle thread context"
                 aria-controls={panelId}
                 aria-expanded={expanded && hasFacts}
-                onClick={(event) =>
-                  expanded ? close() : open(null, event.currentTarget)
+                title={
+                  expanded ? "Collapse thread context" : "Show thread context"
                 }
+                onClick={(event) => {
+                  if (expanded) {
+                    trigger.current = event.currentTarget;
+                    close();
+                  } else {
+                    open(null, event.currentTarget);
+                  }
+                }}
               >
                 {entries.length > summaryEntries.length && (
                   <span>+{entries.length - summaryEntries.length}</span>
