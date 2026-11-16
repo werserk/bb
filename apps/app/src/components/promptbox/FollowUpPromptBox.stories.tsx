@@ -55,9 +55,7 @@ import {
   type WorkspaceCheckoutDisplay,
 } from "@bb/shared-ui/lib/workspace-checkout-display";
 import type { PickerOption } from "@/components/pickers/OptionPicker";
-import {
-  selectWorkspaceChangedFilesSection,
-} from "../../../../../plugins/git/ui/workspace-change-summary";
+import { selectWorkspaceChangedFilesSection } from "../../../../../plugins/git/ui/workspace-change-summary";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import {
   GitSegmentFixtureProvider,

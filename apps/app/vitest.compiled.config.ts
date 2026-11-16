@@ -30,6 +30,9 @@ export default defineWorkspaceTestConfig({
       aliases: { "@": path.resolve(__dirname, "./src") },
       name: "@bb/app:compiled",
       include: [
+        "src/components/promptbox/context/*.test.tsx",
+        "src/components/promptbox/FollowUpPromptBox.test.tsx",
+        "src/components/plugin/PluginComposerBanners.test.tsx",
         "src/components/modal/*.test.tsx",
         "src/components/plugin/PluginThreadFixedTabs.continuity.test.tsx",
         "src/components/plugin/RetainedThreadTabContainer.test.tsx",

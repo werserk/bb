@@ -227,9 +227,17 @@ function FollowUpPromptBoxStackOnly({
     <PluginComposerViewProvider value={composerView}>
       <PluginComposerHostProvider value={pluginComposerHost ?? null}>
         <div data-promptbox-shell="" className="space-y-2">
-          <div className={`grid gap-2 ${PROMPT_STACK_TRACK_CLASS}`}>
-            {stack}
-          </div>
+          {contextStore ? (
+            <ComposerContextDock
+              sources={<ComposerContextSources>{stack}</ComposerContextSources>}
+            >
+              {null}
+            </ComposerContextDock>
+          ) : (
+            <div className={`grid gap-2 ${PROMPT_STACK_TRACK_CLASS}`}>
+              {stack}
+            </div>
+          )}
         </div>
       </PluginComposerHostProvider>
     </PluginComposerViewProvider>

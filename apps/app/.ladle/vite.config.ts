@@ -5,6 +5,8 @@ import { resolveCurrentDevInstanceConfig } from "@bb/config/runtime";
 import { forkablePluginPaths } from "../vite-forkable-plugin-paths.js";
 import { sharedUiEnvSeam } from "../vite-shared-ui-seam.js";
 
+import { pluginZodRuntime } from "../vite-plugin-zod-runtime.js";
+
 const repoRoot = path.resolve(__dirname, "../../..");
 const devInstance = resolveCurrentDevInstanceConfig(repoRoot);
 const trustedDevAppHeaders = {
@@ -13,6 +15,7 @@ const trustedDevAppHeaders = {
 
 export default defineConfig({
   plugins: [
+    pluginZodRuntime(),
     forkablePluginPaths(path.resolve(__dirname, "../src")),
     sharedUiEnvSeam(),
     tailwindcss(),

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   act,
@@ -16,6 +17,11 @@ import {
 import { ComposerContextDock } from "./ComposerContextDock";
 import { ThreadComposerPlan } from "./ThreadComposerPlan";
 import { focusThreadPlan } from "@/views/thread-detail/thread-plan-focus";
+const threadListeners = new Set<() => void>();
+const subscribeThread = (listener: () => void) => {
+  threadListeners.add(listener);
+  return () => threadListeners.delete(listener);
+};
 const facts = vi.hoisted(() => ({
   view: undefined as ThreadPlanView | undefined,
   pending: [] as PendingInteraction[],
@@ -36,7 +42,9 @@ vi.mock("@/hooks/queries/thread-plans", () => ({
   }),
 }));
 vi.mock("@/hooks/queries/thread-queries", () => ({
-  useThread: () => ({ data: facts.thread }),
+  useThread: () => ({
+    data: useSyncExternalStore(subscribeThread, () => facts.thread),
+  }),
   useThreadPendingInteractions: () => ({ data: facts.pending }),
 }));
 vi.mock("@/hooks/queries/environment-queries", () => ({
@@ -146,14 +154,16 @@ it("hands pending questions to the native form and hides settled answer controls
 });
 it("does not present a running spinner while the agent is idle and removes archived plan facts", () => {
   facts.view!.current!.items[0]!.status = "in_progress";
-  const ui = render(<Fixture />);
+  render(<Fixture />);
   fireEvent.click(screen.getByRole("button", { name: "Plan: 0/1" }));
   expect(
     screen
       .getByLabelText("in_progress: Repair layout")
       .querySelector(".motion-safe\\:animate-spin"),
   ).toBeNull();
-  facts.thread.archivedAt = 100;
-  ui.rerender(<Fixture />);
+  act(() => {
+    facts.thread = { ...facts.thread, archivedAt: 100 };
+    for (const listener of threadListeners) listener();
+  });
   expect(screen.queryByRole("button", { name: "Plan: 0/1" })).toBeNull();
 });
