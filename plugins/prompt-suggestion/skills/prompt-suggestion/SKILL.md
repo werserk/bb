@@ -18,3 +18,5 @@ Reasoning effort and Processing speed are explicit native settings. Provider def
 Instructions live in src/instructions.ts, with a native setting override. No transcript/suggestion corpus or model content log is added. Existing BB drafts and sent history keep their ordinary retention. Dataset export and background sending are outside this plugin.
 
 When upgrading Autosay, inspect its non-secret settings, disable the old plugin before enabling Prompt Suggestion, and choose a native model explicitly. Direct API configuration does not map automatically to a BB connection. Do not silently migrate credentials or leave both composer controllers active.
+
+While a request is pending, the composer shows Preparing suggestion and a spinner. None/cancellation restores the normal placeholder; failure/timeout exposes a small pressable error disclosure. Pending text cannot be submitted. Settings show enabled state, selected model, reasoning and requested processing speed. CLI status/diagnostics remain available for inspection.

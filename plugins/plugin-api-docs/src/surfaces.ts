@@ -735,6 +735,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "useComposer",
           "PluginComposerApi.experimental_suggestions",
           "experimental_ComposerSuggestionController",
+          "experimental_ComposerSuggestionController.experimental_begin",
+          "experimental_ComposerSuggestionController.experimental_finish",
         ],
         firstParty: ["Prompt Suggestion", "Composer"],
         experimental: true,

@@ -117,3 +117,29 @@ describe("generation admission and cancellation", () => {
     }
   });
 });
+
+it("reports the server deadline as timeout rather than explicit cancellation", async () => {
+  const host = fixture();
+  const model = await installGenerator(
+    host.bb,
+    async (_request, signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      }),
+  );
+  const service = createService(host.bb, () =>
+    settingsSchema.parse({ enabled: true, model, timeoutMs: 100 }),
+  );
+  try {
+    expect(await service.suggest(input)).toEqual({
+      kind: "unavailable",
+      reason: "timeout",
+    });
+    expect(service.status().active).toBe(0);
+  } finally {
+    service.reset();
+    await host.harness.lifecycle.dispose();
+  }
+});

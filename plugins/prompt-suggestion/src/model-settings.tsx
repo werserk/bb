@@ -46,6 +46,13 @@ export function ModelSettings() {
   const model = models.find((item) => item.id === selected);
   return (
     <section className="flex flex-col gap-3">
+      <p role="status" className="text-sm text-muted-foreground">
+        {settings.values?.enabled === true ? "Enabled" : "Disabled"} ·{" "}
+        {model?.displayName ??
+          (selected ? "Selected model unavailable" : "No model selected")}{" "}
+        · Reasoning: {String(settings.values?.reasoningEffort ?? "default")} ·
+        Requested speed: {String(settings.values?.serviceTier ?? "default")}
+      </p>
       <div className="flex items-center justify-between gap-3">
         <label htmlFor={inputId} className="text-sm font-medium">
           Suggestion model
