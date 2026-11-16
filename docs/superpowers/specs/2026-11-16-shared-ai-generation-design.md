@@ -1,0 +1,47 @@
+# Shared AI generation and Prompt Suggestion
+
+## Mission and authority
+
+The owner approved a shared native AI API, reusable provider connections, and an optional OpenAI-compatible facade, then requested implementation and rollout of both that functionality and Autosay renamed to Prompt Suggestion. This design makes that accepted architecture concrete. No new provider account, secret, external publication, or guessed model choice is authorized by this document.
+
+## Shared AI API
+
+- goal: Plugins and native BB helper tasks invoke explicitly selected models through one typed, bounded service path; OpenAI Chat Completions clients can use that path through a token-authenticated HTTP facade.
+- in_scope: Extend the existing AI service registration and registry; public experimental model-list/generation API; initial Codex and Pi adapter coverage where credentials and catalog match; native helper-task reuse; AI Gateway plugin; SDK/CLI/UI/guide parity; checks and rollout.
+- non_goals: An agent-thread proxy, arbitrary tool execution, copying provider credentials into consumer plugins, automatic provider/model fallback, universal emulation of every OpenAI endpoint, new persistent request/transcript storage.
+- claim_1: A provider advertises only text models its adapter can address using the same host/account configuration used by generation. Model IDs are globally qualified by owning plugin/service and retain the exact native model ID. Probe: fake same-name services, missing credentials, disabled/reloaded plugin and mismatched catalog routes.
+- claim_2: Native consumers, plugin SDK consumers and HTTP consumers call the same generation implementation. Existing line-oriented helper tasks keep their task-specific answer cleaning outside the shared primitive. Probe: contract table through all consumers, including multiline/JSON output.
+- claim_3: A request carries ordered text messages, exact model selection, cancellation and explicit optional generation controls. Unsupported controls fail before dispatch. A result retains exact output text, actual model, finish reason and nullable provider-reported usage. Probe: unsupported max output/temperature/reasoning, truncation, cancellation, timeout and absent usage.
+- claim_4: The gateway exposes GET /v1/models and POST /v1/chat/completions below its native plugin HTTP base. It accepts ordinary Bearer API-key authentication through core token validation. Nonstream text completions work with an unchanged OpenAI client. Streaming is supported only if implemented and tested with valid SSE; otherwise rejected explicitly. Tools, nontext content and unsupported request fields are rejected. Probe: stock SDK request, malformed/oversized body, wrong/missing token, contradictory token sources, exact error/finish shapes, disconnect cancellation and no provider call on rejection.
+- claim_5: Settings show readiness, copyable base URL and supported model IDs; the native token UI supplies the key without logging it. CLI offers model listing and one explicit generation reading prompt from stdin/file. Probe: actual lab UI and CLI on packaged candidate.
+- invariant_1: Core owns admission, caller identity, bounds and cancellation. Provider plugins own native auth and invocation. Consumers never receive provider credentials. Enforcers: adapter boundary tests and source review.
+- invariant_2: Text requests cannot invoke agent tools or start ordinary BB threads. A provider lacking a bounded tool-free path is unavailable, not silently emulated with an agent session. Enforcers: adapter dispatch tests and runtime smoke.
+- invariant_3: One explicit model per request; no fallback. Provider/account identity must be visible. Missing capabilities and usage are meaningful absence, not fabricated values. Enforcers: contract tests.
+- invariant_4: No stored prompts/responses or credential logging. Bound request bytes, output bytes, timeout and concurrent calls; abort on caller cancellation/disposal. Enforcers: boundary tests.
+- decision_1: Extend experimental_aiServices rather than create a parallel service registry. New model/generation members retain experimental prefixes. Legacy service registrations remain valid; their existing complete/transcribe behavior is preserved.
+- decision_2: Ship AI Gateway as a thin optional plugin using the same native API. Reuse per-plugin HTTP tokens, adding tested Bearer support to the core token-auth path. Do not create another credential database or standalone HTTP listener.
+- decision_3: Advertise actual adapter support, not every model from the agent picker. Pi's ModelRuntime can reuse Pi authentication without an agent session. Codex requires a matching native catalog/auth route and must not borrow pooled/workspace model visibility with unrelated primary-host credentials. Unsupported Claude/ACP paths remain explicitly unavailable until a truthful adapter exists.
+- deferred_1: Responses API, embeddings, images, audio and arbitrary tools are separate future capabilities. Rejecting them now avoids claiming false compatibility; additive capability registration leaves expansion possible.
+- deferred_2: Persistent billing/caching analytics and automatic fallback are outside this rollout. Expose provider-reported usage when present; no cache-hit promises or fabricated token counts.
+- affected_paths: packages/plugin-sdk/src/{backend-contract.ts,internal/host-policy.ts,testing}; apps/server/src/services/{ai,plugins}; apps/server/src/routes/plugins.ts; plugins/provider-{codex,pi}; plugins/ai-gateway; plugin guide and architecture docs.
+- affected_resources: Local isolated test runtime, installed BB, existing provider connections only for bounded validation after implementation, configured private fork repository.
+- evidence: Existing AI registry and ai-tasks.ts, SDK PluginAiServices, provider-codex AI host/client, Pi 0.84.4 ModelRuntime declarations, plugin HTTP token validation, repository AGENTS.md and system-overview.md.
+
+## Prompt Suggestion
+
+- goal: The installed suggestion plugin selects an available BB generation model and preserves the accepted placeholder/Tab/Enter workflow.
+- in_scope: Rename package, plugin ID, CLI, settings labels, skills, tests and docs from Autosay to Prompt Suggestion; use the shared native API; provider/model picker; preserve generator instructions, bounded context and stale-response guards; remove duplicate direct-HTTP generator configuration.
+- non_goals: Automatically choosing a paid model, sending suggestions without a user action, exporting a training corpus, restoring native Claude suggestion internals.
+- claim_6: Prompt Suggestion lists current supported BB models and uses exactly the saved choice; changing settings cancels an old request and invalidates its result. Probe: settings UI, captured fake provider dispatch, unavailable selection and cancellation tests.
+- claim_7: Existing accepted UX remains: placeholder ghost; Tab creates editable text; Enter/native Send sends once through the normal host path. Draft/turn/question/focus guards remain. Probe: retained keyboard/host regressions and actual browser smoke.
+- claim_8: Installed Autosay configuration is inspected before rename. The old plugin is disabled before activating the new identity; no duplicate composer listeners. Secrets are neither copied into docs nor silently discarded. This daily instance currently has no configured generator and generation is disabled. Probe: before/after redacted status, installed plugin list and request counters.
+- decision_4: Public name and command are Prompt Suggestion / prompt-suggestion. Historical release records retain Autosay as history; current runtime references and pointers use the new name. No permanent compatibility alias except an explicit migration note.
+- affected_paths: plugins/autosay -> plugins/prompt-suggestion; corresponding lock/workspace records; FORK.md; docs/superpowers and Plugin Guide.
+
+## Verification and rollout
+
+Independent plan review precedes implementation. Focused tests exercise failure modes and the shared consumer contract; Turbo runs typecheck/lint/tests with upstream dependencies. Test gateway with an unchanged OpenAI client against an isolated runtime and verify actual provider invocation on a bounded synthetic prompt where a connection is available. Verify Prompt Suggestion in the actual composer, intercepting sends for synthetic QA. Review the finished diff independently. Reconcile the installed release base immediately before packaging to retain concurrent changes. Use the current maintained release tooling, immutable candidate, dry-run, automatic health/identity/plugin verification and rollback. Owner has authorized rollout; model selection/activation remains a separate unresolved product choice rather than an inferred preference.
+
+## Review disposition
+
+Independent reviewer `/root/ai_contract_review` returned GREEN with four nonblocking notes. Explicit generation cannot enter legacy native task fallback; legacy task selection remains outside the new primitive. The first gateway contract is non-streaming text Chat Completions; stream:true receives an explicit unsupported-feature error. Packaged Pi host execution must be tested without workspace dependencies. Bearer-auth tests cover existing token routes and reject contradictory credentials. Codex's default-host catalog and generation must reject unsupported custom routes before dispatch. Implementation may narrow advertised models based on actual adapter evidence, but may not claim unsupported providers work.
