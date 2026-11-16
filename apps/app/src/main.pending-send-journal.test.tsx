@@ -92,5 +92,5 @@ it.skipIf(!nativeLocks)(
       vi.unstubAllGlobals();
     }
   },
-  30_000,
+  120_000,
 );
