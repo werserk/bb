@@ -189,6 +189,13 @@ function createFakeRuntime() {
     steerTurn: vi.fn(async (_args: SteerTurnArgs) => ({
       status: "steered" as const,
     })),
+    isThreadBusy: (threadId: string) =>
+      activeTurnsByThreadId.has(threadId) ||
+      pendingTurnStartThreadIds.has(threadId) ||
+      openBackgroundWork,
+    async releaseIdleThread(args: { threadId: string }) {
+      return this.stopThread(args);
+    },
     stopThread: vi.fn(async (_args: StopThreadArgs) => ({
       providerCheckpointId: null,
     })),
@@ -265,6 +272,96 @@ function createProvisionWorkspaceMock(path: string) {
 }
 
 describe("RuntimeManager", () => {
+  it("retains an environment whose runtime is still being provisioned", async () => {
+    const started = createDeferredPromise<void>();
+    const ready =
+      createDeferredPromise<ReturnType<typeof createFakeWorkspace>>();
+    const manager = new RuntimeManager({
+      createRuntime: () => createFakeRuntime(),
+      provisionWorkspace: async () => {
+        started.resolve();
+        return ready.promise;
+      },
+    });
+    const provisioning = manager.ensureEnvironment({
+      environmentId: "provisioning",
+      workspacePath: "/tmp/pending-release",
+    });
+    await started.promise;
+    expect(
+      (await manager.releaseIdleThread("t", "provisioning")).activeTurnRetained,
+    ).toBe(true);
+    ready.resolve(createFakeWorkspace("/tmp/pending-release"));
+    await provisioning;
+    expect(await manager.releaseIdleThread("t", "provisioning")).toEqual({
+      providerCheckpointId: null,
+    });
+    await manager.shutdownAll();
+  });
+
+  it("retains all environments for active, pending or retained thread work", async () => {
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/release-idle"),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "old",
+      workspacePath: "/tmp/release-idle",
+    });
+    runtime.setActiveTurn("t", "turn");
+    expect(
+      (await manager.releaseIdleThread("t", "old")).activeTurnRetained,
+    ).toBe(true);
+    runtime.endActiveTurn("t");
+    runtime.setPendingTurnStart("t", true);
+    expect(
+      (await manager.releaseIdleThread("t", "old")).activeTurnRetained,
+    ).toBe(true);
+    runtime.setPendingTurnStart("t", false);
+    const done = await manager.retainEnvironmentForThreadCommand("new", "t");
+    expect(
+      (await manager.releaseIdleThread("t", "old")).activeTurnRetained,
+    ).toBe(true);
+    done();
+    expect(await manager.releaseIdleThread("t", "old")).toEqual({
+      providerCheckpointId: null,
+    });
+    expect(runtime.stopThread).not.toHaveBeenCalled();
+    await manager.shutdownAll();
+  });
+
+  it("orders a newly retained command after asynchronous idle release", async () => {
+    const runtime = createFakeRuntime();
+    runtime.hasThread = () => true;
+    const close = createDeferredPromise<{ providerCheckpointId: null }>();
+    runtime.stopThread.mockReturnValue(close.promise);
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/release-order"),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "old",
+      workspacePath: "/tmp/release-order",
+    });
+    const release = manager.releaseIdleThread("t", "old");
+    let entered = false;
+    const start = manager
+      .retainEnvironmentForThreadCommand("new", "t")
+      .then((finish) => {
+        entered = true;
+        return finish;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.stopThread).toHaveBeenCalledOnce();
+    expect(entered).toBe(false);
+    close.resolve({ providerCheckpointId: null });
+    await release;
+    (await start)();
+    expect(entered).toBe(true);
+    await manager.shutdownAll();
+  });
+
   it("refreshes the workspace on the resident runtime entry", async () => {
     const plainWorkspace = createFakeWorkspace("/tmp/env-refresh", false);
     const gitWorkspace = createFakeWorkspace("/tmp/env-refresh");

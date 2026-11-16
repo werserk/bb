@@ -231,7 +231,7 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
       closed = true;
       wake();
     }),
-    initializationResult: vi.fn(),
+    initializationResult: vi.fn().mockResolvedValue({}),
     interrupt: vi.fn(async () => {}),
     setModel: vi.fn(async () => {}),
     setPermissionMode: vi.fn(async () => {}),

@@ -164,6 +164,8 @@ function buildSdkPermissionOptions(
 
 export class SdkSession {
   private query: Query | undefined;
+  private readiness: Promise<unknown> | undefined;
+  private readonly readinessWaiters = new Set<(error: Error) => void>();
   private sessionId: string | undefined;
   private inputResolve:
     | ((value: IteratorResult<SDKUserMessage>) => void)
@@ -316,6 +318,8 @@ export class SdkSession {
       throw translateMissingClaudeCliError(error);
     }
 
+    this.readiness = this.query.initializationResult();
+    void this.readiness.catch(() => {});
     void this.consumeStream();
   }
 
@@ -323,39 +327,42 @@ export class SdkSession {
     text: string,
     promptId?: NonNullable<SDKUserMessage["uuid"]>,
   ): Promise<void> {
-    const message: SDKUserMessage = {
-      type: "user",
-      message: { role: "user", content: text },
-      parent_tool_use_id: null,
-      session_id: this.sessionId ?? "",
-      ...(promptId !== undefined ? { uuid: promptId } : {}),
-    };
-
-    if (this.inputDone) {
+    const capturedQuery = this.query;
+    const readiness = this.readiness;
+    if (!capturedQuery || !readiness || this.inputDone) {
       return Promise.reject(new Error("Claude SDK input stream is closed"));
     }
-
-    let resolveConsumed = (): void => {};
-    let rejectConsumed = (_error: Error): void => {};
-    const consumed = new Promise<void>((resolve, reject) => {
-      resolveConsumed = resolve;
-      rejectConsumed = reject;
+    return new Promise<void>((resolveConsumed, rejectConsumed) => {
+      this.readinessWaiters.add(rejectConsumed);
+      void readiness.then(
+        () => {
+          this.readinessWaiters.delete(rejectConsumed);
+          if (this.inputDone || this.query !== capturedQuery) {
+            rejectConsumed(new Error("Claude SDK input stream is closed"));
+            return;
+          }
+          const message: SDKUserMessage = {
+            type: "user",
+            message: { role: "user", content: text },
+            parent_tool_use_id: null,
+            session_id: this.sessionId ?? "",
+            ...(promptId !== undefined ? { uuid: promptId } : {}),
+          };
+          if (this.inputResolve) {
+            const resolve = this.inputResolve;
+            this.inputResolve = null;
+            resolve({ value: message, done: false });
+            resolveConsumed();
+          } else {
+            this.inputQueue.push({ message, rejectConsumed, resolveConsumed });
+          }
+        },
+        (error) => {
+          this.readinessWaiters.delete(rejectConsumed);
+          rejectConsumed(error);
+        },
+      );
     });
-
-    if (this.inputResolve) {
-      const resolve = this.inputResolve;
-      this.inputResolve = null;
-      resolve({ value: message, done: false });
-      resolveConsumed();
-      return consumed;
-    }
-
-    this.inputQueue.push({
-      message,
-      rejectConsumed,
-      resolveConsumed,
-    });
-    return consumed;
   }
 
   stop(): void {
@@ -449,6 +456,8 @@ export class SdkSession {
 
   private rejectQueuedInputs(message: string): void {
     const error = new Error(message);
+    for (const reject of this.readinessWaiters) reject(error);
+    this.readinessWaiters.clear();
     while (this.inputQueue.length > 0) {
       const queued = this.inputQueue.shift();
       if (!queued) {

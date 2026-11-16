@@ -81,8 +81,6 @@ schedule does not emit `message.queued`; creation and changed waits still do.
 This prevents bookkeeping retries from driving project-state rebuilds without
 changing message priority, queue storage or public contracts.
 
-
-
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and
@@ -470,3 +468,17 @@ AI Gateway is an optional plugin over that API, with GET models and non-streamin
 ### Suggestion request visibility
 
 Prompt Suggestion reports its scoped RPC lifecycle through the shared suggestion controller. Pending/error changes preserve composer snapshot identity so rendering cannot restart inference. Core Composer renders a loading placeholder and spinner, clears it on none/cancellation, and exposes failure/timeout details without blocking input. Request IDs and snapshots prevent stale completions from replacing a newer state. Settings show enabled status, model, reasoning and requested speed; requested speed is not proof of upstream service tier.
+
+### Conditional native runtime release
+
+Thread idle release is serialized with retained start/submit/rewind work by the
+runtime manager's thread control lane across environments. The runtime refuses
+active, pending or background work and orders new operations after asynchronous
+release. The idle reaper uses the same conditional runtime primitive with its
+additional age policy. `release-idle` has no manual Stop settlement side effects;
+ordinary Stop may still interrupt and cancel interactions. Protocol 268 requires
+updated daemons for these strengthened semantics.
+
+Claude SDK input waits for the captured Query initialization before entering the
+prompt iterator; closure rejects readiness waiters. Iterator consumption remains
+a handoff, not proof that native execution accepted or completed the prompt.

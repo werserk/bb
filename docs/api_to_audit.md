@@ -4650,7 +4650,6 @@ Stabilization requires independent review, native/plugin custody and focus hando
 
 `ThreadPlanStepsProps.focusSerial?: number` is a positive request counter scoped to the mounted component. Each changed positive value, including wrapping to an earlier value, requests focus once: `focusInteractionId` selects an exact pending native question; no ID selects the current failed step or disclosure. The controller waits for the relevant plan/question data before consuming the request, refuses hidden/stale/foreign targets, and does not replay consumed requests on refresh or resize. Legacy ID-only requests remain supported. Core caller: ThreadPlanSteps overlay and panel share useThreadPlanFocus, ThreadTodoCard and the native editor with the SDK component. Stabilization also requires compiled one-shot/repeat/resize coverage and installed native Escape handoff.
 
-
 ## Thread fixed-tab continuity identity
 
 - **Surface:** optional `experimental_useContinuityKey(props: ExperimentalThreadTabProps & { projectId: string }): string | null` on thread fixed registrations only. A nonempty key of at most 256 UTF-16 units retains one DOM body per native pane/project/plugin/tab/generation/key. Null or an invalid/crashing identity falls back to ordinary thread ownership. No persisted state or wire change.
@@ -4733,7 +4732,6 @@ preserves previous answer custody. Exactly-once here concerns durable native
 submission, not proof that a model read or obeyed the text. UI delivery and
 closure states remain distinct, and old records show Attribution unavailable.
 
-
 Question resolution conflicts carry `details.current` when a question snapshot is
 available to the authorized caller (revision, closure and immutable winning
 attribution); the native tool preserves that structured ApiError body. Target
@@ -4765,3 +4763,14 @@ Core callers: native title/commit helpers use the same dispatcher admission/canc
 ### Suggestion request progress
 
 `experimental_ComposerSuggestionController.experimental_begin` and `experimental_finish` expose request-ID and snapshot-scoped pending/error state through `experimental_ComposerSuggestionState.request`. Core Composer renders the shared state in its placeholder and accessible error disclosure; Prompt Suggestion supplies its RPC lifecycle. Terminal updates and cleanup cannot clear newer requests; progress changes retain draft/context snapshot identity. No progress text is draft content or submittable. Stabilization requires request-race, cancellation, typing, disposal, none/error/timeout and mobile disclosure coverage.
+
+## threads.experimental_releaseIdle
+
+Conditionally release a thread runtime through POST /v1/threads/:id/release-idle.
+Returns validated released/busy/unknown with a diagnostic reason; pending work
+and interactions are preserved. A released result does not prove external jobs
+or locks ended. CLI `bb thread release-idle` uses this SDK method. Native idle
+cleanup and explicit Stop use the same runtime conditional release primitive;
+explicit Stop retains its separate interruption and question cancellation policy.
+Stabilization requires cross-environment start/steer/rewind race coverage,
+question preservation, unknown-host coverage and SDK/CLI contract parity.

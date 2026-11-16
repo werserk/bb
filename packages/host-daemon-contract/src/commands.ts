@@ -353,7 +353,7 @@ const turnSubmitCommandSchema = hostDaemonThreadTargetSchema
   .strict()
   .superRefine(refineGroupedInputMatchesFlatInput);
 
-const threadStopIntentSchema = z.enum(["interrupt", "release"]);
+const threadStopIntentSchema = z.enum(["interrupt", "release", "release-idle"]);
 
 export type ThreadStopIntent = z.infer<typeof threadStopIntentSchema>;
 

@@ -223,6 +223,10 @@ function createFakeRuntime(): AgentRuntime {
     })),
     runTurn: vi.fn(async () => ({ status: "started" as const })),
     steerTurn: vi.fn(async () => steerTurnResult),
+    isThreadBusy: () => false,
+    async releaseIdleThread(args) {
+      return this.stopThread(args);
+    },
     stopThread: vi.fn(async () => ({ providerCheckpointId: null })),
     clearThreadGoal: vi.fn(async () => ({ cleared: true })),
     renameThread: vi.fn(async () => undefined),

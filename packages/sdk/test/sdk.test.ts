@@ -107,6 +107,35 @@ function createFetchQueue(
 }
 
 describe("@bb/sdk", () => {
+  for (const status of ["released", "busy", "unknown"] as const) {
+    it(`validates idle release ${status} from the shared route`, async () => {
+      const result = {
+        status,
+        reason:
+          status === "released"
+            ? "runtime_released"
+            : status === "busy"
+              ? "pending_work"
+              : "release_unconfirmed",
+      };
+      const queue = createFetchQueue([{ body: result }]);
+      const sdk = createBbSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://bb.test",
+          fetch: queue.fetch,
+          runtime: "node",
+        }),
+      });
+      expect(
+        await sdk.threads.experimental_releaseIdle({ threadId: "thr_idle" }),
+      ).toEqual(result);
+      expect(queue.requests[0]).toMatchObject({
+        method: "POST",
+        url: "http://bb.test/api/v1/threads/thr_idle/release-idle",
+      });
+    });
+  }
+
   it("pages prompt history with an opaque cursor", async () => {
     const response = {
       entries: [

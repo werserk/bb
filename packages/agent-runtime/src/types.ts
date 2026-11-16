@@ -339,6 +339,8 @@ export interface AgentRuntime {
   steerTurn(args: SteerTurnArgs): Promise<SteerTurnResult>;
 
   stopThread(args: StopThreadArgs): Promise<StopThreadResult>;
+  isThreadBusy(threadId: string): boolean;
+  releaseIdleThread(args: StopThreadArgs): Promise<StopThreadResult | null>;
 
   clearThreadGoal(args: ClearThreadGoalArgs): Promise<{ cleared: boolean }>;
 
