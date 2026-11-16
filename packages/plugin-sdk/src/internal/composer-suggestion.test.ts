@@ -67,3 +67,47 @@ describe("composer suggestions", () => {
     expect(controller.show(candidate)).toBe(false);
   });
 });
+
+it("keeps snapshot stable and rejects stale progress completion and cleanup", () => {
+  const { controller, candidate, draftChanged, replace } = setup();
+  const snapshot = controller.getSnapshot().snapshot;
+  expect(controller.experimental_begin("a", candidate.snapshot)).toBe(true);
+  expect(controller.getSnapshot().snapshot).toBe(snapshot);
+  expect(controller.accept("a")).toBe("stale");
+  controller.experimental_begin("b", candidate.snapshot);
+  controller.clear("a");
+  expect(
+    controller.experimental_finish("a", candidate.snapshot, "failed"),
+  ).toBe(false);
+  expect(controller.show(candidate)).toBe(false);
+  expect(controller.getSnapshot().request?.requestId).toBe("b");
+  controller.experimental_finish("b", candidate.snapshot, "timeout");
+  expect(controller.getSnapshot().request?.error).toBe("timeout");
+  expect(controller.getSnapshot().snapshot).toBe(snapshot);
+  draftChanged();
+  expect(controller.getSnapshot().request).toBeNull();
+  expect(
+    controller.experimental_finish("b", candidate.snapshot, "failed"),
+  ).toBe(false);
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it("clears progress without changing the snapshot on none or cancellation", () => {
+  const { controller, candidate } = setup();
+  const snapshot = controller.getSnapshot().snapshot;
+  controller.experimental_begin("a", candidate.snapshot);
+  controller.experimental_finish("a", candidate.snapshot, null);
+  expect(controller.getSnapshot().request).toBeNull();
+  controller.experimental_begin("b", candidate.snapshot);
+  controller.clear("b");
+  expect(controller.getSnapshot().request).toBeNull();
+  expect(controller.getSnapshot().snapshot).toBe(snapshot);
+});
+
+it("rejects an older response after a newer request completed without a suggestion", () => {
+  const { controller, candidate } = setup();
+  controller.experimental_begin("a", candidate.snapshot);
+  controller.experimental_begin("b", candidate.snapshot);
+  controller.experimental_finish("b", candidate.snapshot, null);
+  expect(controller.show(candidate)).toBe(false);
+});

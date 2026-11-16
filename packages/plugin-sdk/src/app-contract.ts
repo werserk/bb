@@ -4617,6 +4617,12 @@ export interface experimental_ComposerSuggestionState {
   readonly eligible: boolean;
   readonly snapshot: experimental_ComposerSuggestionSnapshot | null;
   readonly candidate: experimental_ComposerSuggestionCandidate | null;
+  readonly request: {
+    readonly requestId: string;
+    readonly snapshot: experimental_ComposerSuggestionSnapshot;
+    readonly phase: "pending" | "error";
+    readonly error: "failed" | "timeout" | null;
+  } | null;
 }
 
 export interface experimental_ComposerSuggestionEvent {
@@ -4628,6 +4634,15 @@ export interface experimental_ComposerSuggestionEvent {
 export interface experimental_ComposerSuggestionController {
   getSnapshot(): experimental_ComposerSuggestionState;
   subscribe(listener: () => void): () => void;
+  experimental_begin(
+    requestId: string,
+    snapshot: experimental_ComposerSuggestionSnapshot,
+  ): boolean;
+  experimental_finish(
+    requestId: string,
+    snapshot: experimental_ComposerSuggestionSnapshot,
+    error: "failed" | "timeout" | null,
+  ): boolean;
   show(candidate: experimental_ComposerSuggestionCandidate): boolean;
   clear(requestId: string): void;
   dismiss(): void;

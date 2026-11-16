@@ -489,6 +489,7 @@ interface PromptActionCommand {
 const PROMPTBOX_INTERACTIVE_TARGET_SELECTOR = [
   "a[href]",
   "button",
+  "summary",
   "input",
   "select",
   "textarea",
@@ -1358,6 +1359,7 @@ export function PromptBoxInternal({
   }, []);
   const showCompactLayout =
     suggestionState.candidate === null &&
+    suggestionState.request === null &&
     compact?.when === "always" &&
     (!showVoiceActionGroup ||
       (value.trim().length === 0 &&
@@ -1365,7 +1367,11 @@ export function PromptBoxInternal({
         !pendingUploads?.length));
   const effectivePlaceholder =
     suggestionState.candidate?.text ??
-    (showCompactLayout ? compact.placeholder : placeholder);
+    (suggestionState.request?.phase === "pending"
+      ? "Preparing suggestion…"
+      : showCompactLayout
+        ? compact.placeholder
+        : placeholder);
   const composerKey = composer.key;
   const composerInputLocked = renderer.inputLocked;
   const composerLayout = showCompactLayout ? "compact" : "expanded";
@@ -3423,7 +3429,9 @@ export function PromptBoxInternal({
       data-promptbox=""
       data-promptbox-compact={showCompactLayout ? "" : undefined}
       data-promptbox-collapsed={
-        compact === undefined || suggestionState.candidate !== null
+        compact === undefined ||
+        suggestionState.candidate !== null ||
+        suggestionState.request !== null
           ? undefined
           : ""
       }
@@ -3548,6 +3556,33 @@ export function PromptBoxInternal({
                 ) : null}
               </>
             ) : null}
+            {suggestionState.request?.phase === "pending" && (
+              <span
+                role="status"
+                aria-label="Preparing suggestion"
+                className="pointer-events-none absolute right-10 top-3 text-muted-foreground"
+              >
+                <SdkIcon
+                  name="Loading"
+                  className="size-4 animate-spin motion-reduce:animate-none"
+                />
+              </span>
+            )}
+            {suggestionState.request?.phase === "error" && (
+              <details className="px-3 text-xs text-muted-foreground">
+                <summary
+                  aria-label="Suggestion error details"
+                  className="cursor-pointer list-none w-fit"
+                >
+                  <SdkIcon name="AlertCircle" className="size-4" />
+                </summary>
+                <p role="status">
+                  {suggestionState.request.error === "timeout"
+                    ? "Suggestion timed out. You can continue typing."
+                    : "Could not prepare a suggestion. You can continue typing."}
+                </p>
+              </details>
+            )}
             <ComposerEditorSlot
               editor={editor}
               scrollContainerRef={editorScrollContainerRef}

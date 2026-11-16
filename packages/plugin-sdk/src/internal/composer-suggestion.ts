@@ -33,6 +33,7 @@ export function createComposerSuggestionController(
   canUse: () => boolean = () => true,
 ) {
   let revision = 0;
+  let latestRequestId: string | null = null;
   let input: ComposerSuggestionInput = {
     composerKey: "",
     threadId: null,
@@ -44,6 +45,7 @@ export function createComposerSuggestionController(
     eligible: false,
     snapshot: null,
     candidate: null,
+    request: null,
   });
   const listeners = new Set<() => void>();
   const events = new Set<
@@ -72,6 +74,7 @@ export function createComposerSuggestionController(
   };
   const invalidate = (dismissed = true) => {
     revision++;
+    latestRequestId = null;
     const old = state.candidate;
     publish({
       eligible: input.eligible,
@@ -86,6 +89,7 @@ export function createComposerSuggestionController(
               draftRevision: revision,
             }),
       candidate: null,
+      request: null,
     });
     if (dismissed) emit("dismissed", old?.requestId ?? null);
   };
@@ -103,14 +107,55 @@ export function createComposerSuggestionController(
         events.delete(listener);
       };
     },
+    experimental_begin(requestId, snapshot) {
+      if (!requestId || !state.eligible || !canUse() || !matches(snapshot))
+        return false;
+      latestRequestId = requestId;
+      publish({
+        ...state,
+        candidate: null,
+        request: Object.freeze({
+          requestId,
+          snapshot,
+          phase: "pending",
+          error: null,
+        }),
+      });
+      return true;
+    },
+    experimental_finish(requestId, snapshot, error) {
+      if (
+        state.request?.requestId !== requestId ||
+        !matches(snapshot) ||
+        !state.eligible ||
+        !canUse()
+      )
+        return false;
+      publish({
+        ...state,
+        request:
+          error === null
+            ? null
+            : Object.freeze({ requestId, snapshot, phase: "error", error }),
+      });
+      return true;
+    },
     show(value) {
       const parsed = candidateSchema.safeParse(value);
       if (!parsed.success) return false;
       const candidate = parsed.data;
-      if (!state.eligible || !canUse() || !matches(candidate.snapshot))
+      if (
+        !state.eligible ||
+        !canUse() ||
+        !matches(candidate.snapshot) ||
+        (latestRequestId !== null &&
+          (latestRequestId !== candidate.requestId ||
+            state.request?.phase !== "pending"))
+      )
         return false;
       publish({
         ...state,
+        request: null,
         candidate: Object.freeze({
           ...candidate,
           snapshot: Object.freeze({ ...candidate.snapshot }),
@@ -121,6 +166,8 @@ export function createComposerSuggestionController(
     },
     clear(requestId) {
       if (state.candidate?.requestId === requestId) invalidate();
+      else if (state.request?.requestId === requestId)
+        publish({ ...state, request: null });
     },
     dismiss: () => invalidate(),
     accept(requestId) {
