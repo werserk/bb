@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import { useCallback } from "react";
 import type { Environment } from "@bb/domain";
 import { getFilePreviewLineRangeStart } from "@bb/client-core";
@@ -80,6 +81,13 @@ export function useLocalFileLinkOpener({
           });
           return true;
         case "preview":
+          if (
+            link.ordinaryActivation === true &&
+            link.openTargetId === null &&
+            !options?.viewer &&
+            openArtifactPopup(resolution.options)
+          )
+            return true;
           openFilePreview({ ...resolution.options, ...options });
           return true;
       }

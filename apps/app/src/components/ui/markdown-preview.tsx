@@ -363,6 +363,7 @@ function areMarkdownLocalFileLinkRoutingsEqual({
   return (
     previous.hostId === next.hostId &&
     previous.onOpenLink === next.onOpenLink &&
+    previous.preserveAnchorHref === next.preserveAnchorHref &&
     areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
       next: next.absoluteLinks,
       previous: previous.absoluteLinks,
@@ -400,6 +401,7 @@ function areMarkdownLinkRoutingsEqual({
   if (previous === next) return true;
   if (previous === undefined || next === undefined) return false;
   return (
+    previous.fallbackUrlTransform === next.fallbackUrlTransform &&
     previous.onOpenLink === next.onOpenLink &&
     areMarkdownLocalFileLinkRoutingsEqual({
       next: next.localFile,
@@ -487,7 +489,11 @@ function buildLocalAwareUrlTransform({
   localImageRouting,
 }: BuildLocalAwareUrlTransformArgs): UrlTransform {
   return (value, key, node) => {
-    if (key === "href" && localFileRouting !== undefined) {
+    if (
+      key === "href" &&
+      localFileRouting !== undefined &&
+      localFileRouting.preserveAnchorHref !== true
+    ) {
       const localFile = resolveMarkdownLocalFileTarget(
         value,
         localFileRouting.absoluteLinks,
@@ -532,7 +538,11 @@ function resolveInlineCodeFileTarget({
   codeText: string;
   localFileRouting: MarkdownLocalFileLinkRouting;
 }): ResolvedMarkdownLocalFileTarget | null {
-  if (codeText.length === 0 || /\s/u.test(codeText)) {
+  if (
+    localFileRouting.preserveAnchorHref === true ||
+    codeText.length === 0 ||
+    /\s/u.test(codeText)
+  ) {
     return null;
   }
 
@@ -632,7 +642,11 @@ function MarkdownAnchor({
     : null;
   const localFileLink =
     linkTarget?.kind === "local-file" ? linkTarget.link : null;
-  const anchorHref = buildLocalFileAnchorHref(localFileLink, rewrittenHref);
+  const preserveAnchorHref =
+    linkRouting?.localFile?.preserveAnchorHref === true;
+  const anchorHref = preserveAnchorHref
+    ? rewrittenHref
+    : buildLocalFileAnchorHref(localFileLink, rewrittenHref);
   const getContextMenuItems = useContext(MarkdownLocalFileContextMenuContext);
   const openTargets = useContext(MarkdownLocalFileOpenTargetsContext);
   if (
@@ -643,7 +657,9 @@ function MarkdownAnchor({
     return <span id={anchorProps.id}>{children}</span>;
   }
   const contextMenuItems =
-    localFileLink !== null && getContextMenuItems !== null
+    localFileLink !== null &&
+    !preserveAnchorHref &&
+    getContextMenuItems !== null
       ? getContextMenuItems(localFileLink)
       : null;
   const openTarget =
@@ -679,7 +695,7 @@ function MarkdownAnchor({
           handleAnchorClick(event);
       }}
     >
-      {localFileLink
+      {localFileLink && !preserveAnchorHref
         ? appendMarkdownLinkIcon(
             children,
             openTarget === undefined ? (
@@ -1964,11 +1980,16 @@ function MarkdownPreviewComponent({
   const resolvedUrlTransform = useMemo(
     () =>
       buildLocalAwareUrlTransform({
-        fallbackUrlTransform: urlTransform,
+        fallbackUrlTransform: urlTransform ?? linkRouting?.fallbackUrlTransform,
         localFileRouting,
         localImageRouting,
       }),
-    [localFileRouting, localImageRouting, urlTransform],
+    [
+      localFileRouting,
+      localImageRouting,
+      linkRouting?.fallbackUrlTransform,
+      urlTransform,
+    ],
   );
 
   const rehypeKatex = useRehypeKatex(markdownMayContainMath(body));

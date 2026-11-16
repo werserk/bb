@@ -25,6 +25,28 @@ The core entities and how they relate:
 
 ## Contracts and boundaries
 
+### Persistent question decision policy
+
+New ordinary HTTP/UI/public SDK/CLI answers and withdrawals serialize canonical
+v2 question notices with explicit local-input parity: the scoped decision has
+the same standing as typed chat. Identity remains `local-unverified`; this is
+not authenticated ownership and does not bypass command approvals. Native
+agent tools and `bb.experimental_questionResolution.resolve` closures retain v1
+non-permission notices, including context-free/deferred plugin calls. A plugin
+using the public HTTP client `bb.sdk.threads.questions` instead follows the same
+local-input policy as CLI and raw HTTP; this soft boundary does not establish
+human identity. Server entry points bind origin internally;
+null invocation and request payloads cannot select parity. Unknown internal
+origins default to v1. The common acceptance services receive origin separately
+from the optional operation call, preserving legacy card retry semantics.
+
+Notice parsing accepts canonical v1/v2 while preserving trusted row sender and
+initiator checks. UI policy labels derive from explicit v2 notices, never old
+local attribution. Receipt replay returns the original queued bytes and IDs;
+upgrade does not relabel prior history or queued v1 input. Actor/SQL/public SDK
+and daemon wire contracts remain unchanged. Old readers display v2 as ordinary
+user text; exact-pair delivery/reader acceptance is required before integration.
+
 ### Plugin candidate disposal
 
 Failed or timed-out factories retain the previous running instance. The rejected
@@ -120,12 +142,74 @@ Implementation packages never import across these boundaries. The server doesn't
 ### Local file viewer
 
 The app registers `core/local-file-viewer` at startup in `apps/app/src/main.tsx`.
-Embedded file links use the shared modal host, with a validated JSON file target.
-The modal reuses the secondary-panel preview and embeds `PluginThreadChat` for
-thread-storage files; workspace files stay alone because cached thread lists do
-not prove unique environment membership. Compact layouts retain both panes behind
-Artifact and Chat tabs. Thread-storage PDFs use the existing preview query update
-timestamp to reload their blob after realtime invalidation.
+Ordinary supported native, semantic, embedded and contextual document activations
+share `artifact-activation.ts` through the current `useLocalFileLinkOpener` and
+semantic navigation paths; imperative calls remain panel intents unless they
+carry the versioned restrictive artifact option. The existing modal supports
+workspace, actual owning-thread storage and host targets; only storage attaches a
+chat. In the native workspace, storage and host Markdown body an ordinary relative link
+resolves from the document's own directory inside its namespace and replaces the same
+popup with the linked file (owning thread and context follow). A host document stays on
+its actual host and is contained to its own directory, so a link above that directory is
+unavailable. The rendered anchor keeps its authored href. Modified clicks, line ranges, editor targets and
+non-artifact files keep the plain anchor; an ordinary click on an artifact link that
+cannot resolve shows the existing "Can't open this file here" toast with Copy path.
+Fixed-tab and retained-host navigation are unchanged.
+
+Markdown and absolute-path attachment leaves carry ephemeral ordinary-activation
+metadata through the existing message and embedded ThreadChat callbacks. The
+shared `file-activation.ts` predicate preserves modifier, button, Download and
+prevented-event dispatch; absent metadata retains baseline programmatic behavior.
+Explicit editor links retain native editor or embedded viewer fallback. Native
+host PDFs use the existing host content URL and PDF blob frame, without a lease
+or attached chat.
+
+Native popup bodies reuse the existing rooted file routes, limits and dot assets.
+Caller-scoped bodies use `ScopedArtifactBody`: an exact workspace/storage descriptor
+or absolute host root requests `artifact-v1` with the original authoritative
+`expectedSource {hostId,canonicalReadRoot}`. Both fields are required together;
+the acknowledgement pins and echoes the expectation, rather than attesting the
+current filesystem. Core checks that exact acknowledgement before consuming a URL.
+Each application-controlled initial/Refresh/Retry/refetch/remount/nested attempt
+re-admits its exact candidate, slash-relative path, root and original physical
+source through the live consumer revalidation callback. Primary PDF/image renderer GET belongs
+to that admitted attempt; subsequent browser reads and Download may reuse its
+strict lease until expiry (default ten minutes). Membership removal, project
+disable and logical source rebinding do not immediately revoke that lease.
+
+`artifact-admission.ts` owns the 10,000 ms admission deadline, races callbacks
+that ignore cancellation and never claims to cancel underlying consumer work.
+Existing modal tokens bind private records outside JSON/public modal props;
+queued replacement/close/Back/unbind/caller abort retire custody. Dead scoped
+history is stripped; native Forward is unchanged. Query generations discard late
+bytes. Unsuccessful admission creates no lease/fetch. After positive admission a
+root mismatch may leave an unused TTL lease but returns zero substituted bytes.
+A stale descriptor still resolving original physical A may read A after a logical
+rebind to B; continuous database freshness is not promised.
+
+Every strict metadata/chunk carries `artifactPolicy` and `expectedCanonicalRoot`.
+The daemon validates the original canonical root before open, after open and
+post-read before returning bytes, comparing the file with its canonical-root
+relative path. Ancestor aliases reaching the same canonical root work; root and
+inside-root symlinks, denied names, inode replacement and strict fstat caps refuse.
+Protocol 267 rejects older daemon wire semantics; native/legacy payloads stay
+unchanged. No queue/session schema or persistent metadata is added.
+
+Scoped HTML reads bounded original bytes once with `redirect:"error"`, decodes
+BOM-first (UTF-16LE/BE or UTF-8; otherwise the route's forced UTF-8), then renders
+`ScopedHtmlFrame`: an opaque static outer srcdoc guard around escaped inner srcdoc.
+The shared `@bb/domain/artifact-preview` CSP forbids document-frame network loads
+and limits scripts/styles/images to the lease (plus inline scripts/styles/data
+images). Same-document fragments retain hash/scroll; other document links stay
+inert with a persistent note. Script/meta attempts can replace the inner document
+with an error page. Strict routes emit no 3xx; injected proxy/asset redirects are
+outside that guarantee because CSP paths alone do not constrain redirect targets.
+Fonts/media stay unsupported. UTF-16 document.characterSet differs after decoding;
+text/title/script output parity is checked only in Chromium, not all engines.
+The host reader tests pin the denial fixture digest in
+`packages/host-daemon-contract/fixtures/artifact-denied.json`. Consumers must
+supply their own admission callback; this core capability does not install or
+change a Library consumer.
 
 ### Service turn presentation
 

@@ -69,6 +69,8 @@ type VersionedQuestionRef = QuestionRef & { revision: number };
 type AnswerArgs = VersionedQuestionRef & {
   answers: Record<string, PendingInteractionUserAnswer>;
 };
+export type QuestionResolutionOrigin = "local-input" | "plugin" | "unknown";
+
 export interface QuestionResolutionCall {
   operationId: string;
   reason: string;
@@ -416,6 +418,7 @@ export async function answerConversationQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AnswerArgs,
   call?: QuestionResolutionCall,
+  origin: QuestionResolutionOrigin = "unknown",
 ): Promise<ConversationQuestion> {
   // Target-derived conflicts and validation are reads subject to the same scope
   // as acceptance. Reauthorize below after asynchronous execution preparation.
@@ -512,7 +515,12 @@ export async function answerConversationQuestion(
             answers: normalized,
           };
           const content = serializeQuestionResolutionNotice({
-            version: 1,
+            ...(origin === "local-input" && actor.kind === "local-unverified"
+              ? {
+                  version: 2 as const,
+                  decisionPolicy: "local-input-parity" as const,
+                }
+              : { version: 1 as const }),
             questionId: current.id,
             revision: current.revision,
             publication: current.publication,
@@ -574,6 +582,7 @@ export async function closeConversationQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: VersionedQuestionRef & { action: "dismiss" | "withdraw" },
   call?: QuestionResolutionCall,
+  origin: QuestionResolutionOrigin = "unknown",
 ): Promise<ConversationQuestion> {
   if (call && args.action !== "withdraw")
     conflict("Agent dismissal is unsupported");
@@ -662,7 +671,12 @@ export async function closeConversationQuestion(
                 current,
               );
             const content = serializeQuestionResolutionNotice({
-              version: 1,
+              ...(origin === "local-input" && actor.kind === "local-unverified"
+                ? {
+                    version: 2 as const,
+                    decisionPolicy: "local-input-parity" as const,
+                  }
+                : { version: 1 as const }),
               questionId: current.id,
               revision: current.revision,
               publication: current.publication,

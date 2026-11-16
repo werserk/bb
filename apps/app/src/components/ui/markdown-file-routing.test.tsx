@@ -132,10 +132,21 @@ describe("Markdown file preview image routing", () => {
       {
         lineRange: { startLineNumber: 3, endLineNumber: 3 },
         openTargetId: null,
+        ordinaryActivation: true,
         path: "/workspace/docs/notes.md",
       },
-      { lineRange: null, openTargetId: null, path: "/workspace/README.md" },
-      { lineRange: null, openTargetId: null, path: "/workspace/src/a.ts" },
+      {
+        lineRange: null,
+        openTargetId: null,
+        ordinaryActivation: true,
+        path: "/workspace/README.md",
+      },
+      {
+        lineRange: null,
+        openTargetId: null,
+        ordinaryActivation: true,
+        path: "/workspace/src/a.ts",
+      },
     ]);
   });
 
@@ -232,4 +243,37 @@ describe("Markdown file preview image routing", () => {
       screen.getByRole("img", { name: "escape" }).getAttribute("src"),
     ).toBe("../../outside.png");
   });
+});
+
+it("restricts unmatched scoped Markdown URLs while keeping lease-relative images", () => {
+  const routing = buildMarkdownFileRouting({
+    hostId: null,
+    path: "report.md",
+    rootPath: null,
+    threadId: null,
+    resolveRelativeSrc: (path) => `/api/v1/file-previews/lease/${path}`,
+  });
+  render(
+    <FilePreview
+      path="report.md"
+      headerMode="none"
+      markdownLinkRouting={{ ...routing, fallbackUrlTransform: () => "" }}
+      state={{
+        kind: "ready",
+        file: {
+          name: "report.md",
+          contents:
+            "![allowed](asset.png)\n![denied](/api/v1/hosts/other/files/secret.png)\n![outside](../secret.png)\n[escape](/unknown.md)",
+        },
+        lineRange: null,
+        textPreviewKind: "markdown",
+      }}
+    />,
+  );
+  expect(screen.getByAltText("allowed").getAttribute("src")).toBe(
+    "/api/v1/file-previews/lease/asset.png",
+  );
+  expect(screen.queryByAltText("denied")).toBeNull();
+  expect(screen.queryByAltText("outside")).toBeNull();
+  expect(screen.getByText("escape").getAttribute("href") ?? "").toBe("");
 });

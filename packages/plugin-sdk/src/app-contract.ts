@@ -5326,6 +5326,22 @@ export type ExperimentalFileLocation =
 
 /** Options shared by BB's preview and preferred-external file intents. */
 export interface ExperimentalFileOpenOptions {
+  /** Restrictive artifact popup admission. Older hosts refuse; never retry without scope. */
+  experimental_artifact?: {
+    version: 1;
+    readRoot: string;
+    /** Original authoritative physical source. In-process only; copied and never persisted. */
+    physicalSource: { hostId: string; canonicalReadRoot: string };
+    /** In-process only. Literal true admits this exact candidate before each application load attempt. */
+    revalidate: (request: {
+      target: ExperimentalLiveFileTarget;
+      readRoot: string;
+      relativePath: string;
+      signal: AbortSignal;
+    }) => Promise<boolean>;
+    /** Mounted caller lifetime. Disposal invalidates queued/open viewers and pending reads. */
+    lifetime: AbortSignal;
+  };
   target: ExperimentalLiveFileTarget;
   location: ExperimentalFileLocation | null;
 }

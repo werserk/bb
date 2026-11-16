@@ -91,9 +91,11 @@ Persistent ordinary questions:
   bb thread questions show <question-id> [id]
   bb thread questions publish [id] --file <publication.json> --turn-id <turn> --provider-thread-id <provider> --call-id <call>
   bb thread questions answer <question-id> [id] --file <answer.json>
+  bb thread questions resolve --file <resolution.json> [--json]
   bb thread questions dismiss <question-id> [id] --revision <number>
   bb thread questions withdraw <question-id> [id] --revision <number>
-    --self and --json are available on every subcommand. Output is JSON.
+    --self is available on target-taking subcommands; resolve takes threadId
+    from its file. Output is JSON; --json is available on every subcommand.
 
   `list --open` returns `{questions,total,nextCursor,readRevision}`. Continue
   sequentially until nextCursor is null. Invalid/cross-thread cursors return 400;
@@ -113,6 +115,13 @@ Persistent ordinary questions:
   returns the same receipt; a conflicting answer is rejected. Delivery is
   queued asynchronously with original context. Dismiss creates no answer and
   stops no thread. Withdraw retains history and fences undelivered answers.
+  New local answers have the same standing as typed chat for this question
+  and revision; identity is not independently verified. Withdrawals cancel the
+  question and grant no approval. Command approvals remain separate.
+  `resolve` requires threadId, questionId, revision, operationId, action and
+  reason in its JSON file, plus answers when action is answer. Identical retries
+  preserve the original receipt and notice policy. Native agent tools retain
+  distinct agent attribution and non-permission notices.
   Approvals and legacy pending interactions continue through `interactions`.
   SDK: `threads.questions.publish/list/get/answer/dismiss/withdraw` use the
   same service; `get` includes immutable material manifests and queue receipt.

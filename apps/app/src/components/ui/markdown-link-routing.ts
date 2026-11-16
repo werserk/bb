@@ -1,3 +1,4 @@
+import type { UrlTransform } from "react-markdown";
 import { createContext, type ReactNode } from "react";
 import type { WorkspaceOpenTarget } from "@bb/host-daemon-contract";
 import type { MarkdownPreviewLinkHandler } from "./markdown-link.js";
@@ -50,6 +51,7 @@ export interface MarkdownLocalFileLinkRouting {
   absoluteLinks: MarkdownAbsoluteLocalFileLinkRouting;
   hostId: string | null;
   onOpenLink: MarkdownPreviewLocalFileLinkHandler;
+  preserveAnchorHref?: boolean;
   relativeLinks?: MarkdownRelativeLocalFileLinkRouting;
 }
 
@@ -64,6 +66,7 @@ export interface MarkdownLocalImageRouting {
 
 export interface MarkdownLinkRouting {
   headingAnchors?: true;
+  fallbackUrlTransform?: UrlTransform;
   localFile?: MarkdownLocalFileLinkRouting;
   localImage?: MarkdownLocalImageRouting;
   onOpenLink?: MarkdownPreviewLinkHandler;

@@ -1,3 +1,5 @@
+import { getRelativeHostPath } from "@bb/domain";
+import { isArtifactCanonicalRoot } from "@bb/domain/artifact-preview";
 import type {
   ExperimentalFileLocation,
   ExperimentalFileOpenOptions,
@@ -210,15 +212,134 @@ export function normalizeExperimentalFileLocation(
   }
 }
 
+export function normalizeExperimentalArtifactScope(
+  target: ExperimentalLiveFileTarget,
+  location: ExperimentalFileLocation | null,
+  artifact: unknown,
+): { version: 1; readRoot: string } | null {
+  if (
+    !isJsonObject(artifact) ||
+    !hasExactKeys(artifact, ["version", "readRoot"]) ||
+    artifact.version !== 1 ||
+    typeof artifact.readRoot !== "string" ||
+    location !== null ||
+    (target.kind === "workspace" && target.experimental_ref !== undefined)
+  )
+    return null;
+  const root = artifact.readRoot;
+  if (
+    root.length > FILE_PATH_MAX_LENGTH ||
+    hasControlCharacter(root) ||
+    hasUnpairedSurrogate(root) ||
+    root.split(/[\\/]/u).some((segment) => segment === ".." || segment === ".")
+  )
+    return null;
+  if (target.kind === "host") {
+    if (
+      !isValidAbsoluteHostFilePath(
+        root.replace(/[\\/]+$/u, "") +
+          (root.includes("\\") ? "\\__artifact__" : "/__artifact__"),
+      )
+    )
+      return null;
+    const relative = getRelativeHostPath({
+      rootPath: root,
+      candidatePath: target.path,
+    });
+    if (!relative || !isValidRelativeFilePath(relative)) return null;
+  } else {
+    if (root !== "" && !isValidRelativeFilePath(root)) return null;
+    if (root !== "" && !target.path.startsWith(root + "/")) return null;
+  }
+  return { version: 1, readRoot: root };
+}
+
+function isLiveAbortSignal(value: unknown): value is AbortSignal {
+  try {
+    if (typeof value !== "object" || value === null) return false;
+    const signal = value as AbortSignal;
+    return (
+      Object.prototype.toString.call(signal) === "[object AbortSignal]" &&
+      signal.aborted === false &&
+      typeof signal.addEventListener === "function" &&
+      typeof signal.removeEventListener === "function" &&
+      typeof signal.throwIfAborted === "function"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizePhysicalSource(value: unknown) {
+  if (
+    !isJsonObject(value) ||
+    !hasExactKeys(value, ["hostId", "canonicalReadRoot"]) ||
+    !isNonEmptyIdentity(value.hostId) ||
+    typeof value.canonicalReadRoot !== "string"
+  )
+    return null;
+  const root = value.canonicalReadRoot;
+  if (!isArtifactCanonicalRoot(root)) return null;
+  return { hostId: value.hostId, canonicalReadRoot: root };
+}
+
 export function normalizeExperimentalFileOpenOptions(
   value: unknown,
 ): ExperimentalFileOpenOptions | null {
-  if (!isJsonObject(value) || !hasExactKeys(value, ["target", "location"])) {
+  if (
+    !isJsonObject(value) ||
+    !hasExactKeys(value, [
+      "target",
+      "location",
+      ...(Object.hasOwn(value, "experimental_artifact")
+        ? ["experimental_artifact"]
+        : []),
+    ])
+  ) {
     return null;
   }
   const target = normalizeExperimentalLiveFileTarget(value.target);
   const location = normalizeExperimentalFileLocation(value.location);
   if (target === null || location === undefined) return null;
+  if (Object.hasOwn(value, "experimental_artifact")) {
+    const artifact = value.experimental_artifact;
+    if (
+      !isJsonObject(artifact) ||
+      !hasExactKeys(artifact, [
+        "version",
+        "readRoot",
+        "physicalSource",
+        "revalidate",
+        "lifetime",
+      ]) ||
+      typeof artifact.revalidate !== "function" ||
+      !isLiveAbortSignal(artifact.lifetime)
+    )
+      return null;
+    const scope = normalizeExperimentalArtifactScope(target, location, {
+      version: artifact.version,
+      readRoot: artifact.readRoot,
+    });
+    const physicalSource = normalizePhysicalSource(artifact.physicalSource);
+    if (
+      scope === null ||
+      physicalSource === null ||
+      (target.kind === "host" && target.hostId !== physicalSource.hostId)
+    )
+      return null;
+    return {
+      target,
+      location,
+      experimental_artifact: {
+        ...scope,
+        physicalSource,
+        revalidate: artifact.revalidate as NonNullable<
+          ExperimentalFileOpenOptions["experimental_artifact"]
+        >["revalidate"],
+        lifetime: artifact.lifetime,
+      },
+    };
+  }
   return { target, location };
 }
 

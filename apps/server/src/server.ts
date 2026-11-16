@@ -794,7 +794,12 @@ export function createApp(
   });
   const pluginService = createPluginService({
     resolveQuestion: (input) =>
-      resolveQuestion(deps, input, currentQuestionResolutionInvocation()),
+      resolveQuestion(
+        deps,
+        input,
+        currentQuestionResolutionInvocation(),
+        "plugin",
+      ),
     machineEnrollments: getMachineEnrollmentService(deps),
     db: deps.db,
     hub: deps.hub,

@@ -8,10 +8,15 @@ import {
 } from "@bb/shared-ui/lib/absolute-file-path";
 import { buildThreadHostFileContentUrl } from "@/lib/file-content-urls";
 
+export type MarkdownFileRoutingOverride =
+  | MarkdownLinkRouting
+  | ((routing: MarkdownLinkRouting) => MarkdownLinkRouting);
+
 const ROUTE_ROOT = "/__bb_markdown_file_root__";
 
 export function buildMarkdownFileRouting({
   hostId,
+  linkRouting,
   path,
   rootPath,
   threadId,
@@ -20,6 +25,7 @@ export function buildMarkdownFileRouting({
   openOutsideRoot,
 }: {
   hostId: string | null;
+  linkRouting?: MarkdownFileRoutingOverride;
   path: string;
   rootPath: string | null;
   threadId: string | null;
@@ -42,7 +48,7 @@ export function buildMarkdownFileRouting({
   };
   const rootRelative = (absolutePath: string) =>
     absolutePath.slice(root === "/" ? 1 : root.length + 1);
-  return {
+  const routing: MarkdownLinkRouting = {
     headingAnchors: true,
     localImage: {
       absolutePaths:
@@ -75,4 +81,7 @@ export function buildMarkdownFileRouting({
           },
         }),
   };
+  return typeof linkRouting === "function"
+    ? linkRouting(routing)
+    : { ...routing, ...linkRouting };
 }

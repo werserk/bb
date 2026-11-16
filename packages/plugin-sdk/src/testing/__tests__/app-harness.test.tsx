@@ -1802,6 +1802,113 @@ describe("renderSlot", () => {
     ]);
   });
 
+  it("passes imperative admission identity through the harness without serializing it", () => {
+    const lifetime = new AbortController().signal;
+    const revalidate = vi.fn(async () => true);
+    const intent = {
+      target: {
+        kind: "workspace" as const,
+        environmentId: "env_42",
+        path: "report.md",
+      },
+      location: null,
+      experimental_artifact: {
+        version: 1 as const,
+        readRoot: "",
+        physicalSource: { hostId: "primary", canonicalReadRoot: "/source/A" },
+        revalidate,
+        lifetime,
+      },
+    };
+    const open = vi.fn(
+      (_intent: import("../../app-contract.js").ExperimentalFileOpenOptions) =>
+        true,
+    );
+    function Probe() {
+      const nav = useBbNavigate();
+      return (
+        <button onClick={() => nav.experimental_openFilePreview(intent)}>
+          Scoped open
+        </button>
+      );
+    }
+    const slot = renderSlot(
+      { component: Probe },
+      {},
+      { openFilePreview: open },
+    );
+    fireEvent.click(slot.getByRole("button", { name: "Scoped open" }));
+    expect(open).toHaveBeenCalledWith(intent);
+    const forwarded = open.mock.calls[0]![0] as typeof intent;
+    expect(forwarded.experimental_artifact.revalidate).toBe(revalidate);
+    expect(forwarded.experimental_artifact.lifetime).toBe(lifetime);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "preserves a preview opener and validates scoped lifetime (scoped=%s)",
+    (scoped) => {
+      const controller = new AbortController();
+      const intent = {
+        target: {
+          kind: "workspace" as const,
+          environmentId: "env_42",
+          path: "report.md",
+        },
+        location: null,
+        opener: "fixture-preview",
+        ...(scoped
+          ? {
+              experimental_artifact: {
+                version: 1 as const,
+                readRoot: "",
+                physicalSource: {
+                  hostId: "primary",
+                  canonicalReadRoot: "/source/A",
+                },
+                revalidate: async () => true,
+                lifetime: controller.signal,
+              },
+            }
+          : {}),
+      };
+      const open = vi.fn(() => true);
+      const handled = vi.fn();
+      function Probe() {
+        const nav = useBbNavigate();
+        return (
+          <button
+            onClick={() => handled(nav.experimental_openFilePreview(intent))}
+          >
+            Open with previewer
+          </button>
+        );
+      }
+      const slot = renderSlot(
+        { component: Probe },
+        {},
+        { openFilePreview: open },
+      );
+      fireEvent.click(
+        slot.getByRole("button", { name: "Open with previewer" }),
+      );
+      expect(handled).toHaveBeenLastCalledWith(true);
+      expect(open).toHaveBeenCalledExactlyOnceWith(intent);
+      expect(slot.inspection.navigateCalls).toEqual([
+        { method: "experimental_openFilePreview", options: intent },
+      ]);
+      if (scoped) {
+        controller.abort();
+        fireEvent.click(
+          slot.getByRole("button", { name: "Open with previewer" }),
+        );
+        expect(handled).toHaveBeenLastCalledWith(false);
+        expect(open).toHaveBeenCalledTimes(1);
+        expect(slot.inspection.navigateCalls).toHaveLength(1);
+      }
+    },
+  );
+
   it("records panel calls and retains target state until the owner clears it", () => {
     const slot = renderSlot(
       { component: FixedTabProbe },

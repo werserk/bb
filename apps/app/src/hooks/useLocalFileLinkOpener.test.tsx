@@ -7,7 +7,10 @@ import { useLocalFileLinkOpener } from "./useLocalFileLinkOpener";
 const mocks = vi.hoisted(() => ({
   openPathInFileTarget: vi.fn(async () => true),
   toastError: vi.fn(),
+  modal: vi.fn(),
 }));
+
+vi.mock("@/lib/modal-host", () => ({ openCoreModal: mocks.modal }));
 
 vi.mock("@/hooks/useLiveFileOpenTargets", () => ({
   useLiveFileOpenTargets: (root: { hostId: string } | null) => ({
@@ -59,6 +62,41 @@ describe("useLocalFileLinkOpener", () => {
     });
     expect(openFilePreview).not.toHaveBeenCalled();
   });
+
+  it.each(["cursor", "vscode"])(
+    "keeps explicit %s editor intent without a line out of artifact popup policy",
+    (targetId) => {
+      const { openFilePreview, openLink } = renderOpener("host_1");
+      expect(
+        openLink({
+          path: "/repo/README.md",
+          lineRange: null,
+          openTargetId: targetId,
+          ordinaryActivation: true,
+        }),
+      ).toBe(true);
+      expect(mocks.modal).not.toHaveBeenCalled();
+      if (targetId === "cursor") {
+        expect(mocks.openPathInFileTarget).toHaveBeenCalledWith({
+          path: "/repo/README.md",
+          lineNumber: null,
+          rememberTarget: false,
+          targetId: "cursor",
+        });
+        expect(openFilePreview).not.toHaveBeenCalled();
+      } else {
+        expect(mocks.openPathInFileTarget).not.toHaveBeenCalled();
+        expect(openFilePreview).toHaveBeenCalledWith({
+          target: {
+            kind: "workspace",
+            environmentId: "env_1",
+            path: "README.md",
+          },
+          location: null,
+        });
+      }
+    },
+  );
 
   it("previews workspace files with the caller's viewer", () => {
     const { openFilePreview, openLink } = renderOpener("host_1");

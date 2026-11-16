@@ -417,6 +417,11 @@ inside a native plugin tool. Calls outside it, CLI, raw HTTP and
 `bb.sdk.threads.questions.experimental_resolve(input)` record local-unverified
 attribution. Supply revision, stable operationId and reason; retry with identical
 content. Both pint agent actions are unsupported without mutation. An agent answer
-is never owner approval. `bb.experimental_questionResolutionScope.register(policy)`
+is never owner approval. The internal resolver retains v1 non-permission notices,
+including context-free calls. Public HTTP/SDK/CLI answers use v2 local-input chat
+standing for the question and revision, even when called by a plugin; this does
+not authenticate a human. Withdrawals cancel the question, and command approvals
+remain separate. Replay preserves the original notice policy.
+`bb.experimental_questionResolutionScope.register(policy)`
 is the single managed-policy registration, disposed on unload; use its captured
 host chain and live acceptance fence. Without it native resolution permits self only.

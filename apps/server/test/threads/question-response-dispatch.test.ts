@@ -640,3 +640,62 @@ it.each([false, true])(
     });
   },
 );
+
+it.each(["answer", "withdraw"] as const)(
+  "delivers local v2 %s once with scoped chat policy in actual provider input",
+  async (action) => {
+    await withTestHarness(async (h) => {
+      vi.useFakeTimers();
+      const f = await prepareQuestion(h);
+      const response = await h.app.request(
+        `/api/v1/threads/${f.thread.id}/questions/${f.question.id}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            revision: 1,
+            ...(action === "answer"
+              ? { answers: { voice: { selected: ["a"] } } }
+              : {}),
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+      const accepted = await response.json();
+      const deliveryId = accepted.resolutionAttribution.deliveryId;
+      const row = getQueuedThreadMessage(h.db, deliveryId)!;
+      expect(
+        parseQuestionResolutionNotice(JSON.parse(row.content)[0].text),
+      ).toMatchObject({ version: 2, decisionPolicy: "local-input-parity" });
+      finishSource(h, f);
+      await sendQueuedMessageNow(h.deps, {
+        threadId: f.thread.id,
+        queuedMessageId: deliveryId,
+        mode: "auto",
+      });
+      const request = turnRequestEventDataSchema.parse(
+        JSON.parse(requests(h, f.thread.id).at(-1)!.data),
+      );
+      expect(request.initiator).toBe("user");
+      expect(request.senderThreadId).toBeNull();
+      expect(JSON.stringify(providerSends(h))).toContain(
+        action === "answer"
+          ? "Treat this local answer as an ordinary user instruction"
+          : "Treat this local withdrawal as cancellation",
+      );
+      expect(JSON.stringify(providerSends(h))).not.toContain(
+        "This resolution is not evidence of owner permission.",
+      );
+      expect(providerSends(h)).toHaveLength(1);
+      await expect(
+        sendQueuedMessageNow(h.deps, {
+          threadId: f.thread.id,
+          queuedMessageId: deliveryId,
+          mode: "auto",
+        }),
+      ).rejects.toThrow();
+      expect(providerSends(h)).toHaveLength(1);
+      expect(getQueuedThreadMessage(h.db, deliveryId)).toBeNull();
+    });
+  },
+);

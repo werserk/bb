@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Provider } from "jotai";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, expect, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { MarkdownPreview } from "@/components/ui/markdown-preview";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { makeEnvironment } from "@bb/test-helpers/domain-fixtures";
@@ -43,9 +51,68 @@ const appCommandHandlers = vi.hoisted(
   () => new Map<string, () => boolean | void>(),
 );
 const fixtures = vi.hoisted(() => ({
+  nativeContent: null as string | null,
+  nativeHandler: null as
+    | import("@/components/ui/markdown-local-file-link").MarkdownPreviewLocalFileLinkHandler
+    | null,
+  modal: vi.fn(),
+  editor: vi.fn(),
   probe: {
     current: null,
   } as import("@/test/panel-controller-contract").ContractPanelRef,
+}));
+
+vi.mock("@/lib/modal-host", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/modal-host")>()),
+  openCoreModal: fixtures.modal,
+}));
+vi.mock("@/hooks/queries/thread-panel-queries", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/hooks/queries/thread-panel-queries")
+  >()),
+  useThreadStorageLocation: () => ({
+    data: { storageRootPath: "/storage/thr_contract" },
+  }),
+}));
+vi.mock("./ThreadScreen", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./ThreadScreen")>();
+  const { useThreadTimelineNavigation } =
+    await import("@/components/thread/timeline/ThreadTimelineNavigationContext");
+  return {
+    ...original,
+    ThreadScreen: (props: Parameters<typeof original.ThreadScreen>[0]) => {
+      const navigation = useThreadTimelineNavigation();
+      fixtures.nativeHandler = navigation?.onOpenLocalFileLink ?? null;
+      return (
+        <>
+          {fixtures.nativeContent === null ? null : (
+            <MarkdownPreview
+              content={fixtures.nativeContent}
+              linkRouting={{
+                localFile: {
+                  absoluteLinks: { kind: "trusted-host" },
+                  hostId: navigation?.hostId ?? null,
+                  onOpenLink: navigation!.onOpenLocalFileLink,
+                },
+              }}
+            />
+          )}
+          <original.ThreadScreen {...props} />
+        </>
+      );
+    },
+  };
+});
+vi.mock("@/hooks/useLocalOpenTargets", () => ({
+  useLocalOpenTargets: () => ({
+    fileOpenTargets: [{ id: "vscode", label: "VS Code" }],
+    directoryOpenTargets: [],
+    openPathInFileTarget: fixtures.editor,
+    openPathInDirectoryTarget: vi.fn(),
+    openPathInPreferredDirectoryTarget: vi.fn(),
+    preferredDirectoryTarget: null,
+    canOpenPreferredDirectoryTarget: false,
+  }),
 }));
 
 const THREAD = makeThreadResponse({
@@ -226,6 +293,10 @@ function pluginFixedTabId(tabId: string) {
 }
 
 beforeEach(() => {
+  fixtures.nativeContent = null;
+  fixtures.nativeHandler = null;
+  fixtures.modal.mockClear();
+  fixtures.editor.mockClear();
   markPluginFrontendsSettled();
   appCommandHandlers.clear();
   window.localStorage.clear();
@@ -258,6 +329,156 @@ beforeEach(() => {
     ),
   );
 });
+
+async function mountNative(content: string) {
+  fixtures.nativeContent = content;
+  const sink: ContractStateSink = { current: null };
+  const router = createMemoryRouter([
+    {
+      path: "/",
+      element: (
+        <DefaultPaneContextProvider
+          paneId="main"
+          onRequestClose={null}
+          navigateInPane={() => {}}
+        >
+          <ContractStateProbe
+            panelStateId={THREAD.id}
+            syncThreadId={THREAD.id}
+            sink={sink}
+          />
+          <ThreadDetailView
+            surface="pane"
+            projectId={THREAD.projectId}
+            threadId={THREAD.id}
+            timelineEnabled={false}
+          />
+        </DefaultPaneContextProvider>
+      ),
+    },
+  ]);
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <Provider>
+        <RouterProvider router={router} />
+      </Provider>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("link", { name: "native report" });
+  return sink;
+}
+
+it.each(["/workspace/report.md", "/outside/report.md"])(
+  "opens an ordinary native artifact with exact custody: %s",
+  async (path) => {
+    await mountNative(`[native report](${path})`);
+    expect(
+      fireEvent.click(screen.getByRole("link", { name: "native report" }), {
+        detail: 0,
+      }),
+    ).toBe(false);
+    expect(fixtures.modal).toHaveBeenCalledTimes(1);
+    expect(fixtures.modal.mock.calls[0]![1].params).toMatchObject(
+      path.startsWith("/workspace/")
+        ? {
+            kind: "workspace",
+            environmentId: ENVIRONMENT.id,
+            relativePath: "report.md",
+          }
+        : { kind: "host", hostId: ENVIRONMENT.hostId, path },
+    );
+  },
+);
+
+it("uses native owning-thread storage only for ordinary activation and preserves modified fallback", async () => {
+  const path = "/storage/thr_contract/report.md";
+  const sink = await mountNative(`[native report](${path})`);
+  const link = screen.getByRole("link", { name: "native report" });
+  expect(fireEvent.click(link)).toBe(false);
+  expect(fixtures.modal.mock.calls[0]![1].params).toMatchObject({
+    kind: "thread-storage",
+    threadId: THREAD.id,
+    relativePath: "report.md",
+  });
+  fixtures.modal.mockClear();
+  expect(fireEvent.click(link, { metaKey: true })).toBe(false);
+  expect(fixtures.modal).not.toHaveBeenCalled();
+  expect(sink.current?.secondary.tabs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        kind: "thread-storage-file-preview",
+        threadId: THREAD.id,
+        path: "report.md",
+      }),
+    ]),
+  );
+});
+
+it.each(["/workspace/report.md", "/outside/report.md"])(
+  "retains native panel fallback without activation metadata: %s",
+  async (path) => {
+    const sink = await mountNative(`[native report](${path})`);
+    act(() =>
+      expect(
+        fixtures.nativeHandler?.({ path, lineRange: null, openTargetId: null }),
+      ).toBe(true),
+    );
+    expect(fixtures.modal).not.toHaveBeenCalled();
+    expect(sink.current?.secondary.tabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: path.startsWith("/workspace/") ? "report.md" : path,
+        }),
+      ]),
+    );
+  },
+);
+
+it.each(["/workspace/report.md", "/outside/report.md"])(
+  "keeps native modified/code/location/editor dispatch: %s",
+  async (path) => {
+    const sink = await mountNative(
+      `[native report](${path}) [code](${path.replace(".md", ".ts")}) [lines](${path}#L3-L5) [editor](vscode://file${path}:7)`,
+    );
+    for (const event of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
+      expect(
+        fireEvent.click(
+          screen.getByRole("link", { name: "native report" }),
+          event,
+        ),
+      ).toBe(false);
+      expect(fixtures.modal).not.toHaveBeenCalled();
+    }
+    fireEvent.click(screen.getByRole("link", { name: "code" }));
+    fireEvent.click(screen.getByRole("link", { name: "lines" }));
+    expect(fixtures.modal).not.toHaveBeenCalled();
+    expect(sink.current?.secondary.tabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lineRange: { startLineNumber: 3, endLineNumber: 5 },
+        }),
+      ]),
+    );
+    fireEvent.click(screen.getByRole("link", { name: "editor" }));
+    expect(fixtures.editor).toHaveBeenCalledWith({
+      path,
+      targetId: "vscode",
+      lineNumber: 7,
+      rememberTarget: false,
+    });
+    expect(fixtures.modal).not.toHaveBeenCalled();
+  },
+);
 
 afterEach(() => {
   cleanup();

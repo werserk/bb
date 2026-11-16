@@ -1555,6 +1555,32 @@ fires after a final unterminated line is emitted.
    session instead of logging the drop. Decide whether the reader should offer
    a fail-closed mode before the signature is a promise.
 
+## Restrictive artifact preview intent
+
+`ExperimentalFileOpenOptions.experimental_artifact` is imperative-only
+`{ version: 1, readRoot: string, physicalSource: {hostId,canonicalReadRoot}, revalidate, lifetime }`. It requests the shared popup with artifact-v1
+byte restrictions, without widening files permission. Workspace/storage roots are
+relative (empty means source root); host roots are absolute, including drive/UNC
+roots. Locations and revision targets refuse this option. Invalid exact-key shapes
+refuse before navigation. Older hosts return false; callers retain safe preview
+and never retry without the option. True acknowledges navigation handling only, not completed admission or bytes.
+External opening refuses the option. Semantic/Markdown props gain no scope field.
+
+Core callers: `useLocalFileLinkOpener`, `usePanelFiles`, `artifact-activation`,
+`ScopedArtifactBody`; ordinary
+native/semantic activations share classification but never request a lease.
+Stabilization requires paired installed SDK/server/daemon skew, draft remount and
+host-custody acceptance. `revalidate({target,readRoot,relativePath,signal})` must resolve literal
+true for the same candidate/root/original physical source before each application-controlled load attempt. Primary PDF/image GET is part of that attempt; later strict live-lease reads/Download may reuse its TTL grant after membership/project-disable/logical-binding changes. Canonical physical A remains pinned; stale descriptors reading A are allowed, substitution B returns zero bytes. The strict acknowledgement echoes policy and expectedSource, not root attestation. `lifetime` is the
+mounted consumer AbortSignal. Both are required in-process values: JSON scope
+parsing is a separate boundary, never a relaxation of imperative validation.
+Core owns ARTIFACT_ADMISSION_TIMEOUT_MS=10,000, combines per-attempt and caller
+cancellation and ignores late completions before lease/fetch. Consumer callbacks
+may ignore cancellation; no underlying RPC cancellation is promised. Existing modal tokens bind ephemeral records; no new
+public registration, modal prop, serialized handle or persisted metadata is added.
+Scoped reload/Forward without a live record is stale, while native history is
+unchanged. SDK 0.6.132+werserk.artifacts.3 includes the question and artifact capabilities. Protocol 267 rejects older strict reader semantics. No live Windows or installed/front-proxy acceptance is implied.
+
 ## Live-file navigation (`experimental_FileLink`, `BbNavigate.experimental_openFilePreview`, `BbNavigate.experimental_openFileExternally`, and `experimental_useCanOpenFileExternally`)
 
 **Kept experimental (2026-08-22).** Windows/UNC paths were never verified.
@@ -4682,7 +4708,13 @@ variables and claimed JSON/header identities cannot upgrade attribution. The
 native `bb_list_questions` and `bb_resolve_question` tools use the same scope and
 resolution services. All operations require revision, operationId and reason;
 identical normalized retries return the original principal-bound resolution and
-delivery receipt. A new resolution never authorizes an owner-reserved action.
+delivery receipt. New local-input HTTP/SDK/CLI answers have the same scoped
+standing as typed chat, without independently verified identity; withdrawals
+cancel the question rather than answer or approve it. The
+`bb.experimental_questionResolution.resolve` closure retains v1 non-permission
+notices, including context-free/deferred calls. A plugin using `bb.sdk` uses the
+public HTTP path and its local-input policy instead. Neither policy bypasses
+command or permission approvals, and replay preserves the original notice.
 
 `bb.experimental_questionResolutionScope.register(policy)` installs one managed
 policy with a disposer, also disposed when its plugin unloads. It receives

@@ -174,7 +174,10 @@ import {
   type ComposerHandleTarget,
 } from "../internal/composer-handle.js";
 import { normalizePluginThreadRowStatus } from "../internal/composer-customization-validation.js";
-import { normalizeExperimentalFileOpenOptions } from "../internal/file-navigation-validation.js";
+import {
+  normalizeExperimentalFileOpenOptions,
+  normalizeExperimentalFilePreviewOptions,
+} from "../internal/file-navigation-validation.js";
 import { experimental_THREAD_ACTION_GROUPS } from "../thread-action-groups.js";
 import { experimental_resolveThreadStatus } from "../internal/thread-status.js";
 import {
@@ -3165,6 +3168,12 @@ export function renderSlot<
       return options.openUrl?.(url) ?? false;
     },
     experimental_openFilePreview(fileOptions) {
+      const normalized = normalizeExperimentalFilePreviewOptions(fileOptions);
+      if (normalized === null) return false;
+      fileOptions = {
+        ...normalized.options,
+        ...(normalized.opener === null ? {} : { opener: normalized.opener }),
+      };
       navigateCalls.push({
         method: "experimental_openFilePreview",
         options: fileOptions,

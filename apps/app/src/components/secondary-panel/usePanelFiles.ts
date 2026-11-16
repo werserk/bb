@@ -1,3 +1,4 @@
+import { openArtifactPopup } from "@/lib/artifact-activation";
 import { useCallback } from "react";
 import {
   getEnvironmentFilePreviewSourceAtRef,
@@ -122,6 +123,10 @@ export function usePanelFiles({
   const scopeHostId = scope?.hostId ?? null;
   const openFilePreview = useCallback(
     (intent: AppFilePreviewIntent) => {
+      if (intent.experimental_artifact) {
+        const normalized = normalizeExperimentalFileOpenOptions(intent);
+        return normalized !== null && openArtifactPopup(normalized);
+      }
       if (!available) return false;
       const request = livePreviewRequest(
         intent,

@@ -184,7 +184,9 @@ export function useBbNavigate(): BbNavigate {
     (options) => {
       const normalized = normalizeExperimentalFileOpenOptions(options);
       return (
-        normalized !== null && appNavigation.openFileExternally(normalized)
+        normalized !== null &&
+        !normalized.experimental_artifact &&
+        appNavigation.openFileExternally(normalized)
       );
     },
     [appNavigation],
