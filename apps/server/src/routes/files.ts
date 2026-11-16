@@ -1,3 +1,4 @@
+import { artifactPreviewCsp } from "@bb/domain/artifact-preview";
 import { readConversationQuestion } from "../services/threads/conversation-questions.js";
 import { randomUUID } from "node:crypto";
 import type { Hono } from "hono";
@@ -52,12 +53,16 @@ const FILE_PREVIEW_TTL_MS = 10 * 60 * 1000;
 const REVISION_REF_PATTERN = /^(?:HEAD|[0-9a-f]{4,40})$/iu;
 
 interface FilePreviewLease {
+  policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   hostId: string;
   rootPath: string;
   expiresAtMs: number;
 }
 
 interface FileRoot {
+  policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   hostId: string;
   rootPath: string;
   ref: string | null;
@@ -108,9 +113,28 @@ async function serveRootedFile(
   if (root.ref === null) {
     return serveDaemonFileStream(
       deps,
-      { hostId: root.hostId, path: filePath, rootPath: root.rootPath },
+      {
+        hostId: root.hostId,
+        path: filePath,
+        rootPath: root.rootPath,
+        artifactPolicy: root.policy,
+        expectedCanonicalRoot: root.expectedSource?.canonicalReadRoot,
+      },
       request,
-      createRawFileHeaders,
+      (metadata) => {
+        const headers = createRawFileHeaders(metadata);
+        if (root.policy === "artifact-v1") {
+          const url = new URL(request.url);
+          const leaseBase = url.pathname.split("/").slice(0, 5).join("/") + "/";
+          const source = url.origin + leaseBase;
+          headers.set(
+            "content-security-policy",
+            `sandbox allow-scripts; ${artifactPreviewCsp(source)}`,
+          );
+          headers.set("cache-control", "no-store");
+        }
+        return headers;
+      },
     );
   }
   const result = await callHostRetryableOnlineRpc(deps, {
@@ -329,19 +353,62 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     }),
   );
 
-  post(fileRoutes.createPreview, (context, payload) => {
-    const hostId = resolveHostId(payload.hostId);
-    const rootPath = requireAbsoluteHostRoot(payload.rootPath);
+  post(fileRoutes.createPreview, async (context, payload) => {
+    let hostId: string;
+    let rootPath: string;
+    if ("target" in payload) {
+      const root = payload.target.root ?? "";
+      const segments = root === "" ? [] : parseRelativeFileSegments(root);
+      if (splitHostPathRoot(root) !== null || /^[a-z]:/iu.test(root))
+        throw new ApiError(400, "invalid_path", "Invalid file path", false);
+      if (payload.target.kind === "workspace") {
+        const environment = requireReadyEnvironment(
+          deps.db,
+          payload.target.environmentId,
+        );
+        hostId = resolveHostId(environment.hostId);
+        rootPath = joinHostPathSegments(environment.path, ...segments);
+      } else {
+        const storage = await requireThreadStorageTarget(
+          deps,
+          payload.target.threadId,
+        );
+        hostId = resolveHostId(storage.hostId);
+        rootPath = joinHostPathSegments(storage.storagePath, ...segments);
+      }
+    } else {
+      hostId = resolveHostId(payload.hostId);
+      rootPath = requireAbsoluteHostRoot(payload.rootPath);
+    }
+    const expectedSource =
+      "expectedSource" in payload ? { ...payload.expectedSource } : undefined;
+    if (expectedSource && hostId !== expectedSource.hostId)
+      throw new ApiError(
+        409,
+        "artifact_source_changed",
+        "Artifact physical source changed",
+        false,
+      );
     const now = Date.now();
     for (const [id, lease] of previewLeases) {
       if (lease.expiresAtMs <= now) previewLeases.delete(id);
     }
     const id = randomUUID();
     const expiresAtMs = now + (payload.ttlMs ?? FILE_PREVIEW_TTL_MS);
-    previewLeases.set(id, { hostId, rootPath, expiresAtMs });
+    previewLeases.set(id, {
+      hostId,
+      rootPath,
+      expiresAtMs,
+      policy: "policy" in payload ? payload.policy : undefined,
+      expectedSource,
+    });
     return context.json({
       baseUrl: `/api/v1/file-previews/${encodeURIComponent(id)}`,
+      ...(previewLeases.get(id)?.policy
+        ? { policy: previewLeases.get(id)!.policy }
+        : {}),
       expiresAtMs,
+      ...(expectedSource ? { expectedSource } : {}),
     });
   });
 
@@ -355,7 +422,13 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     return serveRootedFile(
       deps,
       context.req.raw,
-      { hostId: lease.hostId, rootPath: lease.rootPath, ref: null },
+      {
+        hostId: lease.hostId,
+        rootPath: lease.rootPath,
+        ref: null,
+        policy: lease.policy,
+        expectedSource: lease.expectedSource,
+      },
       parseRelativeFileSegments(context.req.param("filePath")),
     );
   });

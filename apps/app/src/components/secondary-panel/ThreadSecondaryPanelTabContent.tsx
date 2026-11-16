@@ -27,7 +27,10 @@ import {
   type FilePreviewLineRange,
 } from "@bb/client-core";
 import { SecondaryPanelFilePreview } from "./ThreadStorageFilePreview";
-import { buildMarkdownFileRouting } from "@/components/ui/markdown-file-routing";
+import {
+  buildMarkdownFileRouting,
+  type MarkdownFileRoutingOverride,
+} from "@/components/ui/markdown-file-routing";
 import { useAppNavigationHost } from "@/lib/app-navigation-host";
 import {
   useLocalFileLinkOpener,
@@ -41,6 +44,7 @@ import { buildHostFileContentUrl } from "@/lib/file-content-urls";
 
 interface WorkspaceFilePreviewTabContentProps {
   activePath: string;
+  markdownLinkRouting?: MarkdownFileRoutingOverride;
   isPanelOpen: boolean;
   copyPath?: string | null;
   environmentId?: string | null;
@@ -54,6 +58,7 @@ interface WorkspaceFilePreviewTabContentProps {
 
 interface ProjectFilePreviewTabContentProps {
   activePath: string;
+  markdownLinkRouting?: MarkdownFileRoutingOverride;
   isPanelOpen: boolean;
   copyPath?: string | null;
   environmentId: string | null;
@@ -68,6 +73,7 @@ interface ProjectFilePreviewTabContentProps {
 
 interface HostFilePreviewTabContentProps {
   activePath: string;
+  markdownLinkRouting?: MarkdownFileRoutingOverride;
   isPanelOpen: boolean;
   copyPath: string;
   environmentId?: string | null;
@@ -79,6 +85,7 @@ interface HostFilePreviewTabContentProps {
 
 interface HostScopedFilePreviewTabContentProps {
   activePath: string;
+  markdownLinkRouting?: MarkdownFileRoutingOverride;
   hostId: string;
   isPanelOpen: boolean;
   lineRange: FilePreviewLineRange | null;
@@ -95,6 +102,7 @@ interface AttachmentFilePreviewTabContentProps {
 
 interface ThreadStorageFilePreviewTabContentProps {
   activePath: string;
+  markdownLinkRouting?: MarkdownFileRoutingOverride;
   isPanelOpen: boolean;
   copyPath?: string | null;
   headerMode?: "file" | "none";
@@ -116,6 +124,7 @@ function filePreviewQueryProps(query: UseQueryResult<FilePreview>) {
 
 export function WorkspaceFilePreviewTabContent({
   activePath,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   copyPath = null,
   environmentId,
   headerMode,
@@ -146,6 +155,7 @@ export function WorkspaceFilePreviewTabContent({
   const markdownLinkRouting = useMemo(() => {
     if (source === null || !environmentId) return undefined;
     return buildMarkdownFileRouting({
+      linkRouting: callerMarkdownLinkRouting,
       hostId: environmentHostId,
       path: activePath,
       rootPath: environmentRootPath,
@@ -155,6 +165,7 @@ export function WorkspaceFilePreviewTabContent({
       openLink,
     });
   }, [
+    callerMarkdownLinkRouting,
     activePath,
     environmentHostId,
     environmentId,
@@ -188,6 +199,7 @@ export function WorkspaceFilePreviewTabContent({
 
 export function ProjectFilePreviewTabContent({
   activePath,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   copyPath = null,
   environmentId,
   hostId,
@@ -208,6 +220,7 @@ export function ProjectFilePreviewTabContent({
   const markdownLinkRouting = useMemo(
     () =>
       buildMarkdownFileRouting({
+        linkRouting: callerMarkdownLinkRouting,
         hostId,
         path: activePath,
         rootPath,
@@ -218,7 +231,15 @@ export function ProjectFilePreviewTabContent({
             hostId,
           }),
       }),
-    [activePath, environmentId, hostId, projectId, rootPath, threadId],
+    [
+      callerMarkdownLinkRouting,
+      activePath,
+      environmentId,
+      hostId,
+      projectId,
+      rootPath,
+      threadId,
+    ],
   );
 
   return (
@@ -241,6 +262,7 @@ export function ProjectFilePreviewTabContent({
 
 export function HostFilePreviewTabContent({
   activePath,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   copyPath,
   environmentId,
   isPanelOpen,
@@ -268,6 +290,7 @@ export function HostFilePreviewTabContent({
   const workspaceRootPath = environment?.path ?? null;
   const markdownLinkRouting = useMemo(() => {
     return buildMarkdownFileRouting({
+      linkRouting: callerMarkdownLinkRouting,
       hostId: environmentHostId,
       path: activePath,
       rootPath:
@@ -283,7 +306,14 @@ export function HostFilePreviewTabContent({
         buildThreadHostFileContentUrl(threadId, path),
       openLink,
     });
-  }, [activePath, environmentHostId, openLink, threadId, workspaceRootPath]);
+  }, [
+    callerMarkdownLinkRouting,
+    activePath,
+    environmentHostId,
+    openLink,
+    threadId,
+    workspaceRootPath,
+  ]);
 
   return (
     <SecondaryPanelFilePreview
@@ -302,6 +332,7 @@ export function HostFilePreviewTabContent({
 
 export function HostScopedFilePreviewTabContent({
   activePath,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   hostId,
   isPanelOpen,
   lineRange,
@@ -321,6 +352,7 @@ export function HostScopedFilePreviewTabContent({
   const markdownLinkRouting = useMemo(
     () =>
       buildMarkdownFileRouting({
+        linkRouting: callerMarkdownLinkRouting,
         hostId,
         path: activePath,
         rootPath: getAbsoluteDirname({ path: activePath }),
@@ -329,7 +361,7 @@ export function HostScopedFilePreviewTabContent({
           buildHostFileContentUrl(hostId, path),
         openLink,
       }),
-    [activePath, hostId, openLink],
+    [callerMarkdownLinkRouting, activePath, hostId, openLink],
   );
   return (
     <SecondaryPanelFilePreview
@@ -347,6 +379,7 @@ export function HostScopedFilePreviewTabContent({
 
 export function ThreadStorageFilePreviewTabContent({
   activePath,
+  markdownLinkRouting: callerMarkdownLinkRouting,
   copyPath = null,
   headerMode,
   isPanelOpen,
@@ -375,6 +408,7 @@ export function ThreadStorageFilePreviewTabContent({
   const markdownLinkRouting = useMemo(
     () =>
       buildMarkdownFileRouting({
+        linkRouting: callerMarkdownLinkRouting,
         hostId: storageHostId,
         path: activePath,
         rootPath: storageRootPath,
@@ -383,7 +417,14 @@ export function ThreadStorageFilePreviewTabContent({
           buildThreadStorageRawContentUrl(threadId, path),
         openLink,
       }),
-    [activePath, openLink, storageHostId, storageRootPath, threadId],
+    [
+      callerMarkdownLinkRouting,
+      activePath,
+      openLink,
+      storageHostId,
+      storageRootPath,
+      threadId,
+    ],
   );
 
   return (

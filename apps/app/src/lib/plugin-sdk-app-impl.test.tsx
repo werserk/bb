@@ -29,11 +29,20 @@ import { AppNavigationHostProvider } from "./app-navigation-host";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 
+const openCoreModal = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/modal-host", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/modal-host")>()),
+  openCoreModal,
+}));
+
 beforeAll(() =>
   Promise.all([LazyMarkdownHtml.preload(), LazyPluginMarkdown.preload()]),
 );
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  openCoreModal.mockReset();
+});
 
 describe("plugin SDK Markdown", () => {
   it.each([
@@ -224,6 +233,7 @@ describe("plugin SDK Markdown", () => {
     expect(onOpenLocalFileLink).toHaveBeenCalledWith({
       lineRange: null,
       openTargetId: null,
+      ordinaryActivation: true,
       path: "/workspace/README.md",
     });
     expect(screen.getByRole("img", { name: "chart" }).getAttribute("src")).toBe(
@@ -297,14 +307,40 @@ describe("plugin SDK Markdown", () => {
           ? "/api/v1/environments/env_document/files/reports/clip.mp4"
           : "/api/v1/threads/thr_document/thread-storage/files/reports/clip.mp4",
       );
+      expect(openCoreModal).not.toHaveBeenCalled();
+      const previewCalls = openFilePreview.mock.calls.length;
       fireEvent.click(screen.getByRole("link", { name: "Parent" }));
+      expect(openCoreModal).toHaveBeenLastCalledWith(
+        "core/local-file-viewer",
+        expect.objectContaining({
+          title: "summary.md",
+          params: expect.objectContaining({
+            ...target,
+            path: "reports/summary.md",
+            relativePath: "reports/summary.md",
+            lineRange: null,
+          }),
+        }),
+      );
+      fireEvent.click(screen.getByRole("link", { name: "Missing" }));
+      expect(openCoreModal).toHaveBeenLastCalledWith(
+        "core/local-file-viewer",
+        expect.objectContaining({
+          title: "missing.md",
+          params: expect.objectContaining({
+            ...target,
+            path: "reports/nested/missing.md",
+          }),
+        }),
+      );
+      expect(openCoreModal).toHaveBeenCalledTimes(2);
+      expect(openFilePreview).toHaveBeenCalledTimes(previewCalls);
+      fireEvent.click(screen.getByRole("link", { name: "Parent" }), {
+        ctrlKey: true,
+      });
+      expect(openCoreModal).toHaveBeenCalledTimes(2);
       expect(openFilePreview).toHaveBeenLastCalledWith({
         target: { ...target, path: "reports/summary.md" },
-        location: null,
-      });
-      fireEvent.click(screen.getByRole("link", { name: "Missing" }));
-      expect(openFilePreview).toHaveBeenLastCalledWith({
-        target: { ...target, path: "reports/nested/missing.md" },
         location: null,
       });
       fireEvent.click(screen.getByRole("link", { name: "Web" }));
@@ -357,6 +393,7 @@ describe("plugin SDK Markdown", () => {
       path: "/outside.md",
       lineRange: null,
       openTargetId: null,
+      ordinaryActivation: true,
     });
     expect(
       screen.getByRole("img", { name: "Absolute" }).getAttribute("src"),
@@ -426,14 +463,43 @@ describe("plugin SDK navigation components", () => {
       </AppNavigationHostProvider>,
     );
     fireEvent.click(screen.getByRole("link", { name: "result.md" }));
-    expect(openFilePreview).toHaveBeenCalledWith({
-      target: {
-        kind: "thread-storage",
-        threadId: "thr_1",
-        path: "reports/result.md",
-      },
-      location: null,
+    expect(openCoreModal).toHaveBeenCalledWith(
+      "core/local-file-viewer",
+      expect.objectContaining({
+        title: "result.md",
+        params: expect.objectContaining({
+          kind: "thread-storage",
+          threadId: "thr_1",
+          path: "reports/result.md",
+          relativePath: "reports/result.md",
+          lineRange: null,
+        }),
+      }),
+    );
+    expect(openFilePreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("link", { name: "result.md" }), {
+      ctrlKey: true,
     });
+    expect(openCoreModal).toHaveBeenCalledTimes(1);
+    expect(openFilePreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps non-artifact file links on the file preview route", () => {
+    const openFilePreview = vi.fn(() => true);
+    const FileLink = pluginSdkAppImplementation.experimental_FileLink;
+    const target = {
+      kind: "thread-storage",
+      threadId: "thr_1",
+      path: "reports/result.json",
+    } as const;
+    render(
+      <AppNavigationHostProvider capabilities={{ openFilePreview }}>
+        <FileLink target={target}>result.json</FileLink>
+      </AppNavigationHostProvider>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: "result.json" }));
+    expect(openCoreModal).not.toHaveBeenCalled();
+    expect(openFilePreview).toHaveBeenCalledWith({ target, location: null });
   });
 });
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isArtifactCanonicalRoot } from "@bb/domain/artifact-preview";
 import {
   FILE_LIST_EXCLUDE_NAME_MAX_LENGTH,
   FILE_LIST_EXCLUDE_NAMES_MAX,
@@ -14,10 +15,13 @@ export const hostFileReadRequestSchema = z
     ref: z.string().min(1).optional(),
   })
   .strict()
-  .refine((request) => request.ref === undefined || request.rootPath !== undefined, {
-    message: "rootPath is required when ref is set",
-    path: ["rootPath"],
-  });
+  .refine(
+    (request) => request.ref === undefined || request.rootPath !== undefined,
+    {
+      message: "rootPath is required when ref is set",
+      path: ["rootPath"],
+    },
+  );
 export type HostFileReadRequest = z.infer<typeof hostFileReadRequestSchema>;
 
 export const hostFileWriteRequestSchema = z
@@ -95,17 +99,61 @@ export const hostRemovePathRequestSchema = z
   .strict();
 export type HostRemovePathRequest = z.infer<typeof hostRemovePathRequestSchema>;
 
-export const createFilePreviewRequestSchema = z
+const artifactPreviewTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("workspace"),
+      environmentId: z.string().min(1),
+      root: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("thread-storage"),
+      threadId: z.string().min(1),
+      root: z.string().optional(),
+    })
+    .strict(),
+]);
+const artifactExpectedSourceSchema = z
   .object({
-    hostId: z.string().min(1).optional(),
-    rootPath: z.string().min(1),
-    ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+    hostId: z.string().min(1),
+    canonicalReadRoot: z.string().refine(isArtifactCanonicalRoot),
   })
   .strict();
+
+export const createFilePreviewRequestSchema = z.union([
+  z
+    .object({
+      hostId: z.string().min(1).optional(),
+      rootPath: z.string().min(1),
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      hostId: z.string().min(1).optional(),
+      rootPath: z.string().min(1),
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+      policy: z.literal("artifact-v1"),
+      expectedSource: artifactExpectedSourceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      target: artifactPreviewTargetSchema,
+      policy: z.literal("artifact-v1"),
+      expectedSource: artifactExpectedSourceSchema,
+      ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
+    })
+    .strict(),
+]);
 export type CreateFilePreviewRequest = z.infer<
   typeof createFilePreviewRequestSchema
 >;
 export interface CreateFilePreviewResponse {
+  policy?: "artifact-v1";
+  expectedSource?: { hostId: string; canonicalReadRoot: string };
   baseUrl: string;
   expiresAtMs: number;
 }

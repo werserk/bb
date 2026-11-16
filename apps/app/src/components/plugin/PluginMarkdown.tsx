@@ -1,4 +1,11 @@
-import { useMemo } from "react";
+import { appToast } from "@/components/ui/app-toast";
+import { copyToClipboardWithToast } from "@/lib/clipboard";
+import {
+  parseLocalFileHref,
+  resolveRelativeLocalFileHref,
+} from "@/components/ui/markdown-local-file-link";
+import type { MarkdownPreviewLinkHandler } from "@/components/ui/markdown-link";
+import { useCallback, useMemo } from "react";
 import type { MarkdownProps } from "@get-bb/plugin-sdk";
 import { getEnvironmentFilePreviewSourceAtRef } from "@bb/client-core";
 import { normalizeAbsoluteFilePath } from "@bb/shared-ui/lib/absolute-file-path";
@@ -53,7 +60,39 @@ type PluginMarkdownDocument = NonNullable<
 >;
 
 function usePluginMarkdownMessageRouting() {
-  return useMessageLinkRouting(useThreadTimelineNavigation()?.threadId);
+  const routing = useMessageLinkRouting(
+    useThreadTimelineNavigation()?.threadId,
+  );
+  const navigation = useAppNavigationHost();
+  const onOpenLink = useCallback<MarkdownPreviewLinkHandler>(
+    ({ href, ordinaryActivation }) => {
+      if (ordinaryActivation === false) return false;
+      const local =
+        parseLocalFileHref({ href, absoluteLinks: { kind: "trusted-host" } }) ??
+        resolveRelativeLocalFileHref({
+          href,
+          baseDir: "/__unbound__",
+          rootPath: "/__unbound__",
+        });
+      if (local) {
+        appToast.error("Can't open this file here", {
+          description: href,
+          action: {
+            label: "Copy path",
+            onClick: () => {
+              void copyToClipboardWithToast(href, {
+                successMessage: "Path copied",
+              });
+            },
+          },
+        });
+        return true;
+      }
+      return navigation.openUrl({ url: href });
+    },
+    [navigation],
+  );
+  return useMemo(() => ({ ...routing, onOpenLink }), [routing, onOpenLink]);
 }
 
 function PluginDocumentMarkdown({
@@ -143,7 +182,11 @@ export function PluginMarkdown({
       allowHtml
       content={content}
       className={className}
-      linkRouting={document === null ? {} : messageRouting}
+      linkRouting={
+        document === null
+          ? { onOpenLink: messageRouting.onOpenLink }
+          : messageRouting
+      }
       threadMentions={PLUGIN_MARKDOWN_THREAD_MENTIONS}
     />
   );

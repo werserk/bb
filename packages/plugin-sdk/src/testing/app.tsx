@@ -173,7 +173,10 @@ import {
   type ComposerHandleTarget,
 } from "../internal/composer-handle.js";
 import { normalizePluginThreadRowStatus } from "../internal/composer-customization-validation.js";
-import { normalizeExperimentalFileOpenOptions } from "../internal/file-navigation-validation.js";
+import {
+  normalizeExperimentalFileOpenOptions,
+  normalizeExperimentalFilePreviewOptions,
+} from "../internal/file-navigation-validation.js";
 import { experimental_THREAD_ACTION_GROUPS } from "../thread-action-groups.js";
 import { experimental_resolveThreadStatus } from "../internal/thread-status.js";
 import {
@@ -1463,7 +1466,10 @@ function TestVoiceInputTextarea({
  * the target path, with the plugin's Preview body drawn from the file the
  * `filePreview` option returns for the target (nothing when it returns null).
  */
-function TestFilePreview({ target, renderPreview }: ExperimentalFilePreviewProps) {
+function TestFilePreview({
+  target,
+  renderPreview,
+}: ExperimentalFilePreviewProps) {
   const file = useSlotEnv("experimental_FilePreview").filePreview(target);
   return (
     <div data-testid="bb-file-preview" data-path={target.path}>
@@ -3156,6 +3162,12 @@ export function renderSlot<
       return options.openUrl?.(url) ?? false;
     },
     experimental_openFilePreview(fileOptions) {
+      const normalized = normalizeExperimentalFilePreviewOptions(fileOptions);
+      if (normalized === null) return false;
+      fileOptions = {
+        ...normalized.options,
+        ...(normalized.opener === null ? {} : { opener: normalized.opener }),
+      };
       navigateCalls.push({
         method: "experimental_openFilePreview",
         options: fileOptions,

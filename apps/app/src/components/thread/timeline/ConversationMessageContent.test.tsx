@@ -40,6 +40,118 @@ function threadListEntry(
   });
 }
 
+it.each(["user", "assistant", "generated"] as const)(
+  "forwards real ordinary and modified local activation through %s message and attachments",
+  (role) => {
+    const handler = vi.fn(() => true);
+    const attachments = {
+      webImages: 0,
+      localImages: 0,
+      localFiles: 1,
+      imageUrls: [],
+      localImagePaths: [],
+      localFilePaths: ["/workspace/attached.pdf"],
+      localFileDetails: [],
+    };
+    const common = {
+      attachments,
+      onOpenLocalFileLink: handler,
+      text: "[report](/workspace/report.md)",
+      timestamp: 0,
+      threadId: "thr_native",
+    };
+    const user = {
+      role: "user" as const,
+      initiator: "user" as const,
+      mentions: [],
+      senderThreadId: null,
+      senderThreadTitle: null,
+      senderIsPluginSideChat: false,
+      systemMessageKind: "unlabeled" as const,
+      systemMessageSubject: null,
+      turnRequest: {
+        isGrouped: false,
+        kind: "message" as const,
+        status: "accepted" as const,
+      },
+    };
+    render(
+      <MemoryRouter>
+        <ThreadTimelineNavigationProvider
+          environmentId="env_native"
+          hostId="host_native"
+          onOpenLocalFileLink={handler}
+          resolveMentionLink={() => null}
+          workspaceRootPath="/workspace"
+        >
+          {role === "assistant" ? (
+            <ConversationMessageContent
+              {...common}
+              role="assistant"
+              id="msg_native"
+              turnId="turn_native"
+              showActions={false}
+              mobileActionDisplay="overflow"
+              streaming={false}
+            />
+          ) : (
+            <ConversationMessageContent
+              {...common}
+              {...user}
+              {...(role === "generated"
+                ? {
+                    initiator: "agent",
+                    senderThreadId: "thr_sender",
+                    senderThreadTitle: "Sender",
+                  }
+                : {})}
+            />
+          )}
+        </ThreadTimelineNavigationProvider>
+      </MemoryRouter>,
+    );
+    if (role === "generated")
+      fireEvent.click(
+        screen.getByRole("button", { name: "Message from Sender" }),
+      );
+    const link = screen.getByRole("link", { name: "report" });
+    const attachment = screen.getByRole("button", { name: /attached.pdf/ });
+    for (const [event, ordinaryActivation] of [
+      [{}, true],
+      [{ ctrlKey: true }, false],
+      [{ metaKey: true }, false],
+      [{ shiftKey: true }, false],
+      [{ altKey: true }, false],
+      [{ button: 1 }, false],
+    ] as const) {
+      expect(fireEvent.click(link, event)).toBe(false);
+      expect(handler).toHaveBeenLastCalledWith({
+        path: "/workspace/report.md",
+        lineRange: null,
+        openTargetId: null,
+        ordinaryActivation,
+      });
+      fireEvent.click(attachment, event);
+      expect(handler).toHaveBeenLastCalledWith({
+        path: "/workspace/attached.pdf",
+        lineRange: null,
+        openTargetId: null,
+        ordinaryActivation,
+      });
+    }
+    handler.mockClear();
+    fireEvent(
+      link,
+      new MouseEvent("auxclick", {
+        button: 1,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+  },
+);
+
 describe("ConversationMessageContent assistant images", () => {
   it("serves local Markdown images through the thread host-file route", () => {
     render(

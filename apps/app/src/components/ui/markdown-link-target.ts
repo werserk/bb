@@ -1,3 +1,4 @@
+import { isOrdinaryFileActivation } from "@/lib/file-activation";
 import { parseApplicationUrl } from "@bb/domain/application-url";
 import type { Heading, Nodes, Root } from "mdast";
 import type { MouseEvent as ReactMouseEvent } from "react";
@@ -175,7 +176,12 @@ export function openMarkdownLinkTarget({
     case "app-route":
       return;
     case "local-file":
-      if (linkRouting?.localFile?.onOpenLink(target.link)) {
+      if (
+        linkRouting?.localFile?.onOpenLink({
+          ...target.link,
+          ordinaryActivation: isOrdinaryFileActivation(event),
+        })
+      ) {
         event.preventDefault();
       }
       return;
@@ -185,7 +191,12 @@ export function openMarkdownLinkTarget({
       return;
     case "url":
       if (isModifiedClick(event)) return;
-      if ((linkRouting?.onOpenLink ?? openUrl)({ href: target.href })) {
+      if (
+        (linkRouting?.onOpenLink ?? openUrl)({
+          href: target.href,
+          ordinaryActivation: isOrdinaryFileActivation(event),
+        })
+      ) {
         event.preventDefault();
       }
       return;

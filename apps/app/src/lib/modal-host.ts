@@ -28,9 +28,18 @@ export type BbModalState = BbModalTarget & {
   params: ExperimentalModalParams;
 };
 
+export interface CoreModalLifetime {
+  signal: AbortSignal;
+  bind(token: string): void;
+  dispose(): void;
+}
 interface QueuedOpen {
-  target: BbModalTarget;
-  options: ExperimentalModalOpenOptions;
+  state: BbModalState;
+}
+const coreLifetimes = new Map<string, () => void>();
+
+function retireCoreModal(token: string): void {
+  coreLifetimes.get(token)?.();
 }
 
 const coreModals = new Map<string, ComponentType<ExperimentalModalProps>>();
@@ -222,18 +231,18 @@ function currentUrl(): string {
   return `${pathname}${search}${hash}`;
 }
 
-function openNow(target: BbModalTarget, options: ExperimentalModalOpenOptions) {
+function openNow(state: BbModalState) {
   const navigate = navigateRef;
   if (navigate === null) {
     throw new Error("experimental_modal: the modal host is not mounted");
   }
-  const state = buildState(target, options);
   const showing = readHistoryModal();
   const active = document.activeElement;
   const opener =
     (showing !== null ? openers.get(showing.token) : undefined) ??
     (active instanceof HTMLElement && active !== document.body ? active : null);
   if (showing !== null) {
+    retireCoreModal(showing.token);
     knownTokens.delete(showing.token);
     openers.delete(showing.token);
   }
@@ -248,13 +257,44 @@ function openNow(target: BbModalTarget, options: ExperimentalModalOpenOptions) {
 function openTarget(
   target: BbModalTarget,
   options: ExperimentalModalOpenOptions,
+  lifetime?: CoreModalLifetime,
 ): void {
+  let state: BbModalState;
+  try {
+    state = buildState(target, options);
+  } catch (error) {
+    lifetime?.dispose();
+    throw error;
+  }
+  if (lifetime) {
+    if (lifetime.signal.aborted) {
+      lifetime.dispose();
+      return;
+    }
+    const retire = () => {
+      coreLifetimes.delete(state.token);
+      lifetime.signal.removeEventListener("abort", retire);
+      if (queued?.state.token === state.token) queued = null;
+      knownTokens.delete(state.token);
+      openers.delete(state.token);
+      lifetime.dispose();
+      notify();
+    };
+    coreLifetimes.set(state.token, retire);
+    lifetime.bind(state.token);
+    lifetime.signal.addEventListener("abort", retire, { once: true });
+  }
   if (dismissing !== null) {
-    buildState(target, options);
-    queued = { target, options };
+    if (queued) retireCoreModal(queued.state.token);
+    queued = { state };
     return;
   }
-  openNow(target, options);
+  try {
+    openNow(state);
+  } catch (error) {
+    retireCoreModal(state.token);
+    throw error;
+  }
 }
 
 function finishDismiss(): void {
@@ -264,10 +304,15 @@ function finishDismiss(): void {
   const next = queued;
   queued = null;
   notify();
-  if (next !== null) openNow(next.target, next.options);
+  if (next !== null) openNow(next.state);
 }
 
 function onPopState(): void {
+  const current = readHistoryModal()?.token;
+  for (const token of coreLifetimes.keys()) {
+    if (token !== current && token !== queued?.state.token)
+      retireCoreModal(token);
+  }
   if (dismissing !== null) finishDismiss();
 }
 
@@ -282,6 +327,7 @@ export function closeModal(): void {
   ) {
     return;
   }
+  retireCoreModal(showing.token);
   dismissing = showing.token;
   const token = showing.token;
   const startedAt = Date.now();
@@ -304,11 +350,13 @@ export function closeModal(): void {
 export function openCoreModal(
   modalId: string,
   options: ExperimentalModalOpenOptions,
+  lifetime?: CoreModalLifetime,
 ): void {
   if (!coreModals.has(modalId)) {
+    lifetime?.dispose();
     throw new Error(`experimental_modal: "${modalId}" is not a core modal`);
   }
-  openTarget({ kind: "core", modalId }, options);
+  openTarget({ kind: "core", modalId }, options, lifetime);
 }
 
 export function registerCoreModal(
@@ -343,13 +391,17 @@ export function bindModalRouter(navigate: NavigateFunction): () => void {
   navigateRef = navigate;
   window.addEventListener("popstate", onPopState);
   return () => {
-    if (navigateRef === navigate) navigateRef = null;
+    if (navigateRef === navigate) {
+      navigateRef = null;
+      for (const token of coreLifetimes.keys()) retireCoreModal(token);
+    }
     window.removeEventListener("popstate", onPopState);
   };
 }
 
 export function publishShownModal(next: BbModalState | null): void {
   if (shown?.token === next?.token) return;
+  if (shown) retireCoreModal(shown.token);
   shown = next;
   notify();
 }
@@ -389,6 +441,7 @@ const hostDriver: ModalDriver = {
 installModalDriver(hostDriver);
 
 export function resetModalHostForTest(): void {
+  for (const token of coreLifetimes.keys()) retireCoreModal(token);
   if (dismissTimer !== null) clearTimeout(dismissTimer);
   dismissTimer = null;
   dismissing = null;

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { ScopedArtifactBody } from "./ScopedArtifactBody";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ExperimentalModalProps } from "@get-bb/plugin-sdk";
 import { Button } from "@bb/shared-ui/button";
 import {
+  HostScopedFilePreviewTabContent,
   ThreadStorageFilePreviewTabContent,
   WorkspaceFilePreviewTabContent,
 } from "@/components/secondary-panel/ThreadSecondaryPanelTabContent";
@@ -11,6 +13,7 @@ import type { FilePreview } from "@bb/client-core";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useThreadStorageFilePreview } from "@/hooks/queries/thread-panel-queries";
 import {
+  buildHostFileContentUrl,
   buildEnvironmentFileContentUrl,
   buildThreadStorageRawContentUrl,
 } from "@/lib/file-content-urls";
@@ -21,6 +24,8 @@ import {
   type LocalFileViewerTarget,
 } from "@/lib/local-file-viewer-target";
 import { getThreadRoutePath } from "@/lib/route-paths";
+import type { MarkdownFileRoutingOverride } from "@/components/ui/markdown-file-routing";
+import { buildNativeMarkdownLinkRouting } from "./native-markdown-link-routing";
 import { isPdfPath, PdfViewerFrame } from "./PdfViewerFrame";
 
 const WORKING_TREE_SOURCE = { kind: "working-tree" } as const;
@@ -30,6 +35,9 @@ function getFileName(path: string): string {
 }
 
 function getDownloadUrl(target: LocalFileViewerTarget): string {
+  if (target.experimental_artifact) return "";
+  if (target.kind === "host")
+    return buildHostFileContentUrl(target.hostId, target.path);
   return target.kind === "thread-storage"
     ? buildThreadStorageRawContentUrl(target.threadId, target.relativePath)
     : buildEnvironmentFileContentUrl(
@@ -39,14 +47,54 @@ function getDownloadUrl(target: LocalFileViewerTarget): string {
       );
 }
 
-function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
-  if (isPdfPath(target.relativePath)) {
-    return target.kind === "thread-storage" ? (
-      <ThreadStoragePdf target={target} />
-    ) : (
-      <PdfViewerFrame
-        title={getFileName(target.relativePath)}
-        url={getDownloadUrl(target)}
+function useNativeMarkdownLinkRouting(
+  target: LocalFileViewerTarget,
+  context: string | undefined,
+): MarkdownFileRoutingOverride {
+  const { kind } = target;
+  const namespaceId =
+    target.kind === "thread-storage"
+      ? target.threadId
+      : target.kind === "workspace"
+        ? target.environmentId
+        : target.hostId;
+  return useMemo(() => {
+    if (kind === "host") {
+      return buildNativeMarkdownLinkRouting({
+        toTarget: (path) => ({ kind, hostId: namespaceId, path }),
+        context,
+      });
+    }
+    return buildNativeMarkdownLinkRouting({
+      toTarget: (path, rootPath) => {
+        const rootRelative = path.slice(
+          rootPath === "/" ? 1 : rootPath.length + 1,
+        );
+        return kind === "thread-storage"
+          ? { kind, threadId: namespaceId, path: rootRelative }
+          : { kind, environmentId: namespaceId, path: rootRelative };
+      },
+      context,
+    });
+  }, [context, kind, namespaceId]);
+}
+
+function NativeFilePreviewBody({ target }: { target: LocalFileViewerTarget }) {
+  const thread = useThread(
+    target.kind === "thread-storage" ? target.threadId : "",
+  );
+  const routing = useNativeMarkdownLinkRouting(
+    target,
+    thread.data?.title ?? undefined,
+  );
+  if (target.kind === "host") {
+    return (
+      <HostScopedFilePreviewTabContent
+        activePath={target.path}
+        hostId={target.hostId}
+        isPanelOpen
+        lineRange={target.lineRange}
+        markdownLinkRouting={routing}
       />
     );
   }
@@ -58,6 +106,7 @@ function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
         headerMode="none"
         isPanelOpen
         lineRange={target.lineRange}
+        markdownLinkRouting={routing}
         threadId={target.threadId}
       />
     );
@@ -70,9 +119,33 @@ function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
       headerMode="none"
       isPanelOpen
       lineRange={target.lineRange}
+      markdownLinkRouting={routing}
       source={WORKING_TREE_SOURCE}
     />
   );
+}
+
+function LocalFileViewerBody({ target }: { target: LocalFileViewerTarget }) {
+  if (target.experimental_artifact)
+    return <ScopedArtifactBody target={target} />;
+  if (target.kind === "host" && isPdfPath(target.path))
+    return (
+      <PdfViewerFrame
+        title={getFileName(target.path)}
+        url={getDownloadUrl(target)}
+      />
+    );
+  if (isPdfPath(target.relativePath)) {
+    return target.kind === "thread-storage" ? (
+      <ThreadStoragePdf target={target} />
+    ) : (
+      <PdfViewerFrame
+        title={getFileName(target.relativePath)}
+        url={getDownloadUrl(target)}
+      />
+    );
+  }
+  return <NativeFilePreviewBody target={target} />;
 }
 
 function getPreviewReloadKey(
@@ -222,11 +295,13 @@ export function LocalFileViewerModal({
             >
               Copy path
             </Button>
-            <Button asChild size="sm" variant="outline">
-              <a href={getDownloadUrl(target)} download={fileName}>
-                Download
-              </a>
-            </Button>
+            {!target.experimental_artifact && (
+              <Button asChild size="sm" variant="outline">
+                <a href={getDownloadUrl(target)} download={fileName}>
+                  Download
+                </a>
+              </Button>
+            )}
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-auto">
             <LocalFileViewerBody target={target} />

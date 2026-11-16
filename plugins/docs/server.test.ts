@@ -1303,9 +1303,9 @@ describe("Docs vault operations", () => {
                   : "primary-written-sha",
               sizeBytes: 21,
             }),
-            createPreview: async ({ hostId }) => ({
+            createPreview: async (input) => ({
               baseUrl:
-                hostId === "host_remote"
+                "hostId" in input && input.hostId === "host_remote"
                   ? "/remote-preview"
                   : "/primary-preview",
               expiresAtMs: Date.now() + 60_000,
