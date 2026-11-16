@@ -83,6 +83,7 @@ describe("the ACP plugin's registrations", () => {
       }),
     });
 
+    expect(host.harness.registrations.aiServiceRegistrations.map((service) => service.id)).toContain("opencode-openrouter");
     expect(registeredIds(host)).toContain("acp-cursor");
     expect(registeredIds(host)).toContain("acp-amp");
   });

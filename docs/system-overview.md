@@ -478,4 +478,17 @@ The server plugin owns preparation, a bounded foreground-interest cache, one inf
 
 Owner principles come from the same raw instruction reader as core thread composition. Instruction/configuration revisions and source snapshots fence generation and delivery. The native composer still owns editable Tab acceptance and ordinary Enter/Send. Explicit dismissal causes distinguish a user decision from focus cleanup. There is no new atomic server context predicate at Send; this version promises fresh delivery checks and the existing local snapshot fence.
 
-Pi performs provider translation and credential access on the host. Generic session affinity and exact reasoning are capability-checked in the shared dispatcher; OpenRouter latency routing belongs to Pi's server-side native-generation settings and is translated on the host. Host protocol 268 carries the new options, capabilities and applied-routing receipt. AI Gateway and Prompt Suggestion use the same native generation path; neither stores provider keys.
+Pi performs provider translation and credential access on the host. Generic session affinity and exact reasoning are capability-checked in the shared dispatcher; OpenRouter latency routing belongs to Pi's server-side native-generation settings and is translated on the host. Host protocol 269 includes those options, capabilities and applied-routing receipt, plus the ACP plugin's direct OpenRouter host commands. AI Gateway and Prompt Suggestion use the same native generation path; neither stores provider keys.
+
+
+The ACP plugin also owns `opencode-openrouter`, a stateless shared text service.
+Its server registration selects lowest-latency routing and exposes exact model
+identity to both AI Gateway and Prompt Suggestion through the common dispatcher.
+The host alone exports the existing OpenCode OpenRouter key, validates a single
+active credential, and calls fixed OpenRouter endpoints with redirects disabled.
+It caches public catalog metadata for one minute, never credentials; generation
+rereads the key. Metadata defines capabilities, including whether reasoning can
+be disabled. The bounded, cancellable transport rejects tools, refusals and
+unknown finish reasons, does not retry or run an agent loop, and reports only
+upstream model/usage evidence. No additional SDK surface or credential store is
+introduced; host protocol 269 gates the new commands on enrolled machines.

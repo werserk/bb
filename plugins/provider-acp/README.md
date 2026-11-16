@@ -41,12 +41,50 @@ What lives here:
   `bb.providers.register` declaration: ids, display names, icons,
   capabilities, and the bridge options it launches with (`acpLaunchSpec`, and
   `acpDialect` for the agents whose vendor side channels the kit reads).
-- `src/host.ts` — the `bb.host` artifact, two surfaces in one file: the kit's
-  bridge, re-exported, and a host entry whose one RPC asks an agent what it
-  supports on the machine it is installed on (`src/contract.ts`,
-  `src/probe-capabilities.ts`).
+- `src/host.ts` — the `bb.host` artifact: the re-exported ACP bridge,
+  capability probes, native-root discovery, and direct OpenRouter text generation.
+- `src/ai/` — the shared text-service registration, host RPC contract and
+  stateless OpenRouter transport using host-local OpenCode credentials.
 - `icons/` — the provider logos, declared in `package.json` under
   `bb.branding.experimental_icons` so the packaged build ships them.
 
 The kit itself, including the ACP wire schema, the delta translation, the
 per-agent dialects and the bridge process, is `packages/provider-bridge-acp`.
+
+## Direct OpenRouter text generation
+
+The shared text service `opencode-openrouter` appears as **OpenCode credential ·
+OpenRouter direct**. It uses OpenCode only for credential ownership: the host runs
+`opencode auth export openrouter`, accepting exactly one active OpenRouter key.
+Keys stay on the host, are reread for each generation, and are never persisted by
+this plugin. Credential export errors and provider response bodies are not logged
+or forwarded. This service does not start an ACP session or use an agent loop.
+
+Models come from OpenRouter's exact `/api/v1/models` catalog, cached in host memory
+for one minute and invalidated on unsuccessful completion responses. Capabilities
+come from catalog metadata, including explicit supported reasoning efforts;
+`none` is available only when advertised and reasoning is not mandatory.
+
+The server selects latency routing. The host sends one non-streaming Chat
+Completions request with role-separated messages, `max_tokens` when specified,
+and `provider: {sort: "latency", allow_fallbacks: false, require_parameters: true}`.
+No retries, fallback models, tools or session affinity are supported. Fast service
+tiers are unsupported. Actual model, finish reason and usage come from the
+response; unknown usage and actual tier remain null. Requests have bounded
+credential export, catalog and response reads and share cancellation/deadlines.
+
+Use `bb ai-gateway models` or `bb prompt-suggestion models` to discover the
+qualified service/host/profile/model IDs. Select that exact ID in either plugin's
+settings, or invoke `bb ai-gateway generate --model <exact-id> --prompt-stdin`.
+Both plugins consume `bb.experimental_aiServices` through the shared dispatcher;
+there is no separate Prompt Suggestion transport. Existing ACP agents are unchanged.
+
+## Repository verification
+
+Inside the bb monorepo, run `pnpm exec turbo run test:workspace
+--filter=bb-plugin-provider-acp`. The repository-owned
+`vitest.provider-acp.config.ts` uses shared workers for pure Node tests and
+isolated workers for DOM tests and global mocks. Turbo prepares the SDK and
+native modules before running it. The plugin's default `test` command and
+`vitest.config.ts` remain self-contained for standalone forks; `test:workspace`
+is only available inside the bb repository.

@@ -98,6 +98,7 @@
   ],
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
+    "test:workspace": "vitest run --config ../../vitest.provider-acp.config.ts",
     "typecheck": "tsrs --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
     "prepare:bundled": "bb-plugin-build prepare-bundled"

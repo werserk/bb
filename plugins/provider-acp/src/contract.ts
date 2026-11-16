@@ -1,3 +1,4 @@
+import { openRouterAiContract } from "./ai/contract.js";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { experimental_nativeRootsHostContract } from "@get-bb/plugin-sdk/host";
 import { experimental_acpAgentProbeSchema } from "@get-bb/plugin-sdk/provider-bridge/acp";
@@ -15,4 +16,5 @@ export const acpHostContract = defineRpcContract({
     output: experimental_acpAgentProbeSchema,
   },
   ...experimental_nativeRootsHostContract,
+  ...openRouterAiContract,
 });

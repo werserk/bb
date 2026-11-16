@@ -163,3 +163,20 @@ restart is needed.
   workspace, each a relative path without dot segments.
 - `supportsManualCompaction` (default `false`) shows `/compact` only for agents
   that accept an explicit compaction request.
+
+## Direct OpenRouter text generation
+
+The ACP plugin also registers **OpenCode credential · OpenRouter direct** in the
+shared text-generation model catalog. It requires an OpenRouter key already
+configured in OpenCode on the primary host and an OpenCode version supporting
+`auth export openrouter`. Do not print or capture credential export output.
+
+Use `bb ai-gateway models` or `bb prompt-suggestion models` to discover exact
+qualified IDs, then select one explicitly. `bb ai-gateway generate --model
+<exact-id> --prompt-stdin` uses that same shared service. This is a direct
+OpenRouter API call, not OpenCode/ACP agent inference; it never runs tools.
+The catalog cache lasts one minute. Credentials are read anew for each request.
+Only advertised controls are accepted; `none` reasoning must be advertised and
+optional. Latency routing disables provider fallback and requires parameter
+support. There is no automatic retry, model fallback, session affinity or Fast
+tier. Deadlines cancel local work; provider billing may already have occurred.

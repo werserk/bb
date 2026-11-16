@@ -1795,7 +1795,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "experimental_AiGenerationError",
           "experimental_AI_MODEL_ID_MAX_LENGTH",
         ],
-        firstParty: ["bb cloud AI", "Codex provider"],
+        firstParty: ["bb cloud AI", "Codex provider", "ACP providers"],
         experimental: true,
       },
       {

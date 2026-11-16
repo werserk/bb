@@ -1,3 +1,4 @@
+import { registerOpenCodeOpenRouterService } from "./src/ai/service.js";
 import { registerUsageSource } from "./src/usage-source.js";
 import type {
   BbPluginApi,
@@ -47,6 +48,7 @@ export default async function acpProvidersPlugin(
   bb: BbPluginApi,
 ): Promise<void> {
   registerUsageSource(bb);
+  registerOpenCodeOpenRouterService(bb);
   const host = bb.hosts.experimental_client({ contract: acpHostContract });
   const settings = bb.settings.define({
     customAgents: {
