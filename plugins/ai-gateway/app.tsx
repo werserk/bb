@@ -86,7 +86,8 @@ function GatewaySettings() {
           </p>
           <p>
             Supported: non-streaming text Chat Completions. Tools, images,
-            Responses API and streaming are unavailable.
+            Responses API and streaming are unavailable. Fast requires support
+            from the selected model.
           </p>
           {status.models.length === 0 ? (
             <p>No supported connected models are ready.</p>

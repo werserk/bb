@@ -13,6 +13,8 @@ Native settings control instructions, context character limit, timeout, output t
 
 Automatic calls require a focused visible empty composer, successful completed root turn, no queued message or open question/approval, and no upload/voice operation. Draft/context/settings changes cancel or invalidate pending results. The candidate replaces the placeholder: Tab accepts editable text; plain Enter or native Send accepts and submits once through the usual host path. Typing/Escape dismisses it. Unsupported custom composers remain off.
 
+Reasoning effort and Processing speed are explicit native settings. Provider default leaves the corresponding option unset. The model picker lists supported values; unsupported choices fail before generation and are never silently substituted. Fast can use a higher quota or price. The general agent model picker does not set these generator options.
+
 Instructions live in src/instructions.ts, with a native setting override. No transcript/suggestion corpus or model content log is added. Existing BB drafts and sent history keep their ordinary retention. Dataset export and background sending are outside this plugin.
 
 When upgrading Autosay, inspect its non-secret settings, disable the old plugin before enabling Prompt Suggestion, and choose a native model explicitly. Direct API configuration does not map automatically to a BB connection. Do not silently migrate credentials or leave both composer controllers active.

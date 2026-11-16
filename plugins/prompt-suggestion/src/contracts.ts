@@ -22,6 +22,8 @@ export const modelSchema = z.object({
   hostId: z.string(),
   profile: z.string(),
   supportsOutputLimit: z.boolean(),
+  reasoningEfforts: z.array(z.string()),
+  serviceTiers: z.array(z.string()),
 });
 export const rpcContract = defineRpcContract({
   models: { input: z.null(), output: z.array(modelSchema) },
@@ -52,6 +54,8 @@ export const rpcContract = defineRpcContract({
     output: z.object({
       enabled: z.boolean(),
       configured: z.boolean(),
+      reasoningEffort: z.string(),
+      serviceTier: z.string(),
       model: z.string(),
       active: z.number(),
     }),

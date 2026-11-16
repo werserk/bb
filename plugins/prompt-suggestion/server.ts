@@ -32,6 +32,8 @@ export default async function plugin(bb: BbPluginApi) {
         hostId: model.hostId,
         profile: model.profile,
         supportsOutputLimit: model.capabilities.maxOutputTokens,
+        reasoningEfforts: [...model.capabilities.reasoningEfforts],
+        serviceTiers: [...(model.capabilities.serviceTiers ?? [])],
       }),
     );
   bb.rpc.register(rpcContract, {

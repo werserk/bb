@@ -112,6 +112,7 @@ export interface CodexResponsesRequest {
   model: string;
   instructions: string;
   reasoning?: { effort: string };
+  service_tier?: string;
   max_output_tokens?: number;
   store: boolean;
   stream: boolean;

@@ -25,7 +25,8 @@ export async function installGenerator(
           capabilities: {
             maxOutputTokens: true,
             temperature: false,
-            reasoningEfforts: [],
+            reasoningEfforts: ["none", "low"],
+            serviceTiers: ["fast"],
           },
         },
       ],

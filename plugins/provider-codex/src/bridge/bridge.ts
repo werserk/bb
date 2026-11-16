@@ -11,6 +11,7 @@ import {
   assertDefaultCodexAiRoute,
   codexAiConfigSchema,
 } from "../ai/catalog-policy.js";
+import { codexAiCatalogSchema } from "../ai/generation-catalog.js";
 import { isDeepStrictEqual } from "node:util";
 import {
   internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME as CONVERSATION_QUESTION_TOOL_NAME,
@@ -1724,9 +1725,14 @@ export async function readDefaultCodexAiCatalog(signal: AbortSignal) {
           resultSchema: codexAiConfigSchema,
         });
         assertDefaultCodexAiRoute(effective, process.env);
-        const catalog = await loadModelCatalog(connection, 10000);
+        const catalog = await connection.request({
+          method: "model/list",
+          params: {},
+          timeoutMs: 10000,
+          resultSchema: codexAiCatalogSchema,
+        });
         signal.throwIfAborted();
-        return catalog.models;
+        return catalog;
       } finally {
         signal.removeEventListener("abort", abort);
       }

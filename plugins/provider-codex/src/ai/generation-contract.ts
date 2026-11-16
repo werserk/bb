@@ -17,6 +17,7 @@ export const generationInput = z
     maxOutputTokens: z.number().int().positive().max(131072).nullable(),
     temperature: z.number().nullable(),
     reasoningEffort: z.string().nullable(),
+    serviceTier: z.string().min(1).max(64).nullable().default(null),
     timeoutMs: z.number().int().positive().max(60000),
   })
   .strict();
@@ -29,6 +30,7 @@ export const codexGenerationContract = defineRpcContract({
           id: z.string(),
           displayName: z.string(),
           reasoningEfforts: z.array(z.string()),
+          serviceTiers: z.array(z.string()),
           maxOutputTokens: z.boolean(),
         })
         .strict(),
@@ -41,6 +43,7 @@ export const codexGenerationContract = defineRpcContract({
         text: z.string(),
         model: z.string(),
         actualModel: z.string().nullable(),
+        actualServiceTier: z.string().nullable(),
         finishReason: z.enum(["stop", "length"]),
         usage: z
           .object({

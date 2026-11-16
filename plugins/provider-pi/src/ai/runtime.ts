@@ -66,7 +66,11 @@ export function createPiAiRuntime(
       input: z.infer<typeof piGenerationSchema>,
       signal: AbortSignal,
     ) {
-      if (input.temperature !== null || input.reasoningEffort !== null)
+      if (
+        input.temperature !== null ||
+        input.reasoningEffort !== null ||
+        input.serviceTier !== null
+      )
         throw new Error("Unsupported generation option");
       signal.throwIfAborted();
       const runtime = await create(signal);
@@ -102,6 +106,7 @@ export function createPiAiRuntime(
           .join(""),
         model: input.model,
         actualModel: result.responseModel ?? null,
+        actualServiceTier: null,
         finishReason: result.stopReason,
         usage:
           result.usage.totalTokens > 0

@@ -27,6 +27,7 @@ describe("Codex explicit generation response", () => {
       text: "a\nb",
       model: "selected",
       actualModel: "selected",
+      actualServiceTier: null,
       finishReason: "stop",
       usage: { inputTokens: 9, outputTokens: 2, cachedInputTokens: 3 },
     });
@@ -42,6 +43,15 @@ describe("Codex explicit generation response", () => {
         "selected",
       ),
     ).toMatchObject({ finishReason: "length", usage: null });
+  });
+  it("reports the served tier without assuming the requested tier was honored", async () => {
+    for (const serviceTier of ["priority", "fast", "default", null]) {
+      const result = await readGenerationResponse(
+        response({ service_tier: serviceTier }),
+        "selected",
+      );
+      expect(result.actualServiceTier).toBe(serviceTier);
+    }
   });
   it("preserves alias resolution and rejects tools or missing terminal event", async () => {
     expect(

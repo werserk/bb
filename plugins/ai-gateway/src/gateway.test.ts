@@ -56,6 +56,7 @@ describe("gateway shared dispatch", () => {
         });
       expect((await send({ stream: true })).status).toBe(400);
       expect((await send({ temperature: 1 })).status).toBe(400);
+      expect((await send({ service_tier: "priority" })).status).toBe(400);
       expect(
         (
           await send({
@@ -66,6 +67,16 @@ describe("gateway shared dispatch", () => {
           })
         ).status,
       ).toBe(400);
+      const unsupportedCli = await harness.behavior.runCli([
+        "generate",
+        "--model",
+        model,
+        "--prompt",
+        "test",
+        "--service-tier",
+        "fast",
+      ]);
+      expect(unsupportedCli.exitCode).not.toBe(0);
       expect(calls).toBe(0);
       const completed = await send({ max_tokens: 8 });
       expect(completed.status).toBe(200);

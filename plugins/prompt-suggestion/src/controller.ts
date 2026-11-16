@@ -143,6 +143,8 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
         enabled: s.enabled,
         configured: !!s.model,
         model: s.model,
+        reasoningEffort: s.reasoningEffort,
+        serviceTier: s.serviceTier,
         active: active.size,
       };
     },

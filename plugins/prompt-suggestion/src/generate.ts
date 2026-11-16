@@ -20,6 +20,8 @@ export type GeneratorConfig = {
   instructions: string;
   timeoutMs: number;
   outputTokenLimit: number;
+  reasoningEffort: string;
+  serviceTier: string;
 };
 
 export async function generate(
@@ -38,7 +40,9 @@ export async function generate(
       maxOutputTokens:
         config.outputTokenLimit === 0 ? null : config.outputTokenLimit,
       temperature: null,
-      reasoningEffort: null,
+      reasoningEffort:
+        config.reasoningEffort === "default" ? null : config.reasoningEffort,
+      serviceTier: config.serviceTier === "default" ? null : config.serviceTier,
       timeoutMs: config.timeoutMs,
     },
     { signal },

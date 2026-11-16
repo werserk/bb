@@ -29,6 +29,7 @@ describe("OpenAI text boundary", () => {
   });
   it.each([
     { stream: true },
+    { service_tier: "flex" },
     { tools: [] },
     { n: 2 },
     { response_format: { type: "json_object" } },
@@ -39,6 +40,33 @@ describe("OpenAI text boundary", () => {
     },
   ])("rejects unsupported requests before dispatch", (extra) => {
     expect(chatSchema.safeParse({ ...minimal, ...extra }).success).toBe(false);
+  });
+  it.each([
+    [undefined, null],
+    ["default", null],
+    ["priority", "fast"],
+    ["fast", "fast"],
+  ])("maps service_tier %s to explicit shared tier %s", (tier, expected) => {
+    expect(
+      generationRequest(chatSchema.parse({ ...minimal, service_tier: tier }))
+        .serviceTier,
+    ).toBe(expected);
+  });
+  it("reports only provider-confirmed tiers", () => {
+    const response = {
+      text: "ok",
+      model: minimal.model,
+      actualModel: null,
+      finishReason: "stop" as const,
+      usage: null,
+    };
+    expect(chatResponse(response)).not.toHaveProperty("service_tier");
+    expect(
+      chatResponse({ ...response, actualServiceTier: null }),
+    ).not.toHaveProperty("service_tier");
+    expect(
+      chatResponse({ ...response, actualServiceTier: "default" }),
+    ).toHaveProperty("service_tier", "default");
   });
   it("preserves text and omits unknown usage", () => {
     const result = chatResponse({

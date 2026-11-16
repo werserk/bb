@@ -15,6 +15,8 @@ export interface experimental_AiModel {
     maxOutputTokens: boolean;
     temperature: boolean;
     reasoningEfforts: readonly string[];
+    /** Omitted by older adapters when no explicit tier is supported. */
+    serviceTiers?: readonly string[];
   };
 }
 
@@ -24,6 +26,8 @@ export interface experimental_AiGenerationRequest {
   maxOutputTokens: number | null;
   temperature: number | null;
   reasoningEffort: string | null;
+  /** Omitted or null selects the provider default. */
+  serviceTier?: string | null;
   timeoutMs: number;
 }
 
@@ -32,6 +36,8 @@ export interface experimental_AiGenerationResult {
   model: string;
   /** Provider-reported identity, which may resolve an alias; null when not reported. */
   actualModel: string | null;
+  /** Actual provider wire tier; omitted or null when not reported. */
+  actualServiceTier?: string | null;
   finishReason: "stop" | "length";
   usage: {
     inputTokens: number;
@@ -45,8 +51,15 @@ export interface experimental_AiTextService {
     signal: AbortSignal;
   }): Promise<readonly experimental_AiModel[]>;
   generate(
-    request: experimental_AiGenerationRequest,
-    options: { signal: AbortSignal; model: experimental_AiModel },
+    request: experimental_AiGenerationRequest & { serviceTier: string | null },
+    options: {
+      signal: AbortSignal;
+      model: experimental_AiModel & {
+        capabilities: experimental_AiModel["capabilities"] & {
+          serviceTiers: readonly string[];
+        };
+      };
+    },
   ): Promise<experimental_AiGenerationResult>;
 }
 

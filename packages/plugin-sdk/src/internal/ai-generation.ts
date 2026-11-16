@@ -21,6 +21,7 @@ const modelSchema = z
         maxOutputTokens: z.boolean(),
         temperature: z.boolean(),
         reasoningEfforts: z.array(z.string().min(1).max(64)).max(32),
+        serviceTiers: z.array(z.string().min(1).max(64)).max(32).default([]),
       })
       .strict(),
   })
@@ -42,6 +43,7 @@ const requestSchema = z
     maxOutputTokens: z.number().int().min(1).max(131072).nullable(),
     temperature: z.number().min(0).max(2).nullable(),
     reasoningEffort: z.string().min(1).max(64).nullable(),
+    serviceTier: z.string().min(1).max(64).nullable().default(null),
     timeoutMs: z.number().int().min(100).max(60000),
   })
   .strict();
@@ -51,6 +53,7 @@ const resultSchema = z
     text: z.string(),
     model: z.string().min(1),
     actualModel: z.string().min(1).max(512).nullable(),
+    actualServiceTier: z.string().min(1).max(64).nullable().default(null),
     finishReason: z.enum(["stop", "length"]),
     usage: z
       .object({
@@ -138,8 +141,8 @@ export function createAiGenerationDispatcher(list: () => readonly Service[]) {
       );
     const found: {
       service: Service;
-      native: experimental_AiModel;
-      model: experimental_AiModel;
+      native: z.infer<typeof modelSchema>;
+      model: z.infer<typeof modelSchema>;
     }[] = [];
     for (const service of list()) {
       if (
@@ -232,6 +235,8 @@ export function createAiGenerationDispatcher(list: () => readonly Service[]) {
         (request.maxOutputTokens !== null &&
           !native.capabilities.maxOutputTokens) ||
         (request.temperature !== null && !native.capabilities.temperature) ||
+        (request.serviceTier !== null &&
+          !native.capabilities.serviceTiers.includes(request.serviceTier)) ||
         (request.reasoningEffort !== null &&
           !native.capabilities.reasoningEfforts.includes(
             request.reasoningEffort,

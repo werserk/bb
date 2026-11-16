@@ -25,6 +25,7 @@ export const chatSchema = z
     max_completion_tokens: z.number().int().min(1).max(32768).optional(),
     temperature: z.number().min(0).max(2).optional(),
     reasoning_effort: z.string().min(1).max(64).optional(),
+    service_tier: z.enum(["default", "priority", "fast"]).optional(),
     stream: z.literal(false).optional(),
     n: z.literal(1).optional(),
   })
@@ -42,6 +43,10 @@ export function generationRequest(
     maxOutputTokens: value.max_completion_tokens ?? value.max_tokens ?? null,
     temperature: value.temperature ?? null,
     reasoningEffort: value.reasoning_effort ?? null,
+    serviceTier:
+      value.service_tier === "priority" || value.service_tier === "fast"
+        ? "fast"
+        : null,
     timeoutMs: 30000,
   };
 }
@@ -52,6 +57,9 @@ export function chatResponse(result: experimental_AiGenerationResult) {
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
     model: result.actualModel ?? result.model,
+    ...(result.actualServiceTier == null
+      ? {}
+      : { service_tier: result.actualServiceTier }),
     choices: [
       {
         index: 0,

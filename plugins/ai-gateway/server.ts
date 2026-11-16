@@ -171,6 +171,14 @@ export default function plugin(bb: BbPluginApi) {
               required: true,
               description: "Exact model ID from models",
             },
+            "service-tier": {
+              type: "string",
+              description: "default, fast or priority; requires model support",
+            },
+            "reasoning-effort": {
+              type: "string",
+              description: "Exact reasoning effort advertised by the model",
+            },
             prompt: {
               type: "string",
               required: true,
@@ -182,6 +190,8 @@ export default function plugin(bb: BbPluginApi) {
             const request = chatSchema.parse({
               model: input.options.model,
               messages: [{ role: "user", content: input.options.prompt }],
+              service_tier: input.options["service-tier"],
+              reasoning_effort: input.options["reasoning-effort"],
             });
             const result =
               await bb.experimental_aiServices.experimental_generate(

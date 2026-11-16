@@ -73,6 +73,49 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
         callback: generate,
       };
     }
+    it("normalizes omitted tier fields from legacy callers and adapters", async () => {
+      const service = setup();
+      const [model] = await service.models();
+      expect(model!.capabilities.serviceTiers).toEqual([]);
+      const result = await service.generate(request(model!.id));
+      expect(result.actualServiceTier).toBeNull();
+      expect(service.callback).toHaveBeenCalledWith(
+        expect.objectContaining({ serviceTier: null }),
+        expect.anything(),
+      );
+    });
+    it("rejects unsupported tiers before adapter dispatch", async () => {
+      const service = setup();
+      const [model] = await service.models();
+      await expect(
+        service.generate({ ...request(model!.id), serviceTier: "fast" }),
+      ).rejects.toMatchObject({ code: "unsupported" });
+      expect(service.callback).not.toHaveBeenCalled();
+    });
+    it("passes a supported tier and preserves the provider-reported actual tier", async () => {
+      const callback = vi.fn(async () => ({
+        text: "ok",
+        model: native.id,
+        actualModel: null as string | null,
+        actualServiceTier: "default",
+        finishReason: "stop" as const,
+        usage: null,
+      }));
+      const service = setup(callback, {
+        ...native,
+        capabilities: { ...native.capabilities, serviceTiers: ["fast"] },
+      });
+      const [model] = await service.models();
+      const result = await service.generate({
+        ...request(model!.id),
+        serviceTier: "fast",
+      });
+      expect(result.actualServiceTier).toBe("default");
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ serviceTier: "fast" }),
+        expect.anything(),
+      );
+    });
     it("preserves output and selected host/profile binding", async () => {
       const service = setup();
       const [model] = await service.models();
@@ -81,12 +124,18 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
         text: 'line 1\n{"ok":true}',
         model: model!.id,
         actualModel: null,
+        actualServiceTier: null,
         finishReason: "stop",
         usage: null,
       });
       expect(service.callback).toHaveBeenCalledWith(
         expect.objectContaining({ model: native.id }),
-        expect.objectContaining({ model: native }),
+        expect.objectContaining({
+          model: {
+            ...native,
+            capabilities: { ...native.capabilities, serviceTiers: [] },
+          },
+        }),
       );
     });
     it("rejects unsupported options and unloaded models before invocation", async () => {
@@ -156,7 +205,12 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
       );
       expect(callback).toHaveBeenCalledWith(
         expect.objectContaining({ model: longModel.id }),
-        expect.objectContaining({ model: longModel }),
+        expect.objectContaining({
+          model: {
+            ...longModel,
+            capabilities: { ...longModel.capabilities, serviceTiers: [] },
+          },
+        }),
       );
     });
     it("rejects interleaved system messages before dispatch", async () => {

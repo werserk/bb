@@ -100,6 +100,26 @@ export function ModelSettings() {
           your primary machine, then refresh.
         </p>
       ) : null}
+      {model && (
+        <p className="text-xs text-muted-foreground">
+          Available reasoning:{" "}
+          {model.reasoningEfforts.join(", ") || "provider default only"}.
+          Processing speed:{" "}
+          {model.serviceTiers.join(", ") || "provider default only"}.
+        </p>
+      )}
+      {model &&
+        ((typeof settings.values?.reasoningEffort === "string" &&
+          settings.values.reasoningEffort !== "default" &&
+          !model.reasoningEfforts.includes(settings.values.reasoningEffort)) ||
+          (typeof settings.values?.serviceTier === "string" &&
+            settings.values.serviceTier !== "default" &&
+            !model.serviceTiers.includes(settings.values.serviceTier))) && (
+          <p role="alert" className="text-sm text-destructive">
+            This model does not support the selected reasoning or speed. Choose
+            a supported value or Provider default.
+          </p>
+        )}
       {model && !model.supportsOutputLimit && (
         <p className="text-xs text-muted-foreground">
           This model does not support an output token limit. Keep Output token

@@ -19,6 +19,7 @@ it("routes generation to the advertised host even after primary host changes", a
         : {
             text: "ok",
             actualModel: null,
+            actualServiceTier: null,
             model: "test/m",
             finishReason: "stop",
             usage: null,
@@ -30,6 +31,8 @@ it("routes generation to the advertised host even after primary host changes", a
   if (!service) throw new Error("Missing text service");
   const signal = new AbortController().signal;
   const models = await service.models({ signal });
+  const model = models[0];
+  if (!model) throw new Error("Missing model");
   primaryHostId = "host_changed";
   await service.generate(
     {
@@ -38,9 +41,19 @@ it("routes generation to the advertised host even after primary host changes", a
       maxOutputTokens: null,
       temperature: null,
       reasoningEffort: null,
+      serviceTier: null,
       timeoutMs: 1000,
     },
-    { signal, model: models[0]! },
+    {
+      signal,
+      model: {
+        ...model,
+        capabilities: {
+          ...model.capabilities,
+          serviceTiers: model.capabilities.serviceTiers ?? [],
+        },
+      },
+    },
   );
   expect(harness.inspection.experimental_hostRpcCalls.at(-1)).toMatchObject({
     method: "pi.ai.generate",

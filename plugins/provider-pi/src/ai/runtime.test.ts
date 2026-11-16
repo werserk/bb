@@ -20,6 +20,7 @@ const request = {
   maxOutputTokens: 32,
   temperature: null,
   reasoningEffort: null,
+  serviceTier: null,
   timeoutMs: 1000,
 };
 function fixture() {
@@ -59,6 +60,7 @@ describe("Pi direct AI", () => {
       text: "first\nsecond",
       model: "test/sample",
       actualModel: null,
+      actualServiceTier: null,
       finishReason: "length",
       usage: { inputTokens: 9, outputTokens: 2, cachedInputTokens: 3 },
     });
@@ -79,6 +81,9 @@ describe("Pi direct AI", () => {
     ).rejects.toThrow("Unsupported");
     await expect(
       f.ai.generate({ ...request, reasoningEffort: "high" }, signal),
+    ).rejects.toThrow("Unsupported");
+    await expect(
+      f.ai.generate({ ...request, serviceTier: "fast" }, signal),
     ).rejects.toThrow("Unsupported");
     expect(f.completeSimple).not.toHaveBeenCalled();
   });

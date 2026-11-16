@@ -5,6 +5,8 @@ import { installGenerator } from "./generator-fixture.js";
 
 const config = {
   instructions: "Predict",
+  reasoningEffort: "default",
+  serviceTier: "default",
   timeoutMs: 1000,
   outputTokenLimit: 256,
 };
@@ -20,6 +22,8 @@ describe("native generation boundary", () => {
         { role: "user", content: "context" },
       ]);
       expect(request.maxOutputTokens).toBe(256);
+      expect(request.reasoningEffort).toBe("none");
+      expect(request.serviceTier).toBe("fast");
       expect(request).not.toHaveProperty("tools");
       return '{"kind":"suggestion","text":"Run the tests."}';
     });
@@ -27,7 +31,7 @@ describe("native generation boundary", () => {
       expect(
         await generate(
           host.bb.experimental_aiServices,
-          { ...config, model },
+          { ...config, model, reasoningEffort: "none", serviceTier: "fast" },
           "context",
           new AbortController().signal,
         ),

@@ -64,6 +64,7 @@ export function registerCodexAiService(bb: BbPluginApi): void {
             maxOutputTokens: model.maxOutputTokens,
             temperature: false,
             reasoningEfforts: model.reasoningEfforts,
+            serviceTiers: model.serviceTiers,
           },
         }));
       },

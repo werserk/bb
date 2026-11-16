@@ -11,17 +11,14 @@ export async function listCodexTextModels(signal: AbortSignal) {
   const auth = await readCodexAuthCredentials();
   const catalog = await readDefaultCodexAiCatalog(signal);
   return catalog.map((model) => ({
-    id: model.model,
-    displayName: model.displayName,
-    reasoningEfforts: model.supportedReasoningEfforts.map(
-      (effort) => effort.reasoningEffort,
-    ),
+    ...model,
     maxOutputTokens: auth.type === "apiKey",
   }));
 }
 
 const completion = z.object({
   model: z.string(),
+  service_tier: z.string().min(1).max(64).nullish(),
   status: z.enum(["completed", "incomplete"]),
   incomplete_details: z.object({ reason: z.string() }).nullish(),
   output: z.array(
@@ -112,6 +109,7 @@ export async function readGenerationResponse(
     text,
     model: expectedModel,
     actualModel: result.model,
+    actualServiceTier: result.service_tier ?? null,
     finishReason:
       result.status === "completed" ? ("stop" as const) : ("length" as const),
     usage: result.usage
@@ -137,7 +135,9 @@ export async function generateCodexText(
     input.temperature !== null ||
     (input.maxOutputTokens !== null && !model.maxOutputTokens) ||
     (input.reasoningEffort !== null &&
-      !model.reasoningEfforts.includes(input.reasoningEffort))
+      !model.reasoningEfforts.includes(input.reasoningEffort)) ||
+    (input.serviceTier !== null &&
+      !model.serviceTiers.includes(input.serviceTier))
   )
     throw new Error("Unsupported Codex generation option");
   const request: CodexResponsesRequest = {
@@ -165,6 +165,9 @@ export async function generateCodexText(
   }
   if (input.reasoningEffort !== null)
     request.reasoning = { effort: input.reasoningEffort };
+  if (input.serviceTier !== null)
+    request.service_tier =
+      input.serviceTier === "fast" ? "priority" : input.serviceTier;
   if (input.maxOutputTokens !== null)
     request.max_output_tokens = input.maxOutputTokens;
   const result = await readGenerationResponse(

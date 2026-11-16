@@ -25,6 +25,7 @@ export function registerPiAiService(bb: BbPluginApi) {
             maxOutputTokens: model.maxOutputTokens,
             temperature: false,
             reasoningEfforts: [],
+            serviceTiers: [],
           },
         }));
       },

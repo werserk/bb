@@ -1671,7 +1671,7 @@ The same preference is available through `sdk.system.uiPreferences`.
 
 ## Prompt Suggestion
 
-The optional Prompt Suggestion plugin (formerly Autosay) starts disabled with no selected model. Its native settings and model picker select an explicitly available BB generation model and its host/profile identity. Provider authentication remains with that adapter. Settings also configure instructions, bounded context and timeout (15 seconds by default, at most 30 seconds), hourly request cap and allowed project IDs. Output token limit 0 uses the model default; a positive limit fails before dispatch if the model does not support it. No fallback model or additional conversation corpus is used. See `plugins/prompt-suggestion/skills/prompt-suggestion/SKILL.md` for commands and migration.
+The optional Prompt Suggestion plugin (formerly Autosay) starts disabled with no selected model. Its native settings and model picker select an explicitly available BB generation model and its host/profile identity. Provider authentication remains with that adapter. Reasoning effort and processing speed are explicit settings: Provider default sends no override; unsupported values fail before generation, and changing the model never silently resets them. Fast may consume a higher quota or cost more. Settings also configure instructions, bounded context and timeout (15 seconds by default, at most 30 seconds), hourly request cap and allowed project IDs. Output token limit 0 uses the model default; a positive limit fails before dispatch if the model does not support it. No fallback model or additional conversation corpus is used. See `plugins/prompt-suggestion/skills/prompt-suggestion/SKILL.md` for commands and migration.
 
 ## AI Gateway
 

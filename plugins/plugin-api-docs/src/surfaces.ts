@@ -1774,6 +1774,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "List host/profile-bound text models and invoke one exact model from another plugin",
           "Keep requested model identity separate from the provider-reported snapshot; system messages precede conversation",
           "Reuse the same bounded dispatcher as native helper tasks; unavailable model catalogs are omitted",
+          "Request advertised service tiers such as fast; distinguish requested speed from provider-reported actual tier",
         ],
         apiSymbols: [
           "PluginAiServices",
