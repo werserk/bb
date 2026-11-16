@@ -329,6 +329,7 @@ function renderPromptBox(
   initialValue: string,
   options: {
     suggestionContext?: boolean;
+    onSubmitDraft?: (text: string) => void | Promise<void>;
     initialMentionRanges?: PromptTextMention[];
     mentionTriggers?: TypeaheadConfig["mention"]["triggers"];
     mentionSuggestions?: readonly PromptMentionSuggestion[];
@@ -347,12 +348,14 @@ function renderPromptBox(
     mentionSuggestions: options.mentionSuggestions,
     commandSuggestions: options.commandSuggestions,
   });
-  const onSubmit = vi.fn();
+  const currentDraft = { text: initialValue };
+  const onSubmit = vi.fn(() => options.onSubmitDraft?.(currentDraft.text));
   const promptBoxRef = createRef<PromptBoxHandle>();
   const attachmentState = { items: options.initialAttachments ?? [] };
 
   function PromptBoxHarness() {
     const [value, setValue] = useState(initialValue);
+    currentDraft.text = value;
     const [attachmentItems, setAttachmentItems] = useState(
       attachmentState.items,
     );
@@ -380,6 +383,7 @@ function renderPromptBox(
             }
           : undefined,
         textEffectKey: "prompt-action-composer",
+        sendsOnEnter: options.suggestionContext === true,
         getCurrent: () => draft,
         subscribeDraft: () => () => {},
         setDraft: (next) => {
@@ -6587,7 +6591,7 @@ describe("ComposerBox pill word boundaries", () => {
 });
 
 describe("host suggestions in the real Composer", () => {
-  it("keeps Enter empty, accepts Tab as editable draft, and supports undo", async () => {
+  it("accepts Tab as editable draft without sending and supports undo", async () => {
     const { onSubmit } = renderPromptBox("", { suggestionContext: true });
     await waitFor(() =>
       expect(
@@ -6608,8 +6612,7 @@ describe("host suggestions in the real Composer", () => {
     });
     const editor = getPromptEditorElement();
     expect(editor.textContent).toBe("");
-    fireEvent.keyDown(editor, { key: "Enter" });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(editor.getAttribute("data-placeholder")).toBe("Continue");
     fireEvent.keyDown(editor, { key: "Tab" });
     await waitFor(() => expect(editor.textContent).toBe("Continue"));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -6644,11 +6647,9 @@ it("keeps suggestions scoped when two mounted composers share a draft key", asyn
       }),
     ).toBe(true);
   });
-  fireEvent.click(
-    within(first.view.container).getByRole("button", {
-      name: /Use suggestion/,
-    }),
-  );
+  fireEvent.keyDown(first.view.container.querySelector(".ProseMirror")!, {
+    key: "Tab",
+  });
   await waitFor(() =>
     expect(
       first.view.container.querySelector(".ProseMirror")?.textContent,
@@ -6808,10 +6809,9 @@ it("expands a compact composer while showing a suggestion and restores compact a
   await waitFor(() =>
     expect(view.container.querySelector("[data-promptbox-compact]")).toBeNull(),
   );
-  expect(screen.getByLabelText("Suggested message").textContent).toContain(
-    text,
-  );
-  expect(screen.getByRole("button", { name: /Use suggestion/ })).toBeTruthy();
+  expect(getPromptEditorElement().getAttribute("data-placeholder")).toBe(text);
+  expect(screen.queryByRole("button", { name: /Use suggestion/ })).toBeNull();
+  expect(view.container.querySelector("[data-promptbox-collapsed]")).toBeNull();
   expect(controller.getSnapshot().candidate?.requestId).toBe("narrow");
   expect(controller.getSnapshot().eligible).toBe(true);
   act(() => controller.dismiss());
@@ -6820,4 +6820,94 @@ it("expands a compact composer while showing a suggestion and restores compact a
       view.container.querySelector("[data-promptbox-compact]"),
     ).not.toBeNull(),
   );
+});
+
+it("sends the suggestion through the host on Enter with the current draft exactly once", async () => {
+  const sent: string[] = [];
+  let finish = () => {};
+  const { onSubmit } = renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: (text) => {
+      sent.push(text);
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    expect(
+      controller.show({
+        requestId: "send",
+        snapshot: controller.getSnapshot().snapshot!,
+        text: "Run the tests",
+      }),
+    ).toBe(true);
+  });
+  const editor = getPromptEditorElement();
+  expect(editor.textContent).toBe("");
+  fireEvent.keyDown(editor, { key: "Enter" });
+  expect(sent).toEqual(["Run the tests"]);
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(editor.textContent).toBe("Run the tests");
+  fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+  expect(editor.querySelectorAll("p").length).toBe(2);
+  expect(sent).toEqual(["Run the tests"]);
+  fireEvent.keyDown(editor, { key: "Enter", repeat: true });
+  fireEvent.keyDown(editor, { key: "Enter" });
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish();
+  });
+});
+
+it("retains accepted suggestion draft when the host send rejects", async () => {
+  const { onSubmit } = renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: async () => {
+      throw new Error("Reported send failure");
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "fail",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Run the tests",
+    });
+  });
+  fireEvent.keyDown(getPromptEditorElement(), { key: "Enter" });
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  expect(getPromptEditorElement().textContent).toBe("Run the tests");
+  expect(controller.getSnapshot().candidate).toBeNull();
+});
+
+it("sends the suggestion with the existing native submit button", async () => {
+  const sent: string[] = [];
+  renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: (text) => {
+      sent.push(text);
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "button",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Run the tests",
+    });
+  });
+  const button = screen.getByRole("button", { name: "Submit (Enter)" });
+  expect(button.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(sent).toEqual(["Run the tests"]);
+  expect(controller.getSnapshot().candidate).toBeNull();
 });

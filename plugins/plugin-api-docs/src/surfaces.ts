@@ -728,7 +728,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "useComposer().experimental_suggestions exposes a scoped reactive controller.",
           "Capture its eligible snapshot before generation; show checks composer, completed turn, context and draft revisions.",
-          "The shipped Composer uses the same accept operation for Tab and touch. Acceptance never submits.",
+          "Tab accepts into the draft. Enter and native Send accept, then use the normal submit path; controller.accept alone never submits.",
           "Typing, context changes and dismissal invalidate pending results; unsupported renderers stay ineligible.",
         ],
         apiSymbols: [

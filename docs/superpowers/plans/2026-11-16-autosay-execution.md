@@ -33,3 +33,13 @@ Live lab and final independent reviews remain pending. This is an implementation
 ## Final local checkpoint
 
 Implementation, relevant automated checks, standalone package build, isolated browser smoke and both independent source reviews are complete. The narrow compact clipping found by browser inspection was fixed and independently reviewed. See `2026-11-16-autosay-verification.md` for exact commands, evidence and missing live-provider/model gates. No daily installation, merge or publication occurred. The preceding progress sections are historical checkpoints, superseded by this record.
+
+## Owner-directed UX correction
+
+The owner explicitly replaced the earlier interaction choice: render the candidate where the empty editor placeholder appears; Tab makes it editable; Enter accepts and sends immediately. Remove the separate suggestion panel/button. This supersedes the earlier plan's separate-send and touch-button requirements. Keep all eligibility, stale-result, IME, modifier and normal submission checks. Acceptance delivery is a screenshot of the running isolated UI, without an additional approval ceremony.
+
+The correction is implemented and independently reviewed PASS. The native placeholder now displays the transient candidate, with no separate suggestion block. Tab accepts without sending; plain Enter and the native Send button share acceptance plus the existing host submission path. IME, modifiers and mobile newline behavior remain intact. Duplicate Enter/button events are fenced during submission.
+
+Verification: `autosay-host-evidence/placeholder-button-tests.log` records 19 passing focused tests; `placeholder-send-final-tests.log` records two final exact-payload/duplicate-send regressions; `placeholder-final-types-lint.log` records 9 successful typecheck/lint tasks. The last CSS-only correction preserves the original caret using native `::before` and reserves long-text height with invisible `::after`; it was independently reviewed and verified in a clean rebuilt browser. `autosay-placeholder-verified.jpg` is the final screenshot from the rebuilt isolated app (no injected style). `autosay-enter-final-browser.json` records exactly one send request carrying the suggestion text; the QA browser intercepted it with HTTP503 before provider dispatch to test the ordinary submission path without executing an agent turn. The local generator uses synthetic fixture text.
+
+The isolated plugin was disabled and owned processes/browser stopped after verification. Daily BB remains unchanged. Owner requested screenshot-only acceptance, so no additional approval flow is introduced.
