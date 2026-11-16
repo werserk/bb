@@ -6,7 +6,10 @@ export interface JournalStorage {
 export interface JournalLocks {
   request(
     name: string,
-    options: { mode: "exclusive"; ifAvailable?: boolean; signal: AbortSignal },
+    options: { mode: "exclusive" } & (
+      | { ifAvailable: true; signal?: never }
+      | { signal: AbortSignal; ifAvailable?: never }
+    ),
     callback: (lock: object | null) => Promise<void>,
   ): Promise<unknown>;
 }
@@ -80,8 +83,7 @@ export class PendingSendJournal {
         `bb-pending-send/${key}/${this.journalId}`,
         {
           mode: "exclusive",
-          ...(reload ? {} : { ifAvailable: true }),
-          signal: controller.signal,
+          ...(reload ? { signal: controller.signal } : { ifAvailable: true }),
         },
         async (lock) => {
           if (generation !== this.generation || controller.signal.aborted)

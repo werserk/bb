@@ -64,7 +64,9 @@ timeout acknowledges sends.
 
 The optional versioned session journal uses exclusive Web Locks. A normal
 navigation uses nonwaiting acquisition; a duplicate starts a fresh journal.
-Reload waits for actual grant. While waiting, new sends remain in memory.
+Nonwaiting requests use `ifAvailable` without `signal`, as required by Web Locks;
+reload requests use `signal` without `ifAvailable` and wait for actual grant.
+While waiting, new sends remain in memory.
 Refresh retries acquisition; Hide aborts only this document's lock request and
 cannot read, delete or mutate the unowned journal (M2). Late grants are fenced by
 generation and AbortSignal. Recovery never resends automatically. Journal failures

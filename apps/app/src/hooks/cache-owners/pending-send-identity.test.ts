@@ -104,14 +104,14 @@ it("erases the owned account journal and rejects a late old-account Web Lock gra
   const client = createAppQueryClient();
   window.sessionStorage.clear();
   const grants: {
-    signal: AbortSignal;
+    signal: AbortSignal | undefined;
     callback: (lock: object | null) => Promise<void>;
   }[] = [];
   vi.stubGlobal("navigator", {
     locks: {
       request: async (
         _key: string,
-        options: { signal: AbortSignal },
+        options: { signal?: AbortSignal },
         callback: (lock: object | null) => Promise<void>,
       ) => {
         grants.push({ signal: options.signal, callback });
@@ -166,7 +166,7 @@ it("erases the owned account journal and rejects a late old-account Web Lock gra
     );
     const waiting = grants.at(-1)!;
     account("c", 3);
-    expect(waiting.signal.aborted).toBe(true);
+    expect(waiting.signal).toBeUndefined();
     await waiting.callback({});
     expect(pendingSendOwner(client).journalEntries()).toEqual([]);
     expect(pendingSendJournal(client)?.status).toBe("waiting");
@@ -300,14 +300,14 @@ it("adopts initial account status without losing a send or rejecting its admitte
 it("preserves confirmed custody across profile-pending and same-account recovery, but clears on a true switch", async () => {
   const h = identityHarness();
   const grants: {
-    signal: AbortSignal;
+    signal: AbortSignal | undefined;
     callback: (lock: object | null) => Promise<void>;
   }[] = [];
   vi.stubGlobal("navigator", {
     locks: {
       request: async (
         _key: string,
-        options: { signal: AbortSignal },
+        options: { signal?: AbortSignal },
         callback: (lock: object | null) => Promise<void>,
       ) => {
         grants.push({ signal: options.signal, callback });
@@ -327,7 +327,7 @@ it("preserves confirmed custody across profile-pending and same-account recovery
     const entry = pendingSendOwner(h.client).list()[0];
     const before = grants[0]!;
     h.emit({ state: "profile-pending", revision: 2, account: null });
-    expect(before.signal.aborted).toBe(true);
+    expect(before.signal).toBeUndefined();
     await before.callback({});
     expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
     expect(pendingRecoveryStatus(h.client)).toBe("unavailable");

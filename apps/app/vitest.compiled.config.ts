@@ -33,6 +33,7 @@ export default defineWorkspaceTestConfig({
         "src/components/promptbox/context/*.test.tsx",
         "src/components/promptbox/FollowUpPromptBox.test.tsx",
         "src/components/plugin/PluginComposerBanners.test.tsx",
+        "src/main.pending-send-journal.test.tsx",
         "src/components/modal/*.test.tsx",
         "src/components/plugin/PluginThreadFixedTabs.continuity.test.tsx",
         "src/components/plugin/RetainedThreadTabContainer.test.tsx",

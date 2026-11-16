@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import * as workerThreads from "node:worker_threads";
+import { expect, it, vi } from "vitest";
 import { PendingSendJournal } from "../src/pending-send-journal.js";
 
 it("Hide aborts a permanently blocked reload and a late lock grant cannot hydrate", async () => {
@@ -48,7 +49,7 @@ it("Hide aborts a permanently blocked reload and a late lock grant cannot hydrat
 });
 it("Refresh cancels only its wait and does not force a lock takeover", async () => {
   const requests: {
-    signal: AbortSignal;
+    signal: AbortSignal | undefined;
     callback: (lock: object | null) => Promise<void>;
   }[] = [];
   let writes = 0,
@@ -77,12 +78,107 @@ it("Refresh cancels only its wait and does not force a lock takeover", async () 
   });
   journal.refresh();
   expect(requests).toHaveLength(2);
-  expect(requests[0]?.signal.aborted).toBe(true);
-  expect(requests[1]?.signal.aborted).toBe(false);
+  expect(requests[0]?.signal?.aborted).toBe(true);
+  expect(requests[1]?.signal?.aborted).toBe(false);
   await requests[0]?.callback({});
   expect(hydrates).toBe(0);
   expect(writes).toBe(0);
   expect(journal.status).toBe("waiting");
+  journal.dispose();
+});
+
+const nativeLocks =
+  "locks" in workerThreads ? (workerThreads.locks as LockManager) : undefined;
+
+it.skipIf(!nativeLocks)(
+  "cancels a blocked native reload acquisition without taking over its predecessor",
+  async () => {
+    const key = `journal-test/${crypto.randomUUID()}`;
+    const journalId = crypto.randomUUID();
+    const lockName = `bb-pending-send/${key}/${journalId}`;
+    let release!: () => void;
+    let acquired!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const predecessor = nativeLocks!.request(lockName, async () => {
+      acquired();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await ready;
+    const hydrate = vi.fn();
+    const journal = new PendingSendJournal({
+      key,
+      reload: true,
+      storage: {
+        getItem: () => JSON.stringify({ version: 1, journalId, entries: [] }),
+        setItem: () => {
+          throw Error("must not write before ownership");
+        },
+        removeItem: () => {},
+      },
+      locks: nativeLocks,
+    });
+    try {
+      journal.start(hydrate);
+      await vi.waitFor(async () => {
+        expect((await nativeLocks!.query()).pending).toContainEqual(
+          expect.objectContaining({ name: lockName }),
+        );
+      });
+      journal.hide();
+      expect(journal.status).toBe("hidden");
+      expect(hydrate).not.toHaveBeenCalled();
+      expect((await nativeLocks!.query()).held).toContainEqual(
+        expect.objectContaining({ name: lockName }),
+      );
+      release();
+      await predecessor;
+      await nativeLocks!.request(lockName, async () => {});
+      expect(hydrate).not.toHaveBeenCalled();
+      expect(journal.status).toBe("hidden");
+    } finally {
+      journal.dispose();
+      release();
+      await predecessor;
+    }
+  },
+);
+
+it("uses valid non-waiting lock options and ignores a late grant after Hide", async () => {
+  const key = `journal-test/${crypto.randomUUID()}`;
+  const journalId = crypto.randomUUID();
+  const hydrate = vi.fn();
+  let grant!: (lock: object | null) => Promise<void>;
+  const journal = new PendingSendJournal({
+    key,
+    reload: false,
+    storage: {
+      getItem: () => JSON.stringify({ version: 1, journalId, entries: [] }),
+      setItem: () => {
+        throw Error("must not write after Hide");
+      },
+      removeItem: () => {},
+    },
+    locks: {
+      request: async (_name, options, callback) => {
+        if (options.ifAvailable && options.signal)
+          throw new DOMException(
+            "signal cannot be used with steal or ifAvailable",
+            "NotSupportedError",
+          );
+        grant = callback;
+      },
+    },
+  });
+  journal.start(hydrate);
+  expect(grant).toBeTypeOf("function");
+  journal.hide();
+  await grant({});
+  expect(hydrate).not.toHaveBeenCalled();
+  expect(journal.status).toBe("hidden");
   journal.dispose();
 });
 it("unavailable locking leaves memory sending available without reading storage", () => {
