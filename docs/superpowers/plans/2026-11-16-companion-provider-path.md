@@ -94,4 +94,4 @@ Provider completion requires passing dispatcher, Pi serializer, routing, Gateway
 
 ## Execution receipt
 
-Local implementation and verification are recorded in [the 2026-11-16 verification receipt](2026-11-16-companion-verification.md). The fast-provider pilot is still pending authenticated OpenRouter access; no release or production activation occurred. Original checklists above preserve the approved scope.
+Local implementation and verification are recorded in [the 2026-11-16 verification receipt](2026-11-16-companion-verification.md). The owner subsequently selected OpenCode instead of Pi. Its preliminary pilot is complete; production OpenCode integration and subsecond acceptance remain incomplete. The verification receipt records the evidence and remaining decision; no release or production activation occurred. Original checklists above preserve the approved scope.
