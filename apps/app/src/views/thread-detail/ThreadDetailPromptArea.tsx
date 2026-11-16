@@ -1,3 +1,9 @@
+import { useComposerSuggestionQuestions } from "@/hooks/queries/composer-suggestion-questions";
+import { useQuery } from "@tanstack/react-query";
+import { sdk } from "@/lib/sdk";
+import { composerSuggestionContext } from "@/lib/composer-suggestion-host";
+import { useThreadTimeline } from "@/hooks/queries/thread-panel-queries";
+import { useServerConnectionState } from "@/hooks/useServerConnectionState";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
 import { visibleQueuedMessages } from "@/lib/queued-system-notice";
 import { useQueuedMessagesExpanded } from "@/components/promptbox/banner/queued-messages-expanded";
@@ -1107,9 +1113,55 @@ export function ThreadDetailPromptArea({
     },
     [applySelection],
   );
+  const suggestionTimeline = useThreadTimeline(thread.id);
+  const suggestionConnection = useServerConnectionState();
+  const suggestionEvents = useQuery({
+    queryKey: [
+      "composer-suggestion-events",
+      thread.id,
+      suggestionTimeline.data?.tag,
+      suggestionTimeline.data?.maxSeq,
+      thread.status,
+    ],
+    queryFn: ({ signal }) =>
+      sdk.threads.events.list({
+        threadId: thread.id,
+        types: ["turn/started", "turn/completed", "system/thread/interrupted"],
+        order: "desc",
+        limit: "100",
+        signal,
+      }),
+    enabled:
+      suggestionTimeline.data !== undefined &&
+      thread.status === "idle" &&
+      suggestionConnection === "connected",
+    staleTime: Infinity,
+    gcTime: 0,
+  });
+  const suggestionQuestions = useComposerSuggestionQuestions(
+    thread.id,
+    suggestionConnection === "connected",
+  );
+  const suggestionContext = composerSuggestionContext(
+    suggestionTimeline.data,
+    thread.status,
+    pendingInteractions,
+    queuedMessagesQuery.data === undefined ? 1 : queuedMessages.length,
+    suggestionConnection === "connected",
+    suggestionEvents.data,
+    suggestionQuestions,
+  );
+  const suggestionTurnId = suggestionContext.completedTurnId;
+  const suggestionRevision = suggestionContext.contextRevision;
+  const suggestionEligible = suggestionContext.eligible;
   const normalPluginComposerHost = useMemo<PluginComposerHost>(
     () => ({
       scope: { kind: "thread", threadId: thread.id },
+      suggestionContext: {
+        completedTurnId: suggestionTurnId,
+        contextRevision: suggestionRevision,
+        eligible: suggestionEligible,
+      },
       textEffectKey: promptDraft.storageKey,
       getCurrent: promptDraft.getCurrent,
       subscribeDraft: promptDraft.subscribe,
@@ -1121,6 +1173,9 @@ export function ThreadDetailPromptArea({
       setSelection,
     }),
     [
+      suggestionTurnId,
+      suggestionRevision,
+      suggestionEligible,
       focusBottomPluginComposer,
       getSelection,
       promptDraft.getCurrent,

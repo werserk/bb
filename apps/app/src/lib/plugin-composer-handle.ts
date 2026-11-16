@@ -38,6 +38,7 @@ import {
 
 export type ComposerSource = Pick<
   PluginComposerHost,
+  | "suggestions"
   | "scope"
   | "textEffectKey"
   | "getCurrent"
@@ -162,6 +163,9 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
   const key = source.textEffectKey;
   return {
     ...draftTarget,
+    get suggestions() {
+      return source.suggestions ?? getComposerEditorBridge(key)?.suggestions;
+    },
     key,
     scope: source.scope,
     openPopup: (pluginId, id) =>

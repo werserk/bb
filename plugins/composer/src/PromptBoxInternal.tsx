@@ -1,3 +1,6 @@
+import { ComposerSuggestion } from "./ComposerSuggestion";
+import { handleComposerSuggestionKey } from "./composer-suggestion-keys";
+import { useSyncExternalStore } from "react";
 import {
   experimental_ComposerRoot as ComposerRoot,
   experimental_FailedVoiceRecordings as FailedVoiceRecordings,
@@ -1034,6 +1037,14 @@ export function PromptBoxInternal({
   const rendererRef = useRef(renderer);
   rendererRef.current = renderer;
   const composer = useComposer();
+  const suggestions = composer.experimental_suggestions;
+  const suggestionsRef = useRef(suggestions);
+  suggestionsRef.current = suggestions;
+  const suggestionState = useSyncExternalStore(
+    suggestions.subscribe,
+    suggestions.getSnapshot,
+    suggestions.getSnapshot,
+  );
   const composerDraft = composer.draft;
   const value = composerDraft.text;
   const mentionRanges = composerDraft.mentions;
@@ -1142,6 +1153,7 @@ export function PromptBoxInternal({
   const handleEditorKeyDownRef = useRef<
     (event: KeyboardEvent, isOriginalIPadHardwareEnter?: boolean) => boolean
   >(() => false);
+  const [suggestionComposing, setSuggestionComposing] = useState(false);
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const postCompositionKeyDownEvents = usePostCompositionKeyDownEvents();
   const dispatchAppCommandKey = renderer.dispatchAppCommandKey;
@@ -1342,14 +1354,18 @@ export function PromptBoxInternal({
     return transition;
   }, []);
   const showCompactLayout =
+    suggestionState.candidate === null &&
     compact?.when === "always" &&
     (!showVoiceActionGroup ||
       (value.trim().length === 0 &&
         attachments.length === 0 &&
         !pendingUploads?.length));
-  const effectivePlaceholder = showCompactLayout
-    ? compact.placeholder
-    : placeholder;
+  const effectivePlaceholder =
+    suggestionState.candidate !== null
+      ? ""
+      : showCompactLayout
+        ? compact.placeholder
+        : placeholder;
   const composerKey = composer.key;
   const composerInputLocked = renderer.inputLocked;
   const composerLayout = showCompactLayout ? "compact" : "expanded";
@@ -1782,7 +1798,13 @@ export function PromptBoxInternal({
             });
             return false;
           },
+          compositionstart: () => {
+            suggestionsRef.current.dismiss();
+            setSuggestionComposing(true);
+            return false;
+          },
           compositionend: (_view, event) => {
+            setSuggestionComposing(false);
             if (!_view.composing) return false;
             compositionEndedAtRef.current = event.timeStamp;
             return false;
@@ -2018,6 +2040,7 @@ export function PromptBoxInternal({
       },
       onUpdate({ editor: updatedEditor, transaction }) {
         if (skipEditorChangeRef.current) return;
+        if (transaction.docChanged) suggestionsRef.current.dismiss();
         const dismissedTrigger = dismissedTriggerRef.current;
         if (
           dismissedTrigger !== null &&
@@ -2846,8 +2869,11 @@ export function PromptBoxInternal({
       submittingBlockedReason,
       isAttaching,
       attachmentError,
+      experimental_suggestionSupport: !suggestionComposing && !composerMenuOpen,
     }),
     [
+      suggestionComposing,
+      composerMenuOpen,
       attachmentError,
       canPrimarySubmit,
       composerLayout,
@@ -3186,6 +3212,18 @@ export function PromptBoxInternal({
         }
       }
 
+      if (
+        handleComposerSuggestionKey(
+          event,
+          suggestions,
+          composerInputLocked ||
+            showTypeaheadMenu ||
+            composerMenuOpen ||
+            showVoiceActionGroup,
+        )
+      )
+        return true;
+
       if (event.key === "Escape") {
         if (onEscape) {
           onEscape();
@@ -3286,6 +3324,10 @@ export function PromptBoxInternal({
       return true;
     },
     [
+      suggestions,
+      composerInputLocked,
+      composerMenuOpen,
+      showVoiceActionGroup,
       activeHistoryIndex,
       activeSuggestions,
       applyHistoryDraft,
@@ -3450,6 +3492,7 @@ export function PromptBoxInternal({
                 ) : null}
               </>
             ) : null}
+            <ComposerSuggestion controller={suggestions} />
             <ComposerEditorSlot
               editor={editor}
               scrollContainerRef={editorScrollContainerRef}

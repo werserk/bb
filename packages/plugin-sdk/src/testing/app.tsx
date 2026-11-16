@@ -1,3 +1,4 @@
+import { createComposerSuggestionController } from "../internal/composer-suggestion.js";
 import { experimental_PluginRpcCallError } from "../rpc-contract.js";
 import { invalidateTags, pluginTagScope } from "@bb/query-tags";
 import { QueryClient } from "@tanstack/react-query";
@@ -1463,7 +1464,10 @@ function TestVoiceInputTextarea({
  * the target path, with the plugin's Preview body drawn from the file the
  * `filePreview` option returns for the target (nothing when it returns null).
  */
-function TestFilePreview({ target, renderPreview }: ExperimentalFilePreviewProps) {
+function TestFilePreview({
+  target,
+  renderPreview,
+}: ExperimentalFilePreviewProps) {
   const file = useSlotEnv("experimental_FilePreview").filePreview(target);
   return (
     <div data-testid="bb-file-preview" data-path={target.path}>
@@ -2418,6 +2422,11 @@ export interface RenderSlotOptions<
   realtimeConnectionState?: PluginRealtimeConnectionState;
   /** Initial state for this render's isolated composer scope and view. */
   composer?: {
+    experimental_suggestionContext?: {
+      completedTurnId: string;
+      contextRevision: string;
+      eligible: boolean;
+    };
     text?: string;
     /** Mention pills already in `text`, with ranges into it. */
     mentions?: readonly ComposerMention[];
@@ -3209,6 +3218,8 @@ export function renderSlot<
   let composerVersion = 0;
   const composerListeners = new Set<() => void>();
   const notifyComposerListeners = () => {
+    composerSuggestionStore.draftChanged();
+    syncComposerSuggestions();
     composerVersion += 1;
     for (const listener of composerListeners) listener();
   };
@@ -3287,7 +3298,29 @@ export function renderSlot<
   const composerIsAvailable = () =>
     composerOwnership.active || composerScope.kind !== "queued-message";
   const submissionListeners = new Set<() => void>();
+  const composerSuggestionStore = createComposerSuggestionController((text) =>
+    commitComposerDraft(text, []),
+  );
+  const syncComposerSuggestions = () =>
+    composerSuggestionStore.update({
+      composerKey: testComposerKey(composerScope),
+      threadId: composerScope.kind === "thread" ? composerScope.threadId : null,
+      completedTurnId:
+        options.composer?.experimental_suggestionContext?.completedTurnId ?? "",
+      contextRevision:
+        options.composer?.experimental_suggestionContext?.contextRevision ?? "",
+      eligible:
+        options.composer?.experimental_suggestionContext?.eligible === true &&
+        composerScope.kind === "thread" &&
+        !composerIsRunning &&
+        !composerIsSubmitting &&
+        composerText.length === 0 &&
+        composerMentions.length === 0 &&
+        composerAttachmentCount === 0,
+    });
+  syncComposerSuggestions();
   const composerTarget: ComposerHandleTarget = {
+    suggestions: composerSuggestionStore.controller,
     get key() {
       return testComposerKey(composerScope);
     },
@@ -3594,6 +3627,7 @@ export function renderSlot<
   };
   const unmountSlot = (): void => {
     if (!composerOwnership.active) return;
+    composerSuggestionStore.dispose();
     result.unmount();
   };
 

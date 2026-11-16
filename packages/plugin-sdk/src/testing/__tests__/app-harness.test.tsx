@@ -2601,3 +2601,46 @@ describe("sidebar navigation test runtime", () => {
     ).rejects.toThrow('slots.experimental_sidebarHeader: duplicate id "icons"');
   });
 });
+
+it("uses the host suggestion state machine in the SDK harness", async () => {
+  const captured: { handle: PluginComposerApi | null } = { handle: null };
+  function Probe() {
+    captured.handle = useComposer();
+    return null;
+  }
+  const slot = renderSlot(
+    { component: Probe },
+    {},
+    {
+      composer: {
+        scope: { kind: "thread", threadId: "thread" },
+        experimental_suggestionContext: {
+          eligible: true,
+          contextRevision: "revision",
+          completedTurnId: "turn",
+        },
+      },
+    },
+  );
+  const composer = captured.handle!;
+  const controller = composer.experimental_suggestions;
+  const snapshot = controller.getSnapshot().snapshot!;
+  await slot.behavior.setComposerText("typed");
+  await slot.behavior.setComposerText("");
+  expect(
+    controller.show({ requestId: "old", snapshot, text: "Continue" }),
+  ).toBe(false);
+  expect(
+    controller.show({
+      requestId: "new",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Continue",
+    }),
+  ).toBe(true);
+  expect(slot.composer.text).toBe("");
+  expect(controller.accept("new")).toBe("accepted");
+  expect(slot.composer.text).toBe("Continue");
+  expect(slot.composer.submits).toEqual([]);
+  slot.unmount();
+  expect(controller.getSnapshot().eligible).toBe(false);
+});

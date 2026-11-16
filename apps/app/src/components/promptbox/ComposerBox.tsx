@@ -1,3 +1,4 @@
+import { createComposerSuggestionController } from "@get-bb/plugin-sdk/internal/composer-handle";
 import {
   createContext,
   useCallback,
@@ -519,16 +520,101 @@ function useComposerRendererHostApi({
     });
   });
   useEffect(() => () => draftObserverRunner.dispose(), [draftObserverRunner]);
+  const activeSuggestionEditorRef = useRef<{
+    token: symbol;
+    supported: boolean;
+  } | null>(null);
+  const liveSuggestionHostRef = useRef(host ?? boxHost);
+  liveSuggestionHostRef.current = host ?? boxHost;
+  const suggestionHostRef = useRef(boxHost);
+  suggestionHostRef.current = boxHost;
+  const [suggestionStore] = useState(() =>
+    createComposerSuggestionController(
+      (text) => {
+        const current = suggestionHostRef.current;
+        current.setDraft({ ...current.getCurrent(), text, mentions: [] });
+        current.focus();
+      },
+      () => {
+        const current = liveSuggestionHostRef.current;
+        const liveDraft = current.getCurrent();
+        return (
+          activeSuggestionEditorRef.current?.supported === true &&
+          document.visibilityState === "visible" &&
+          current.isAvailable?.() !== false &&
+          liveDraft.text.length === 0 &&
+          liveDraft.mentions.length === 0 &&
+          liveDraft.attachments.length === 0
+        );
+      },
+    ),
+  );
+  const [suggestionSupport, setSuggestionSupport] = useState(false);
+  const [foreground, setForeground] = useState(
+    () => document.visibilityState === "visible",
+  );
+  useEffect(() => {
+    const changed = () => setForeground(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", changed);
+    return () => document.removeEventListener("visibilitychange", changed);
+  }, []);
+  useLayoutEffect(() => {
+    suggestionStore.update({
+      composerKey: `${key}:${syntheticKey}`,
+      threadId: boxHost.scope.kind === "thread" ? boxHost.scope.threadId : null,
+      contextRevision: boxHost.suggestionContext?.contextRevision ?? "",
+      completedTurnId: boxHost.suggestionContext?.completedTurnId ?? "",
+      eligible:
+        boxHost.scope.kind === "thread" &&
+        boxHost.suggestionContext?.eligible === true &&
+        suggestionSupport &&
+        isFocusedPane &&
+        foreground &&
+        !inputLocked &&
+        !submission?.disabled &&
+        !submission?.isSubmitting &&
+        voice?.state !== "recording" &&
+        voice?.state !== "transcribing" &&
+        value.length === 0 &&
+        mentionRanges.length === 0 &&
+        draftAttachments.length === 0,
+    });
+  });
+  useLayoutEffect(() => {
+    suggestionStore.draftChanged();
+  }, [draft, suggestionStore]);
+  useEffect(
+    () => host?.subscribeDraft(suggestionStore.draftChanged),
+    [host, suggestionStore],
+  );
+  useEffect(() => () => suggestionStore.dispose(), [suggestionStore]);
   const registerEditor: ComposerRootHost["registerEditor"] = (editor) => {
+    const registration = {
+      token: Symbol("suggestion-editor"),
+      supported:
+        editor.state.experimental_suggestionSupport === true &&
+        !editor.state.isAttaching,
+    };
+    activeSuggestionEditorRef.current = registration;
+    setSuggestionSupport(registration.supported);
+
     if (editor.state.layout !== layout) handleLayoutChange(editor.state.layout);
     const bridge = {
+      suggestions: suggestionStore.controller,
       host: host ?? boxHost,
       pluginCustomizable: host !== null && !suppress,
       ...editor,
       submit: submitForPlugin(editor.state),
     };
     publishComposerEditorBridge(key, bridge);
-    return () => clearComposerEditorBridge(key, bridge);
+    return () => {
+      clearComposerEditorBridge(key, bridge);
+      if (activeSuggestionEditorRef.current?.token !== registration.token)
+        return;
+      activeSuggestionEditorRef.current = null;
+      suggestionStore.dispose();
+      setSuggestionSupport(false);
+    };
   };
   const getCachedThreadLink = (threadId: string) => {
     const thread =
@@ -545,55 +631,56 @@ function useComposerRendererHostApi({
 
   const mentionTriggers =
     typeahead.mention.triggers ?? DEFAULT_MENTION_TRIGGERS;
-  const api: ExperimentalComposerRendererApi & RetiredComposerRendererMembers = {
-    input: {
-      ...input,
-      ...(maxHeight === undefined ? {} : { maxHeight }),
-      submission: composerSubmission(submission, onSubmit),
-      voice: composerVoice(voice),
-      mentionTriggers,
-      commandTriggers: typeahead.command.source.skillsTriggers.filter(
-        (trigger) => !mentionTriggers.some((mention) => mention === trigger),
-      ),
-      resolveMentionLink: mentionLinkResolver({
-        resolveLink: typeahead.mention.resolveLink,
-        attachments: draftAttachments,
-        attachmentProjectId: attachments?.projectId,
-        openAttachment,
-      }),
-      attachments: composerAttachments(attachments),
-      history: composerHistory(history),
-    },
-    view,
-    key,
-    inputLocked,
-    focusComposerShortcut,
-    decorationSources,
-    threadLinks: {
-      parse: (url) => parseThreadLink(url, window.location.origin),
-      cached: getCachedThreadLink,
-      resolve: (threadIds, signal, onBatch) =>
-        resolveThreadMentionsInBatches(
-          threadIds,
-          (batch, batchSignal) =>
-            sdk.threads.resolveMentions({
-              threadIds: batch,
-              signal: batchSignal,
-            }),
-          signal,
-          ({ threads }) => onBatch(threads),
+  const api: ExperimentalComposerRendererApi & RetiredComposerRendererMembers =
+    {
+      input: {
+        ...input,
+        ...(maxHeight === undefined ? {} : { maxHeight }),
+        submission: composerSubmission(submission, onSubmit),
+        voice: composerVoice(voice),
+        mentionTriggers,
+        commandTriggers: typeahead.command.source.skillsTriggers.filter(
+          (trigger) => !mentionTriggers.some((mention) => mention === trigger),
         ),
-    },
-    clipboard: {
-      readMessage: readMessageClipboardHtml,
-      readMessageImage: readMessageClipboardImage,
-    },
-    dispatchAppCommandKey,
-    showError: (message) => appToast.error(message),
-    attachmentSrc: (path, projectId) =>
-      getLocalAttachmentPreviewSrc(path) ??
-      toUserAttachmentImageSrc(path, projectId),
-  };
+        resolveMentionLink: mentionLinkResolver({
+          resolveLink: typeahead.mention.resolveLink,
+          attachments: draftAttachments,
+          attachmentProjectId: attachments?.projectId,
+          openAttachment,
+        }),
+        attachments: composerAttachments(attachments),
+        history: composerHistory(history),
+      },
+      view,
+      key,
+      inputLocked,
+      focusComposerShortcut,
+      decorationSources,
+      threadLinks: {
+        parse: (url) => parseThreadLink(url, window.location.origin),
+        cached: getCachedThreadLink,
+        resolve: (threadIds, signal, onBatch) =>
+          resolveThreadMentionsInBatches(
+            threadIds,
+            (batch, batchSignal) =>
+              sdk.threads.resolveMentions({
+                threadIds: batch,
+                signal: batchSignal,
+              }),
+            signal,
+            ({ threads }) => onBatch(threads),
+          ),
+      },
+      clipboard: {
+        readMessage: readMessageClipboardHtml,
+        readMessageImage: readMessageClipboardImage,
+      },
+      dispatchAppCommandKey,
+      showError: (message) => appToast.error(message),
+      attachmentSrc: (path, projectId) =>
+        getLocalAttachmentPreviewSrc(path) ??
+        toUserAttachmentImageSrc(path, projectId),
+    };
   const getEditorRef = useRef<(() => ExperimentalComposerEditor) | null>(null);
   const lastFocusEndKeyRef = useRef(focusEndKey);
   useLayoutEffect(() => {
@@ -632,7 +719,13 @@ function useComposerRendererHostApi({
     Popup: PluginComposerPopup,
     MenuEntry: ComposerMenuEntry,
   };
-  return { api, boxHost, rootHost, contributions, typeahead };
+  return {
+    api,
+    boxHost: { ...boxHost, suggestions: suggestionStore.controller },
+    rootHost,
+    contributions,
+    typeahead,
+  };
 }
 
 export function ComposerRendererHostProvider({
