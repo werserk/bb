@@ -1119,3 +1119,19 @@ value is accepted. The response echoes stored policy and expectedSource; this is
 not filesystem attestation. A missing or mismatched acknowledgement is unavailable
 and its URL must never be fetched. Legacy requests without policy keep their previous bytes.
 An older daemon rejects `artifactPolicy`; callers never drop it on Retry.
+
+
+## Composer Across Host Updates
+
+A retained browser tab can load a newer Composer plugin against its older host
+SDK. Composer treats a missing experimental suggestions controller as unavailable:
+the editor remains usable, with no suggestion candidate or request. Its local
+fallback has a stable snapshot so React external-store subscriptions cannot loop.
+A host that supplies the controller keeps its existing behavior.
+
+To reproduce the compatibility boundary, serve a previous packaged app's HTML
+and assets while keeping the current server and Composer bundle. Check that the
+editor mounts and accepts text without sending a message. A missing controller
+previously threw while reading `subscribe`. This reproduction establishes version
+compatibility, not the cause of every generic `Could not load` error; capture the
+affected client's exception before attributing that message to this defect.
