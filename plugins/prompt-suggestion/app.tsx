@@ -6,6 +6,7 @@ import {
   useSettings,
   type experimental_ComposerSuggestionController,
 } from "@get-bb/plugin-sdk/app";
+import { ModelSettings } from "./src/model-settings.js";
 import type { rpcContract } from "./src/contracts.js";
 
 function SuggestionController() {
@@ -74,8 +75,9 @@ function ConnectedSuggestionController({
   return null;
 }
 export default definePluginApp((app) => {
+  app.slots.settingsSection({ id: "generator", component: ModelSettings });
   app.composer.customize({
-    id: "autosay",
+    id: "prompt-suggestion",
     scopes: ["thread"],
     banners: [
       {

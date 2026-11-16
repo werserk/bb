@@ -4,6 +4,13 @@ import { rpcContract, requestSchema } from "./src/contracts.js";
 import { createService } from "./src/controller.js";
 import { settingDescriptors, settingsSchema } from "./src/settings.js";
 export default async function plugin(bb: BbPluginApi) {
+  if (
+    typeof bb.experimental_aiServices.experimental_generate !== "function" ||
+    typeof bb.experimental_aiServices.experimental_models !== "function"
+  )
+    throw new Error(
+      "Prompt Suggestion requires a BB build with shared AI generation",
+    );
   const handle = bb.settings.define(settingDescriptors);
   const normalize = (value: unknown) => {
     const parsed = settingsSchema.safeParse(value);
@@ -16,7 +23,30 @@ export default async function plugin(bb: BbPluginApi) {
     settings = normalize(next);
   });
   bb.onDispose(() => service.reset());
+  const models = async (signal?: AbortSignal) =>
+    (await bb.experimental_aiServices.experimental_models({ signal })).map(
+      (model) => ({
+        id: model.id,
+        displayName: model.displayName,
+        provider: model.provider,
+        hostId: model.hostId,
+        profile: model.profile,
+        supportsOutputLimit: model.capabilities.maxOutputTokens,
+      }),
+    );
   bb.rpc.register(rpcContract, {
+    models: (_input, ctx) => models(ctx.experimental_signal),
+    selectModel: async (input, ctx) => {
+      if (
+        input.model &&
+        !(await models(ctx.experimental_signal)).some(
+          (model) => model.id === input.model,
+        )
+      )
+        throw new Error("The selected model is no longer available");
+      await handle.experimental_set({ model: input.model });
+      return { model: input.model };
+    },
     suggest: (input, ctx) => service.suggest(input, ctx.experimental_signal),
     observe: (input) => service.observe(input.requestId, input.event),
     cancel: (input) => service.cancel(input.requestId, input.token),
@@ -25,11 +55,18 @@ export default async function plugin(bb: BbPluginApi) {
   });
   bb.cli.register(
     defineCli({
-      name: "autosay",
+      name: "prompt-suggestion",
       summary: "Suggest the next user message",
       description:
-        "Autosay generates a draft suggestion without sending or modifying a thread.",
+        "Prompt Suggestion generates a draft suggestion without sending or modifying a thread.",
       commands: {
+        models: cliCommand({
+          summary: "List available BB generation models",
+          run: async () => ({
+            stdout: JSON.stringify(await models()),
+            exitCode: 0,
+          }),
+        }),
         status: cliCommand({
           summary: "Show configuration readiness",
           run: () => ({

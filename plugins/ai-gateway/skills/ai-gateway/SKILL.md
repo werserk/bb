@@ -1,0 +1,14 @@
+---
+name: ai-gateway
+description: List connected BB generation models or configure OpenAI-compatible text clients.
+---
+
+AI Gateway exposes the same native generation path used by BB plugins. It does not launch agent threads or copy provider credentials. Only models advertised by a supported adapter are available; an agent being installed is not proof of text-generation support.
+
+Use `bb ai-gateway status` to obtain the Base URL and supported model IDs. Use `bb ai-gateway models` to list connection/profile and capability information. In an OpenAI-compatible client, set that Base URL, the plugin HTTP token as `api_key`, and an exact advertised model ID. Use Copy API key in Gateway settings (backed by BB’s native plugin-token API); never print it into reports, transcripts or logs. A provider API key is not the gateway token.
+
+The HTTP subset is GET `/v1/models` and POST `/v1/chat/completions`, below `/api/v1/plugins/ai-gateway/http`. Authentication accepts `Authorization: Bearer <plugin-token>` through BB's token validation. Contradictory credentials fail. Text messages support system, user and assistant roles; system messages must precede conversation messages. A later system message receives HTTP 400 before provider dispatch. Requests are non-streaming, single-choice. Optional max_tokens or max_completion_tokens, temperature and reasoning_effort are accepted only when the selected model adapter supports them. Unsupported fields, tools, nontext content, streaming and response_format are rejected before provider dispatch. Responses API, embeddings, images and audio are not implemented. Missing usage is omitted rather than estimated. Completion response model uses the provider-reported actual model when available, otherwise the selected qualified model ID; listing/request model IDs remain stable selections.
+
+Use `bb ai-gateway generate --model <exact-id> --prompt-stdin` to read prompt text from stdin (redirect a local text file through the shell if desired). Output is Chat Completions JSON. Requests have a 30-second deadline and a 256-KiB HTTP body limit. Native generation adds its own bounds and concurrency control. Disconnect/disposal cancels local waiting and asks the provider to cancel; remote billing may already have occurred. There is no fallback, automatic model selection, additional transcript store or request-body logging.
+
+Authentication failures retain BB’s existing HTTP 401 JSON envelope; standard OpenAI clients still raise AuthenticationError. Successful completions and generation/request failures use the Chat Completions shapes.

@@ -1,4 +1,11 @@
 import type {
+  experimental_AiModel,
+  experimental_AiGenerationRequest,
+  experimental_AiGenerationResult,
+  experimental_AiTextService,
+} from "./ai-generation.js";
+export * from "./ai-generation.js";
+import type {
   EnvironmentRemoval,
   Environment,
   Host,
@@ -2104,6 +2111,8 @@ export type PluginAiServiceStatus =
  * Failure is a rejected promise.
  */
 export interface PluginAiServiceDeclaration {
+  /** Tool-free, model-selectable text generation. */
+  readonly experimental_text?: experimental_AiTextService;
   /**
    * Stable, lowercase id, unique within this plugin. bb identifies a service
    * by plugin id and service id, so another plugin may use the same id.
@@ -2135,6 +2144,15 @@ export interface PluginAiServiceDeclaration {
 }
 
 export interface PluginAiServices {
+  /** List models available through matching host/profile bindings. */
+  experimental_models(options?: {
+    signal?: AbortSignal;
+  }): Promise<experimental_AiModel[]>;
+  /** Invoke one exact model without fallback, preserving text and actual usage. */
+  experimental_generate(
+    request: experimental_AiGenerationRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<experimental_AiGenerationResult>;
   /**
    * Register an AI service. Call during the factory; the registration lands
    * when the plugin load commits and is removed on reload or disable. Throws

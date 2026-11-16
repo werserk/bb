@@ -1,4 +1,12 @@
 {
+  "ai-gateway": {
+    "category": "agents-and-providers",
+    "screenshots": []
+  },
+  "prompt-suggestion": {
+    "category": "thread-content",
+    "screenshots": []
+  },
   "account-pool": {
     "category": "agents-and-providers",
     "screenshots": []

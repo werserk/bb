@@ -1,6 +1,6 @@
 import { HOST_TAILWIND_VERSION } from "@bb/plugin-build/host-tailwind-version";
 import type { PluginUpdateJobs } from "../services/plugins/plugin-update-jobs.js";
-import { timingSafeEqual } from "node:crypto";
+import { validPluginToken } from "./plugin-token-auth.js";
 import { promisify } from "node:util";
 import { brotliCompress, constants as zlibConstants, gzip } from "node:zlib";
 import type { Context, Hono } from "hono";
@@ -214,29 +214,23 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
-function timingSafeEqualStrings(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a, "utf8");
-  const bufferB = Buffer.from(b, "utf8");
-  return bufferA.length === bufferB.length && timingSafeEqual(bufferA, bufferB);
-}
-
 async function tokenAuthProblem(
   context: Context,
   plugins: PluginService,
   id: string,
 ): Promise<WireAuthProblem | null> {
-  const presented =
-    context.req.header("x-bb-plugin-token") ?? context.req.query("token");
   const expected = await plugins.httpToken(id);
   if (
-    expected === undefined ||
-    presented === undefined ||
-    !timingSafeEqualStrings(presented, expected)
+    !validPluginToken(
+      context.req.raw.headers,
+      context.req.queries("token") ?? [],
+      expected,
+    )
   ) {
     return {
       status: 401,
       error:
-        'missing or invalid plugin token — send it as the "x-bb-plugin-token" header ' +
+        'missing or invalid plugin token — use Authorization: Bearer, the "x-bb-plugin-token" header ' +
         "or ?token=; print it with `bb plugin token " +
         `${id}\``,
     };

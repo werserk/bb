@@ -1,3 +1,4 @@
+import { createAiGenerationDispatcher } from "@get-bb/plugin-sdk/internal/host-policy";
 import {
   aiServiceStatusSchema,
   type AiServiceStatus,
@@ -29,6 +30,7 @@ interface CachedStatus {
 }
 
 export interface AiServiceRegistry {
+  generation: ReturnType<typeof createAiGenerationDispatcher>;
   register(registration: AiServiceRegistration): { dispose(): void };
   get(key: AiServiceKey): AiServiceRegistration | null;
   list(): AiServiceRegistration[];
@@ -101,6 +103,7 @@ export function createAiServiceRegistry(
 ): AiServiceRegistry {
   const now = args.now ?? Date.now;
   const services = new Map<string, AiServiceRegistration>();
+  const generation = createAiGenerationDispatcher(() => [...services.values()]);
   const statuses = new Map<AiServiceRegistration, CachedStatus>();
   const inFlight = new Map<AiServiceRegistration, Promise<AiServiceStatus>>();
 
@@ -124,6 +127,7 @@ export function createAiServiceRegistry(
   }
 
   return {
+    generation,
     register(registration) {
       const key = mapKey(aiServiceKey(registration));
       if (services.has(key)) {
@@ -137,6 +141,9 @@ export function createAiServiceRegistry(
           if (disposed) return;
           disposed = true;
           if (services.get(key) === registration) {
+            generation.invalidate(
+              `${registration.pluginId}/${registration.id}`,
+            );
             services.delete(key);
             statuses.delete(registration);
             args.onStatusChange?.();

@@ -1,3 +1,4 @@
+import { codexGenerationContract } from "./ai/generation-contract.js";
 import { Buffer } from "node:buffer";
 import type { BbPluginApi, PluginAiServiceStatus } from "@get-bb/plugin-sdk";
 import {
@@ -19,6 +20,9 @@ const RETRY_WITH_NEXT_MODEL: ReadonlySet<CodexAiFailureCode> = new Set([
 ]);
 
 export function registerCodexAiService(bb: BbPluginApi): void {
+  const generationHost = bb.hosts.experimental_client({
+    contract: codexGenerationContract,
+  });
   const host = bb.hosts.experimental_client({ contract: codexAiHostContract });
 
   async function primaryHostId(): Promise<string | null> {
@@ -41,6 +45,38 @@ export function registerCodexAiService(bb: BbPluginApi): void {
   bb.experimental_aiServices.register({
     id: "codex",
     displayName: "Codex",
+    experimental_text: {
+      async models({ signal }) {
+        const hostId = await primaryHostId();
+        if (!hostId) return [];
+        const models = await generationHost.call(
+          "codex.ai.models",
+          {},
+          { hostId, signal, timeoutMs: 15000 },
+        );
+        return models.map((model) => ({
+          id: model.id,
+          displayName: model.displayName,
+          provider: "codex",
+          hostId,
+          profile: "default",
+          capabilities: {
+            maxOutputTokens: model.maxOutputTokens,
+            temperature: false,
+            reasoningEfforts: model.reasoningEfforts,
+          },
+        }));
+      },
+      generate(request, { signal, model }) {
+        if (model.profile !== "default")
+          throw new Error("Unsupported Codex profile");
+        return generationHost.call(
+          "codex.ai.generate",
+          { ...request, messages: [...request.messages] },
+          { hostId: model.hostId, signal, timeoutMs: request.timeoutMs + 1000 },
+        );
+      },
+    },
     async complete(prompt, { signal }) {
       const hostId = await requirePrimaryHostId();
       let last: CodexAiTextResult | null = null;

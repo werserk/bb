@@ -39,7 +39,7 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
     callerSignal?: AbortSignal,
   ) {
     const settings = getSettings();
-    if (!settings.enabled || !settings.baseUrl || !settings.model)
+    if (!settings.enabled || !settings.model)
       return { kind: "unavailable" as const, reason: "not_configured" };
     if (active.size >= 1)
       return { kind: "unavailable" as const, reason: "busy" };
@@ -84,7 +84,12 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       requests.push(Date.now());
       counters.requests++;
       const began = Date.now();
-      const result = await generate(settings, context.text, signal);
+      const result = await generate(
+        bb.experimental_aiServices,
+        settings,
+        context.text,
+        signal,
+      );
       counters.lastLatencyMs = Date.now() - began;
       const current = await readContext(
         bb,
@@ -136,9 +141,8 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       const s = getSettings();
       return {
         enabled: s.enabled,
-        configured: !!s.baseUrl && !!s.model,
+        configured: !!s.model,
         model: s.model,
-        baseUrl: s.baseUrl,
         active: active.size,
       };
     },

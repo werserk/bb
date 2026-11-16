@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { experimental_AI_MODEL_ID_MAX_LENGTH } from "@get-bb/plugin-sdk";
 import plugin from "../server.js";
 
-describe("public Autosay entry points", () => {
+describe("public Prompt Suggestion entry points", () => {
   it("defaults off, refuses generation and validates CLI and RPC boundaries", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "autosay" });
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "prompt-suggestion",
+    });
     try {
       await plugin(bb);
       expect(await harness.behavior.callRpc("status")).toMatchObject({
@@ -44,25 +47,27 @@ describe("public Autosay entry points", () => {
     }
   });
 
-  it("validates native settings and keeps API keys out of status", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "autosay" });
+  it("validates native settings and exposes only the selected BB model", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "prompt-suggestion",
+    });
     try {
       await plugin(bb);
       await harness.behavior.setSettings({
         enabled: true,
-        baseUrl: "https://example.com/v1",
         model: "configured",
-        apiKey: "fixture-secret",
       });
       await expect(
         harness.behavior.setSettings({ timeoutMs: -1 }),
       ).rejects.toThrow();
       await expect(
-        harness.behavior.setSettings({ baseUrl: "http://example.com" }),
+        harness.behavior.setSettings({
+          model: "x".repeat(experimental_AI_MODEL_ID_MAX_LENGTH + 1),
+        }),
       ).rejects.toThrow();
       const status = await harness.behavior.runCli(["status"]);
       expect(status.exitCode).toBe(0);
-      expect(status.stdout).not.toContain("fixture-secret");
+      expect(status.stdout).not.toContain("apiKey");
       expect(JSON.parse(status.stdout)).toMatchObject({
         enabled: true,
         configured: true,

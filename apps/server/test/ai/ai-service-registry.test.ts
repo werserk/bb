@@ -15,6 +15,7 @@ function service(
     id,
     displayName: "Acme",
     pluginId,
+    experimental_text: null,
     builtin: false,
     complete: async () => "reply",
     transcribe: null,

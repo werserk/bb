@@ -35,6 +35,12 @@ export function accountPoolDefaultEnabled(
 const REPO_PLUGINS_DIRECTORY_NAME = "plugins";
 
 export const BUILTIN_PLUGINS = [
+  { name: "ai-gateway", pluginId: "ai-gateway", defaultEnabled: true },
+  {
+    name: "prompt-suggestion",
+    pluginId: "prompt-suggestion",
+    defaultEnabled: true,
+  },
   {
     name: "storage-retention",
     pluginId: "bb--storage-retention",

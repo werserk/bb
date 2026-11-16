@@ -49,7 +49,7 @@ export function fixture(
     },
   ];
   return createFakePluginHost({
-    pluginId: "autosay",
+    pluginId: "prompt-suggestion",
     sdk: {
       threads: {
         get: async () =>

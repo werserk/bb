@@ -1,5 +1,7 @@
 # Autosay implementation and verification
 
+Historical initial-verification record. The later owner-requested placeholder/Enter correction and 0.49.0+werserk.5 rollout supersede the behavior and deployment statements below. Current renamed-source architecture is in `../specs/2026-11-16-shared-ai-generation-design.md`; original evidence remains retained.
+
 ## Result
 
 Implemented on `feat/autosay-thr_kcc869cqv6`, based on `5a77b30f94be2d0ce7bf4d0ec43da626e03efa6e`. No daily installation, merge or publication. Autosay is an optional standalone plugin in `plugins/autosay`; the matching core/Composer adds the experimental scoped suggestion capability.

@@ -1,3 +1,4 @@
+import { createAiGenerationDispatcher } from "../internal/ai-generation.js";
 import { experimental_PluginRpcCallError } from "../rpc-contract.js";
 import {
   rpcInvalidationTags,
@@ -1089,7 +1090,31 @@ function createFakePluginHostInternal(
       else attentionPolicies.set(threadId, { ...policy });
     },
   };
+  const generationServices = new Map<
+    string,
+    ReturnType<typeof validatePluginAiServiceDeclaration> & { pluginId: string }
+  >();
+  const generation = createAiGenerationDispatcher(() => [
+    ...generationServices.values(),
+  ]);
+  const generationLifetime = new AbortController();
   const experimental_aiServices: PluginAiServices = {
+    experimental_models(args = {}) {
+      assertLive();
+      return generation.models({
+        signal: args.signal
+          ? AbortSignal.any([args.signal, generationLifetime.signal])
+          : generationLifetime.signal,
+      });
+    },
+    experimental_generate(request, args = {}) {
+      assertLive();
+      return generation.generate(request, {
+        signal: args.signal
+          ? AbortSignal.any([args.signal, generationLifetime.signal])
+          : generationLifetime.signal,
+      });
+    },
     register(declaration) {
       assertLive();
       const normalized = validatePluginAiServiceDeclaration(declaration);
@@ -1108,14 +1133,20 @@ function createFakePluginHostInternal(
           ? {}
           : { transcribe: normalized.transcribe }),
         ...(normalized.status === null ? {} : { status: normalized.status }),
+        ...(normalized.experimental_text === null
+          ? {}
+          : { experimental_text: normalized.experimental_text }),
       });
       aiServiceRegistrations.push(registration);
+      generationServices.set(normalized.id, { ...normalized, pluginId });
       let disposed = false;
       const dispose = (): void => {
         if (disposed) return;
         disposed = true;
         const index = aiServiceRegistrations.indexOf(registration);
         if (index !== -1) aiServiceRegistrations.splice(index, 1);
+        generation.invalidate(`${pluginId}/${normalized.id}`);
+        generationServices.delete(normalized.id);
       };
       disposeHooks.push(dispose);
       return { dispose };
@@ -1306,7 +1337,9 @@ function createFakePluginHostInternal(
     string,
     import("../backend-contract.js").ServerAccessProviderDeclaration
   >();
-  const disposeHooks: Array<() => void | Promise<void>> = [];
+  const disposeHooks: Array<() => void | Promise<void>> = [
+    () => generationLifetime.abort(),
+  ];
   const installHandlers: Array<() => void | Promise<void>> = [];
   const serviceControllers: AbortController[] = [];
   let nextInteractionId = 1;

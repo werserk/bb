@@ -1669,6 +1669,10 @@ controls cannot be pinned. Use the thread title menu's Pin to header / Unpin fro
 header controls, or `bb settings ui set threadHeader.pinned '["wprojects/threads"]'`.
 The same preference is available through `sdk.system.uiPreferences`.
 
-## Autosay
+## Prompt Suggestion
 
-The optional Autosay plugin starts disabled. Its native plugin settings configure a separate generator API base URL/model/server-only API key, instructions, bounded context/output/timeout, per-session hourly request cap and allowed project IDs. The endpoint receives conversation context independently of the thread's working-agent provider. Invalid settings fail closed; no fallback endpoint/model is selected. No additional conversation corpus is stored. See `plugins/autosay/skills/autosay/SKILL.md` for exact commands and operational boundaries.
+The optional Prompt Suggestion plugin (formerly Autosay) starts disabled with no selected model. Its native settings and model picker select an explicitly available BB generation model and its host/profile identity. Provider authentication remains with that adapter. Settings also configure instructions, bounded context and timeout (15 seconds by default, at most 30 seconds), hourly request cap and allowed project IDs. Output token limit 0 uses the model default; a positive limit fails before dispatch if the model does not support it. No fallback model or additional conversation corpus is used. See `plugins/prompt-suggestion/skills/prompt-suggestion/SKILL.md` for commands and migration.
+
+## AI Gateway
+
+The optional AI Gateway plugin exposes BB's supported text models to OpenAI Chat Completions clients through its plugin HTTP Base URL. Use its native settings page for readiness, model IDs and connection instructions; use the ordinary per-plugin HTTP token as the API key. Credentials for upstream providers are not exposed to consumers. The initial API supports non-streaming text requests; unsupported operations fail explicitly. See `plugins/ai-gateway/skills/ai-gateway/SKILL.md` for configuration, exact supported fields and CLI commands.

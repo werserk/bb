@@ -574,6 +574,10 @@ export function createPluginApi(options: {
   registerProvider: (declaration: NormalizedPluginProviderDeclaration) => {
     dispose(): void;
   };
+  aiGeneration: {
+    models: PluginAiServices["experimental_models"];
+    generate: PluginAiServices["experimental_generate"];
+  };
   registerAiService: (declaration: NormalizedPluginAiService) => {
     dispose(): void;
   };
@@ -1448,7 +1452,25 @@ export function createPluginApi(options: {
     isActivated: () => activated,
     disposeHooks,
   });
+  const generationLifetime = new AbortController();
+  disposeHooks.push(() => generationLifetime.abort());
   const experimental_aiServices: PluginAiServices = {
+    experimental_models(args = {}) {
+      assertLive();
+      return options.aiGeneration.models({
+        signal: args.signal
+          ? AbortSignal.any([args.signal, generationLifetime.signal])
+          : generationLifetime.signal,
+      });
+    },
+    experimental_generate(request, args = {}) {
+      assertLive();
+      return options.aiGeneration.generate(request, {
+        signal: args.signal
+          ? AbortSignal.any([args.signal, generationLifetime.signal])
+          : generationLifetime.signal,
+      });
+    },
     register: aiServiceRegistrations.register,
   };
 

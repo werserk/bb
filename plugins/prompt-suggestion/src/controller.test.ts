@@ -1,8 +1,8 @@
-import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
 import { createService } from "./controller.js";
 import { settingsSchema } from "./settings.js";
 import { fixture } from "./test-fixtures.js";
+import { installGenerator } from "./generator-fixture.js";
 
 const input = {
   threadId: "thread",
@@ -13,36 +13,16 @@ const input = {
 };
 describe("generation admission and cancellation", () => {
   it.each(["claude-code", "codex", "other"])(
-    "uses the same generator for %s and deduplicates a completed turn",
+    "uses the selected BB model for %s and deduplicates a completed turn",
     async (providerId) => {
-      let calls = 0;
-      const server = createServer((_req, res) => {
-        calls++;
-        res.end(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: "stop",
-                message: {
-                  content: '{"kind":"suggestion","text":"Run the tests."}',
-                },
-              },
-            ],
-          }),
-        );
-      });
-      await new Promise<void>((resolve) =>
-        server.listen(0, "127.0.0.1", resolve),
-      );
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("No port");
       const host = fixture({ providerId });
+      let calls = 0;
+      const model = await installGenerator(host.bb, async () => {
+        calls++;
+        return '{"kind":"suggestion","text":"Run the tests."}';
+      });
       const service = createService(host.bb, () =>
-        settingsSchema.parse({
-          enabled: true,
-          baseUrl: `http://127.0.0.1:${address.port}/v1`,
-          model: "fixture",
-        }),
+        settingsSchema.parse({ enabled: true, model }),
       );
       try {
         expect(await service.suggest(input)).toEqual({
@@ -56,21 +36,8 @@ describe("generation admission and cancellation", () => {
         expect(service.observe("request", "shown")).toBe(true);
         expect(service.observe("request", "shown")).toBe(false);
         expect(host.harness.inspection.logEntries).toEqual([]);
-        expect(
-          host.harness.inspection.sdk.calls.every((call) =>
-            [
-              "threads.get",
-              "threads.timeline",
-              "threads.questions.open",
-              "threads.interactions.list",
-              "threads.events.list",
-            ].includes(call.path),
-          ),
-        ).toBe(true);
       } finally {
         service.reset();
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
         await host.harness.lifecycle.dispose();
       }
     },
@@ -78,11 +45,7 @@ describe("generation admission and cancellation", () => {
   it("rejects a stale expected turn before a model request", async () => {
     const host = fixture();
     const service = createService(host.bb, () =>
-      settingsSchema.parse({
-        enabled: true,
-        baseUrl: "http://127.0.0.1:1/v1",
-        model: "fixture",
-      }),
+      settingsSchema.parse({ enabled: true, model: "fixture" }),
     );
     try {
       expect(
@@ -93,38 +56,63 @@ describe("generation admission and cancellation", () => {
       await host.harness.lifecycle.dispose();
     }
   });
-  it("requires the request capability to abort and never returns late content", async () => {
+  it("requires the cancellation capability and never returns late content", async () => {
+    const host = fixture();
     let reached!: () => void;
+    let finish!: (value: string) => void;
     const started = new Promise<void>((resolve) => {
       reached = resolve;
     });
-    const server = createServer(() => reached());
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("No port");
-    const host = fixture();
+    const response = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const model = await installGenerator(host.bb, async () => {
+      reached();
+      return response;
+    });
     const service = createService(host.bb, () =>
-      settingsSchema.parse({
-        enabled: true,
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
-        model: "fixture",
-      }),
+      settingsSchema.parse({ enabled: true, model }),
     );
     try {
       const pending = service.suggest(input);
       await started;
       expect(service.cancel(input.requestId, "wrong")).toBe(false);
       expect(service.cancel(input.requestId, input.token)).toBe(true);
+      finish('{"kind":"suggestion","text":"Late response"}');
       expect(await pending).toEqual({
         kind: "unavailable",
         reason: "cancelled",
       });
     } finally {
       service.reset();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await host.harness.lifecycle.dispose();
+    }
+  });
+  it("invalidates a response when the selected model changes", async () => {
+    const host = fixture();
+    let reached!: () => void;
+    let finish!: (value: string) => void;
+    const started = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const response = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const model = await installGenerator(host.bb, async () => {
+      reached();
+      return response;
+    });
+    let settings = settingsSchema.parse({ enabled: true, model });
+    const service = createService(host.bb, () => settings);
+    try {
+      const pending = service.suggest(input);
+      await started;
+      settings = { ...settings, model: "replacement" };
+      service.reset();
+      finish('{"kind":"none"}');
+      expect((await pending).kind).toBe("unavailable");
+    } finally {
+      service.reset();
       await host.harness.lifecycle.dispose();
     }
   });

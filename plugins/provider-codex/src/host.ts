@@ -1,3 +1,5 @@
+import { codexGenerationContract } from "./ai/generation-contract.js";
+import { listCodexTextModels, generateCodexText } from "./ai/generation.js";
 import os from "node:os";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import {
@@ -22,6 +24,7 @@ export { experimental_providerBridge } from "./bridge/bridge.js";
 
 const codexHostContract = defineRpcContract({
   ...codexAiHostContract,
+  ...codexGenerationContract,
   ...experimental_nativeRootsHostContract,
 });
 
@@ -36,6 +39,9 @@ async function textResult(work: Promise<string>): Promise<CodexAiTextResult> {
 export default experimental_defineHostEntry({
   contract: codexHostContract,
   handlers: {
+    "codex.ai.models": (_input, context) => listCodexTextModels(context.signal),
+    "codex.ai.generate": (input, context) =>
+      generateCodexText(input, context.signal),
     resolveNativeRoots: (): Promise<ExperimentalNativeRootsResolveAnswer> =>
       resolveCodexNativeRoots({ homeDir: os.homedir(), env: process.env }),
     "codex.ai.complete": (input, context) =>

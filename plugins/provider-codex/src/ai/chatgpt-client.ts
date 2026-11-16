@@ -108,24 +108,23 @@ interface CodexHttpErrorArgs {
   response: Response;
 }
 
-interface CodexResponsesRequest {
+export interface CodexResponsesRequest {
   model: string;
   instructions: string;
-  reasoning: {
-    effort: "none";
-  };
+  reasoning?: { effort: string };
+  max_output_tokens?: number;
   store: boolean;
   stream: boolean;
   input: CodexInputMessage[];
 }
 
 interface CodexInputMessage {
-  role: "user";
+  role: "user" | "assistant";
   content: CodexInputContent[];
 }
 
 interface CodexInputContent {
-  type: "input_text";
+  type: "input_text" | "output_text";
   text: string;
 }
 
@@ -766,6 +765,31 @@ async function fetchResponses(args: ResponsesFetchArgs): Promise<Response> {
         deadline: args.deadline,
         request: args.request,
       });
+}
+
+export async function fetchExplicitCodexResponse(
+  request: CodexResponsesRequest,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const deadline = createCodexRequestDeadline(timeoutMs, signal);
+  const auth = await readCodexAuthCredentials();
+  if (auth.type === "chatgpt" && request.max_output_tokens !== undefined) {
+    throw new Error(
+      "Output token limit is unsupported for this Codex connection",
+    );
+  }
+  const response = await fetchResponses({
+    auth,
+    command: { model: request.model, prompt: "", timeoutMs },
+    deadline,
+    request,
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Codex generation HTTP ${response.status}`);
+  }
+  return response;
 }
 
 export async function completeCodexInference(

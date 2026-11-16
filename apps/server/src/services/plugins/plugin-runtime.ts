@@ -1935,6 +1935,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         }
         return deps.openTunnelIngress(audience);
       },
+      aiGeneration: deps.aiServices.generation,
       registerAiService: (declaration) =>
         deps.aiServices.register({
           ...declaration,

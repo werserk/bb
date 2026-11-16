@@ -422,6 +422,29 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     expect(viaHeader.status).toBe(200);
     expect(await viaHeader.json()).toEqual({ guarded: true });
 
+    const viaBearer = await harness.app.request(
+      `${BASE}/api/v1/plugins/wire/http/guarded`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(viaBearer.status).toBe(200);
+    const authCases: Record<string, string>[] = [
+      { authorization: `Bearer ${token}`, "x-bb-plugin-token": "different" },
+      { authorization: `Bearer ${token}, Bearer ${token}` },
+      { authorization: "Basic invalid", "x-bb-plugin-token": token },
+    ];
+    for (const headers of authCases) {
+      const denied = await harness.app.request(
+        `${BASE}/api/v1/plugins/wire/http/guarded`,
+        { headers },
+      );
+      expect(denied.status).toBe(401);
+      expect(await denied.text()).not.toContain(token);
+    }
+    const duplicateQuery = await harness.app.request(
+      `${BASE}/api/v1/plugins/wire/http/guarded?token=${token}&token=${token}`,
+    );
+    expect(duplicateQuery.status).toBe(401);
+
     const viaQuery = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded?token=${token}`,
     );

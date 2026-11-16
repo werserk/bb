@@ -1055,6 +1055,20 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
+    "bb-plugin-ai-gateway#typecheck": {
+      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    },
+    "bb-plugin-ai-gateway#test": {
+      "env": ["VITEST_MAX_WORKERS"],
+      "dependsOn": ["//#ensure-native-modules", "@get-bb/plugin-sdk#build", "topo"]
+    },
+    "bb-plugin-prompt-suggestion#typecheck": {
+      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    },
+    "bb-plugin-prompt-suggestion#test": {
+      "env": ["VITEST_MAX_WORKERS"],
+      "dependsOn": ["//#ensure-native-modules", "@get-bb/plugin-sdk#build", "topo"]
+    },
     "bb-plugin-composer-customization#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
     },

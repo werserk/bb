@@ -302,7 +302,7 @@ export function runTextAiTask(
       if (service.complete === null) {
         throw new Error("This service does not answer text prompts");
       }
-      return service.complete(args.prompt, { signal });
+      return deps.aiServices.generation.complete(service, args.prompt, signal);
     },
     accept: (raw) => (typeof raw === "string" ? cleanGeneratedLine(raw) : null),
   });

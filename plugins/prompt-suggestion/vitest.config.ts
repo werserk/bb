@@ -6,7 +6,7 @@ export default defineWorkspaceTestConfig({
   test: {
     projects: sharedWorkerProjects({
       pkgDir: __dirname,
-      name: "bb-plugin-autosay",
+      name: "bb-plugin-prompt-suggestion",
       include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     }),
   },

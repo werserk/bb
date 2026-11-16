@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   installTestPluginRuntime,
@@ -16,7 +16,7 @@ const app = await loadPluginApp(plugin);
 const Controller = app.composerCustomizations[0]!.banners![0]!.component;
 afterEach(cleanup);
 
-describe("mounted Autosay lifecycle", () => {
+describe("mounted Prompt Suggestion lifecycle", () => {
   it("does not request suggestions while disabled", () => {
     const slot = renderSlot(
       { component: Controller },
@@ -84,5 +84,30 @@ describe("mounted Autosay lifecycle", () => {
     expect(slot.composer.text).toBe("My own message");
     expect(slot.composer.submits).toEqual([]);
     slot.unmount();
+  });
+});
+
+describe("model selection", () => {
+  it("shows an unavailable saved choice without silently switching", async () => {
+    const component = app.settingsSections[0]!.component;
+    const slot = renderSlot(
+      { component },
+      {},
+      {
+        settings: { model: "old-model" },
+        experimental_rpcContract: rpcContract,
+        rpc: { models: () => [], selectModel: (input) => input },
+      },
+    );
+    try {
+      await waitFor(() =>
+        expect(screen.getByText("Selected model is unavailable")).toBeTruthy(),
+      );
+      expect(
+        slot.rpcCalls.filter((call) => call.method === "selectModel"),
+      ).toEqual([]);
+    } finally {
+      slot.unmount();
+    }
   });
 });

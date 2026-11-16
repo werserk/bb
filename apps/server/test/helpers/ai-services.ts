@@ -45,6 +45,7 @@ export function registerFakeAiService(
     id: args.id ?? "fake-ai",
     displayName: args.displayName ?? "Fake AI",
     pluginId: args.pluginId ?? "fake-ai-plugin",
+    experimental_text: null,
     builtin: args.builtin ?? false,
     complete:
       complete === null

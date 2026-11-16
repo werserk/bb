@@ -1174,6 +1174,9 @@ function validateProviderFallbackModels(
  * undefined.
  */
 export interface NormalizedPluginAiService {
+  readonly experimental_text: NonNullable<
+    PluginAiServiceDeclaration["experimental_text"]
+  > | null;
   readonly id: string;
   readonly displayName: string;
   readonly complete: NonNullable<PluginAiServiceDeclaration["complete"]> | null;
@@ -1240,12 +1243,27 @@ export function validatePluginAiServiceDeclaration(
     declaration.transcribe,
   );
   const status = optionalAiServiceFunction(id, "status", declaration.status);
-  if (complete === null && transcribe === null) {
+  const experimental_text = declaration.experimental_text ?? null;
+  if (
+    experimental_text !== null &&
+    (typeof experimental_text !== "object" ||
+      typeof experimental_text.models !== "function" ||
+      typeof experimental_text.generate !== "function")
+  )
+    throw new Error("Invalid AI text service");
+  if (complete === null && transcribe === null && experimental_text === null) {
     throw new Error(
       `AI service "${id}" must declare complete, transcribe, or both`,
     );
   }
-  return Object.freeze({ id, displayName, complete, transcribe, status });
+  return Object.freeze({
+    id,
+    displayName,
+    complete,
+    transcribe,
+    status,
+    experimental_text,
+  });
 }
 
 /** The collision a plugin's second registration of one AI-service id raises. */
@@ -2851,10 +2869,9 @@ export function runPluginStorageMigrations(
     database.exec("ALTER TABLE _bb_migrations ADD COLUMN statement_hash TEXT");
   }
   const rows = database
-    .prepare<
-      [],
-      { id: number; statement_hash: string | null }
-    >("SELECT id, statement_hash FROM _bb_migrations ORDER BY id")
+    .prepare<[], { id: number; statement_hash: string | null }>(
+      "SELECT id, statement_hash FROM _bb_migrations ORDER BY id",
+    )
     .all();
   const applied = new Map<number, string | null>();
   for (const row of rows) applied.set(row.id, row.statement_hash);
@@ -3801,3 +3818,5 @@ export function normalizeRpcJsonResult(
 
   return visit(value, "$result");
 }
+
+export { createAiGenerationDispatcher } from "./ai-generation.js";

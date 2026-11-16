@@ -348,6 +348,12 @@ skill; in a checkout it lives under plugins/bb-guide/skills/bb-plugin-authoring/
 `plugins/` holds every bundled plugin and `examples/plugins/` holds reference
 plugins.
 
+### AI Gateway and Prompt Suggestion
+
+AI Gateway exposes connected, supported text models through BB's shared generation API and an authenticated OpenAI-compatible Chat Completions endpoint. Its settings page supplies the Base URL, model IDs and Copy API key action. See its `ai-gateway` skill for supported fields and CLI commands.
+
+Prompt Suggestion (formerly Autosay) offers the next user message in the empty composer placeholder. Select a connected generation model and enable generation in its settings; Tab accepts editable text and Enter sends. See its `prompt-suggestion` skill for guards, limits and migration.
+
 ## Inspect plugin RPC
 
 `bb plugin rpc list [plugin-id] [--method <exact-name>] [--json]` lists discoverable methods from running plugins, optionally restricted to one plugin. `bb plugin rpc inspect <plugin-id> [method] [--json]` dumps registration and method descriptions plus input/output JSON Schemas. Copy the relevant schema into your consumer and call the existing plugin RPC endpoint. Discovery is opt-in advertising, not access control; method names may carry versions such as `provider-usage.v1.listResources`.

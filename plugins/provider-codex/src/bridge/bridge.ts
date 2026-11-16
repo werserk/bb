@@ -6,6 +6,11 @@ import {
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import {
+  assertDefaultCodexAiRoute,
+  codexAiConfigSchema,
+} from "../ai/catalog-policy.js";
 import { isDeepStrictEqual } from "node:util";
 import {
   internal_DO_NOT_USE_CONVERSATION_QUESTION_TOOL_NAME as CONVERSATION_QUESTION_TOOL_NAME,
@@ -1070,6 +1075,7 @@ function handleChildExit(
 }
 
 function spawnChildConnection(callbacks: {
+  cwd?: string;
   envVars?: Readonly<Record<string, string>>;
   recordThreadId: string | null;
   onNotification: (method: string, params: unknown) => void;
@@ -1082,11 +1088,11 @@ function spawnChildConnection(callbacks: {
 }): CodexAppServerConnection {
   const env = buildAppServerEnv(callbacks.envVars);
   const launch = resolveAppServerLaunch(appServerLaunchEnv(callbacks.envVars));
-  const { envVars: _envVars, ...connectionCallbacks } = callbacks;
+  const { envVars: _envVars, cwd, ...connectionCallbacks } = callbacks;
   return createCodexAppServerConnection({
     command: launch.command,
     args: launch.args,
-    cwd: process.cwd(),
+    cwd: cwd ?? process.cwd(),
     env,
     ...connectionCallbacks,
   });
@@ -1628,9 +1634,13 @@ async function rebuildThreadSession(
 async function withMaintenanceChild<T>(
   fn: (connection: CodexAppServerConnection) => Promise<T>,
   envVars?: Readonly<Record<string, string>>,
+  signal?: AbortSignal,
+  cwd?: string,
 ): Promise<T> {
+  signal?.throwIfAborted();
   const connection = spawnChildConnection({
     envVars,
+    cwd,
     recordThreadId: null,
     onNotification: () => {},
     onRequest: (_method, _params, responder) => {
@@ -1642,10 +1652,16 @@ async function withMaintenanceChild<T>(
     onExit: () => {},
   });
   maintenanceConnections.add(connection);
+  const abort = () => {
+    void connection.kill();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
   try {
+    signal?.throwIfAborted();
     await initializeChild(connection);
     return await fn(connection);
   } finally {
+    signal?.removeEventListener("abort", abort);
     maintenanceConnections.delete(connection);
     await connection.kill();
   }
@@ -1689,6 +1705,36 @@ function handleInitialize(id: string | number): void {
     },
   };
   sendResult(id, result);
+}
+
+export async function readDefaultCodexAiCatalog(signal: AbortSignal) {
+  signal.throwIfAborted();
+  return withMaintenanceChild(
+    async (connection) => {
+      const abort = () => {
+        void connection.kill();
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      try {
+        signal.throwIfAborted();
+        const effective = await connection.request({
+          method: "config/read",
+          params: {},
+          timeoutMs: 10000,
+          resultSchema: codexAiConfigSchema,
+        });
+        assertDefaultCodexAiRoute(effective, process.env);
+        const catalog = await loadModelCatalog(connection, 10000);
+        signal.throwIfAborted();
+        return catalog.models;
+      } finally {
+        signal.removeEventListener("abort", abort);
+      }
+    },
+    undefined,
+    signal,
+    homedir(),
+  );
 }
 
 async function handleModelList(

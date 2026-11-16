@@ -1,3 +1,4 @@
+import { experimental_AI_MODEL_ID_MAX_LENGTH } from "@get-bb/plugin-sdk";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { resultSchema } from "./generate.js";
@@ -14,7 +15,22 @@ export const responseSchema = z.union([
   resultSchema,
   z.object({ kind: z.literal("unavailable"), reason: z.string() }),
 ]);
+export const modelSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  provider: z.string(),
+  hostId: z.string(),
+  profile: z.string(),
+  supportsOutputLimit: z.boolean(),
+});
 export const rpcContract = defineRpcContract({
+  models: { input: z.null(), output: z.array(modelSchema) },
+  selectModel: {
+    input: z
+      .object({ model: z.string().max(experimental_AI_MODEL_ID_MAX_LENGTH) })
+      .strict(),
+    output: z.object({ model: z.string() }),
+  },
   suggest: { input: requestSchema, output: responseSchema },
   cancel: {
     input: z
@@ -37,7 +53,6 @@ export const rpcContract = defineRpcContract({
       enabled: z.boolean(),
       configured: z.boolean(),
       model: z.string(),
-      baseUrl: z.string(),
       active: z.number(),
     }),
   },
