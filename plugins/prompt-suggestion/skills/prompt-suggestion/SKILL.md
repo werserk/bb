@@ -26,3 +26,12 @@ While a request is pending, the composer shows Preparing suggestion and a spinne
 This implementation is local work only. Verification does not authorize publishing, deployment, an installed pilot or a release.
 
 Job state exposes server preparation, queue, model and validation durations, total server duration, actual model/tier, finish reason and output budget. A truncated response remains `output_truncated`; it is not retried automatically. Diagnostics include the last browser-observed-ready-to-attachment duration and its job ID. Browser and server clocks are never subtracted; this measurement excludes transport and does not claim completion-to-display latency. Missing attachment evidence is null.
+
+
+## Separate suggestion and memory roles
+
+Foreground generation returns only `{kind: "suggestion", text}` (at most 600 Unicode code points) or `{kind: "none"}`. CLI/RPC suggestion responses have no task state; `inspect --thread <id>` remains the derived memory surface. After a validated completed snapshot settles, an independent memory lane may refresh source-linked TaskState. Streaming snapshots do not trigger memory inference. Both roles receive the same selected model, effort, tier, full owner BIBLE and current messages; only the role contract and output cap differ. `outputTokenLimit` controls suggestions; `memoryOutputTokenLimit` controls memory (both default to 0, the provider default; positive caps require support).
+
+Both roles share the rolling-hour request budget, preserved across cache clear/reset. Memory reserves the final available request for foreground work, never runs with a limit of 1, and yields by cancellation to new foreground demand. Failed or cancelled admitted memory snapshots are not retried during that window. Memory failure does not remove a suggestion. Diagnostics expose separate memory counters; job latency and usage remain foreground-only. This is local scheduling priority, not a global SDK slot reservation. Shared slots stay occupied until provider cleanup settles, so foreground work can report `busy` during cancellation or other callers' activity; that admitted snapshot is not silently retried.
+
+The synthetic pilot accepts `--role suggestion` (default) or `--role memory`; each uses its matching production prompt and output schema. Historical full-state-plus-suggestion artifacts are not current-run output.

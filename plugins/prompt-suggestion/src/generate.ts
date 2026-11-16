@@ -14,10 +14,9 @@ export const resultSchema = z.discriminatedUnion("kind", [
         .trim()
         .min(1)
         .refine((s) => [...s].length <= 600),
-      state: taskStateSchema,
     })
     .strict(),
-  z.object({ kind: z.literal("none"), state: taskStateSchema }).strict(),
+  z.object({ kind: z.literal("none") }).strict(),
 ]);
 export type GenerationResult = z.infer<typeof resultSchema>;
 export type GeneratorConfig = {
@@ -42,13 +41,13 @@ export class IncompleteGenerationError extends Error {
   }
 }
 
-export async function generate(
+async function generateValue(
   ai: BbPluginApi["experimental_aiServices"],
   config: GeneratorConfig,
   context: string,
   signal: AbortSignal,
   measured?: (measurement: GenerationMeasurement) => void,
-): Promise<GenerationResult> {
+): Promise<unknown> {
   const result = await ai.experimental_generate(
     {
       model: config.model,
@@ -78,5 +77,13 @@ export async function generate(
     throw new IncompleteGenerationError(config.outputTokenLimit || null);
   if (new TextEncoder().encode(result.text).length > 65536)
     throw new Error("Suggestion response too large");
-  return resultSchema.parse(JSON.parse(result.text));
+  return JSON.parse(result.text);
+}
+
+export async function generate(...args: Parameters<typeof generateValue>): Promise<GenerationResult> {
+  return resultSchema.parse(await generateValue(...args));
+}
+
+export async function generateMemory(...args: Parameters<typeof generateValue>) {
+  return taskStateSchema.parse(await generateValue(...args));
 }

@@ -7,7 +7,6 @@ import {
   renderSlot,
 } from "@get-bb/plugin-sdk/testing/app";
 import type { PluginComposerApi } from "@get-bb/plugin-sdk/app";
-import { emptyTaskState } from "./task-state.js";
 import { rpcContract } from "./contracts.js";
 
 installTestPluginRuntime();
@@ -55,8 +54,7 @@ describe("mounted Prompt Suggestion lifecycle", () => {
         ? {
             kind: "suggestion",
             text: "Late suggestion",
-            state: emptyTaskState(),
-          }
+            }
         : null,
       queueMs: 0,
       preparationMs: 0,

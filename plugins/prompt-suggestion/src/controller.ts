@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { readContext } from "./context.js";
-import { generate } from "./generate.js";
+import { generate, generateMemory } from "./generate.js";
 import { instructionBundle } from "./instruction-bundle.js";
 import { createCoordinator } from "./coordinator.js";
 import type { Settings } from "./settings.js";
@@ -23,7 +23,8 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       const settings = getSettings();
       if (!settings.enabled || !settings.model) return null;
       const bundle = instructionBundle(bb, settings.instructions);
-      if (!bundle) return null;
+      const memoryBundle = instructionBundle(bb, settings.instructions, "memory");
+      if (!bundle || !memoryBundle) return null;
       const context = await readContext(
         bb,
         threadId,
@@ -40,9 +41,15 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       return {
         context,
         instructions: bundle.content,
+        memoryInstructions: memoryBundle.content,
+        memoryInstructionRevision: memoryBundle.revision,
         instructionRevision: bundle.revision,
         configKey: JSON.stringify([configRevision, settings]),
       };
+    },
+    async generateMemory(_threadId, prepared, signal) {
+      const settings = getSettings();
+      return generateMemory(bb.experimental_aiServices, { ...settings, instructions: prepared.memoryInstructions, outputTokenLimit: settings.memoryOutputTokenLimit }, prepared.context.text, signal);
     },
     async generate(threadId, prepared, signal, measured) {
       const settings = getSettings();

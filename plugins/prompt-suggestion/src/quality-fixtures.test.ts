@@ -70,7 +70,6 @@ const valid = () =>
     JSON.stringify({
       kind: "suggestion",
       text: "Исправь сохранение и проверь результат.",
-      state: emptyTaskState(),
     }),
   );
 
@@ -140,7 +139,7 @@ describe("companion bounded pilot", () => {
     [() => new Response("invalid"), "envelope-json-error"],
     [() => Response.json({}), "envelope-schema-error"],
     [() => completion("invalid"), "result-json-error"],
-    [() => completion('{"kind":"none"}'), "result-schema-error"],
+    [() => completion('{"kind":"none","text":"extra"}'), "result-schema-error"],
     [() => completion("{}", "length"), "incomplete-or-oversized"],
     [
       () =>
@@ -158,7 +157,7 @@ describe("companion bounded pilot", () => {
             },
           }),
         ),
-      "source-validation-error",
+      "result-schema-error",
     ],
   ])(
     "classifies response failures without retrying the same case",
@@ -248,14 +247,10 @@ describe("companion bounded pilot", () => {
     };
     const { transport } = harness([
       completion(
-        JSON.stringify({
-          kind: "suggestion",
-          text: "Проверь загрузку.",
-          state,
-        }),
+        JSON.stringify(state),
       ),
     ]);
-    const report = await runPilot(live(), [fixture], owner, transport);
+    const report = await runPilot({ ...live(), role: "memory" }, [fixture], owner, transport);
     expect(report.calls[0]).toMatchObject({
       validation: "valid",
       assertions: { evidence: false },
@@ -278,9 +273,7 @@ describe("companion bounded pilot", () => {
         {
           message: {
             content: JSON.stringify({
-              kind: "suggestion",
-              text: privateOwner,
-              state: { ...emptyTaskState(), goal: fact, constraints: [fact] },
+              ...emptyTaskState(), goal: fact, constraints: [fact],
             }),
           },
           finish_reason: "stop",
@@ -288,7 +281,7 @@ describe("companion bounded pilot", () => {
       ],
     });
     const { transport } = harness([response]);
-    const report = await runPilot(live(), [fixture], privateOwner, transport);
+    const report = await runPilot({ ...live(), role: "memory" }, [fixture], privateOwner, transport);
     const call = report.calls[0]!;
     expect(call).toMatchObject({
       validation: "valid",
@@ -303,9 +296,8 @@ describe("companion bounded pilot", () => {
     )
       throw new Error("Missing sanitized result");
     const decoded = JSON.parse(call.rawSyntheticResult!);
-    expect(decoded.text).toBe("");
-    expect(decoded.state.goal.text).toBe("");
-    expect(decoded.state.constraints[0].text).toBe("");
+    expect(decoded.goal.text).toBe("");
+    expect(decoded.constraints[0].text).toBe("");
     for (const line of privateOwner.split("\n")) {
       expect(JSON.stringify(report)).not.toContain(line);
       expect(JSON.stringify(report)).not.toContain(

@@ -1,4 +1,3 @@
-import { emptyTaskState } from "./task-state.js";
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { generate } from "./generate.js";
@@ -29,7 +28,6 @@ describe("native generation boundary", () => {
       return JSON.stringify({
         kind: "suggestion",
         text: "Run the tests.",
-        state: emptyTaskState(),
       });
     });
     try {
@@ -43,7 +41,6 @@ describe("native generation boundary", () => {
       ).toEqual({
         kind: "suggestion",
         text: "Run the tests.",
-        state: emptyTaskState(),
       });
       expect(calls).toBe(1);
     } finally {
@@ -77,7 +74,7 @@ describe("native generation boundary", () => {
     const host = createFakePluginHost({ pluginId: "prompt-suggestion" });
     const model = await installGenerator(
       host.bb,
-      async () => JSON.stringify({ kind: "none", state: emptyTaskState() }),
+      async () => JSON.stringify({ kind: "none" }),
       "length",
     );
     try {

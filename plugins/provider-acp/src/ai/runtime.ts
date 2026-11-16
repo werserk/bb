@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { experimental_AiGenerationError } from "@get-bb/plugin-sdk";
+import type { experimental_AiGenerationErrorCode } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { openRouterGenerationSchema, type OpenRouterGenerationRequest, type OpenRouterModel } from "./contract.js";
 
@@ -39,7 +39,12 @@ const completionSchema = z.object({
   error: z.never().optional(),
 });
 
-class OpenRouterError extends experimental_AiGenerationError {}
+class OpenRouterError extends Error {
+  constructor(readonly code: experimental_AiGenerationErrorCode, message: string) {
+    super(message);
+    this.name = "OpenRouterError";
+  }
+}
 
 function failure(): OpenRouterError {
   return new OpenRouterError("failed", "OpenRouter request failed");

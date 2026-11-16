@@ -4,26 +4,29 @@ import {
   DEFAULT_INSTRUCTIONS,
   LEGACY_INSTRUCTIONS,
   OUTPUT_CONTRACT,
+  MEMORY_INSTRUCTIONS,
+  MEMORY_OUTPUT_CONTRACT,
 } from "./instructions.js";
 
-export function instructionBundle(bb: BbPluginApi, guidance: string) {
+export function instructionBundle(bb: BbPluginApi, guidance: string, role: "suggestion" | "memory" = "suggestion") {
   const owner = bb.experimental_userInstructions?.read();
   if (!owner || owner.kind !== "ready") return null;
-  return composeInstructionBundle(owner, guidance);
+  return composeInstructionBundle(owner, guidance, role);
 }
 
 export function composeInstructionBundle(
   owner: { content: string; revision: string },
   guidance: string,
+  role: "suggestion" | "memory" = "suggestion",
 ) {
   const additional =
     guidance === LEGACY_INSTRUCTIONS || guidance === DEFAULT_INSTRUCTIONS
       ? ""
       : guidance.trim();
   const content = [
-    DEFAULT_INSTRUCTIONS,
-    OUTPUT_CONTRACT,
-    "The following owner base instructions apply within your recommendation-only role. No tools or other execution capabilities are available.",
+    role === "memory" ? MEMORY_INSTRUCTIONS : DEFAULT_INSTRUCTIONS,
+    role === "memory" ? MEMORY_OUTPUT_CONTRACT : OUTPUT_CONTRACT,
+    "The following owner base instructions apply within your assigned tool-free role. No tools or other execution capabilities are available.",
     "<owner_instructions>",
     owner.content,
     "</owner_instructions>",

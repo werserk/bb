@@ -1,5 +1,7 @@
 # Companion implementation verification — 2026-11-16
 
+Historical receipt. Current direct-OpenRouter implementation and remaining acceptance gaps are recorded in [the November17 verification](2026-11-17-direct-companion-verification.md).
+
 Status: the Pi-based implementation and its local verification are complete. The owner subsequently selected OpenCode instead of Pi. The OpenCode preliminary pilot is complete; a production OpenCode path and subsecond acceptance remain incomplete. No release, deployment, production model change or production background activation was performed. This receipt is the current execution status for the provider and goal-oriented companion plans; their original checklists remain the accepted scope, not a claim that every live acceptance item passed.
 
 ## Implemented

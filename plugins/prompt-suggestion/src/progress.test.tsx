@@ -91,7 +91,7 @@ it.each(["none", "failed", "timeout"])(
     const snapshot = store.controller.getSnapshot().snapshot;
     mocks.data =
       outcome === "none"
-        ? job("none", { kind: "none", state: emptyTaskState() })
+        ? job("none", { kind: "none" })
         : job("error", {
             kind: "unavailable",
             reason: outcome === "failed" ? "generation_failed" : "timeout",
@@ -121,7 +121,7 @@ it("typing dismisses pending state and ignores the same job after the draft clea
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Stale",
-    state: emptyTaskState(),
+
   });
   refresh();
   expect(store.controller.getSnapshot().candidate).toBeNull();
@@ -137,7 +137,7 @@ it("reattaches a ready server job after unmount without cancel", async () => {
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Continue",
-    state: emptyTaskState(),
+
   });
   const second = await mount();
   expect(second.store.controller.getSnapshot().candidate?.text).toBe(
@@ -153,7 +153,7 @@ it("rejects a ready job from a different turn", async () => {
     ...job("ready", {
       kind: "suggestion",
       text: "Stale",
-      state: emptyTaskState(),
+
     }),
     turnId: "old",
   };
@@ -165,7 +165,7 @@ it("reattaches the same ready job after blur and focus without browser inference
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Continue",
-    state: emptyTaskState(),
+
   });
   const { store } = await mount();
   expect(store.controller.getSnapshot().candidate).not.toBeNull();
@@ -198,7 +198,7 @@ it("disabling the configuration clears the candidate without cancelling a server
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Continue",
-    state: emptyTaskState(),
+
   });
   const { store, refresh } = await mount();
   expect(store.controller.getSnapshot().candidate).not.toBeNull();
@@ -222,7 +222,7 @@ it("reattaches pending progress against the current eligible snapshot", async ()
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Continue",
-    state: emptyTaskState(),
+
   });
   refresh();
   expect(store.controller.getSnapshot().candidate?.text).toBe("Continue");
@@ -234,7 +234,7 @@ it.each(["dismiss", "accept"] as const)(
     mocks.data = job("ready", {
       kind: "suggestion",
       text: "Continue",
-      state: emptyTaskState(),
+
     });
     const { store } = await mount();
     const candidate = store.controller.getSnapshot().candidate!;
@@ -257,7 +257,7 @@ it("keeps a typed draft dismissal terminal when eligibility changes first", asyn
   mocks.data = job("ready", {
     kind: "suggestion",
     text: "Stale",
-    state: emptyTaskState(),
+
   });
   refresh();
   expect(store.controller.getSnapshot().candidate).toBeNull();
@@ -324,7 +324,7 @@ it("keeps a server-admitted next-turn job alive during foreground renewal", asyn
       await new Promise<void>((resolve) => {
         release = resolve;
       });
-    return { kind: "none" as const, state: emptyTaskState() };
+    return { kind: "none" as const };
   });
   const coordinator = createCoordinator({
     configuration: () => ({
@@ -347,9 +347,12 @@ it("keeps a server-admitted next-turn job alive during foreground renewal", asyn
       },
       instructionRevision: "bible",
       instructions: "BIBLE",
+      memoryInstructions: "BIBLE memory",
+      memoryInstructionRevision: "memory",
       configKey: "config",
     }),
     generate,
+    generateMemory: async () => emptyTaskState(),
     changed: vi.fn(),
   });
   mocks.data = job("prepared");

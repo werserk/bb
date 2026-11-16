@@ -133,3 +133,17 @@ it("keeps mixed catalogs usable when reasoning metadata omits explicit efforts",
   expect(models[1]?.reasoningEfforts).toEqual([]);
   expect(() => completionBody({ ...request, model: "vendor/implicit-reasoning" }, models[1]!)).toThrow("Unsupported");
 });
+
+it("sanitizes external errors even when they imitate the SDK generation error", async () => {
+  const runtime = createOpenRouterRuntime({
+    key: async () => "secret",
+    fetch: async () => {
+      throw Object.assign(new Error("synthetic-secret"), {
+        name: "AiGenerationError", code: "unsupported",
+      });
+    },
+  });
+  await expect(runtime.models(signal())).rejects.toMatchObject({
+    code: "failed", message: "OpenRouter request failed",
+  });
+});

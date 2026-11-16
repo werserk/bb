@@ -2,6 +2,7 @@ import { z } from "zod";
 import { composeInstructionBundle } from "./instruction-bundle.js";
 import { contextInput, sourceMessage, textRevision } from "./context-input.js";
 import {
+  taskStateSchema,
   emptyTaskState,
   rememberTask,
   validateStateSources,
@@ -81,6 +82,7 @@ export function parsePilotArgs(args: string[]) {
     "reasoning-effort",
     "session-affinity",
     "service-tier",
+    "role",
   ]);
   let live = false;
   for (let index = 0; index < args.length; index++) {
@@ -158,7 +160,9 @@ export function parsePilotArgs(args: string[]) {
     !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionAffinity)
   )
     throw new Error("Affinity must be an opaque identifier");
+  const role = z.enum(["suggestion", "memory"]).parse(values.get("role") ?? "suggestion");
   return {
+    role,
     live,
     origin,
     output,
@@ -173,10 +177,11 @@ export function parsePilotArgs(args: string[]) {
   };
 }
 
-export function preparePilotCase(fixture: PilotFixture, ownerContent: string) {
+export function preparePilotCase(fixture: PilotFixture, ownerContent: string, role: "suggestion" | "memory" = "suggestion") {
   const bundle = composeInstructionBundle(
     { content: ownerContent, revision: textRevision(ownerContent) },
     "",
+    role,
   );
   const messages = fixture.messages.map((message, index) =>
     sourceMessage(`${fixture.id}-${index}`, message.role, message.text, index),
@@ -262,6 +267,7 @@ function evaluateCompletion(
   ownerContent: string,
   token: string,
   latencyMs: number,
+  role: "suggestion" | "memory",
 ) {
   const envelope = completionSchema.safeParse(payload);
   if (!envelope.success) {
@@ -296,31 +302,25 @@ function evaluateCompletion(
   } catch {
     return { ...measured, validation: "result-json-error" };
   }
-  const parsed = resultSchema.safeParse(value);
-  if (!parsed.success) {
-    return { ...measured, validation: "result-schema-error" };
+  const parsed = role === "memory" ? taskStateSchema.safeParse(value) : resultSchema.safeParse(value);
+  if (!parsed.success) return { ...measured, validation: "result-schema-error" };
+  const output = parsed.data;
+  let assertions: Record<string, boolean>;
+  if ("kind" in output) {
+    const text = output.kind === "suggestion" ? output.text : "";
+    assertions = {
+      kind: fixture.expected.kinds.includes(output.kind),
+      direction: !fixture.expected.any.length || fixture.expected.any.some((pattern) => new RegExp(pattern, "iu").test(text)),
+      forbidden: fixture.expected.forbidden.every((pattern) => !new RegExp(pattern, "iu").test(text)),
+    };
+  } else {
+    try { validateStateSources(output, context.messages); }
+    catch { return { ...measured, validation: "source-validation-error" }; }
+    assertions = {
+      evidence: !fixture.expected.evidenceMustBeEmpty || output.visibleEvidence.length === 0,
+      context: context.contextComplete || !output.contextComplete,
+    };
   }
-  try {
-    validateStateSources(parsed.data.state, context.messages);
-  } catch {
-    return { ...measured, validation: "source-validation-error" };
-  }
-  const text = parsed.data.kind === "suggestion" ? parsed.data.text : "";
-  const assertions = {
-    kind: fixture.expected.kinds.includes(parsed.data.kind),
-    direction:
-      !fixture.expected.any.length ||
-      fixture.expected.any.some((pattern) =>
-        new RegExp(pattern, "iu").test(text),
-      ),
-    forbidden: fixture.expected.forbidden.every(
-      (pattern) => !new RegExp(pattern, "iu").test(text),
-    ),
-    evidence:
-      !fixture.expected.evidenceMustBeEmpty ||
-      parsed.data.state.visibleEvidence.length === 0,
-    context: context.contextComplete || !parsed.data.state.contextComplete,
-  };
   const rawSyntheticResult = JSON.stringify(redact.decoded(parsed.data));
   return {
     ...measured,
@@ -393,11 +393,12 @@ export async function runPilot(
     throw new Error("Repeated cases are not allowed");
   const prepared = selected.map((fixture) => ({
     fixture,
-    ...preparePilotCase(fixture, ownerContent),
+    ...preparePilotCase(fixture, ownerContent, options.role),
   }));
   const bundle = prepared[0]?.bundle;
   if (!bundle) throw new Error("No cases selected");
   const metadata = {
+    role: options.role,
     mode: options.live ? "live" : "dry-run",
     requestedModel: options.model,
     requestedServiceTier: options.serviceTier,
@@ -504,6 +505,7 @@ export async function runPilot(
         ownerContent,
         token,
         latencyMs,
+        options.role,
       ),
     );
   }

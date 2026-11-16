@@ -160,6 +160,13 @@ export const rpcContract = defineRpcContract({
       tracked: z.number(),
       queued: z.number(),
       admitted: z.number(),
+      memory: z.object({
+        completed: z.number(),
+        errors: z.number(),
+        cancelled: z.number(),
+        active: z.number(),
+        queued: z.number(),
+      }),
       active: z.number(),
       scope: z.string(),
     }),

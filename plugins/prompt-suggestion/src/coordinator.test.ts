@@ -17,7 +17,7 @@ function setup() {
   let finish: (() => void) | null = null;
   const generate = vi.fn<CoordinatorDeps["generate"]>(async () => {
     calls++;
-    return { kind: "none" as const, state: emptyTaskState() };
+    return { kind: "none" as const };
   });
   const prepared = (): Prepared => ({
     context: {
@@ -32,6 +32,8 @@ function setup() {
     },
     instructionRevision: "instructions",
     instructions: "BIBLE",
+    memoryInstructions: "BIBLE memory",
+    memoryInstructionRevision: "memory-instructions",
     configKey: "config",
   });
   const prepare = vi.fn(async () => prepared());
@@ -39,6 +41,7 @@ function setup() {
     now: () => time,
     prepare,
     generate,
+    generateMemory: async () => emptyTaskState(),
     configuration: () => ({
       enabled,
       backgroundPreparation: true,
@@ -72,7 +75,7 @@ function setup() {
         await new Promise<void>((resolve) => {
           finish = resolve;
         });
-        return { kind: "none", state: emptyTaskState() };
+        return { kind: "none" };
       });
     },
     finish() {
@@ -174,7 +177,7 @@ describe("server-owned companion", () => {
       s.coordinator.reset();
       await s.coordinator.suggest("t", "b");
       expect(s.calls()).toBe(1);
-      expect(s.coordinator.diagnostics().admitted).toBe(1);
+      expect(s.coordinator.diagnostics().admitted).toBe(2);
     } finally {
       s.coordinator.dispose();
     }
@@ -243,16 +246,14 @@ describe("bounded companion scheduling", () => {
       expect((await s.coordinator.state("thread-1")).phase).toBe("none");
       expect(s.coordinator.diagnostics()).toMatchObject({
         tracked: 8,
-        admitted: 9,
+        admitted: 18,
       });
       s.advance(1);
       expect(await s.coordinator.track("thread-0", "returning")).toMatchObject({
         phase: "none",
         jobId: firstJobId,
       });
-      expect(s.coordinator.inspect("thread-0")).toMatchObject({
-        state: emptyTaskState(),
-      });
+      expect(s.coordinator.inspect("thread-0")).toBeNull();
       expect((await s.coordinator.state("thread-1")).phase).toBe("unavailable");
       expect(s.generate).toHaveBeenCalledTimes(9);
     } finally {
@@ -272,7 +273,7 @@ describe("bounded companion scheduling", () => {
       peak = Math.max(peak, active);
       try {
         await new Promise<void>((resolve) => release.set(threadId, resolve));
-        return { kind: "none", state: emptyTaskState() };
+        return { kind: "none" };
       } finally {
         active--;
       }
@@ -357,7 +358,7 @@ describe("bounded companion scheduling", () => {
               once: true,
             });
           });
-          return { kind: "none", state: emptyTaskState() };
+          return { kind: "none" };
         },
       );
       try {

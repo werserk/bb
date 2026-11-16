@@ -32,3 +32,20 @@ it("preserves the full owner source and invalidates same-size changes", async ()
     await host.harness.lifecycle.dispose();
   }
 });
+
+
+it("keeps full BIBLE bytes in both role contracts without short-output state requirements", async () => {
+  const host = fixture();
+  const content = "\n# BIBLE\n" + "Preserve owner authority.\n".repeat(2000);
+  host.bb.experimental_userInstructions.read = () => ({ kind: "ready", content, revision: "owner" });
+  try {
+    const short = instructionBundle(host.bb, "", "suggestion")!;
+    const memory = instructionBundle(host.bb, "", "memory")!;
+    expect(short.content).toContain(content);
+    expect(memory.content).toContain(content);
+    expect(short.revision).not.toBe(memory.revision);
+    expect(short.content).toContain("No state or other keys");
+    expect(short.content).not.toContain("state plus");
+    expect(memory.content).toContain("Return only the task state JSON object");
+  } finally { await host.harness.lifecycle.dispose(); }
+});

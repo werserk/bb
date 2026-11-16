@@ -1,9 +1,12 @@
+import { experimental_AiGenerationError } from "@get-bb/plugin-sdk";
 import { IncompleteGenerationError } from "./generate.js";
 import { randomUUID } from "node:crypto";
 import { createAdmissionLedger } from "./admission.js";
 import type { CompanionContext } from "./context.js";
 import type { GenerationResult, GenerationMeasurement } from "./generate.js";
 import {
+  taskStateSchema,
+  type TaskState,
   rememberTask,
   validateStateSources,
   type TaskMemory,
@@ -39,6 +42,8 @@ export type Prepared = {
   context: CompanionContext;
   instructionRevision: string;
   instructions: string;
+  memoryInstructions: string;
+  memoryInstructionRevision: string;
   configKey: string;
 };
 export type CoordinatorDeps = {
@@ -53,6 +58,7 @@ export type CoordinatorDeps = {
     signal: AbortSignal,
     measured: (measurement: GenerationMeasurement) => void,
   ): Promise<GenerationResult>;
+  generateMemory(threadId: string, prepared: Prepared, signal: AbortSignal): Promise<TaskState>;
   configuration(): {
     enabled: boolean;
     backgroundPreparation: boolean;
@@ -75,6 +81,8 @@ type Job = {
   finish: (outcome: Outcome) => void;
   settled: boolean;
 };
+type MemoryJob = { entry: Entry; prepared: Prepared; key: string; controller: AbortController };
+type Admission = { role: "suggestion"; job: Job } | { role: "memory" };
 type Entry = {
   threadId: string;
   clients: Set<string>;
@@ -113,8 +121,11 @@ const emptyView = (reason: string): JobView => ({
 export function createCoordinator(deps: CoordinatorDeps) {
   const now = deps.now ?? (() => performance.now());
   const entries = new Map<string, Entry>();
-  const ledger = createAdmissionLedger<Job>(now);
+  const ledger = createAdmissionLedger<Admission>(now);
   const queue = new Map<string, Job>();
+  const memoryQueue = new Map<string, MemoryJob>();
+  let memoryRunning: MemoryJob | null = null;
+  const memoryStats = { completed: 0, errors: 0, cancelled: 0 };
   let running: Job | null = null;
   let pumping = false;
   let disposed = false;
@@ -132,6 +143,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
       prepared.context.revision,
       prepared.configKey,
       prepared.instructionRevision,
+      prepared.memoryInstructionRevision,
     ]);
   const interested = (entry: Entry) =>
     !disposed &&
@@ -163,6 +175,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
   function remove(threadId: string) {
     const entry = entries.get(threadId);
     if (!entry) return;
+    cancelMemory(threadId);
     entries.delete(threadId);
     clearTimeout(entry.timer);
     entry.controller.abort();
@@ -206,12 +219,12 @@ export function createCoordinator(deps: CoordinatorDeps) {
             continue;
           }
           const previous = ledger.get(job.key);
-          if (previous) {
-            settle(job, await previous.done);
+          if (previous?.role === "suggestion") {
+            settle(job, await previous.job.done);
             continue;
           }
           if (
-            !ledger.admit(job.key, job, deps.configuration().maxRequestsPerHour)
+            !ledger.admit(job.key, { role: "suggestion", job }, deps.configuration().maxRequestsPerHour)
           ) {
             settle(job, unavailable("rate_limited"));
             continue;
@@ -234,9 +247,6 @@ export function createCoordinator(deps: CoordinatorDeps) {
               stats.lastLatencyMs = job.view.modelMs;
             });
           const validationBegan = now();
-          validateStateSources(result.state, fresh.context.messages);
-          if (!fresh.context.contextComplete && result.state.contextComplete)
-            throw new Error("Unfounded complete context");
           const current = await deps.prepare(
             job.threadId,
             entry.memory,
@@ -253,14 +263,10 @@ export function createCoordinator(deps: CoordinatorDeps) {
             continue;
           }
           job.view.validationMs = now() - validationBegan;
-          entry.memory = rememberTask(
-            result.state,
-            fresh.context.messages,
-            fresh.context.boundary,
-          );
           if (result.kind === "suggestion") stats.suggestions++;
           else stats.none++;
           settle(job, result);
+          memoryQueue.set(entry.threadId, { entry, prepared: fresh, key: JSON.stringify(["memory", entry.threadId, keyFor(fresh)]), controller: new AbortController() });
         } catch (error) {
           if (error instanceof IncompleteGenerationError)
             job.view.outputTokenLimit = error.outputTokenLimit;
@@ -270,7 +276,9 @@ export function createCoordinator(deps: CoordinatorDeps) {
               ? "cancelled"
               : error instanceof IncompleteGenerationError
                 ? error.code
-                : "generation_failed";
+                : error instanceof experimental_AiGenerationError && error.code === "busy"
+                  ? "busy"
+                  : "generation_failed";
           if (reason === "cancelled") stats.cancelled++;
           else stats.errors++;
           settle(job, unavailable(reason));
@@ -280,6 +288,42 @@ export function createCoordinator(deps: CoordinatorDeps) {
       }
     } finally {
       pumping = false;
+      void pumpMemory();
+    }
+  }
+  function cancelMemory(threadId: string) {
+    memoryQueue.get(threadId)?.controller.abort();
+    memoryQueue.delete(threadId);
+    if (memoryRunning?.entry.threadId === threadId) memoryRunning.controller.abort();
+  }
+  async function pumpMemory() {
+    if (memoryRunning || pumping || queue.size || disposed) return;
+    const job = memoryQueue.values().next().value;
+    if (!job) return;
+    memoryQueue.delete(job.entry.threadId);
+    memoryRunning = job;
+    const signal = AbortSignal.any([job.controller.signal, job.entry.controller.signal, AbortSignal.timeout(deps.configuration().timeoutMs)]);
+    const valid = (fresh: Prepared | null) => !signal.aborted && interested(job.entry) && deps.configuration().enabled && fresh?.context.eligible && keyFor(fresh) === keyFor(job.prepared);
+    try {
+      const fresh = await deps.prepare(job.entry.threadId, job.entry.memory, signal);
+      if (!valid(fresh) || !fresh || pumping || queue.size || ledger.get(job.key)) return;
+      const limit = deps.configuration().maxRequestsPerHour;
+      if (ledger.size() >= limit - 1 || !ledger.admit(job.key, { role: "memory" }, limit)) return;
+      stats.requests++;
+      const state = taskStateSchema.parse(await deps.generateMemory(job.entry.threadId, fresh, signal));
+      validateStateSources(state, fresh.context.messages);
+      if (!fresh.context.contextComplete && state.contextComplete) throw new Error("Unfounded complete context");
+      const current = await deps.prepare(job.entry.threadId, job.entry.memory, signal);
+      if (!valid(current)) return;
+      job.entry.memory = rememberTask(state, fresh.context.messages, fresh.context.boundary);
+      memoryStats.completed++;
+      deps.changed(job.entry.threadId);
+    } catch {
+      if (signal.aborted) memoryStats.cancelled++;
+      else memoryStats.errors++;
+    } finally {
+      memoryRunning = null;
+      void pumpMemory();
     }
   }
   async function refresh(entry: Entry) {
@@ -293,12 +337,15 @@ export function createCoordinator(deps: CoordinatorDeps) {
     entry.preparationMs = now() - began;
     if (!prepared || !deps.configuration().enabled) {
       entry.prepared = null;
+      cancelMemory(entry.threadId);
       if (entry.job && !entry.job.settled) cancelJob(entry.job, "ineligible");
       entry.job = null;
       deps.changed(entry.threadId);
       return;
     }
     entry.prepared = prepared;
+    const memoryJob = memoryQueue.get(entry.threadId) ?? (memoryRunning?.entry === entry ? memoryRunning : null);
+    if (memoryJob && (!prepared.context.eligible || keyFor(memoryJob.prepared) !== keyFor(prepared))) cancelMemory(entry.threadId);
     if (entry.memory && entry.memory.boundary !== prepared.context.boundary)
       entry.memory = null;
     if (!prepared.context.eligible) {
@@ -314,15 +361,8 @@ export function createCoordinator(deps: CoordinatorDeps) {
     }
     if (entry.job && !entry.job.settled) cancelJob(entry.job, "stale");
     const existing = ledger.get(key);
-    if (existing) {
-      entry.job = existing;
-      const result = existing.view.result;
-      if (result && result.kind !== "unavailable")
-        entry.memory = rememberTask(
-          result.state,
-          existing.prepared.context.messages,
-          existing.prepared.context.boundary,
-        );
+    if (existing?.role === "suggestion") {
+      entry.job = existing.job;
       deps.changed(entry.threadId);
       return;
     }
@@ -358,6 +398,8 @@ export function createCoordinator(deps: CoordinatorDeps) {
         outputTokenLimit: deps.configuration().outputTokenLimit || null,
       },
     };
+    if (memoryRunning) memoryRunning.controller.abort();
+    cancelMemory(entry.threadId);
     entry.job = job;
     queue.set(entry.threadId, job);
     deps.changed(entry.threadId);
@@ -375,6 +417,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
           await refresh(entry);
         } catch {
           entry.prepared = null;
+          cancelMemory(threadId);
           if (entry.job && !entry.job.settled)
             cancelJob(entry.job, "unavailable");
           entry.job = null;
@@ -475,6 +518,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
     detach(threadId: string, clientId: string) {
       const entry = entries.get(threadId);
       if (!entry || !entry.clients.delete(clientId)) return false;
+      if (!interested(entry)) cancelMemory(threadId);
       if (!interested(entry) && entry.job && !entry.job.settled)
         cancelJob(entry.job, "cancelled");
       return true;
@@ -492,6 +536,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
         entry.job.settled
       )
         return false;
+      cancelMemory(threadId);
       cancelJob(entry.job, "cancelled");
       return true;
     },
@@ -513,6 +558,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
         queued: queue.size,
         active: running === null ? 0 : 1,
         admitted: ledger.size(),
+        memory: { ...memoryStats, active: memoryRunning ? 1 : 0, queued: memoryQueue.size },
         scope: "current plugin process; rolling one-hour admission window",
       };
     },

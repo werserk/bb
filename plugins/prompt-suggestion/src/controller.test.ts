@@ -1,5 +1,6 @@
-import { emptyTaskState } from "./task-state.js";
+import { setImmediate } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
+import { generate } from "./generate.js";
 import { createService } from "./controller.js";
 import { settingsSchema } from "./settings.js";
 import { fixture } from "./test-fixtures.js";
@@ -23,7 +24,6 @@ describe("generation admission and cancellation", () => {
         return JSON.stringify({
           kind: "suggestion",
           text: "Run the tests.",
-          state: emptyTaskState(),
         });
       });
       const service = createService(host.bb, () =>
@@ -33,7 +33,6 @@ describe("generation admission and cancellation", () => {
         expect(await service.suggest(input)).toEqual({
           kind: "suggestion",
           text: "Run the tests.",
-          state: emptyTaskState(),
         });
         expect(
           await service.suggest({ ...input, requestId: "second" }),
@@ -93,7 +92,6 @@ describe("generation admission and cancellation", () => {
         JSON.stringify({
           kind: "suggestion",
           text: "Late response",
-          state: emptyTaskState(),
         }),
       );
       expect(await pending).toEqual({
@@ -126,7 +124,7 @@ describe("generation admission and cancellation", () => {
       await started;
       settings = { ...settings, model: "replacement" };
       service.reset();
-      finish(JSON.stringify({ kind: "none", state: emptyTaskState() }));
+      finish(JSON.stringify({ kind: "none" }));
       expect((await pending).kind).toBe("unavailable");
     } finally {
       service.reset();
@@ -188,7 +186,7 @@ it("keeps affinity opaque and stable across turns, scoped to thread, configurati
       generate: async (request) => {
         hints.push(request.experimental_sessionAffinity);
         return {
-          text: JSON.stringify({ kind: "none", state: emptyTaskState() }),
+          text: JSON.stringify({ kind: "none" }),
           model: request.model,
           actualModel: null,
           actualServiceTier: null,
@@ -232,6 +230,69 @@ it("keeps affinity opaque and stable across turns, scoped to thread, configurati
     }
   } finally {
     service.dispose();
+    await host.harness.lifecycle.dispose();
+  }
+});
+
+it("cancels memory, reports shared saturation without retry, and admits a new turn after cleanup", async () => {
+  const options = { turnId: "turn" };
+  const host = fixture(options);
+  const memorySignal: { current: AbortSignal | null } = { current: null };
+  let occupied = 0;
+  let foregroundCalls = 0;
+  let releaseMemory!: () => void;
+  const memoryCleanup = new Promise<void>((resolve) => { releaseMemory = resolve; });
+  const external = new AbortController();
+  const blockers: Promise<unknown>[] = [];
+  let memoryStarted!: () => void;
+  const started = new Promise<void>((resolve) => { memoryStarted = resolve; });
+  const model = await installGenerator(host.bb, async (request, signal) => {
+    if (request.messages[0]?.content === "occupied") {
+      occupied++;
+      return new Promise<string>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    }
+    if (request.messages[0]?.content.startsWith("Maintain only revisable")) {
+      memorySignal.current = signal;
+      memoryStarted();
+      await memoryCleanup;
+      signal.throwIfAborted();
+      return JSON.stringify({ kind: "none" });
+    }
+    foregroundCalls++;
+    return JSON.stringify({ kind: "suggestion", text: "Verify the result." });
+  });
+  const service = createService(host.bb, () => settingsSchema.parse({ enabled: true, model, backgroundPreparation: true }));
+  try {
+    await service.track("thread", "client");
+    await started;
+    for (let index = 0; index < 3; index++) blockers.push(generate(host.bb.experimental_aiServices, { model, instructions: "occupied", outputTokenLimit: 0, reasoningEffort: "default", serviceTier: "default", timeoutMs: 30000 }, "external request", external.signal).catch(() => null));
+    await expect.poll(() => occupied).toBe(3);
+    const first = await service.state("thread");
+    expect(first.phase).toBe("ready");
+    options.turnId = "next";
+    await service.wake("thread");
+    expect(memorySignal.current?.aborted).toBe(true);
+    await expect.poll(() => service.state("thread")).toMatchObject({ phase: "error", result: { kind: "unavailable", reason: "busy" } });
+    const blocked = await service.state("thread");
+    await service.wake("thread");
+    expect((await service.state("thread")).jobId).toBe(blocked.jobId);
+    expect(foregroundCalls).toBe(1);
+    expect(service.diagnostics().requests).toBe(3);
+    releaseMemory();
+    await memoryCleanup;
+    await setImmediate();
+    expect(service.inspect("thread")).toBeNull();
+    options.turnId = "after-cleanup";
+    await service.wake("thread");
+    await expect.poll(async () => (await service.state("thread")).phase).toBe("ready");
+    expect((await service.state("thread")).jobId).not.toBe(first.jobId);
+    expect(foregroundCalls).toBe(2);
+    expect(occupied).toBe(3);
+  } finally {
+    releaseMemory();
+    external.abort();
+    service.dispose();
+    await Promise.all(blockers);
     await host.harness.lifecycle.dispose();
   }
 });

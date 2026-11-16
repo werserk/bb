@@ -6,8 +6,8 @@ import {
 import { experimental_AI_MODEL_ID_MAX_LENGTH } from "@get-bb/plugin-sdk";
 import { fixture } from "./test-fixtures.js";
 import { installGenerator } from "./generator-fixture.js";
-import { emptyTaskState } from "./task-state.js";
 import plugin from "../server.js";
+import { rpcContract } from "./contracts.js";
 
 describe("public Prompt Suggestion entry points", () => {
   it("defaults off, refuses generation and validates CLI and RPC boundaries", async () => {
@@ -93,7 +93,7 @@ it("shares RPC and CLI state and preserves admission after cache clearing", asyn
   let calls = 0;
   const model = await installGenerator(bb, async () => {
     calls++;
-    return JSON.stringify({ kind: "none", state: emptyTaskState() });
+    return JSON.stringify({ kind: "none" });
   });
   try {
     await plugin(bb);
@@ -119,16 +119,24 @@ it("shares RPC and CLI state and preserves admission after cache clearing", asyn
       .toContain('"phase":"none"');
     expect(
       await harness.behavior.callRpc("inspect", { threadId: "thread" }),
-    ).toMatchObject({ state: emptyTaskState(), sources: [] });
+    ).toBeNull();
+    await expect.poll(async () => rpcContract.diagnostics.output.parse(await harness.behavior.callRpc("diagnostics"))).toMatchObject({ memory: { errors: 1, active: 0 } });
     expect(await harness.behavior.callRpc("detach", args)).toBe(true);
     expect(
       (await harness.behavior.runCli(["clear-cache", "--thread", "thread"]))
         .exitCode,
     ).toBe(0);
     await harness.behavior.callRpc("track", args);
-    expect(calls).toBe(1);
-    const diagnostics = await harness.behavior.callRpc("diagnostics");
-    expect(diagnostics).toMatchObject({ admitted: 1, tracked: 1 });
+    expect(calls).toBe(2);
+    const diagnostics = rpcContract.diagnostics.output.parse(await harness.behavior.callRpc("diagnostics"));
+    expect(diagnostics).toMatchObject({
+      admitted: 2,
+      tracked: 1,
+      memory: { completed: 0, errors: 1, cancelled: 0, active: 0, queued: 0 },
+    });
+    const cliDiagnostics = await harness.behavior.runCli(["diagnostics"]);
+    expect(cliDiagnostics.exitCode).toBe(0);
+    expect(JSON.parse(cliDiagnostics.stdout)).toEqual(diagnostics);
     expect(JSON.stringify(diagnostics)).not.toContain("Fixed locally");
     await harness.emitThreadEvent("thread.archived", {
       thread: makeThreadResponse({ id: "thread", archivedAt: 1 }),

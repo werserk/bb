@@ -11,6 +11,7 @@ export const settingsSchema = z.object({
   serviceTier: z.enum(["default", "fast"]).default("default"),
   instructions: z.string().max(16000).default(""),
   contextCharLimit: z.number().int().min(1000).max(100000).default(24000),
+  memoryOutputTokenLimit: z.number().int().min(0).max(2048).default(0),
   outputTokenLimit: z.number().int().min(0).max(2048).default(0),
   timeoutMs: z.number().int().min(100).max(30000).default(DEFAULT_TIMEOUT_MS),
   maxRequestsPerHour: z.number().int().min(1).max(1000).default(60),
@@ -78,6 +79,13 @@ export const settingDescriptors = {
     type: "number",
     label: "Context character limit",
     default: 24000,
+  },
+  memoryOutputTokenLimit: {
+    experimental_schema: settingsSchema.shape.memoryOutputTokenLimit.unwrap(),
+    type: "number",
+    label: "Memory output token limit",
+    description: "0 uses the model default. A positive limit requires model support.",
+    default: 0,
   },
   outputTokenLimit: {
     experimental_schema: settingsSchema.shape.outputTokenLimit.unwrap(),
