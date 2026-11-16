@@ -721,6 +721,25 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
       },
       {
+        id: "composer-suggestions",
+        title: "Next-message suggestions",
+        summary:
+          "Offer transient text that the user explicitly accepts into a draft.",
+        bullets: [
+          "useComposer().experimental_suggestions exposes a scoped reactive controller.",
+          "Capture its eligible snapshot before generation; show checks composer, completed turn, context and draft revisions.",
+          "Tab accepts into the draft. Enter and native Send accept, then use the normal submit path; controller.accept alone never submits.",
+          "Typing, context changes and dismissal invalidate pending results; unsupported renderers stay ineligible.",
+        ],
+        apiSymbols: [
+          "useComposer",
+          "PluginComposerApi.experimental_suggestions",
+          "experimental_ComposerSuggestionController",
+        ],
+        firstParty: ["Autosay", "Composer"],
+        experimental: true,
+      },
+      {
         id: "composer-state",
         title: "Draft prompt state & locking",
         summary:

@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { ComposerDraft } from "@get-bb/plugin-sdk";
+import type { ComposerDraft, PluginComposerApi } from "@get-bb/plugin-sdk";
 import type {
   ComposerEditorState,
   ComposerEditorSubmission,
@@ -8,6 +8,7 @@ import type { PluginComposerHost } from "@/components/plugin/plugin-composer-hos
 import { createKeyedListeners } from "./keyed-listeners";
 
 export interface ComposerEditorBridge {
+  suggestions?: PluginComposerApi["experimental_suggestions"];
   host: PluginComposerHost;
   pluginCustomizable: boolean;
   state: ComposerEditorState;

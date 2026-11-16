@@ -1668,3 +1668,7 @@ Unknown keys are retained for plugins that return later. Pinning appends; pane
 controls cannot be pinned. Use the thread title menu's Pin to header / Unpin from
 header controls, or `bb settings ui set threadHeader.pinned '["wprojects/threads"]'`.
 The same preference is available through `sdk.system.uiPreferences`.
+
+## Autosay
+
+The optional Autosay plugin starts disabled. Its native plugin settings configure a separate generator API base URL/model/server-only API key, instructions, bounded context/output/timeout, per-session hourly request cap and allowed project IDs. The endpoint receives conversation context independently of the thread's working-agent provider. Invalid settings fail closed; no fallback endpoint/model is selected. No additional conversation corpus is stored. See `plugins/autosay/skills/autosay/SKILL.md` for exact commands and operational boundaries.

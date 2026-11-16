@@ -1,4 +1,9 @@
 import {
+  acceptComposerSuggestion,
+  handleComposerSuggestionKey,
+} from "./composer-suggestion-keys";
+import { useSyncExternalStore } from "react";
+import {
   experimental_ComposerRoot as ComposerRoot,
   experimental_FailedVoiceRecordings as FailedVoiceRecordings,
   experimental_Icon as SdkIcon,
@@ -1034,6 +1039,15 @@ export function PromptBoxInternal({
   const rendererRef = useRef(renderer);
   rendererRef.current = renderer;
   const composer = useComposer();
+  const suggestions = composer.experimental_suggestions;
+  const suggestionSubmissionPendingRef = useRef(false);
+  const suggestionsRef = useRef(suggestions);
+  suggestionsRef.current = suggestions;
+  const suggestionState = useSyncExternalStore(
+    suggestions.subscribe,
+    suggestions.getSnapshot,
+    suggestions.getSnapshot,
+  );
   const composerDraft = composer.draft;
   const value = composerDraft.text;
   const mentionRanges = composerDraft.mentions;
@@ -1142,6 +1156,7 @@ export function PromptBoxInternal({
   const handleEditorKeyDownRef = useRef<
     (event: KeyboardEvent, isOriginalIPadHardwareEnter?: boolean) => boolean
   >(() => false);
+  const [suggestionComposing, setSuggestionComposing] = useState(false);
   const compositionEndedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const postCompositionKeyDownEvents = usePostCompositionKeyDownEvents();
   const dispatchAppCommandKey = renderer.dispatchAppCommandKey;
@@ -1342,14 +1357,15 @@ export function PromptBoxInternal({
     return transition;
   }, []);
   const showCompactLayout =
+    suggestionState.candidate === null &&
     compact?.when === "always" &&
     (!showVoiceActionGroup ||
       (value.trim().length === 0 &&
         attachments.length === 0 &&
         !pendingUploads?.length));
-  const effectivePlaceholder = showCompactLayout
-    ? compact.placeholder
-    : placeholder;
+  const effectivePlaceholder =
+    suggestionState.candidate?.text ??
+    (showCompactLayout ? compact.placeholder : placeholder);
   const composerKey = composer.key;
   const composerInputLocked = renderer.inputLocked;
   const composerLayout = showCompactLayout ? "compact" : "expanded";
@@ -1782,7 +1798,13 @@ export function PromptBoxInternal({
             });
             return false;
           },
+          compositionstart: () => {
+            suggestionsRef.current.dismiss();
+            setSuggestionComposing(true);
+            return false;
+          },
           compositionend: (_view, event) => {
+            setSuggestionComposing(false);
             if (!_view.composing) return false;
             compositionEndedAtRef.current = event.timeStamp;
             return false;
@@ -2018,6 +2040,7 @@ export function PromptBoxInternal({
       },
       onUpdate({ editor: updatedEditor, transaction }) {
         if (skipEditorChangeRef.current) return;
+        if (transaction.docChanged) suggestionsRef.current.dismiss();
         const dismissedTrigger = dismissedTriggerRef.current;
         if (
           dismissedTrigger !== null &&
@@ -2814,11 +2837,19 @@ export function PromptBoxInternal({
     ],
   );
 
+  const canSubmitSuggestion =
+    suggestionState.eligible &&
+    suggestionState.candidate !== null &&
+    !composerInputLocked &&
+    !composerMenuOpen &&
+    !suggestionComposing;
   const canSubmitActionAfterVoice = (
     action: ExperimentalComposerAction | null,
   ) =>
     action !== null &&
-    (!action.requiresInput || hasSubmittableInput) &&
+    (!action.requiresInput ||
+      hasSubmittableInput ||
+      (action === primarySubmitAction && canSubmitSuggestion)) &&
     !isAttaching &&
     !isSubmitting &&
     !submitDisabled;
@@ -2827,7 +2858,8 @@ export function PromptBoxInternal({
   const canSubmitVoiceTranscript =
     hasSubmittableInput && canSubmitActionAfterVoice(primarySubmitAction);
   const canPrimarySubmit = canSubmitAction(primarySubmitAction);
-  const canSubmit = hasSubmittableInput && canPrimarySubmit;
+  const canSubmit =
+    (hasSubmittableInput || canSubmitSuggestion) && canPrimarySubmit;
   const canModifierSubmit = canSubmitAction(modifierSubmitAction);
   const submittingBlockedReason = composerSubmittingBlockedReason({
     canSubmit: canPrimarySubmit,
@@ -2846,8 +2878,11 @@ export function PromptBoxInternal({
       submittingBlockedReason,
       isAttaching,
       attachmentError,
+      experimental_suggestionSupport: !suggestionComposing && !composerMenuOpen,
     }),
     [
+      suggestionComposing,
+      composerMenuOpen,
       attachmentError,
       canPrimarySubmit,
       composerLayout,
@@ -2929,6 +2964,7 @@ export function PromptBoxInternal({
     isPointerCoarse &&
     !isAttaching &&
     !hasSubmittableInput &&
+    !canSubmitSuggestion &&
     canStartVoiceInput;
   const showCompactVoiceAction =
     showCompactLayout &&
@@ -2971,15 +3007,44 @@ export function PromptBoxInternal({
     onSubmit?.();
   }, [onSubmit]);
 
+  const submitSuggestion = useCallback(() => {
+    if (
+      !canSubmitSuggestion ||
+      !canPrimarySubmit ||
+      suggestionSubmissionPendingRef.current
+    )
+      return false;
+    if (!acceptComposerSuggestion(suggestions)) return false;
+    suggestionSubmissionPendingRef.current = true;
+    void composer
+      .submit()
+      .catch(() => {})
+      .finally(() => {
+        suggestionSubmissionPendingRef.current = false;
+      });
+    return true;
+  }, [canSubmitSuggestion, canPrimarySubmit, suggestions, composer]);
+
   const submitPrompt = useCallback(() => {
+    if (suggestionSubmissionPendingRef.current) return;
     const shouldBlurAfterSubmit = blurAfterPointerSubmitRef.current;
     blurAfterPointerSubmitRef.current = false;
     if (!canPrimarySubmit) return;
+    if (suggestionState.candidate !== null) {
+      if (submitSuggestion() && shouldBlurAfterSubmit)
+        blurPromptEditor(editorRef.current);
+      return;
+    }
     dispatchSubmit();
     if (shouldBlurAfterSubmit) {
       blurPromptEditor(editorRef.current);
     }
-  }, [canPrimarySubmit, dispatchSubmit]);
+  }, [
+    canPrimarySubmit,
+    dispatchSubmit,
+    suggestionState.candidate,
+    submitSuggestion,
+  ]);
 
   useLayoutEffect(() => {
     const baseline = voiceSubmitBaselineRef.current;
@@ -3186,6 +3251,30 @@ export function PromptBoxInternal({
         }
       }
 
+      if (
+        event.key === "Enter" &&
+        !hasArrowNavigationModifier &&
+        canSubmitWithEnterKey &&
+        suggestionSubmissionPendingRef.current
+      ) {
+        event.preventDefault();
+        return true;
+      }
+
+      if (
+        handleComposerSuggestionKey(
+          event,
+          suggestions,
+          composerInputLocked ||
+            showTypeaheadMenu ||
+            composerMenuOpen ||
+            showVoiceActionGroup,
+          canSubmitWithEnterKey,
+          submitSuggestion,
+        )
+      )
+        return true;
+
       if (event.key === "Escape") {
         if (onEscape) {
           onEscape();
@@ -3286,6 +3375,11 @@ export function PromptBoxInternal({
       return true;
     },
     [
+      submitSuggestion,
+      suggestions,
+      composerInputLocked,
+      composerMenuOpen,
+      showVoiceActionGroup,
       activeHistoryIndex,
       activeSuggestions,
       applyHistoryDraft,
@@ -3328,7 +3422,11 @@ export function PromptBoxInternal({
       ref={formRef}
       data-promptbox=""
       data-promptbox-compact={showCompactLayout ? "" : undefined}
-      data-promptbox-collapsed={compact === undefined ? undefined : ""}
+      data-promptbox-collapsed={
+        compact === undefined || suggestionState.candidate !== null
+          ? undefined
+          : ""
+      }
       data-promptbox-voice-active={showVoiceActionGroup ? "" : undefined}
       onSubmit={handleSubmit}
       onKeyDown={(event) => handleComposerMenuKeyDown(event.nativeEvent)}
@@ -3455,6 +3553,7 @@ export function PromptBoxInternal({
               scrollContainerRef={editorScrollContainerRef}
               inputLocked={composerInputLocked}
               isCompactLayout={showCompactLayout}
+              suggestionVisible={suggestionState.candidate !== null}
               minHeight={minHeight}
               layout={surface === "new-thread" ? "root-compose" : "thread"}
               resolveMentionLink={mentionResolveLink}

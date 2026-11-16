@@ -1,3 +1,5 @@
+import { createComposerSuggestionController } from "./composer-suggestion.js";
+export { createComposerSuggestionController } from "./composer-suggestion.js";
 import {
   removeComposerMentions,
   setComposerText,
@@ -23,6 +25,7 @@ import { createComposerDraftActions } from "./composer-draft-actions.js";
 export { createComposerDraftActions } from "./composer-draft-actions.js";
 
 export interface ComposerEditorState {
+  experimental_suggestionSupport?: boolean;
   layout: "expanded" | "compact";
   isRunning: boolean;
   isSubmitting: boolean;
@@ -42,6 +45,7 @@ export interface ComposerEditorSubmission extends ComposerSubmitExtras {
 }
 
 export interface ComposerHandleTarget {
+  suggestions?: PluginComposerApi["experimental_suggestions"];
   key: string;
   scope: PluginComposerScope;
   getDraft(): ComposerDraftSnapshot;
@@ -381,7 +385,13 @@ export function createComposerHandleBinding(
   };
 
   const draftActions = createComposerDraftActions(target);
+  const unsupportedSuggestions = createComposerSuggestionController(
+    () => {},
+  ).controller;
   const handle: PluginComposerApi = {
+    get experimental_suggestions() {
+      return target().suggestions ?? unsupportedSuggestions;
+    },
     replace: draftActions.replace,
     get scope() {
       return target().scope;

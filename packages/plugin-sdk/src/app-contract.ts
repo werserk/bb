@@ -3209,6 +3209,7 @@ export interface ExperimentalComposerDecorationSource {
 
 /** Editor state a composer box reports so other plugins' `useComposer()` sees it. */
 export interface ExperimentalComposerEditorState {
+  experimental_suggestionSupport?: boolean;
   layout: "expanded" | "compact";
   isRunning: boolean;
   isSubmitting: boolean;
@@ -4598,7 +4599,46 @@ export interface PluginComposerMention {
  * `setSelection` throw "This composer is no longer available"; the older
  * text methods log a warning and do nothing.
  */
+export interface experimental_ComposerSuggestionSnapshot {
+  readonly completedTurnId: string;
+  readonly composerKey: string;
+  readonly threadId: string;
+  readonly contextRevision: string;
+  readonly draftRevision: number;
+}
+
+export interface experimental_ComposerSuggestionCandidate {
+  readonly requestId: string;
+  readonly snapshot: experimental_ComposerSuggestionSnapshot;
+  readonly text: string;
+}
+
+export interface experimental_ComposerSuggestionState {
+  readonly eligible: boolean;
+  readonly snapshot: experimental_ComposerSuggestionSnapshot | null;
+  readonly candidate: experimental_ComposerSuggestionCandidate | null;
+}
+
+export interface experimental_ComposerSuggestionEvent {
+  readonly kind: "shown" | "accepted" | "dismissed";
+  readonly requestId: string | null;
+}
+
+/** Memory-only, scoped to one mounted composer. Acceptance replaces the draft, never sends. */
+export interface experimental_ComposerSuggestionController {
+  getSnapshot(): experimental_ComposerSuggestionState;
+  subscribe(listener: () => void): () => void;
+  show(candidate: experimental_ComposerSuggestionCandidate): boolean;
+  clear(requestId: string): void;
+  dismiss(): void;
+  accept(requestId: string): "accepted" | "stale" | "ineligible";
+  onEvent(
+    listener: (event: experimental_ComposerSuggestionEvent) => void,
+  ): () => void;
+}
+
 export interface PluginComposerApi {
+  readonly experimental_suggestions: experimental_ComposerSuggestionController;
   /** Open this plugin's registered composer popup by popup id in this mounted composer. Returns false for an unavailable, suppressed or out-of-scope popup. */
   experimental_openPopup(popupId: string): boolean;
   /** Close this plugin's open popup in this composer and restore editor focus. Returns false if this plugin has no open popup. */

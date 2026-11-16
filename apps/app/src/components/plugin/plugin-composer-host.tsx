@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  experimental_ComposerSuggestionController,
   ComposerSelection,
   ComposerView,
   PluginComposerScope,
@@ -19,6 +20,12 @@ import { isComposerDraftEmpty } from "@get-bb/plugin-sdk/internal/composer-view"
 import type { PromptDraftState } from "@bb/client-core";
 
 export interface PluginComposerHost {
+  suggestions?: experimental_ComposerSuggestionController;
+  suggestionContext?: {
+    contextRevision: string;
+    completedTurnId: string;
+    eligible: boolean;
+  };
   scope: PluginComposerScope;
   textEffectKey: string;
   getCurrent(): PromptDraftState;

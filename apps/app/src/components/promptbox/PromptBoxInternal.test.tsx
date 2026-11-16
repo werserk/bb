@@ -1,3 +1,4 @@
+import { ComposerRoot } from "./composer-root";
 // @vitest-environment jsdom
 import { buildMessageClipboardHtml } from "@/lib/message-clipboard";
 
@@ -97,6 +98,7 @@ import {
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
   ComposerBox,
+  ComposerRendererHostProvider,
   type PromptBoxAction,
   type PromptBoxHandle,
   type PromptVoiceConfig,
@@ -326,6 +328,8 @@ function PromptBoxHistoryNavigationHarness({
 function renderPromptBox(
   initialValue: string,
   options: {
+    suggestionContext?: boolean;
+    onSubmitDraft?: (text: string) => void | Promise<void>;
     initialMentionRanges?: PromptTextMention[];
     mentionTriggers?: TypeaheadConfig["mention"]["triggers"];
     mentionSuggestions?: readonly PromptMentionSuggestion[];
@@ -344,12 +348,14 @@ function renderPromptBox(
     mentionSuggestions: options.mentionSuggestions,
     commandSuggestions: options.commandSuggestions,
   });
-  const onSubmit = vi.fn();
+  const currentDraft = { text: initialValue };
+  const onSubmit = vi.fn(() => options.onSubmitDraft?.(currentDraft.text));
   const promptBoxRef = createRef<PromptBoxHandle>();
   const attachmentState = { items: options.initialAttachments ?? [] };
 
   function PromptBoxHarness() {
     const [value, setValue] = useState(initialValue);
+    currentDraft.text = value;
     const [attachmentItems, setAttachmentItems] = useState(
       attachmentState.items,
     );
@@ -366,8 +372,18 @@ function renderPromptBox(
     );
     const host = useMemo<PluginComposerHost>(
       () => ({
-        scope: { kind: "new-thread", projectId: null },
+        scope: options.suggestionContext
+          ? { kind: "thread", threadId: "thread-suggestion" }
+          : { kind: "new-thread", projectId: null },
+        suggestionContext: options.suggestionContext
+          ? {
+              eligible: true,
+              completedTurnId: "turn-1",
+              contextRevision: "turn-1",
+            }
+          : undefined,
         textEffectKey: "prompt-action-composer",
+        sendsOnEnter: options.suggestionContext === true,
         getCurrent: () => draft,
         subscribeDraft: () => () => {},
         setDraft: (next) => {
@@ -6572,4 +6588,326 @@ describe("ComposerBox pill word boundaries", () => {
       expect(latestValue(changes)).toBe("I am lost. /poteto-mode Also testing"),
     );
   });
+});
+
+describe("host suggestions in the real Composer", () => {
+  it("accepts Tab as editable draft without sending and supports undo", async () => {
+    const { onSubmit } = renderPromptBox("", { suggestionContext: true });
+    await waitFor(() =>
+      expect(
+        getComposerEditorBridge(
+          "prompt-action-composer",
+        )?.suggestions?.getSnapshot().eligible,
+      ).toBe(true),
+    );
+    const controller = getComposerEditorBridge(
+      "prompt-action-composer",
+    )!.suggestions!;
+    act(() => {
+      controller.show({
+        requestId: "one",
+        snapshot: controller.getSnapshot().snapshot!,
+        text: "Continue",
+      });
+    });
+    const editor = getPromptEditorElement();
+    expect(editor.textContent).toBe("");
+    expect(editor.getAttribute("data-placeholder")).toBe("Continue");
+    fireEvent.keyDown(editor, { key: "Tab" });
+    await waitFor(() => expect(editor.textContent).toBe("Continue"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    pressUndo();
+    await waitFor(() => expect(editor.textContent).toBe(""));
+  });
+});
+
+it("keeps suggestions scoped when two mounted composers share a draft key", async () => {
+  const first = renderPromptBox("", { suggestionContext: true });
+  const firstController = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  const second = renderPromptBox("", { suggestionContext: true });
+  const secondController = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  expect(firstController).not.toBe(secondController);
+  act(() => {
+    expect(
+      firstController.show({
+        requestId: "first",
+        snapshot: firstController.getSnapshot().snapshot!,
+        text: "First reply",
+      }),
+    ).toBe(true);
+    expect(
+      secondController.show({
+        requestId: "second",
+        snapshot: secondController.getSnapshot().snapshot!,
+        text: "Second reply",
+      }),
+    ).toBe(true);
+  });
+  fireEvent.keyDown(first.view.container.querySelector(".ProseMirror")!, {
+    key: "Tab",
+  });
+  await waitFor(() =>
+    expect(
+      first.view.container.querySelector(".ProseMirror")?.textContent,
+    ).toBe("First reply"),
+  );
+  expect(second.view.container.querySelector(".ProseMirror")?.textContent).toBe(
+    "",
+  );
+  expect(secondController.getSnapshot().candidate?.text).toBe("Second reply");
+  first.view.unmount();
+  expect(firstController.getSnapshot().eligible).toBe(false);
+  expect(secondController.getSnapshot().eligible).toBe(true);
+});
+
+it("rejects pending suggestions after type and erase in one React batch", async () => {
+  renderPromptBox("", { suggestionContext: true });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  const snapshot = controller.getSnapshot().snapshot!;
+  const editor = (getPromptEditorElement() as TiptapEditorHTMLElement).editor!;
+  act(() => {
+    editor.view.dispatch(editor.state.tr.insertText("typed"));
+    editor.commands.clearContent();
+  });
+  expect(getPromptEditorElement().textContent).toBe("");
+  expect(
+    controller.show({ requestId: "late", snapshot, text: "Continue" }),
+  ).toBe(false);
+});
+
+it("withdraws a suggestion when IME composition starts", async () => {
+  renderPromptBox("", { suggestionContext: true });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "ime",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Continue",
+    });
+  });
+  fireEvent.compositionStart(getPromptEditorElement());
+  await waitFor(() => expect(controller.getSnapshot().eligible).toBe(false));
+  expect(controller.getSnapshot().candidate).toBeNull();
+  expect(controller.accept("ime")).toBe("ineligible");
+  fireEvent.compositionEnd(getPromptEditorElement());
+  await waitFor(() => expect(controller.getSnapshot().eligible).toBe(true));
+});
+
+it("revokes suggestion capability on renderer teardown while retaining its host", async () => {
+  const setDraft = vi.fn();
+  const props = createPromptBoxProps();
+  const host: PluginComposerHost = {
+    scope: { kind: "thread", threadId: "thread" },
+    textEffectKey: "renderer-lifecycle",
+    suggestionContext: {
+      eligible: true,
+      contextRevision: "context",
+      completedTurnId: "turn",
+    },
+    getCurrent: () => ({ text: "", mentions: [], attachments: [] }),
+    subscribeDraft: () => () => {},
+    setDraft,
+    focus: () => {},
+  };
+  function Renderer({ supported }: { supported: boolean }) {
+    const rootRef = useRef<HTMLDivElement>(null);
+    const editor: ComponentProps<typeof ComposerRoot>["editor"] = {
+      state: {
+        layout: "expanded",
+        isRunning: false,
+        isSubmitting: false,
+        isSubmittingBlocked: true,
+        submittingBlockedReason: null,
+        isAttaching: false,
+        attachmentError: null,
+        experimental_suggestionSupport: supported,
+      },
+      insertAtCursor: () => false,
+      focus: () => true,
+      focusEnd: () => {},
+      acceptsThreadDrop: () => false,
+      insertDroppedThreads: () => {},
+      openPopup: () => false,
+      closePopup: () => false,
+      isPopupOpen: () => false,
+    };
+    return (
+      <div ref={rootRef}>
+        <ComposerRoot rootRef={rootRef} editor={editor} />
+      </div>
+    );
+  }
+  function Harness() {
+    const [mounted, setMounted] = useState(true);
+    const [revision, rerender] = useState(0);
+    return (
+      <PluginComposerHostProvider value={host}>
+        <button onClick={() => rerender(revision + 1)}>
+          Refresh host {revision}
+        </button>
+        <button onClick={() => setMounted(false)}>Remove renderer</button>
+        <ComposerRendererHostProvider {...props}>
+          {mounted ? <Renderer supported /> : null}
+        </ComposerRendererHostProvider>
+      </PluginComposerHostProvider>
+    );
+  }
+  render(<Harness />);
+  await waitFor(() =>
+    expect(
+      getComposerEditorBridge("renderer-lifecycle")?.suggestions?.getSnapshot()
+        .eligible,
+    ).toBe(true),
+  );
+  const controller =
+    getComposerEditorBridge("renderer-lifecycle")!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "retained",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Continue",
+    });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh host 0" }));
+  expect(controller.getSnapshot().candidate?.requestId).toBe("retained");
+  fireEvent.click(screen.getByRole("button", { name: "Remove renderer" }));
+  expect(controller.getSnapshot().eligible).toBe(false);
+  expect(controller.accept("retained")).toBe("ineligible");
+  expect(setDraft).not.toHaveBeenCalled();
+});
+
+it("expands a compact composer while showing a suggestion and restores compact after dismissal", async () => {
+  const { view } = renderPromptBox("", {
+    suggestionContext: true,
+    compact: true,
+    props: { compact: { when: "always", placeholder: "Ask a follow-up" } },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  expect(
+    view.container.querySelector("[data-promptbox-compact]"),
+  ).not.toBeNull();
+  const text = "Run the remaining tests and report the results.";
+  act(() => {
+    expect(
+      controller.show({
+        requestId: "narrow",
+        snapshot: controller.getSnapshot().snapshot!,
+        text,
+      }),
+    ).toBe(true);
+  });
+  await waitFor(() =>
+    expect(view.container.querySelector("[data-promptbox-compact]")).toBeNull(),
+  );
+  expect(getPromptEditorElement().getAttribute("data-placeholder")).toBe(text);
+  expect(screen.queryByRole("button", { name: /Use suggestion/ })).toBeNull();
+  expect(view.container.querySelector("[data-promptbox-collapsed]")).toBeNull();
+  expect(controller.getSnapshot().candidate?.requestId).toBe("narrow");
+  expect(controller.getSnapshot().eligible).toBe(true);
+  act(() => controller.dismiss());
+  await waitFor(() =>
+    expect(
+      view.container.querySelector("[data-promptbox-compact]"),
+    ).not.toBeNull(),
+  );
+});
+
+it("sends the suggestion through the host on Enter with the current draft exactly once", async () => {
+  const sent: string[] = [];
+  let finish = () => {};
+  const { onSubmit } = renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: (text) => {
+      sent.push(text);
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    expect(
+      controller.show({
+        requestId: "send",
+        snapshot: controller.getSnapshot().snapshot!,
+        text: "Run the tests",
+      }),
+    ).toBe(true);
+  });
+  const editor = getPromptEditorElement();
+  expect(editor.textContent).toBe("");
+  fireEvent.keyDown(editor, { key: "Enter" });
+  expect(sent).toEqual(["Run the tests"]);
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(editor.textContent).toBe("Run the tests");
+  fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+  expect(editor.querySelectorAll("p").length).toBe(2);
+  expect(sent).toEqual(["Run the tests"]);
+  fireEvent.keyDown(editor, { key: "Enter", repeat: true });
+  fireEvent.keyDown(editor, { key: "Enter" });
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish();
+  });
+});
+
+it("retains accepted suggestion draft when the host send rejects", async () => {
+  const { onSubmit } = renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: async () => {
+      throw new Error("Reported send failure");
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "fail",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Run the tests",
+    });
+  });
+  fireEvent.keyDown(getPromptEditorElement(), { key: "Enter" });
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  expect(getPromptEditorElement().textContent).toBe("Run the tests");
+  expect(controller.getSnapshot().candidate).toBeNull();
+});
+
+it("sends the suggestion with the existing native submit button", async () => {
+  const sent: string[] = [];
+  renderPromptBox("", {
+    suggestionContext: true,
+    onSubmitDraft: (text) => {
+      sent.push(text);
+    },
+  });
+  const controller = getComposerEditorBridge(
+    "prompt-action-composer",
+  )!.suggestions!;
+  act(() => {
+    controller.show({
+      requestId: "button",
+      snapshot: controller.getSnapshot().snapshot!,
+      text: "Run the tests",
+    });
+  });
+  const button = screen.getByRole("button", { name: "Submit (Enter)" });
+  expect(button.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(sent).toEqual(["Run the tests"]);
+  expect(controller.getSnapshot().candidate).toBeNull();
 });

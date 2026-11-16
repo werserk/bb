@@ -4751,3 +4751,7 @@ presentation removes it only with matching event sender and recorded agent;
 canonical history/publication/material checks still gate attribution. Internal
 claimed questionResponse drains preserve a self agent sender at the checkpoint
 and final send. Ordinary self sends retain their existing local semantics.
+
+## Composer suggestions
+
+`PluginComposerApi.experimental_suggestions` and the `experimental_ComposerSuggestion*` types expose scoped transient candidates. `experimental_suggestionSupport` on editor state advertises renderer capability. The app host owns context/draft revisions; the shipped Composer's Tab, Enter and native Send actions call the same controller `accept` as plugins; Enter and Send then use the normal host submit operation. Unsupported renderers stay ineligible. Stabilization requires real-editor acceptance/undo and cross-pane, type-erase, stale context, questions, reconnect, keyboard/IME and disposal tests. No suggestion enters persistence or submit payload before explicit acceptance. Autosay is the first generating consumer; SDK test harness uses the same controller implementation.

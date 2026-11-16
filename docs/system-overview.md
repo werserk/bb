@@ -456,3 +456,7 @@ pending interactions, performs five warmups and 30 measured passes through the
 server reader, and reports nearest-rank p50/p95 plus a projection checksum.
 Each pass refuses load1 >=16. It measures plan reading only, not the complete
 WProjects project-state build or HTTP/SDK overhead.
+
+### Next-message suggestions
+
+Autosay (`plugins/autosay`) owns bounded conversation selection, explicit generator configuration and no-tools inference. The app host supplies a current root-turn/context snapshot independent of timeline presentation, and the SDK composer controller keeps a candidate outside the persisted draft. The shipped Composer renders the candidate through the existing placeholder decoration. Tab accepts into the draft; plain Enter or the native Send button accepts and immediately uses the ordinary host submission path. Both retain snapshot and submission guards. Eligibility fails closed on input, queue, questions, connection/focus changes or unsupported renderers. Runtime requests/counters are memory-only; no transcript corpus or daemon/schema change is introduced.
