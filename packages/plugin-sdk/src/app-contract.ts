@@ -4628,6 +4628,7 @@ export interface experimental_ComposerSuggestionState {
 export interface experimental_ComposerSuggestionEvent {
   readonly kind: "shown" | "accepted" | "dismissed";
   readonly requestId: string | null;
+  readonly experimental_cause?: "user" | "context" | "programmatic";
 }
 
 /** Memory-only, scoped to one mounted composer. Acceptance replaces the draft, never sends. */

@@ -1,3 +1,4 @@
+import { readOwnerInstructions } from "../threads/workspace-agent-instructions.js";
 import {
   rpcInvalidationTags,
   type ContractTagDeclarations,
@@ -1529,6 +1530,12 @@ export function createPluginApi(options: {
   });
 
   const api: BbPluginApi = {
+    experimental_userInstructions: {
+      read() {
+        assertLive();
+        return readOwnerInstructions(logger, dataDir);
+      },
+    },
     get experimental_questionResolution() {
       assertLive();
       const resolve = options.resolveQuestion;

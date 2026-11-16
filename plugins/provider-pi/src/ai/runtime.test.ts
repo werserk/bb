@@ -21,6 +21,8 @@ const request = {
   temperature: null,
   reasoningEffort: null,
   serviceTier: null,
+  experimental_sessionAffinity: null,
+  routing: "default" as const,
   timeoutMs: 1000,
 };
 function fixture() {
@@ -57,6 +59,7 @@ describe("Pi direct AI", () => {
     const f = fixture();
     const signal = new AbortController().signal;
     expect(await f.ai.generate(request, signal)).toEqual({
+      routingApplied: "inapplicable",
       text: "first\nsecond",
       model: "test/sample",
       actualModel: null,
@@ -136,9 +139,96 @@ describe("Pi direct AI", () => {
         displayName: "Sample",
         provider: "test",
         maxOutputTokens: false,
+        reasoningEfforts: [],
+        experimental_sessionAffinity: false,
       },
     ]);
     await expect(f.ai.generate(request, signal)).rejects.toThrow("unsupported");
     expect(f.completeSimple).not.toHaveBeenCalled();
   });
 });
+
+it.each(["default", "lowest-latency"] as const)(
+  "serializes exact OpenRouter options through authenticated ModelRuntime: %s",
+  async (routing) => {
+    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+    const { InMemoryCredentialStore } = await import("@earendil-works/pi-ai");
+    const runtime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+      refreshOnCreate: false,
+      allowModelNetwork: false,
+    });
+    await runtime.setRuntimeApiKey("openrouter", "test-only-not-a-secret");
+    const selected: Model<Api> = {
+      ...model,
+      provider: "openrouter",
+      id: "vendor/exact-model",
+      baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: true,
+      thinkingLevelMap: { low: null },
+    };
+    const original = structuredClone(selected);
+    const bodies: unknown[] = [];
+    const headers: Headers[] = [];
+    const fetch: typeof globalThis.fetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      headers.push(new Headers(init?.headers));
+      return new Response(
+        'data: {"id":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    };
+    const ai = createPiAiRuntime(async () => ({
+      getAvailable: async () => [selected],
+      completeSimple: (m, c, o) =>
+        runtime.completeSimple(m, c, { ...o, fetch }),
+    }));
+    const signal = new AbortController().signal;
+    const catalog = await ai.models(signal);
+    expect(catalog[0]?.reasoningEfforts).toContain("none");
+    expect(catalog[0]?.reasoningEfforts).not.toContain("low");
+    for (const reasoningEffort of ["none", null]) {
+      await ai.generate(
+        {
+          ...request,
+          model: "openrouter/vendor/exact-model",
+          reasoningEffort,
+          experimental_sessionAffinity: "thread-test",
+          routing,
+        },
+        signal,
+      );
+    }
+    for (const body of bodies) {
+      expect(body).toMatchObject({
+        model: "vendor/exact-model",
+        reasoning: { effort: "none" },
+      });
+      expect(body).not.toHaveProperty("tools");
+      if (routing === "lowest-latency")
+        expect(body).toHaveProperty("provider", {
+          sort: "latency",
+          require_parameters: true,
+          allow_fallbacks: false,
+        });
+      else expect(body).not.toHaveProperty("provider");
+    }
+    expect(bodies).toHaveLength(2);
+    expect(
+      headers.every((header) => header.get("x-session-id") === "thread-test"),
+    ).toBe(true);
+    expect(selected).toEqual(original);
+    await expect(
+      ai.generate(
+        {
+          ...request,
+          model: "openrouter/vendor/exact-model",
+          reasoningEffort: "low",
+        },
+        signal,
+      ),
+    ).rejects.toThrow("Unsupported");
+    expect(bodies).toHaveLength(2);
+  },
+);

@@ -1,3 +1,4 @@
+import { emptyTaskState } from "./task-state.js";
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { generate } from "./generate.js";
@@ -25,7 +26,11 @@ describe("native generation boundary", () => {
       expect(request.reasoningEffort).toBe("none");
       expect(request.serviceTier).toBe("fast");
       expect(request).not.toHaveProperty("tools");
-      return '{"kind":"suggestion","text":"Run the tests."}';
+      return JSON.stringify({
+        kind: "suggestion",
+        text: "Run the tests.",
+        state: emptyTaskState(),
+      });
     });
     try {
       expect(
@@ -35,7 +40,11 @@ describe("native generation boundary", () => {
           "context",
           new AbortController().signal,
         ),
-      ).toEqual({ kind: "suggestion", text: "Run the tests." });
+      ).toEqual({
+        kind: "suggestion",
+        text: "Run the tests.",
+        state: emptyTaskState(),
+      });
       expect(calls).toBe(1);
     } finally {
       await host.harness.lifecycle.dispose();
@@ -68,7 +77,7 @@ describe("native generation boundary", () => {
     const host = createFakePluginHost({ pluginId: "prompt-suggestion" });
     const model = await installGenerator(
       host.bb,
-      async () => '{"kind":"none"}',
+      async () => JSON.stringify({ kind: "none", state: emptyTaskState() }),
       "length",
     );
     try {

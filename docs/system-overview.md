@@ -470,3 +470,12 @@ AI Gateway is an optional plugin over that API, with GET models and non-streamin
 ### Suggestion request visibility
 
 Prompt Suggestion reports its scoped RPC lifecycle through the shared suggestion controller. Pending/error changes preserve composer snapshot identity so rendering cannot restart inference. Core Composer renders a loading placeholder and spinner, clears it on none/cancellation, and exposes failure/timeout details without blocking input. Request IDs and snapshots prevent stale completions from replacing a newer state. Settings show enabled status, model, reasoning and requested speed; requested speed is not proof of upstream service tier.
+
+
+### Goal-oriented Prompt Suggestion
+
+The server plugin owns preparation, a bounded foreground-interest cache, one inference queue and a separate process-local one-hour admission ledger. UI, CLI and RPC use that coordinator; browser focus does not own leased background generation. Native lifecycle events wake authoritative eligibility reads, and tagged RPC invalidation delivers state without polling. One admitted generation returns a source-linked task state plus a suggestion/none; no extra summarizer, permanent agent or transcript database is added. Thread history remains authoritative, explicit context resets invalidate memory, and unknown goal context stays incomplete.
+
+Owner principles come from the same raw instruction reader as core thread composition. Instruction/configuration revisions and source snapshots fence generation and delivery. The native composer still owns editable Tab acceptance and ordinary Enter/Send. Explicit dismissal causes distinguish a user decision from focus cleanup. There is no new atomic server context predicate at Send; this version promises fresh delivery checks and the existing local snapshot fence.
+
+Pi performs provider translation and credential access on the host. Generic session affinity and exact reasoning are capability-checked in the shared dispatcher; OpenRouter latency routing belongs to Pi's server-side native-generation settings and is translated on the host. Host protocol 268 carries the new options, capabilities and applied-routing receipt. AI Gateway and Prompt Suggestion use the same native generation path; neither stores provider keys.

@@ -107,3 +107,7 @@ type CompanionResult =
 `claim_1`: Tasks 3–4, detached composer test. `claim_2`: Tasks 3–4, invalidation table and documented Send limit. `claim_3`: Task 3 admission lifetime tests. `claim_4`: provider plan Tasks 1–4. `claim_5`: Task 5 timing and capped pilot. `claim_6`: Task 4 shared operations plus provider documentation. `claim_7`: Tasks 1–2 and Task 5 semantic fixtures. `invariant_2`: Task 3 ledger and no extra inference. `invariant_3`: Task 2 serialized budget and source boundary. `invariant_1`: plan-writing makes no production/code changes; later execution remains subject to its authorized boundary.
 
 Independent plan review on 2026-11-16: GREEN, reviewer `/root/companion_design_review`. No blocking findings. Nonblocking notes: preserve the main agent's existing instruction composition (Task 1), state the process/window deduplication boundary accurately (Tasks 3 and 6), and keep timing clock domains separate (Task 5). Review receipt is retained in the owning thread as `companion-implementation-plan-review.md`. This is readiness to start, not implementation, semantic-quality, latency or release acceptance.
+
+## Execution receipt
+
+Local implementation and verification are recorded in [the 2026-11-16 verification receipt](2026-11-16-companion-verification.md). The fast-provider pilot is still pending authenticated OpenRouter access; no release or production activation occurred. Original checklists above preserve the approved scope.

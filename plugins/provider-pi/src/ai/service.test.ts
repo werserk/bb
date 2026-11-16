@@ -14,9 +14,12 @@ it("routes generation to the advertised host even after primary host changes", a
               displayName: "M",
               provider: "test",
               maxOutputTokens: true,
+              reasoningEfforts: [],
+              experimental_sessionAffinity: false,
             },
           ]
         : {
+            routingApplied: "inapplicable",
             text: "ok",
             actualModel: null,
             actualServiceTier: null,
@@ -25,7 +28,7 @@ it("routes generation to the advertised host even after primary host changes", a
             usage: null,
           },
   });
-  registerPiAiService(bb);
+  const status = registerPiAiService(bb);
   const service =
     harness.registrations.aiServiceRegistrations[0]?.experimental_text;
   if (!service) throw new Error("Missing text service");
@@ -42,6 +45,7 @@ it("routes generation to the advertised host even after primary host changes", a
       temperature: null,
       reasoningEffort: null,
       serviceTier: null,
+      experimental_sessionAffinity: null,
       timeoutMs: 1000,
     },
     {
@@ -51,10 +55,15 @@ it("routes generation to the advertised host even after primary host changes", a
         capabilities: {
           ...model.capabilities,
           serviceTiers: model.capabilities.serviceTiers ?? [],
+          experimental_sessionAffinity: false,
         },
       },
     },
   );
+  expect(status()).toEqual({
+    requestedRouting: "default",
+    last: { model: "test/m", routingApplied: "inapplicable" },
+  });
   expect(harness.inspection.experimental_hostRpcCalls.at(-1)).toMatchObject({
     method: "pi.ai.generate",
     hostId: "host_original",

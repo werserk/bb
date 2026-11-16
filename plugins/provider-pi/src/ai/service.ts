@@ -1,7 +1,14 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { piAiContract } from "./contract.js";
 
-export function registerPiAiService(bb: BbPluginApi) {
+export function registerPiAiService(
+  bb: BbPluginApi,
+  routing: () => "default" | "lowest-latency" = () => "default",
+) {
+  let last: {
+    model: string;
+    routingApplied: "default" | "lowest-latency" | "inapplicable";
+  } | null = null;
   const host = bb.hosts.experimental_client({ contract: piAiContract });
   bb.experimental_aiServices.register({
     id: "pi",
@@ -24,20 +31,24 @@ export function registerPiAiService(bb: BbPluginApi) {
           capabilities: {
             maxOutputTokens: model.maxOutputTokens,
             temperature: false,
-            reasoningEfforts: [],
+            reasoningEfforts: model.reasoningEfforts,
+            experimental_sessionAffinity: model.experimental_sessionAffinity,
             serviceTiers: [],
           },
         }));
       },
-      generate(request, { signal, model }) {
+      async generate(request, { signal, model }) {
         if (model.profile !== "default")
           throw new Error("Unsupported Pi profile");
-        return host.call(
+        const { routingApplied, ...result } = await host.call(
           "pi.ai.generate",
-          { ...request, messages: [...request.messages] },
+          { ...request, messages: [...request.messages], routing: routing() },
           { hostId: model.hostId, signal, timeoutMs: request.timeoutMs + 1000 },
         );
+        last = { model: result.model, routingApplied };
+        return result;
       },
     },
   });
+  return () => ({ requestedRouting: routing(), last });
 }

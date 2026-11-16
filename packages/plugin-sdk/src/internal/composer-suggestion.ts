@@ -54,8 +54,10 @@ export function createComposerSuggestionController(
   const emit = (
     kind: experimental_ComposerSuggestionEvent["kind"],
     requestId: string | null,
+    experimental_cause: "user" | "context" | "programmatic",
   ) => {
-    for (const listener of [...events]) listener({ kind, requestId });
+    for (const listener of [...events])
+      listener({ kind, requestId, experimental_cause });
   };
   const publish = (next: experimental_ComposerSuggestionState) => {
     state = Object.freeze(next);
@@ -72,7 +74,7 @@ export function createComposerSuggestionController(
       current.draftRevision === snapshot.draftRevision
     );
   };
-  const invalidate = (dismissed = true) => {
+  const invalidate = (cause: "user" | "context" | "programmatic" | null) => {
     revision++;
     latestRequestId = null;
     const old = state.candidate;
@@ -91,7 +93,7 @@ export function createComposerSuggestionController(
       candidate: null,
       request: null,
     });
-    if (dismissed) emit("dismissed", old?.requestId ?? null);
+    if (cause) emit("dismissed", old?.requestId ?? null, cause);
   };
   const controller: experimental_ComposerSuggestionController = {
     getSnapshot: () => state,
@@ -161,23 +163,23 @@ export function createComposerSuggestionController(
           snapshot: Object.freeze({ ...candidate.snapshot }),
         }),
       });
-      emit("shown", candidate.requestId);
+      emit("shown", candidate.requestId, "programmatic");
       return true;
     },
     clear(requestId) {
-      if (state.candidate?.requestId === requestId) invalidate();
+      if (state.candidate?.requestId === requestId) invalidate("programmatic");
       else if (state.request?.requestId === requestId)
         publish({ ...state, request: null });
     },
-    dismiss: () => invalidate(),
+    dismiss: () => invalidate("user"),
     accept(requestId) {
       if (!state.eligible || !canUse()) return "ineligible";
       const candidate = state.candidate;
       if (candidate?.requestId !== requestId || !matches(candidate.snapshot))
         return "stale";
-      invalidate(false);
+      invalidate(null);
       replace(candidate.text);
-      emit("accepted", requestId);
+      emit("accepted", requestId, "user");
       return "accepted";
     },
   };
@@ -186,12 +188,12 @@ export function createComposerSuggestionController(
     update(next: ComposerSuggestionInput) {
       if (JSON.stringify(input) === JSON.stringify(next)) return;
       input = next;
-      invalidate();
+      invalidate("context");
     },
-    draftChanged: () => invalidate(),
+    draftChanged: () => invalidate("user"),
     dispose() {
       input = { ...input, eligible: false, threadId: null };
-      invalidate();
+      invalidate("context");
     },
   };
 }

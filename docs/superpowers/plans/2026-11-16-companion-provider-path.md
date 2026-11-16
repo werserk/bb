@@ -91,3 +91,7 @@ const openRouterRouting = {
 ## Completion boundary
 
 Provider completion requires passing dispatcher, Pi serializer, routing, Gateway and daemon-version checks plus independent change review. The native path is usable even without enabling companion background generation. No subsecond claim follows from synthetic tests; no release, provider switch or paid pilot is included in this plan-writing step.
+
+## Execution receipt
+
+Local implementation and verification are recorded in [the 2026-11-16 verification receipt](2026-11-16-companion-verification.md). The fast-provider pilot is still pending authenticated OpenRouter access; no release or production activation occurred. Original checklists above preserve the approved scope.

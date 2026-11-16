@@ -3,6 +3,83 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server.js";
 
 describe("gateway shared dispatch", () => {
+  it.each([undefined, " group ", "x".repeat(257), " "])(
+    "shares HTTP and CLI affinity admission: %s",
+    async (hint) => {
+      for (const supported of [false, true]) {
+        const { bb, harness } = createFakePluginHost({
+          pluginId: "ai-gateway",
+        });
+        const hints: (string | null)[] = [];
+        bb.experimental_aiServices.register({
+          id: "fixture",
+          displayName: "Fixture",
+          experimental_text: {
+            models: async () => [
+              {
+                id: "m",
+                displayName: "M",
+                provider: "test",
+                hostId: "h",
+                profile: "default",
+                capabilities: {
+                  maxOutputTokens: true,
+                  temperature: false,
+                  reasoningEfforts: [],
+                  experimental_sessionAffinity: supported,
+                },
+              },
+            ],
+            generate: async (request) => {
+              hints.push(request.experimental_sessionAffinity);
+              return {
+                text: "ok",
+                model: request.model,
+                actualModel: null,
+                finishReason: "stop",
+                usage: null,
+              };
+            },
+          },
+        });
+        plugin(bb);
+        try {
+          const [model] =
+            await bb.experimental_aiServices.experimental_models();
+          const valid =
+            hint === undefined ||
+            (supported && hint.trim().length > 0 && hint.trim().length <= 256);
+          const http = await harness.behavior.fetchHttp(
+            "POST",
+            "/v1/chat/completions",
+            {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                model: model!.id,
+                messages: [{ role: "user", content: "test" }],
+                prompt_cache_key: hint,
+              }),
+            },
+          );
+          const cli = await harness.behavior.runCli([
+            "generate",
+            "--model",
+            model!.id,
+            "--prompt",
+            "test",
+            ...(hint === undefined ? [] : ["--session-affinity", hint]),
+          ]);
+          expect(http.status).toBe(valid ? 200 : 400);
+          expect(cli.exitCode === 0).toBe(valid);
+          expect(hints).toEqual(
+            valid ? [hint?.trim() ?? null, hint?.trim() ?? null] : [],
+          );
+        } finally {
+          await harness.lifecycle.dispose();
+        }
+      }
+    },
+  );
   it.each([
     { label: "ordinary", nativeId: "native" },
     { label: "long qualified ID", nativeId: "n".repeat(512) },

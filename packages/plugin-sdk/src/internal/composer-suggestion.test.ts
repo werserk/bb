@@ -111,3 +111,26 @@ it("rejects an older response after a newer request completed without a suggesti
   controller.experimental_finish("b", candidate.snapshot, null);
   expect(controller.show(candidate)).toBe(false);
 });
+
+it.each([
+  ["clear", "programmatic"],
+  ["context", "context"],
+  ["draft", "user"],
+  ["dismiss", "user"],
+  ["accept", "user"],
+] as const)("emits the explicit cause for %s", (action, cause) => {
+  const store = setup();
+  store.controller.show(store.candidate);
+  const events = vi.fn();
+  store.controller.onEvent(events);
+  if (action === "clear") store.controller.clear("a");
+  if (action === "context") store.update({ ...store.input, eligible: false });
+  if (action === "draft") store.draftChanged();
+  if (action === "dismiss") store.controller.dismiss();
+  if (action === "accept") store.controller.accept("a");
+  expect(events).toHaveBeenCalledExactlyOnceWith({
+    kind: action === "accept" ? "accepted" : "dismissed",
+    requestId: "a",
+    experimental_cause: cause,
+  });
+});

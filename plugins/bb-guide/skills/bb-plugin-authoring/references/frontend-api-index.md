@@ -457,3 +457,13 @@ For `app.slots.experimental_tab`, `ExperimentalTabRegistration`,
 `experimental_useAppPanel().openTab`, see
 [Thread side-panel tabs in the Plugin Guide](https://getbb.app/plugin-guide#surface-thread-panel).
 Source upgrades are in [Tab API migration](frontend-registration.md#tab-api-migration).
+
+## Experimental composer suggestions
+
+- `experimental_ComposerSuggestionSnapshot`
+- `experimental_ComposerSuggestionCandidate`
+- `experimental_ComposerSuggestionState`
+- `experimental_ComposerSuggestionEvent`
+- `experimental_ComposerSuggestionController`
+
+Behavior is in the Plugin Guide; use installed SDK declarations for signatures.

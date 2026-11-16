@@ -1,10 +1,13 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { TaskMemory } from "./task-state.js";
+import { contextInput, sourceMessage, textRevision } from "./context-input.js";
 
 export async function readContext(
   bb: BbPluginApi,
   threadId: string,
   limit: number,
   signal?: AbortSignal,
+  options: { allowActive?: boolean; memory?: TaskMemory | null } = {},
 ) {
   const [thread, timeline, questions, interactions, events] = await Promise.all(
     [
@@ -28,7 +31,8 @@ export async function readContext(
     ],
   );
   if (
-    thread.status !== "idle" ||
+    (thread.status !== "idle" &&
+      !(options.allowActive && thread.status === "active")) ||
     thread.archivedAt !== null ||
     thread.deletedAt !== null ||
     thread.queuedMessageCount > 0 ||
@@ -47,7 +51,7 @@ export async function readContext(
       event.scope.kind === "turn" &&
       event.scope.turnId === turnId,
   );
-  if (
+  const completed = !(
     !completion ||
     completion.type !== "turn/completed" ||
     completion.data.status !== "completed" ||
@@ -57,8 +61,8 @@ export async function readContext(
         event.type === "system/thread/interrupted" &&
         event.seq > completion.seq,
     )
-  )
-    return null;
+  );
+  if (!completed && !options.allowActive) return null;
   const messages = timeline.rows
     .flatMap((row) => (row.kind === "turn" ? (row.children ?? []) : [row]))
     .filter((row) => row.kind === "conversation")
@@ -70,32 +74,42 @@ export async function readContext(
     )
     .sort((a, b) => a.sourceSeqEnd - b.sourceSeqEnd);
   const last = messages.at(-1);
-  if (!last || last.role !== "assistant" || last.turnId !== turnId) return null;
-  const selected: { role: string; text: string }[] = [];
-  for (const message of [...messages].reverse()) {
-    const next = [{ role: message.role, text: message.text }, ...selected];
-    if (JSON.stringify(next).length > limit) break;
-    selected.unshift({ role: message.role, text: message.text });
-  }
-  if (
-    !selected.some((message) => message.role === "user") ||
-    selected.at(-1)?.text !== last.text
-  )
-    return null;
+  const eligible =
+    thread.status === "idle" &&
+    completed &&
+    last?.role === "assistant" &&
+    last.turnId === turnId;
+  if (!eligible && !options.allowActive) return null;
+  const input = contextInput(
+    messages.map((message) =>
+      sourceMessage(
+        message.id,
+        message.role,
+        message.text,
+        message.sourceSeqEnd,
+      ),
+    ),
+    limit,
+    options.memory ?? null,
+    timeline.contextBoundarySeq ?? null,
+    timeline.timelinePage.olderCursor !== null,
+  );
+  if (!input) return null;
   return {
     projectId: thread.projectId,
-    turnId: turnId,
-    revision: JSON.stringify([
-      timeline.tag,
-      timeline.contextBoundarySeq,
-      turnId,
-      questions.readRevision,
-      thread.status,
-      thread.queuedMessageCount,
-    ]),
-    text: JSON.stringify({
-      source: "current thread; older messages may be omitted",
-      messages: selected,
-    }),
+    turnId,
+    eligible,
+    boundary: timeline.contextBoundarySeq ?? null,
+    revision: textRevision(
+      JSON.stringify([
+        timeline.contextBoundarySeq,
+        turnId,
+        messages.map((message) => [message.id, message.text]),
+      ]),
+    ),
+    ...input,
   };
 }
+export type CompanionContext = NonNullable<
+  Awaited<ReturnType<typeof readContext>>
+>;

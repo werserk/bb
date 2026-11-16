@@ -3,10 +3,10 @@ import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import type { z } from "zod";
 import type { piGenerationSchema } from "./contract.js";
 
+import { resolvePiOptions } from "./options.js";
+
 type Runtime = Pick<ModelRuntime, "getAvailable" | "completeSimple">;
 const identity = (model: Model<Api>) => `${model.provider}/${model.id}`;
-const outputLimitSupported = (model: Model<Api>) =>
-  model.api !== "openai-codex-responses";
 
 function contextFor(
   input: z.infer<typeof piGenerationSchema>,
@@ -58,7 +58,7 @@ export function createPiAiRuntime(
           id: identity(model),
           displayName: model.name,
           provider: model.provider,
-          maxOutputTokens: outputLimitSupported(model),
+          ...resolvePiOptions(model).capabilities,
         }),
       );
     },
@@ -66,11 +66,7 @@ export function createPiAiRuntime(
       input: z.infer<typeof piGenerationSchema>,
       signal: AbortSignal,
     ) {
-      if (
-        input.temperature !== null ||
-        input.reasoningEffort !== null ||
-        input.serviceTier !== null
-      )
+      if (input.temperature !== null || input.serviceTier !== null)
         throw new Error("Unsupported generation option");
       signal.throwIfAborted();
       const runtime = await create(signal);
@@ -78,12 +74,12 @@ export function createPiAiRuntime(
         (candidate) => identity(candidate) === input.model,
       );
       if (!model) throw new Error("The selected Pi model is unavailable");
-      if (input.maxOutputTokens !== null && !outputLimitSupported(model))
-        throw new Error("Output token limit is unsupported by this model");
+      const resolved = resolvePiOptions(model, input);
       const result = await runtime.completeSimple(
-        model,
-        contextFor(input, model),
+        resolved.model,
+        contextFor(input, resolved.model),
         {
+          ...resolved.options,
           signal,
           timeoutMs: input.timeoutMs,
           maxRetries: 0,
@@ -100,6 +96,7 @@ export function createPiAiRuntime(
       if (result.content.some((part) => part.type === "toolCall"))
         throw new Error("Tool calls are unsupported");
       return {
+        routingApplied: resolved.routingApplied,
         text: result.content
           .filter((part) => part.type === "text")
           .map((part) => part.text)

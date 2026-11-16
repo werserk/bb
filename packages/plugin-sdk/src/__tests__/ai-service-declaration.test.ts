@@ -20,6 +20,7 @@ describe("validatePluginAiServiceDeclaration", () => {
       displayName: "Acme AI",
       complete,
       transcribe: null,
+      experimental_text: null,
       status,
     });
     expect(Object.isFrozen(normalized)).toBe(true);

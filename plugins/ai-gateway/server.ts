@@ -171,6 +171,11 @@ export default function plugin(bb: BbPluginApi) {
               required: true,
               description: "Exact model ID from models",
             },
+            "session-affinity": {
+              type: "string",
+              description:
+                "Opaque session hint, 1–256 characters; requires model support",
+            },
             "service-tier": {
               type: "string",
               description: "default, fast or priority; requires model support",
@@ -190,6 +195,7 @@ export default function plugin(bb: BbPluginApi) {
             const request = chatSchema.parse({
               model: input.options.model,
               messages: [{ role: "user", content: input.options.prompt }],
+              prompt_cache_key: input.options["session-affinity"],
               service_tier: input.options["service-tier"],
               reasoning_effort: input.options["reasoning-effort"],
             });

@@ -16,3 +16,12 @@ The plugin starts `pi` in RPC mode on the host and loads a small bb extension in
 - Install the Pi coding agent on the host machine: `npm install -g @earendil-works/pi-coding-agent`. Version 0.84.0 or newer is required.
 - Sign in with `pi` on that machine.
 - Optional: set `BB_PI_BRIDGE_COMMAND` and `BB_PI_BRIDGE_ARGS` on the host to use a Pi executable that is not on `PATH`.
+
+Native shared text generation resolves capabilities and request options together in
+`src/ai/options.ts`. The server owns `nativeGenerationRouting` normalization and
+passes its explicit value over the host RPC. Lowest-latency routing clones only the
+request model's OpenRouter compatibility options; it never mutates the catalog or
+agent-turn settings. ModelRuntime remains the sole authentication and transport
+owner. Supported reasoning levels come from installed Pi metadata and verified
+OpenRouter completions serializer semantics. Explicit affinity is admitted only
+on the compatible OpenRouter route. Null reasoning retains existing Pi defaults.

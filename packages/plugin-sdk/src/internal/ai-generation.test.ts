@@ -73,6 +73,49 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
         callback: generate,
       };
     }
+    it.each([undefined, null, "group", "  group  ", "", " ", "x".repeat(257)])(
+      "validates affinity %s before invoking adapters",
+      async (hint) => {
+        for (const supported of [false, true]) {
+          const service = setup(undefined, {
+            ...native,
+            capabilities: {
+              ...native.capabilities,
+              ...(supported ? { experimental_sessionAffinity: true } : {}),
+            },
+          });
+          const [model] = await service.models();
+          const pending = service.generate({
+            ...request(model!.id),
+            experimental_sessionAffinity: hint,
+          });
+          const invalid =
+            hint !== null &&
+            hint !== undefined &&
+            (hint.trim().length === 0 || hint.trim().length > 256);
+          if (invalid || (hint != null && !supported)) {
+            await expect(pending).rejects.toMatchObject({
+              code: invalid ? "invalid_request" : "unsupported",
+            });
+            expect(service.callback).not.toHaveBeenCalled();
+          } else {
+            await pending;
+            expect(service.callback).toHaveBeenCalledWith(
+              expect.objectContaining({
+                experimental_sessionAffinity: hint?.trim() ?? null,
+              }),
+              expect.objectContaining({
+                model: expect.objectContaining({
+                  capabilities: expect.objectContaining({
+                    experimental_sessionAffinity: supported,
+                  }),
+                }),
+              }),
+            );
+          }
+        }
+      },
+    );
     it("normalizes omitted tier fields from legacy callers and adapters", async () => {
       const service = setup();
       const [model] = await service.models();
@@ -133,7 +176,11 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
         expect.objectContaining({
           model: {
             ...native,
-            capabilities: { ...native.capabilities, serviceTiers: [] },
+            capabilities: {
+              ...native.capabilities,
+              serviceTiers: [],
+              experimental_sessionAffinity: false,
+            },
           },
         }),
       );
@@ -208,7 +255,11 @@ for (const surface of ["dispatcher", "plugin SDK"] as const) {
         expect.objectContaining({
           model: {
             ...longModel,
-            capabilities: { ...longModel.capabilities, serviceTiers: [] },
+            capabilities: {
+              ...longModel.capabilities,
+              serviceTiers: [],
+              experimental_sessionAffinity: false,
+            },
           },
         }),
       );

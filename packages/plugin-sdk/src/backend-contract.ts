@@ -2397,6 +2397,12 @@ export interface ExperimentalQuestionResolution {
 
 /** The API handed to a plugin factory, implemented by the BB server. */
 export interface BbPluginApi {
+  /** Read the configured owner base instructions, preserving their exact content. Shares core's source; never reads workspace files or provider scaffolding. */
+  readonly experimental_userInstructions: {
+    read():
+      | { kind: "ready"; content: string; revision: string }
+      | { kind: "unavailable"; reason: "missing" | "empty" | "unreadable" };
+  };
   /** Undefined when the host cannot provide the complete versioned contract. */
   readonly experimental_questionResolution:
     | ExperimentalQuestionResolution

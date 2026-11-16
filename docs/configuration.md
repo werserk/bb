@@ -1676,3 +1676,14 @@ The optional Prompt Suggestion plugin (formerly Autosay) starts disabled with no
 ## AI Gateway
 
 The optional AI Gateway plugin exposes BB's supported text models to OpenAI Chat Completions clients through its plugin HTTP Base URL. Use its native settings page for readiness, model IDs and connection instructions; use the ordinary per-plugin HTTP token as the API key. Credentials for upstream providers are not exposed to consumers. The initial API supports non-streaming text requests; unsupported operations fail explicitly. See `plugins/ai-gateway/skills/ai-gateway/SKILL.md` for configuration, exact supported fields and CLI commands.
+
+
+### Companion preparation
+
+Prompt Suggestion's `backgroundPreparation` defaults to false. When enabled, actual foreground entry retains interest in at most eight recent threads for ten minutes; expiry requires reopening a long-running thread. Context and goal state stay in process memory. The rolling hourly admission ledger is separate from context cache clearing, retains none/error outcomes and resets on plugin restart. The existing model, effort and speed settings are not changed by upgrade. Additional guidance supplements the mandatory companion role and current owner instructions. The exact legacy default is treated as the new role default; customized guidance remains supplied. A missing owner-instruction source makes generation unavailable and is visible in status.
+
+Use `bb prompt-suggestion track`, `state`, `inspect` and `clear-cache` with `--thread` to inspect the same coordinator used by the composer. Inspect explicitly returns private task state and its source excerpts; diagnostics do not. Cache clearing does not reset hourly admission or force a second model request. See the plugin skill for manual cancellation ownership and foreground behavior.
+
+### Pi native text routing
+
+`bb plugin config provider-pi set nativeGenerationRouting lowest-latency` selects latency sorting for compatible OpenRouter native text generation, requiring supported parameters and disabling provider fallbacks. The default value is `default`. The setting uses standard plugin UI/settings/SDK and does not alter agent-turn routing. `bb pi-generation status` and the `nativeGenerationStatus` RPC report the requested mode and last successful host-applied mode: `inapplicable` means the route was not compatible OpenRouter, and null means no result has been observed in this plugin process. This does not promise a provider, cache hit or response time.

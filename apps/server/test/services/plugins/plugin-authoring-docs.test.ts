@@ -184,6 +184,7 @@ const BB_PLUGIN_API_KEYS = [
   "server",
   "hosts",
   "experimental_aiServices",
+  "experimental_userInstructions",
   "experimental_hooks",
   "experimental_environments",
   "experimental_machines",
@@ -266,7 +267,9 @@ const THREAD_EVENT_PAYLOAD_FIELDS = {
     "originPluginId",
   ],
 } as const satisfies {
-  [E in keyof PluginThreadEventPayloads]: readonly (keyof PluginThreadEventPayloads[E])[];
+  [
+    E in keyof PluginThreadEventPayloads
+  ]: readonly (keyof PluginThreadEventPayloads[E])[];
 };
 
 type MissingThreadEventField = {

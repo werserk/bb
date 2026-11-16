@@ -73,7 +73,15 @@ export function registerCodexAiService(bb: BbPluginApi): void {
           throw new Error("Unsupported Codex profile");
         return generationHost.call(
           "codex.ai.generate",
-          { ...request, messages: [...request.messages] },
+          {
+            model: request.model,
+            messages: [...request.messages],
+            maxOutputTokens: request.maxOutputTokens,
+            temperature: request.temperature,
+            reasoningEffort: request.reasoningEffort,
+            serviceTier: request.serviceTier,
+            timeoutMs: request.timeoutMs,
+          },
           { hostId: model.hostId, signal, timeoutMs: request.timeoutMs + 1000 },
         );
       },

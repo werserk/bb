@@ -1738,6 +1738,9 @@ function createFakePluginHostInternal(
     hosts,
     experimental_aiServices,
     experimental_threads,
+    experimental_userInstructions: {
+      read: () => ({ kind: "unavailable", reason: "missing" }),
+    },
     experimental_questionResolution: undefined,
     experimental_questionResolutionScope: {
       register() {

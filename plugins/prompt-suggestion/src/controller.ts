@@ -1,160 +1,196 @@
+import { createHmac, randomBytes } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { readContext } from "./context.js";
 import { generate } from "./generate.js";
+import { instructionBundle } from "./instruction-bundle.js";
+import { createCoordinator } from "./coordinator.js";
 import type { Settings } from "./settings.js";
 
 export function createService(bb: BbPluginApi, getSettings: () => Settings) {
-  const active = new Map<
-    string,
-    { token: string; controller: AbortController }
-  >();
-  const attempted = new Set<string>();
+  const salt = randomBytes(32);
+  const manual = new Map<string, { token: string; threadId: string }>();
   const observed = new Map<string, Set<string>>();
-  let requests: number[] = [];
+  const counters = { shown: 0, accepted: 0, dismissed: 0 };
+  let lastAttachment: { jobId: string; observedToAttachMs: number } | null =
+    null;
   let configRevision = 0;
-  const counters = {
-    requests: 0,
-    suggestions: 0,
-    none: 0,
-    errors: 0,
-    cancelled: 0,
-    shown: 0,
-    accepted: 0,
-    dismissed: 0,
-    lastLatencyMs: 0,
-  };
-  function reset() {
-    for (const item of active.values()) item.controller.abort();
-    attempted.clear();
-    configRevision++;
-  }
-  async function suggest(
-    input: {
-      threadId: string;
-      requestId: string;
-      token: string;
-      automatic: boolean;
-      expectedTurnId: string | null;
-    },
-    callerSignal?: AbortSignal,
-  ) {
-    const settings = getSettings();
-    if (!settings.enabled || !settings.model)
-      return { kind: "unavailable" as const, reason: "not_configured" };
-    if (active.size >= 1)
-      return { kind: "unavailable" as const, reason: "busy" };
-    const now = Date.now();
-    requests = requests.filter((time) => now - time < 3600000);
-    if (requests.length >= settings.maxRequestsPerHour)
-      return { kind: "unavailable" as const, reason: "rate_limited" };
-    const controller = new AbortController();
-    active.set(input.requestId, { token: input.token, controller });
-    const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
-    const signal = AbortSignal.any([
-      controller.signal,
-      timeoutSignal,
-      ...(callerSignal ? [callerSignal] : []),
-    ]);
-    const revision = configRevision;
-    try {
+  let affinity: { model: string; supported: boolean } | null = null;
+  const coordinator = createCoordinator({
+    configuration: getSettings,
+    changed: (threadId) =>
+      bb.rpc.experimental_invalidate([`companion:${threadId}`]),
+    async prepare(threadId, memory, signal) {
+      const settings = getSettings();
+      if (!settings.enabled || !settings.model) return null;
+      const bundle = instructionBundle(bb, settings.instructions);
+      if (!bundle) return null;
       const context = await readContext(
         bb,
-        input.threadId,
+        threadId,
         settings.contextCharLimit,
         signal,
+        { allowActive: true, memory },
       );
-      if (
-        !context ||
-        (input.automatic && context.turnId !== input.expectedTurnId)
-      )
-        return { kind: "unavailable" as const, reason: "ineligible" };
+      if (!context) return null;
       const projects = settings.projectIds
         .split(",")
         .map((id) => id.trim())
         .filter(Boolean);
-      if (projects.length && !projects.includes(context.projectId))
-        return { kind: "unavailable" as const, reason: "project_disabled" };
-      const key = JSON.stringify([input.threadId, context.turnId, revision]);
-      if (input.automatic && attempted.has(key))
-        return { kind: "unavailable" as const, reason: "already_attempted" };
-      if (signal.aborted || revision !== configRevision)
-        return { kind: "unavailable" as const, reason: "cancelled" };
-      attempted.add(key);
-      if (attempted.size > 2048)
-        attempted.delete(attempted.values().next().value!);
-      requests.push(Date.now());
-      counters.requests++;
-      const began = Date.now();
-      const result = await generate(
+      if (projects.length && !projects.includes(context.projectId)) return null;
+      return {
+        context,
+        instructions: bundle.content,
+        instructionRevision: bundle.revision,
+        configKey: JSON.stringify([configRevision, settings]),
+      };
+    },
+    async generate(threadId, prepared, signal, measured) {
+      const settings = getSettings();
+      if (affinity?.model !== settings.model) {
+        const models = await bb.experimental_aiServices.experimental_models({
+          signal,
+        });
+        affinity = {
+          model: settings.model,
+          supported:
+            models.find((model) => model.id === settings.model)?.capabilities
+              .experimental_sessionAffinity === true,
+        };
+      }
+      const sessionAffinity = affinity.supported
+        ? createHmac("sha256", salt)
+            .update(
+              JSON.stringify([
+                bb.pluginId,
+                threadId,
+                settings.model,
+                prepared.configKey,
+                prepared.instructionRevision,
+              ]),
+            )
+            .digest("hex")
+        : null;
+      return generate(
         bb.experimental_aiServices,
-        settings,
-        context.text,
+        { ...settings, instructions: prepared.instructions, sessionAffinity },
+        prepared.context.text,
         signal,
+        measured,
       );
-      counters.lastLatencyMs = Date.now() - began;
-      const current = await readContext(
-        bb,
-        input.threadId,
-        settings.contextCharLimit,
-        signal,
-      );
-      if (
-        signal.aborted ||
-        revision !== configRevision ||
-        current?.revision !== context.revision
-      )
-        return { kind: "unavailable" as const, reason: "stale" };
-      if (result.kind === "suggestion") {
-        counters.suggestions++;
-        observed.set(input.requestId, new Set());
+    },
+  });
+  const rememberView = async (threadId: string) => {
+    const view = await coordinator.state(threadId);
+    if (view.jobId && view.phase === "ready" && !observed.has(view.jobId)) {
+      observed.set(view.jobId, new Set());
+      if (observed.size > 2048) observed.delete(observed.keys().next().value!);
+    }
+    return view;
+  };
+  return {
+    async track(threadId: string, clientId: string) {
+      await coordinator.track(threadId, clientId);
+      return rememberView(threadId);
+    },
+    state: rememberView,
+    detach: coordinator.detach,
+    clearCache: coordinator.clearCache,
+    inspect: coordinator.inspect,
+    wake: coordinator.wake,
+    dispose: coordinator.dispose,
+    reset() {
+      configRevision++;
+      affinity = null;
+      coordinator.reset();
+    },
+    async suggest(
+      input: {
+        threadId: string;
+        requestId: string;
+        token: string;
+        automatic: boolean;
+        expectedTurnId: string | null;
+      },
+      callerSignal?: AbortSignal,
+    ) {
+      if (input.automatic) {
+        const current = await readContext(
+          bb,
+          input.threadId,
+          getSettings().contextCharLimit,
+          callerSignal,
+        );
+        if (current?.turnId !== input.expectedTurnId)
+          return { kind: "unavailable" as const, reason: "ineligible" };
+      }
+      if (callerSignal?.aborted)
+        return { kind: "unavailable" as const, reason: "cancelled" };
+      if (manual.has(input.requestId))
+        return { kind: "unavailable" as const, reason: "duplicate_request" };
+      manual.set(input.requestId, {
+        token: input.token,
+        threadId: input.threadId,
+      });
+      const detach = () => coordinator.detach(input.threadId, input.requestId);
+      callerSignal?.addEventListener("abort", detach, { once: true });
+      try {
+        const result = await coordinator.suggest(
+          input.threadId,
+          input.requestId,
+          input.automatic ? input.expectedTurnId : null,
+        );
+        if (result.kind === "suggestion")
+          observed.set(input.requestId, new Set());
         if (observed.size > 2048)
           observed.delete(observed.keys().next().value!);
-      } else counters.none++;
-      return result;
-    } catch {
-      if (signal.aborted) counters.cancelled++;
-      else counters.errors++;
-      return {
-        kind: "unavailable" as const,
-        reason: timeoutSignal.aborted
-          ? "timeout"
-          : signal.aborted
-            ? "cancelled"
-            : "generation_failed",
-      };
-    } finally {
-      active.delete(input.requestId);
-    }
-  }
-  return {
-    suggest,
-    reset,
-    observe(requestId: string, event: "shown" | "accepted" | "dismissed") {
+        return callerSignal?.aborted
+          ? { kind: "unavailable" as const, reason: "cancelled" }
+          : result;
+      } finally {
+        callerSignal?.removeEventListener("abort", detach);
+        manual.delete(input.requestId);
+        detach();
+      }
+    },
+    cancel(requestId: string, token: string) {
+      const item = manual.get(requestId);
+      return (
+        !!item &&
+        item.token === token &&
+        coordinator.cancel(item.threadId, requestId)
+      );
+    },
+    observe(
+      requestId: string,
+      event: "shown" | "accepted" | "dismissed",
+      observedToAttachMs: number | null = null,
+    ) {
       const seen = observed.get(requestId);
       if (!seen || seen.has(event)) return false;
       seen.add(event);
       counters[event]++;
-      return true;
-    },
-    cancel(requestId: string, token: string) {
-      const item = active.get(requestId);
-      if (!item || item.token !== token) return false;
-      item.controller.abort();
+      if (event === "shown" && observedToAttachMs !== null)
+        lastAttachment = { jobId: requestId, observedToAttachMs };
       return true;
     },
     status() {
-      const s = getSettings();
+      const settings = getSettings();
+      const bundle = instructionBundle(bb, settings.instructions);
       return {
-        enabled: s.enabled,
-        configured: !!s.model,
-        model: s.model,
-        reasoningEffort: s.reasoningEffort,
-        serviceTier: s.serviceTier,
-        active: active.size,
+        enabled: settings.enabled,
+        configured: !!settings.model,
+        model: settings.model,
+        reasoningEffort: settings.reasoningEffort,
+        serviceTier: settings.serviceTier,
+        backgroundPreparation: settings.backgroundPreparation,
+        instructionsAvailable: bundle !== null,
+        instructionRevision: bundle?.ownerRevision ?? null,
+        active: coordinator.diagnostics().active,
+        tracked: coordinator.diagnostics().tracked,
       };
     },
     diagnostics() {
-      return { ...counters, scope: "current plugin session" };
+      return { ...coordinator.diagnostics(), ...counters, lastAttachment };
     },
   };
 }

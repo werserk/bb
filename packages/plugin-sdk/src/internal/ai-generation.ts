@@ -18,6 +18,7 @@ const modelSchema = z
     profile: z.string().min(1).max(256),
     capabilities: z
       .object({
+        experimental_sessionAffinity: z.boolean().default(false),
         maxOutputTokens: z.boolean(),
         temperature: z.boolean(),
         reasoningEfforts: z.array(z.string().min(1).max(64)).max(32),
@@ -44,6 +45,13 @@ const requestSchema = z
     temperature: z.number().min(0).max(2).nullable(),
     reasoningEffort: z.string().min(1).max(64).nullable(),
     serviceTier: z.string().min(1).max(64).nullable().default(null),
+    experimental_sessionAffinity: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .nullable()
+      .default(null),
     timeoutMs: z.number().int().min(100).max(60000),
   })
   .strict();
@@ -232,6 +240,8 @@ export function createAiGenerationDispatcher(list: () => readonly Service[]) {
         throw new Failure("unavailable", "Selected model is unavailable");
       const { service, native } = selected;
       if (
+        (request.experimental_sessionAffinity !== null &&
+          !native.capabilities.experimental_sessionAffinity) ||
         (request.maxOutputTokens !== null &&
           !native.capabilities.maxOutputTokens) ||
         (request.temperature !== null && !native.capabilities.temperature) ||

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-import { act, cleanup, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installTestPluginRuntime,
   loadPluginApp,
   renderSlot,
 } from "@get-bb/plugin-sdk/testing/app";
 import type { PluginComposerApi } from "@get-bb/plugin-sdk/app";
+import { emptyTaskState } from "./task-state.js";
 import { rpcContract } from "./contracts.js";
 
 installTestPluginRuntime();
@@ -14,7 +15,13 @@ const { useComposer } = await import("@get-bb/plugin-sdk/app");
 const { default: plugin } = await import("../app.js");
 const app = await loadPluginApp(plugin);
 const Controller = app.composerCustomizations[0]!.banners![0]!.component;
-afterEach(cleanup);
+beforeEach(() => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("mounted Prompt Suggestion lifecycle", () => {
   it("does not request suggestions while disabled", () => {
@@ -37,14 +44,31 @@ describe("mounted Prompt Suggestion lifecycle", () => {
     slot.unmount();
   });
 
-  it("cancels a pending result when typing and never inserts the late text", async () => {
+  it("keeps foreground interest while typing and never inserts a late server candidate", async () => {
     let composer: PluginComposerApi | null = null;
-    let finish!: (value: { kind: "suggestion"; text: string }) => void;
-    const result = new Promise<{ kind: "suggestion"; text: string }>(
-      (resolve) => {
-        finish = resolve;
-      },
-    );
+    let ready = false;
+    const state = () => ({
+      phase: ready ? "ready" : "pending",
+      jobId: "232df470-1f92-4dc5-b924-19a1fc2c7d38",
+      turnId: "turn",
+      result: ready
+        ? {
+            kind: "suggestion",
+            text: "Late suggestion",
+            state: emptyTaskState(),
+          }
+        : null,
+      queueMs: 0,
+      preparationMs: 0,
+      modelMs: 0,
+      validationMs: 0,
+      serverMs: null,
+      usage: null,
+      actualModel: null,
+      actualServiceTier: null,
+      finishReason: null,
+      outputTokenLimit: null,
+    });
     function Probe() {
       composer = useComposer();
       return <Controller />;
@@ -55,7 +79,7 @@ describe("mounted Prompt Suggestion lifecycle", () => {
       {
         settings: { enabled: true },
         experimental_rpcContract: rpcContract,
-        rpc: { suggest: () => result, cancel: () => true, observe: () => true },
+        rpc: { track: state, state, detach: () => true, observe: () => true },
         composer: {
           scope: { kind: "thread", threadId: "thread" },
           experimental_suggestionContext: {
@@ -67,17 +91,12 @@ describe("mounted Prompt Suggestion lifecycle", () => {
       },
     );
     await waitFor(() =>
-      expect(slot.rpcCalls.some((call) => call.method === "suggest")).toBe(
-        true,
-      ),
+      expect(slot.rpcCalls.some((call) => call.method === "track")).toBe(true),
     );
     await slot.behavior.setComposerText("My own message");
-    await waitFor(() =>
-      expect(slot.rpcCalls.some((call) => call.method === "cancel")).toBe(true),
-    );
-    await act(async () =>
-      finish({ kind: "suggestion", text: "Late suggestion" }),
-    );
+    expect(slot.rpcCalls.some((call) => call.method === "detach")).toBe(false);
+    ready = true;
+    await slot.behavior.experimental_invalidateRpc(["companion:thread"]);
     expect(
       composer!.experimental_suggestions.getSnapshot().candidate,
     ).toBeNull();
@@ -96,7 +115,22 @@ describe("model selection", () => {
       {
         settings: { model: "old-model" },
         experimental_rpcContract: rpcContract,
-        rpc: { models: () => [], selectModel: (input) => input },
+        rpc: {
+          models: () => [],
+          selectModel: (input) => input,
+          status: () => ({
+            enabled: false,
+            configured: true,
+            model: "old-model",
+            reasoningEffort: "default",
+            serviceTier: "default",
+            active: 0,
+            tracked: 0,
+            backgroundPreparation: false,
+            instructionsAvailable: true,
+            instructionRevision: "revision",
+          }),
+        },
       },
     );
     try {

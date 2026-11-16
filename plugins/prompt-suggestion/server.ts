@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { cliCommand, defineCli, type BbPluginApi } from "@get-bb/plugin-sdk";
-import { rpcContract, requestSchema } from "./src/contracts.js";
+import {
+  rpcContract,
+  requestSchema,
+  clientSchema,
+  threadSchema,
+} from "./src/contracts.js";
 import { createService } from "./src/controller.js";
 import { settingDescriptors, settingsSchema } from "./src/settings.js";
 export default async function plugin(bb: BbPluginApi) {
   if (
     typeof bb.experimental_aiServices.experimental_generate !== "function" ||
-    typeof bb.experimental_aiServices.experimental_models !== "function"
+    typeof bb.experimental_aiServices.experimental_models !== "function" ||
+    typeof bb.experimental_userInstructions?.read !== "function"
   )
     throw new Error(
-      "Prompt Suggestion requires a BB build with shared AI generation",
+      "Prompt Suggestion requires a BB build with shared AI generation and owner instructions",
     );
   const handle = bb.settings.define(settingDescriptors);
   const normalize = (value: unknown) => {
@@ -19,10 +25,26 @@ export default async function plugin(bb: BbPluginApi) {
   let settings = normalize(await handle.get());
   const service = createService(bb, () => settings);
   handle.onChange((next) => {
-    service.reset();
     settings = normalize(next);
+    service.reset();
   });
-  bb.onDispose(() => service.reset());
+  bb.onDispose(() => service.dispose());
+  for (const event of [
+    "thread.active",
+    "thread.idle",
+    "thread.failed",
+    "experimental_thread.events",
+    "interaction.pending",
+  ] as const)
+    bb.events.on(event, ({ thread }) => service.wake(thread.id));
+  for (const event of ["thread.archived", "thread.deleted"] as const)
+    bb.events.on(event, ({ thread }) => service.clearCache(thread.id));
+  for (const event of [
+    "message.queued",
+    "message.dispatched",
+    "message.cancelled",
+  ] as const)
+    bb.events.on(event, ({ entry }) => service.wake(entry.threadId));
   const models = async (signal?: AbortSignal) =>
     (await bb.experimental_aiServices.experimental_models({ signal })).map(
       (model) => ({
@@ -49,8 +71,17 @@ export default async function plugin(bb: BbPluginApi) {
       await handle.experimental_set({ model: input.model });
       return { model: input.model };
     },
+    track: (input) => service.track(input.threadId, input.clientId),
+    state: (input) => service.state(input.threadId),
+    detach: (input) => service.detach(input.threadId, input.clientId),
+    clearCache: (input) => {
+      service.clearCache(input.threadId);
+      return null;
+    },
+    inspect: (input) => service.inspect(input.threadId),
     suggest: (input, ctx) => service.suggest(input, ctx.experimental_signal),
-    observe: (input) => service.observe(input.requestId, input.event),
+    observe: (input) =>
+      service.observe(input.requestId, input.event, input.observedToAttachMs),
     cancel: (input) => service.cancel(input.requestId, input.token),
     status: () => service.status(),
     diagnostics: () => service.diagnostics(),
@@ -62,6 +93,58 @@ export default async function plugin(bb: BbPluginApi) {
       description:
         "Prompt Suggestion generates a draft suggestion without sending or modifying a thread.",
       commands: {
+        track: cliCommand({
+          summary: "Track a thread for ten minutes without sending",
+          options: {
+            thread: {
+              type: "string",
+              required: true,
+              description: "Thread ID",
+            },
+            client: { type: "string", description: "Client UUID" },
+          },
+          run: async (input) => {
+            const args = clientSchema.parse({
+              threadId: input.options.thread,
+              clientId: input.options.client ?? randomUUID(),
+            });
+            const view = await service.track(args.threadId, args.clientId);
+            service.detach(args.threadId, args.clientId);
+            return { stdout: JSON.stringify(view), exitCode: 0 };
+          },
+        }),
+        ...Object.fromEntries(
+          (["state", "inspect", "clear-cache"] as const).map((method) => [
+            method,
+            cliCommand({
+              summary:
+                method === "inspect"
+                  ? "Inspect task state and its sources"
+                  : method === "state"
+                    ? "Read current companion state"
+                    : "Clear prepared data; retain admission history",
+              options: {
+                thread: {
+                  type: "string",
+                  required: true,
+                  description: "Thread ID",
+                },
+              },
+              run: async (input) => {
+                const { threadId } = threadSchema.parse({
+                  threadId: input.options.thread,
+                });
+                const result =
+                  method === "state"
+                    ? await service.state(threadId)
+                    : method === "inspect"
+                      ? service.inspect(threadId)
+                      : (service.clearCache(threadId), null);
+                return { stdout: JSON.stringify(result), exitCode: 0 };
+              },
+            }),
+          ]),
+        ),
         models: cliCommand({
           summary: "List available BB generation models",
           run: async () => ({

@@ -1,10 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import {
   useRpc,
+  experimental_useRpcQuery,
   useSettings,
   type StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk/app";
-import type { rpcContract } from "./contracts.js";
+import { rpcContract } from "./contracts.js";
 
 type Models = StandardSchemaV1InferOutput<
   (typeof rpcContract)["models"]["output"]
@@ -14,6 +15,11 @@ export function ModelSettings() {
   const inputId = useId();
   const rpc = useRpc<typeof rpcContract>();
   const settings = useSettings();
+  const status = experimental_useRpcQuery({
+    contract: rpcContract,
+    method: "status",
+    input: null,
+  });
   const [models, setModels] = useState<Models>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,6 +59,17 @@ export function ModelSettings() {
         · Reasoning: {String(settings.values?.reasoningEffort ?? "default")} ·
         Requested speed: {String(settings.values?.serviceTier ?? "default")}
       </p>
+      <p className="text-xs text-muted-foreground">
+        Background preparation:{" "}
+        {settings.values?.backgroundPreparation === true
+          ? "Enabled"
+          : "Disabled"}{" "}
+        · Owner instructions:{" "}
+        {status.data?.instructionsAvailable ? "Available" : "Unavailable"}
+        {status.data?.instructionRevision
+          ? ` · Revision: ${status.data.instructionRevision}`
+          : ""}
+      </p>
       <div className="flex items-center justify-between gap-3">
         <label htmlFor={inputId} className="text-sm font-medium">
           Suggestion model
@@ -60,7 +77,10 @@ export function ModelSettings() {
         <button
           type="button"
           disabled={loading || saving}
-          onClick={() => setRefresh((value) => value + 1)}
+          onClick={() => {
+            setRefresh((value) => value + 1);
+            void status.refetch();
+          }}
           className="text-sm underline disabled:opacity-50"
         >
           Refresh
@@ -134,8 +154,9 @@ export function ModelSettings() {
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        The selected provider receives recent text from the current thread.
-        Existing BB authentication is reused.
+        The selected provider receives bounded thread context, source-linked
+        task state and the full owner BIBLE. Existing BB authentication is
+        reused.
       </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">

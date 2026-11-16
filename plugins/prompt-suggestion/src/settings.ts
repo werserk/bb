@@ -1,15 +1,15 @@
 import { experimental_AI_MODEL_ID_MAX_LENGTH } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { DEFAULT_INSTRUCTIONS } from "./instructions.js";
 const DEFAULT_TIMEOUT_MS = 15000;
 export const settingsSchema = z.object({
   enabled: z.boolean().default(false),
+  backgroundPreparation: z.boolean().default(false),
   model: z.string().max(experimental_AI_MODEL_ID_MAX_LENGTH).default(""),
   reasoningEffort: z
     .enum(["default", "none", "low", "medium", "high", "xhigh", "max", "ultra"])
     .default("default"),
   serviceTier: z.enum(["default", "fast"]).default("default"),
-  instructions: z.string().max(16000).default(DEFAULT_INSTRUCTIONS),
+  instructions: z.string().max(16000).default(""),
   contextCharLimit: z.number().int().min(1000).max(100000).default(24000),
   outputTokenLimit: z.number().int().min(0).max(2048).default(0),
   timeoutMs: z.number().int().min(100).max(30000).default(DEFAULT_TIMEOUT_MS),
@@ -18,6 +18,13 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const settingDescriptors = {
+  backgroundPreparation: {
+    type: "boolean",
+    label: "Background preparation",
+    description:
+      "Keep recently opened threads prepared for 10 minutes, including while you view another thread.",
+    default: false,
+  },
   enabled: {
     type: "boolean",
     label: "Enable Prompt Suggestion",
@@ -61,8 +68,10 @@ export const settingDescriptors = {
   instructions: {
     experimental_schema: settingsSchema.shape.instructions.unwrap(),
     type: "string",
-    label: "Generator instructions",
-    default: DEFAULT_INSTRUCTIONS,
+    label: "Additional companion guidance",
+    description:
+      "Added to the goal-oriented role and your owner base instructions.",
+    default: "",
   },
   contextCharLimit: {
     experimental_schema: settingsSchema.shape.contextCharLimit.unwrap(),

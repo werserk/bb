@@ -5,6 +5,7 @@ import {
 export function fixture(
   options: {
     queued?: number;
+    turnId?: string;
     status?: "completed" | "failed";
     openQuestion?: boolean;
     turnRow?: boolean;
@@ -48,7 +49,7 @@ export function fixture(
       turnRequest: null,
     },
   ];
-  return createFakePluginHost({
+  const host = createFakePluginHost({
     pluginId: "prompt-suggestion",
     sdk: {
       threads: {
@@ -77,7 +78,11 @@ export function fixture(
                   children: [],
                 },
               ]
-            : messages,
+            : messages.map((message) =>
+                message.role === "assistant"
+                  ? { ...message, turnId: options.turnId ?? "turn" }
+                  : message,
+              ),
           contextBoundarySeq: null,
           completedTurnDisplay: "flat" as const,
           activePromptMode: null,
@@ -91,10 +96,13 @@ export function fixture(
           modelFallback: null,
           maxSeq: 4,
           tag: "tag",
-          returnedSegmentCount: 1,
-          olderCursor: null,
-          historySnapshot: "history",
-          olderRowsSourceSeqEnd: null,
+          timelinePage: {
+            returnedSegmentCount: 1,
+            olderCursor: null,
+            historySnapshot: "history",
+            olderRowsSourceSeqEnd: null,
+            olderRowUpdates: [],
+          },
         }),
         questions: {
           open: async () => ({
@@ -113,7 +121,10 @@ export function fixture(
               seq: 4,
               createdAt: 1,
               type: "turn/completed" as const,
-              scope: { kind: "turn" as const, turnId: "turn" },
+              scope: {
+                kind: "turn" as const,
+                turnId: options.turnId ?? "turn",
+              },
               data: {
                 providerThreadId: "p",
                 status: options.status ?? "completed",
@@ -125,7 +136,10 @@ export function fixture(
               seq: 2,
               createdAt: 0,
               type: "turn/started" as const,
-              scope: { kind: "turn" as const, turnId: "turn" },
+              scope: {
+                kind: "turn" as const,
+                turnId: options.turnId ?? "turn",
+              },
               data: { providerThreadId: "p" },
             },
           ],
@@ -133,4 +147,10 @@ export function fixture(
       },
     },
   });
+  host.bb.experimental_userInstructions.read = () => ({
+    kind: "ready",
+    content: "# BIBLE\nPreserve the accepted goal.",
+    revision: "fixture-bible",
+  });
+  return host;
 }

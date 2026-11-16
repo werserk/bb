@@ -12,3 +12,10 @@ The HTTP subset is GET `/v1/models` and POST `/v1/chat/completions`, below `/api
 Use `bb ai-gateway generate --model <exact-id> --prompt-stdin` to read prompt text from stdin (redirect a local text file through the shell if desired). Optional `--service-tier fast` and `--reasoning-effort <advertised-value>` use the same capability checks as HTTP. Output is Chat Completions JSON. Requests have a 30-second deadline and a 256-KiB HTTP body limit. Native generation adds its own bounds and concurrency control. Disconnect/disposal cancels local waiting and asks the provider to cancel; remote billing may already have occurred. There is no fallback, automatic model selection, additional transcript store or request-body logging.
 
 Authentication failures retain BB’s existing HTTP 401 JSON envelope; standard OpenAI clients still raise AuthenticationError. Successful completions and generation/request failures use the Chat Completions shapes.
+
+Optional HTTP `prompt_cache_key` maps to shared AI `experimental_sessionAffinity`.
+The native equivalent is `bb ai-gateway generate --session-affinity <hint>`.
+Hints are trimmed, bounded to 1–256 characters, and must not contain credentials.
+Omission uses the provider default. An explicit hint requires the advertised model
+capability; unsupported models and invalid hints fail before generation. The API
+remains text-only and non-streaming. Affinity does not guarantee caching or latency.

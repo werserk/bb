@@ -26,6 +26,7 @@ export const chatSchema = z
     temperature: z.number().min(0).max(2).optional(),
     reasoning_effort: z.string().min(1).max(64).optional(),
     service_tier: z.enum(["default", "priority", "fast"]).optional(),
+    prompt_cache_key: z.string().trim().min(1).max(256).optional(),
     stream: z.literal(false).optional(),
     n: z.literal(1).optional(),
   })
@@ -47,6 +48,7 @@ export function generationRequest(
       value.service_tier === "priority" || value.service_tier === "fast"
         ? "fast"
         : null,
+    experimental_sessionAffinity: value.prompt_cache_key ?? null,
     timeoutMs: 30000,
   };
 }

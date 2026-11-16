@@ -15,6 +15,8 @@ export const piGenerationSchema = z
     temperature: z.number().nullable(),
     reasoningEffort: z.string().nullable(),
     serviceTier: z.string().min(1).max(64).nullable().default(null),
+    experimental_sessionAffinity: z.string().trim().min(1).max(256).nullable(),
+    routing: z.enum(["default", "lowest-latency"]),
     timeoutMs: z.number().int().positive().max(60000),
   })
   .strict();
@@ -24,6 +26,8 @@ const model = z
     displayName: z.string(),
     provider: z.string(),
     maxOutputTokens: z.boolean(),
+    reasoningEfforts: z.array(z.string()),
+    experimental_sessionAffinity: z.boolean(),
   })
   .strict();
 export const piAiContract = defineRpcContract({
@@ -32,6 +36,7 @@ export const piAiContract = defineRpcContract({
     input: piGenerationSchema,
     output: z
       .object({
+        routingApplied: z.enum(["default", "lowest-latency", "inapplicable"]),
         text: z.string(),
         model: z.string(),
         actualModel: z.string().nullable(),
