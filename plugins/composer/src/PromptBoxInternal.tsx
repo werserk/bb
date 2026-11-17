@@ -1,3 +1,4 @@
+import { resolveComposerSuggestions } from "./composer-suggestions";
 import {
   acceptComposerSuggestion,
   handleComposerSuggestionKey,
@@ -1040,7 +1041,9 @@ export function PromptBoxInternal({
   const rendererRef = useRef(renderer);
   rendererRef.current = renderer;
   const composer = useComposer();
-  const suggestions = composer.experimental_suggestions;
+  const suggestions = resolveComposerSuggestions(
+    composer.experimental_suggestions,
+  );
   const suggestionSubmissionPendingRef = useRef(false);
   const suggestionsRef = useRef(suggestions);
   suggestionsRef.current = suggestions;

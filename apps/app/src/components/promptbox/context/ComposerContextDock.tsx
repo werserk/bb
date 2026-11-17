@@ -21,11 +21,9 @@ import "./composer-context.css";
 function ContextBody({
   entry,
   visible,
-  overview,
 }: {
   entry: ComposerContextEntry;
   visible: boolean;
-  overview: boolean;
 }) {
   const target = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -39,14 +37,9 @@ function ContextBody({
     <section
       hidden={!visible}
       data-context-group={entry.group}
+      data-context-tone={entry.tone}
       className="composer-context-section"
     >
-      {overview && (
-        <h3>
-          <Icon name={entry.icon} aria-hidden className="size-3.5" />
-          {entry.label}
-        </h3>
-      )}
       <div ref={target} />
     </section>
   );
@@ -74,6 +67,7 @@ export function ComposerContextDock({
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  const summaryButtons = useRef(new Map<string, HTMLButtonElement>());
   const panelId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const disclosure = useRef<HTMLButtonElement>(null);
@@ -84,11 +78,13 @@ export function ComposerContextDock({
       Number(b.tone === "error") - Number(a.tone === "error") ||
       Number(b.tone === "attention") - Number(a.tone === "attention"),
   );
-  const main = prioritized.find((entry) => entry.group === "work");
+  const main =
+    prioritized.find((entry) => entry.group === "work") ??
+    prioritized.find((entry) => entry.group !== "attention");
   const attention = prioritized.find((entry) => entry.group === "attention");
   const bodyEntries = [
-    ...(main ? [main] : []),
     ...(attention ? [attention] : []),
+    ...(main ? [main] : []),
     ...entries.filter((entry) => entry !== main && entry !== attention),
   ];
   const overview = active === undefined;
@@ -109,6 +105,14 @@ export function ComposerContextDock({
       : disclosure.current
     )?.focus({ preventScroll: true });
   };
+  const toggleSection = (id: string, button: HTMLButtonElement) => {
+    if (expanded && active?.id === id) {
+      trigger.current = button;
+      close();
+    } else {
+      open(id, button);
+    }
+  };
   useLayoutEffect(() => {
     if (!store) return;
     const dismiss = () => setExpanded(false);
@@ -120,6 +124,8 @@ export function ComposerContextDock({
           .find((item) => item.sourceId === sourceId);
         if (!entry) return;
         entry.onReveal?.();
+        trigger.current =
+          summaryButtons.current.get(entry.id) ?? disclosure.current;
         setSelected(entry.id);
         setExpanded(true);
       },
@@ -187,27 +193,6 @@ export function ComposerContextDock({
               }
             }}
           >
-            <header className="composer-context-heading">
-              {active && (
-                <button
-                  type="button"
-                  aria-label="Back to thread context"
-                  onClick={() => setSelected(null)}
-                >
-                  <Icon name="ChevronLeft" aria-hidden className="size-3.5" />
-                </button>
-              )}
-              <Icon name="Layers" aria-hidden className="size-3.5" />
-              <strong>{active?.label ?? "Thread context"}</strong>
-              <button
-                type="button"
-                className="ml-auto"
-                aria-label="Collapse thread context"
-                onClick={close}
-              >
-                <Icon name="ChevronDown" className="size-3.5" aria-hidden />
-              </button>
-            </header>
             <div
               className={cn(
                 "composer-context-canvas",
@@ -218,37 +203,45 @@ export function ComposerContextDock({
                 <ContextBody
                   key={entry.id}
                   entry={entry}
-                  overview={overview}
                   visible={
                     overview
                       ? entry === main ||
                         entry === attention ||
                         (!main && !attention)
-                      : entry === active
+                      : entry === active || entry === attention
                   }
                 />
               ))}
             </div>
-            <footer
-              className="composer-context-footer"
-              aria-label="All thread context sections"
-            >
-              {entries
-                .filter((entry) => entry !== main && entry !== attention)
-                .map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    onClick={(event) => open(entry.id, event.currentTarget)}
-                  >
-                    <Icon name={entry.icon} className="size-3" aria-hidden />
-                    {entry.label}
-                    {entry.summary !== undefined && (
-                      <span>{entry.summary}</span>
-                    )}
-                  </button>
-                ))}
-            </footer>
+            {overview && entries.length > summaryEntries.length && (
+              <nav
+                className="composer-context-more"
+                aria-label="More thread context sections"
+              >
+                {entries
+                  .filter((entry) => !summaryEntries.includes(entry))
+                  .map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => {
+                        if (disclosure.current)
+                          open(entry.id, disclosure.current);
+                      }}
+                    >
+                      <Icon
+                        name={entry.icon}
+                        className="size-3.5"
+                        aria-hidden
+                      />
+                      {entry.label}
+                      {entry.summary !== undefined && (
+                        <span>{entry.summary}</span>
+                      )}
+                    </button>
+                  ))}
+              </nav>
+            )}
           </Popover.Content>
         </Popover.Portal>
         {hasFacts && (
@@ -259,53 +252,82 @@ export function ComposerContextDock({
               role="toolbar"
               aria-label="Thread context summary"
             >
-              {summaryEntries.map((entry) => (
-                <button
-                  type="button"
-                  key={entry.id}
-                  data-context-count={
-                    (entry.summary !== undefined &&
-                      entry.group !== "attention" &&
-                      entry.tone === undefined) ||
-                    undefined
-                  }
-                  data-context-category={entry.group}
-                  aria-label={
-                    entry.summary === undefined
-                      ? entry.label
-                      : `${entry.label}: ${entry.summary}`
-                  }
-                  aria-controls={panelId}
-                  aria-expanded={expanded && active?.id === entry.id}
-                  className={cn(
-                    entry.tone === "error"
-                      ? "text-destructive-text"
-                      : entry.tone === "attention"
-                        ? "text-attention"
-                        : "text-muted-foreground",
-                  )}
-                  onClick={(event) => open(entry.id, event.currentTarget)}
-                >
-                  <Icon
-                    name={entry.icon}
-                    aria-hidden
-                    className="size-3.5 shrink-0"
-                  />
-                  <span>
-                    {entry.group === "attention" ||
-                    entry.tone !== undefined ||
-                    entry.summary === undefined
-                      ? entry.label
-                      : null}
-                    {(entry.group === "attention" ||
-                      entry.tone !== undefined) &&
-                    entry.summary !== undefined
-                      ? " "
-                      : null}
-                    {entry.summary}
-                  </span>
-                </button>
-              ))}
+              <div
+                className="composer-context-tabs"
+                onKeyDown={(event) => {
+                  const direction =
+                    event.key === "ArrowRight"
+                      ? 1
+                      : event.key === "ArrowLeft"
+                        ? -1
+                        : 0;
+                  if (!direction && event.key !== "Home" && event.key !== "End")
+                    return;
+                  const buttons = [
+                    ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                      "button",
+                    ),
+                  ];
+                  const index =
+                    event.target instanceof HTMLButtonElement
+                      ? buttons.indexOf(event.target)
+                      : -1;
+                  if (index < 0) return;
+                  event.preventDefault();
+                  buttons[
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? buttons.length - 1
+                        : (index + direction + buttons.length) % buttons.length
+                  ]?.focus();
+                }}
+              >
+                {summaryEntries.map((entry) => (
+                  <button
+                    type="button"
+                    key={entry.id}
+                    ref={(button) => {
+                      if (button) summaryButtons.current.set(entry.id, button);
+                      else summaryButtons.current.delete(entry.id);
+                    }}
+                    data-context-tone={entry.tone}
+                    data-context-category={entry.group}
+                    aria-label={
+                      entry.summary === undefined
+                        ? entry.label
+                        : `${entry.label}: ${entry.summary}`
+                    }
+                    aria-controls={panelId}
+                    aria-expanded={expanded && active?.id === entry.id}
+                    className={cn(
+                      entry.tone === "error"
+                        ? "text-destructive-text"
+                        : entry.tone === "attention"
+                          ? "text-attention"
+                          : "text-muted-foreground",
+                    )}
+                    title={`${expanded && active?.id === entry.id ? "Collapse" : "Show"} ${entry.label}`}
+                    onClick={(event) =>
+                      toggleSection(entry.id, event.currentTarget)
+                    }
+                  >
+                    <Icon
+                      name={entry.icon}
+                      aria-hidden
+                      className="size-3.5 shrink-0"
+                    />
+                    <span className="composer-context-label">
+                      {entry.label}
+                    </span>
+                    {entry.summary !== undefined && (
+                      <span className="composer-context-count">
+                        {entry.summary}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
               <button
                 ref={disclosure}
                 type="button"
@@ -313,9 +335,22 @@ export function ComposerContextDock({
                 aria-label="Toggle thread context"
                 aria-controls={panelId}
                 aria-expanded={expanded && hasFacts}
-                onClick={(event) =>
-                  expanded ? close() : open(null, event.currentTarget)
+                title={
+                  expanded ? "Collapse thread context" : "Show thread context"
                 }
+                onClick={(event) => {
+                  if (expanded) {
+                    trigger.current = event.currentTarget;
+                    close();
+                  } else {
+                    open(
+                      entries.length > summaryEntries.length
+                        ? null
+                        : (main?.id ?? attention?.id ?? null),
+                      event.currentTarget,
+                    );
+                  }
+                }}
               >
                 {entries.length > summaryEntries.length && (
                   <span>+{entries.length - summaryEntries.length}</span>

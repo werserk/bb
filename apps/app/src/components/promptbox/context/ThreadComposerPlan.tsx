@@ -31,11 +31,10 @@ export function ComposerPlanSteps({
     (step) => step.status === "completed",
   ).length;
   return (
-    <div className="space-y-2">
+    <div className="composer-context-plan space-y-2">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span>Current work</span>
-        <span className="ml-auto tabular-nums">
-          {done} / {snapshot.items.length}
+        <span className="tabular-nums">
+          {done} / {snapshot.items.length} steps done
         </span>
       </div>
       {snapshot.staleSince !== undefined && (

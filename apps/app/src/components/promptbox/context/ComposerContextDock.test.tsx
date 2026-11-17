@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { createContext, useContext, useLayoutEffect, useState } from "react";
 import {
   ComposerContextProvider,
@@ -209,11 +215,9 @@ it("keeps plan and native questions in the overview even when other sources moun
   expect(screen.getByText("Machine detail").closest("section")?.hidden).toBe(
     true,
   );
-  const footer = screen.getByRole("contentinfo", {
-    name: "All thread context sections",
-  });
-  expect(footer.textContent).toContain("Machine status");
-  expect(footer.textContent).toContain("Child threads");
+  expect(screen.queryByRole("contentinfo")).toBeNull();
+  expect(screen.getByRole("button", { name: "Machine status" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Child threads" })).toBeTruthy();
 });
 
 it("updates native detail content without republishing unchanged summary metadata", () => {
@@ -252,4 +256,132 @@ it("updates native detail content without republishing unchanged summary metadat
   rerender(fixture(58, 3));
   expect(listener).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Needs you: 3" })).toBeTruthy();
+});
+
+it("toggles the selected summary, switches sections and preserves draft and clicked-button focus", () => {
+  render(<Fixture />);
+  const draft = screen.getByRole("textbox", { name: "Draft" });
+  fireEvent.change(draft, { target: { value: "Unsaved draft" } });
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  const queue = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.click(plan);
+  expect(plan.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(plan);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(plan);
+  fireEvent.click(plan);
+  fireEvent.click(queue);
+  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+  expect(queue.getAttribute("aria-expanded")).toBe("true");
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(queue);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(queue);
+  expect(screen.getByRole("textbox", { name: "Draft" })).toBe(draft);
+  expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
+});
+
+it("labels counted sections and keeps attention visible while switching", () => {
+  render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  expect(plan.textContent).toContain("Plan");
+  fireEvent.click(plan);
+  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Queue: 3" }));
+  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  const disclosure = screen.getByRole("button", {
+    name: "Toggle thread context",
+  });
+  fireEvent.click(disclosure);
+  expect(document.activeElement).toBe(disclosure);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+});
+
+it("moves keyboard focus between summary buttons without changing the selected section", () => {
+  render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  const queue = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.click(plan);
+  plan.focus();
+  fireEvent.keyDown(plan, { key: "ArrowRight" });
+  expect(document.activeElement).toBe(queue);
+  expect(plan.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.keyDown(queue, { key: "Home" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Questions unavailable" }),
+  );
+  fireEvent.keyDown(document.activeElement!, { key: "End" });
+  expect(document.activeElement).toBe(queue);
+});
+
+it("keeps programmatic reveal force-open when the same section is already selected", () => {
+  function Reveal() {
+    const store = useComposerContextStore();
+    return <button onClick={() => store?.reveal("plan")}>Reveal plan</button>;
+  }
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <ComposerContextItem
+          id="plan"
+          label="Plan"
+          icon="ListTodo"
+          group="work"
+        >
+          <p>Current work</p>
+        </ComposerContextItem>
+      </ComposerContextSources>
+      <Reveal />
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  const reveal = screen.getByRole("button", { name: "Reveal plan" });
+  fireEvent.click(reveal);
+  fireEvent.click(reveal);
+  expect(screen.getByRole("region", { name: "Thread context" })).toBeTruthy();
+  const plan = within(screen.getByRole("toolbar")).getByRole("button", {
+    name: "Plan",
+  });
+  fireEvent.click(plan);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(plan);
+});
+
+it("opens overflow sections and returns Escape focus to the external disclosure", () => {
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        {Array.from({ length: 7 }, (_, index) => (
+          <ComposerContextItem
+            key={index}
+            id={`item-${index}`}
+            label={`Context ${index}`}
+            icon="Info"
+            group="context"
+          >
+            <button>Action {index}</button>
+          </ComposerContextItem>
+        ))}
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  const disclosure = screen.getByRole("button", {
+    name: "Toggle thread context",
+  });
+  expect(disclosure.textContent).toContain("+2");
+  fireEvent.click(disclosure);
+  const overflow = screen.getByRole("navigation", {
+    name: "More thread context sections",
+  });
+  fireEvent.click(within(overflow).getByRole("button", { name: "Context 6" }));
+  const action = screen.getByRole("button", { name: "Action 6" });
+  action.focus();
+  fireEvent.keyDown(action, { key: "Escape" });
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(document.activeElement).toBe(disclosure);
 });
