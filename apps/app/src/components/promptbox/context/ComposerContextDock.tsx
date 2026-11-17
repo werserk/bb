@@ -226,20 +226,6 @@ export function ComposerContextDock({
               }
             }}
           >
-            {active && !active.strip && (
-              <header className="composer-context-panel-header">
-                <Icon name={active.icon} className="size-4" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{active.label}</span>
-                <span>{active.summary}</span>
-                <button
-                  type="button"
-                  aria-label="Close thread context"
-                  onClick={close}
-                >
-                  <Icon name="X" className="size-4" aria-hidden />
-                </button>
-              </header>
-            )}
             <div
               className={cn(
                 "composer-context-canvas",

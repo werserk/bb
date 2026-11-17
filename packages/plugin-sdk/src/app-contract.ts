@@ -3393,6 +3393,8 @@ export interface ExperimentalComposerContributions {
   readonly Actions: ComponentType;
   /** Render inside the composer border above the draft, on every layout. */
   readonly experimental_InlinePanels: ComponentType;
+  /** Actions registered with `experimental_placement: "editor"`, for the start of the draft line. */
+  readonly experimental_EditorActions?: ComponentType;
   readonly Popup: ComponentType<ExperimentalComposerPopupProps>;
   readonly MenuEntry: ComponentType<ExperimentalComposerMenuEntryProps>;
 }
@@ -4348,7 +4350,15 @@ export interface ComposerCustomization {
   id: string;
   /** Composer kinds where this customization is active; omit for all kinds. */
   scopes?: readonly PluginComposerScope["kind"][];
-  actions?: readonly { id: string; component: ComponentType }[];
+  actions?: readonly {
+    id: string;
+    component: ComponentType;
+    /**
+     * Where the composer shows the action: its action row (default) or at the
+     * start of the draft line, before the text or ghost suggestion. Experimental.
+     */
+    experimental_placement?: "toolbar" | "editor";
+  }[];
   /** Inline panels inside the composer border, above its editable draft. */
   experimental_inlinePanels?: readonly {
     id: string;

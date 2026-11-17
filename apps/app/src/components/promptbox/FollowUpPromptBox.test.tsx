@@ -362,9 +362,9 @@ beforeEach(() => {
 
 describe("FollowUpPromptBox", () => {
   it.each([
-    { height: 24, expectedMinHeight: 79 },
-    { height: 35, expectedMinHeight: 68 },
-    { height: 64, expectedMinHeight: 68 },
+    { height: 24, expectedMinHeight: 71 },
+    { height: 35, expectedMinHeight: 60 },
+    { height: 64, expectedMinHeight: 60 },
   ])(
     "compensates a $height px stack before paint without duplicate commits",
     ({ height, expectedMinHeight }) => {
@@ -473,8 +473,8 @@ describe("FollowUpPromptBox", () => {
       resizeObserverCallback?.([], {} as ResizeObserver);
     });
 
-    expect(initialMinHeight).toBe(103);
-    expect(promptBox.getAttribute("data-min-height")).toBe("79");
+    expect(initialMinHeight).toBe(95);
+    expect(promptBox.getAttribute("data-min-height")).toBe("71");
   });
 
   it("renders plugin banners above native stack content", () => {
@@ -1689,7 +1689,7 @@ it("measures a context summary arriving after the footer mounts before the draft
     await waitFor(() =>
       expect(
         screen.getByTestId("prompt-box").getAttribute("data-min-height"),
-      ).toBe("71"),
+      ).toBe("63"),
     );
   } finally {
     height.mockRestore();

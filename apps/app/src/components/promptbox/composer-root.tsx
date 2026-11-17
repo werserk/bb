@@ -15,6 +15,7 @@ import type {
 } from "@get-bb/plugin-sdk";
 import {
   ComposerActionsSlot,
+  ComposerEditorActionsSlot,
   PluginComposerPlusMenuEntry,
 } from "@/components/plugin/PluginComposerActions";
 import { PluginComposerCommands } from "@/components/plugin/PluginComposerCommands";
@@ -70,6 +71,10 @@ export function useComposerContributions(): ExperimentalComposerContributions {
 
 export function ComposerPluginActions() {
   return <ComposerActionsSlot />;
+}
+
+export function ComposerPluginEditorActions() {
+  return <ComposerEditorActionsSlot />;
 }
 
 export function NoComposerPluginActions() {

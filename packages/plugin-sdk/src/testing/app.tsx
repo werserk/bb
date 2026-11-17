@@ -1347,6 +1347,7 @@ const TEST_COMPOSER_CONTRIBUTIONS: ExperimentalComposerContributions = {
   sendMenuItems: [],
   Actions: TestComposerPluginActions,
   experimental_InlinePanels: TestComposerPluginActions,
+  experimental_EditorActions: TestComposerPluginActions,
   Popup: TestComposerPluginPopup,
   MenuEntry: TestComposerMenuEntry,
 };

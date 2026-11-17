@@ -6,7 +6,6 @@ import type {
   PluginComposerApi,
 } from "@get-bb/plugin-sdk";
 import { Button } from "@bb/shared-ui/button";
-import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
 import { DropdownMenuItem } from "@bb/shared-ui/dropdown-menu";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
@@ -21,7 +20,10 @@ import type {
   ResolvedComposerPlusMenuItem,
 } from "@/lib/plugin-slot-resolvers";
 import { useComposer, useComposerView } from "@/lib/plugin-sdk-hooks";
-import { useResolvedComposerActions } from "./composer-slot-hooks";
+import {
+  useResolvedComposerActions,
+  useResolvedComposerEditorActions,
+} from "./composer-slot-hooks";
 import { PluginIcon } from "./PluginIcon";
 import { PluginSlotMount } from "./PluginSlotMount";
 import {
@@ -71,6 +73,38 @@ export function ComposerActionsSlot({
         <PluginComposerActionList actions={actions} scopeKey={scopeKey} />
       ) : null}
       {children}
+    </>
+  );
+}
+
+/** Plugin actions placed at the start of the draft line. */
+export function ComposerEditorActionsSlot() {
+  const composerView = useOptionalPluginComposerStaticView();
+  const actions = useResolvedComposerEditorActions(
+    composerView?.scope.kind ?? null,
+  );
+  if (composerView === undefined || actions.length === 0) return null;
+  const scopeKey = composerScopeIdentity(composerView.scope);
+  return (
+    <>
+      {actions.map(({ key, pluginId, customizationId, action }) => (
+        <div
+          key={`${key}/${scopeKey}`}
+          data-plugin-composer-action=""
+          data-plugin-composer-action-placement="editor"
+          className="flex items-center"
+          onClickCapture={() => recordPluginComposerActionUse(pluginId)}
+        >
+          <PluginSlotMount
+            pluginId={pluginId}
+            slotKind="composerAction"
+            slotId={`${customizationId}/${action.id}`}
+            crashFallback={<></>}
+          >
+            <action.component />
+          </PluginSlotMount>
+        </div>
+      ))}
     </>
   );
 }
@@ -133,7 +167,7 @@ const PluginComposerActionList = memo(function PluginComposerActionList({
               variant="ghost"
               aria-label="More plugin actions"
               className={cn(
-                COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+                "size-auto h-7 px-1.5 transition-all max-md:pointer-coarse:h-9 max-md:pointer-coarse:px-2.5",
                 "shrink-0 data-[state=open]:bg-state-active data-[state=open]:text-foreground",
               )}
             >
@@ -190,7 +224,7 @@ function PluginComposerActionGroupMount({
         <div
           key={`${key}/${scopeKey}`}
           data-plugin-composer-action=""
-          className="flex h-9 max-h-9 min-w-0 max-w-full shrink-0 items-center overflow-hidden"
+          className="flex h-7 max-h-7 min-w-0 max-w-full shrink-0 items-center overflow-hidden max-md:pointer-coarse:h-9 max-md:pointer-coarse:max-h-9"
         >
           <PluginSlotMount
             pluginId={pluginId}

@@ -50,32 +50,22 @@ function HelperAction({
 }: {
   controller: experimental_ComposerSuggestionController;
 }) {
-  const composer = useComposer();
   const panel = panelFor(controller);
   const state = useSyncExternalStore(
     panel.subscribe,
     panel.getSnapshot,
     panel.getSnapshot,
   );
+  // Sits before the draft line: a click asks for a new proposal, Tab accepts.
   return (
     <button
       type="button"
       aria-label="Prompt helper"
-      title="Prompt helper"
+      title="New suggestion · Tab accepts"
       aria-expanded={state.open}
-      className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
-      onClick={() => {
-        const candidate = controller.getSnapshot().candidate;
-        if (
-          !composer.draft.text.trim() &&
-          candidate &&
-          controller.accept(candidate.requestId) === "accepted"
-        ) {
-          composer.focus();
-          return;
-        }
-        panel.change(!state.open);
-      }}
+      onMouseDown={(event) => event.preventDefault()}
+      className="flex h-full w-5 shrink-0 items-center justify-center rounded text-[0.85em] leading-none text-subtle-foreground transition-colors hover:text-foreground aria-expanded:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
+      onClick={() => panel.change(!state.open)}
     >
       <span aria-hidden="true">✦</span>
     </button>

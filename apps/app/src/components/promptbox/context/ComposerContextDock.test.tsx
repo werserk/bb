@@ -412,18 +412,18 @@ it("moves one mounted plugin preview between strip and panel and routes Tab/Esca
   expect(document.activeElement).toBe(screen.getByRole("textbox"));
 });
 
-it("connects each counter to its panel, shows the selected header and closes with its button", () => {
+it("connects each counter to its panel and closes it from the same tab", () => {
   render(<Fixture />);
   const plan = screen.getByRole("button", { name: "Plan: 2/6" });
   expect(plan.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(plan);
   const panel = screen.getByRole("region", { name: "Thread context" });
   expect(plan.getAttribute("aria-controls")).toBe(panel.id);
-  expect(panel.querySelector("header")?.textContent).toBe("Plan2/6");
+  expect(panel.querySelector("header")).toBeNull();
   expect(
     within(panel).queryByRole("button", { name: "Retry questions" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Close thread context" }));
+  fireEvent.click(plan);
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
   expect(plan.getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(plan);

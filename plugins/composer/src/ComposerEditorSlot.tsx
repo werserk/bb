@@ -75,7 +75,7 @@ export function ComposerEditorSlot({
         data-editor-layout={layout}
         aria-busy={inputLocked || undefined}
         className={cn(
-          "w-full overflow-y-auto bg-transparent px-4 pb-1 pr-14 pt-3 outline-none",
+          "w-full overflow-y-auto bg-transparent px-3 pb-1 pr-10 pt-2.5 outline-none",
           COARSE_POINTER_TEXT_BASE_CLASS,
           "leading-relaxed",
           isCompactLayout && "h-12 overflow-hidden pb-0 pr-2 pt-0",

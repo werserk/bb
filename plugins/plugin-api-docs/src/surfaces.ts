@@ -736,6 +736,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ComposerCustomization.experimental_inlinePanels",
           "experimental_ComposerContextStrip",
           "ExperimentalComposerContributions.experimental_InlinePanels",
+          "ExperimentalComposerContributions.experimental_EditorActions",
           "experimental_ComposerSuggestionController.experimental_suspend",
           "experimental_ComposerSuggestionController.experimental_handleContextPreviewKey",
         ],

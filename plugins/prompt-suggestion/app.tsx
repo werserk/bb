@@ -209,7 +209,13 @@ export default definePluginApp((app) => {
   app.composer.customize({
     id: "prompt-suggestion",
     scopes: ["thread"],
-    actions: [{ id: "prompt-helper", component: PromptHelperAction }],
+    actions: [
+      {
+        id: "prompt-helper",
+        component: PromptHelperAction,
+        experimental_placement: "editor",
+      },
+    ],
     experimental_inlinePanels: [
       { id: "prompt-helper", component: PromptHelperPanel },
     ],
