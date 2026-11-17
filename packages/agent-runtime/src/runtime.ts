@@ -306,6 +306,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   }, options.turnStartWatchdog?.intervalMs ?? 15_000);
   turnStartWatchdogTimer.unref?.();
   const threadOperationCounts = new Map<string, number>();
+  const idleThreadReleases = new Map<
+    string,
+    ReturnType<AgentRuntime["stopThread"]>
+  >();
   const stagedThreadRewinds = new Map<string, StagedThreadRewind>();
   const suppressedThreadEventIds = new Set<string>();
   const threadGoalState = new RuntimeThreadGoalState();
@@ -815,6 +819,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   async function runThreadOperation<TResult>(
     args: RunThreadOperationArgs<TResult>,
   ): Promise<TResult> {
+    const release = idleThreadReleases.get(args.threadId);
+    if (release) await release.catch(() => {});
     beginThreadOperation(args.threadId);
     try {
       return await args.work();
@@ -1375,7 +1381,17 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         getActiveTurnId: (threadId) => turnState.getActiveTurnId(threadId),
         getThreadExecutionOptions: (threadId) =>
           threadRuntimeConfigs.get(threadId)?.options,
-        onInteractiveRequest: options.onInteractiveRequest,
+        onInteractiveRequest: options.onInteractiveRequest
+          ? (request) => {
+              const handle = options.onInteractiveRequest;
+              if (!handle)
+                throw new Error("Interactive request handler unavailable");
+              return runThreadOperation({
+                threadId: request.threadId,
+                work: () => handle(request),
+              });
+            }
+          : undefined,
         onToolCall: options.onToolCall,
         toolCalls,
         parsedId: parsedLine.parsedId,
@@ -2285,6 +2301,25 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       });
     },
 
+    isThreadBusy(threadId) {
+      return (
+        idleThreadReleases.has(threadId) ||
+        threadMayStartTurn(threadId) ||
+        backgroundWorkState.hasOpenThreadWork(threadId)
+      );
+    },
+
+    async releaseIdleThread({ threadId }) {
+      if (runtime.isThreadBusy(threadId)) return null;
+      const release = runtime.stopThread({ threadId });
+      idleThreadReleases.set(threadId, release);
+      try {
+        return await release;
+      } finally {
+        idleThreadReleases.delete(threadId);
+      }
+    },
+
     async stopThread({ threadId }) {
       toolCalls.cancelThread(threadId);
       return runThreadOperation({
@@ -2634,7 +2669,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           }
 
           try {
-            await runtime.stopThread({ threadId: candidate.threadId });
+            if (
+              (await runtime.releaseIdleThread({
+                threadId: candidate.threadId,
+              })) === null
+            )
+              return null;
           } catch (error) {
             options.onStderr?.(
               `Provider session release failed for ${candidate.threadId}: ${

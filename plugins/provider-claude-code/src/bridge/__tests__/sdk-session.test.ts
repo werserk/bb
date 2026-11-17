@@ -6,6 +6,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 const mockQueryInstance = {
+  initializationResult: vi.fn().mockResolvedValue({}),
   applyFlagSettings: vi.fn(),
   close: vi.fn(),
   interrupt: vi.fn(),
@@ -75,6 +76,7 @@ function waitForAsyncWork(): Promise<void> {
 describe("SdkSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueryInstance.initializationResult.mockResolvedValue({});
     queryMock.mockImplementation(() => mockQueryInstance);
     mockQueryInstance.applyFlagSettings.mockResolvedValue(undefined);
     mockQueryInstance.interrupt.mockResolvedValue(undefined);
@@ -88,6 +90,120 @@ describe("SdkSession", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("holds FIFO input until the captured query initializes", async () => {
+    keepSdkStreamOpen();
+    let ready!: () => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((resolve) => {
+        ready = resolve;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const iterator = getLatestPrompt()[Symbol.asyncIterator]();
+    const received: string[] = [];
+    const first = iterator.next().then((item) => {
+      received.push(JSON.stringify(item.value));
+      return item;
+    });
+    const one = session.pushInput("first");
+    const two = session.pushInput("second");
+    await waitForAsyncWork();
+    expect(received).toEqual([]);
+    ready();
+    expect((await first).value.message.content).toBe("first");
+    expect((await iterator.next()).value.message.content).toBe("second");
+    await Promise.all([one, two]);
+    expect(mockQueryInstance.initializationResult).toHaveBeenCalledTimes(1);
+    session.stop();
+  });
+
+  it("rejects initialization failure without yielding input", async () => {
+    keepSdkStreamOpen();
+    let fail!: (error: Error) => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("original");
+    const assertion = expect(consumed).rejects.toThrow(
+      "busy before initialization",
+    );
+    fail(new Error("busy before initialization"));
+    await assertion;
+    session.stop();
+    expect((await getLatestPrompt()[Symbol.asyncIterator]().next()).done).toBe(
+      true,
+    );
+  });
+
+  it("settles a readiness waiter on Stop even if SDK initialization never settles", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise(() => {}),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("original");
+    const assertion = expect(consumed).rejects.toThrow(
+      "stopped before input consumed",
+    );
+    session.stop();
+    await assertion;
+    expect((await getLatestPrompt()[Symbol.asyncIterator]().next()).done).toBe(
+      true,
+    );
+  });
+
+  it("refuses input when readiness belongs to a replaced query", async () => {
+    keepSdkStreamOpen();
+    let ready!: () => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((resolve) => {
+        ready = resolve;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("stale");
+    const assertion = expect(consumed).rejects.toThrow(
+      "input stream is closed",
+    );
+    queryMock.mockReturnValue({
+      ...mockQueryInstance,
+      initializationResult: () => Promise.resolve({}),
+    });
+    session.start();
+    ready();
+    await assertion;
+    session.stop();
+  });
+
+  it("settles readiness waiters when the SDK output stream ends", async () => {
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise(() => {}),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await expect(session.pushInput("never delivered")).rejects.toThrow(
+      "stream ended before input consumed",
+    );
+  });
+
+  it("handles rejected initialization without submitted input", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockRejectedValue(
+      new Error("startup failed"),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await waitForAsyncWork();
+    session.stop();
   });
 
   it("preserves injected question aliases alongside native tool exclusions", () => {
@@ -114,8 +230,10 @@ describe("SdkSession", () => {
 
   it("rejects queued input when the SDK input stream closes before consumption", async () => {
     const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    keepSdkStreamOpen();
+    session.start();
     const consumed = session.pushInput("hello");
-
+    await waitForAsyncWork();
     session.stop();
     expect(session.canPushInput()).toBe(false);
 

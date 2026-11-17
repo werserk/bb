@@ -81,8 +81,6 @@ schedule does not emit `message.queued`; creation and changed waits still do.
 This prevents bookkeeping retries from driving project-state rebuilds without
 changing message priority, queue storage or public contracts.
 
-
-
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and
@@ -494,3 +492,17 @@ be disabled. The bounded, cancellable transport rejects tools, refusals and
 unknown finish reasons, does not retry or run an agent loop, and reports only
 upstream model/usage evidence. No additional SDK surface or credential store is
 introduced; host protocol 269 gates the new commands on enrolled machines.
+
+### Conditional native runtime release
+
+Thread idle release is serialized with retained start/submit/rewind work by the
+runtime manager's thread control lane across environments. The runtime refuses
+active, pending or background work and orders new operations after asynchronous
+release. The idle reaper uses the same conditional runtime primitive with its
+additional age policy. `release-idle` has no manual Stop settlement side effects;
+ordinary Stop may still interrupt and cancel interactions. Protocol 270 requires
+updated daemons for these strengthened semantics.
+
+Claude SDK input waits for the captured Query initialization before entering the
+prompt iterator; closure rejects readiness waiters. Iterator consumption remains
+a handoff, not proof that native execution accepted or completed the prompt.

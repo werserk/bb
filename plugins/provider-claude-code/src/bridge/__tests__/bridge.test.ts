@@ -320,7 +320,7 @@ function createControlledClaudeQuery(): ControlledClaudeQuery {
       .fn()
       .mockResolvedValue([{ name: "bb-bridge", status: "connected" }]),
     getContextUsage: vi.fn().mockResolvedValue(null),
-    initializationResult: vi.fn(),
+    initializationResult: vi.fn().mockResolvedValue({}),
     interrupt: vi.fn().mockResolvedValue(undefined),
     setModel: vi.fn().mockResolvedValue(undefined),
     setPermissionMode: vi.fn().mockResolvedValue(undefined),
@@ -685,6 +685,7 @@ async function forwardAskUserQuestion({
 describe("bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    if (process.getuid) vi.spyOn(process, "getuid").mockReturnValue(1000);
     contextQueryMock.mockImplementation(() => createControlledClaudeQuery());
     queryMock.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({
@@ -724,6 +725,7 @@ describe("bridge", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     for (const tempDir of tempDirs.splice(0)) {
       rmSync(tempDir, { recursive: true, force: true });
@@ -5903,6 +5905,42 @@ describe("bridge", () => {
       await bridge.flushWork();
       queries[1]?.finish();
       await bridge.waitForResponse(14);
+    } finally {
+      bridge.restore();
+    }
+  });
+
+  it("does not emit acceptance when SDK initialization rejects before input handoff", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let fail!: (error: Error) => void;
+    query.initializationResult.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      }),
+    );
+    queryMock.mockReturnValue(query);
+    try {
+      await startBridgeThread({ bridge, threadId: "thread-init-rejected" });
+      bridge.sendRequest(10, "turn/start", {
+        threadId: "thread-init-rejected",
+        providerThreadId: "thread-init-rejected",
+        input: [{ type: "text", text: "Retain this original" }],
+        clientRequestId: "creq_abcdefghjk",
+        options: canonicalOptions({}),
+      });
+      await bridge.flushWork();
+      expect(bridge.hasResponse(10)).toBe(false);
+      fail(new Error("native cell busy before initialization"));
+      const response = await bridge.waitForResponse(10);
+      expect(response.error).toBeDefined();
+      expect(
+        assembleCapturedThreadEvents(bridge.messages, "claude-code").filter(
+          (event) => event.type === "turn/input/accepted",
+        ),
+      ).toEqual([]);
+      query.finish();
+      await bridge.flushWork();
     } finally {
       bridge.restore();
     }

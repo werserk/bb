@@ -1401,3 +1401,19 @@ export const threadStoragePathListResponseSchema =
 export type ThreadStoragePathListResponse = z.infer<
   typeof threadStoragePathListResponseSchema
 >;
+
+export const threadReleaseIdleResultSchema = z
+  .object({
+    status: z.enum(["released", "busy", "unknown"]),
+    reason: z.enum([
+      "runtime_released",
+      "pending_work",
+      "thread_unavailable",
+      "host_unavailable",
+      "release_unconfirmed",
+    ]),
+  })
+  .strict();
+export type ThreadReleaseIdleResult = z.infer<
+  typeof threadReleaseIdleResultSchema
+>;

@@ -363,6 +363,43 @@ export class RuntimeManager {
     return runInSerialLane(this.threadControlTails, threadId, work);
   }
 
+  async releaseIdleThread(
+    threadId: string,
+    environmentId: string,
+  ): Promise<{
+    providerCheckpointId: string | null;
+    activeTurnRetained?: boolean;
+  }> {
+    return this.enqueueThreadControl(threadId, async () => {
+      const entries = [...this.entries.values()];
+      if (
+        this.pendingEntries.has(environmentId) ||
+        this.pendingEnvironmentProvisions.has(environmentId) ||
+        [...this.inFlightThreadCommandsByEnvironmentId.values()].some(
+          (commands) => commands.has(threadId),
+        ) ||
+        entries.some((entry) => entry.runtime.isThreadBusy(threadId))
+      ) {
+        return { providerCheckpointId: null, activeTurnRetained: true };
+      }
+      const checkpoints = new Set<string>();
+      for (const entry of entries) {
+        if (!entry.runtime.hasThread(threadId)) continue;
+        const result = await entry.runtime.releaseIdleThread({ threadId });
+        if (result === null)
+          return { providerCheckpointId: null, activeTurnRetained: true };
+        if (result.providerCheckpointId)
+          checkpoints.add(result.providerCheckpointId);
+      }
+      return {
+        providerCheckpointId:
+          checkpoints.size === 1
+            ? (checkpoints.values().next().value ?? null)
+            : null,
+      };
+    });
+  }
+
   async releaseThreadFromOtherEnvironments(args: {
     activeTurn: ReleaseThreadActiveTurnPolicy;
     environmentId: string;
@@ -558,7 +595,14 @@ export class RuntimeManager {
         ...args,
         runThreadExclusive: (threadId, work) =>
           this.enqueueThreadControl(threadId, () => {
-            if (this.entryHasInFlightThreadCommand(entry, threadId)) {
+            if (
+              [...this.inFlightThreadCommandsByEnvironmentId.values()].some(
+                (commands) => commands.has(threadId),
+              ) ||
+              [...this.entries.values()].some((owner) =>
+                owner.runtime.isThreadBusy(threadId),
+              )
+            ) {
               return null;
             }
             return work();
@@ -649,17 +693,6 @@ export class RuntimeManager {
     }
     return [...commandsByThreadId.keys()].some(
       (threadId) => threadId !== excludingThreadId,
-    );
-  }
-
-  private entryHasInFlightThreadCommand(
-    entry: RuntimeEntry,
-    threadId: string,
-  ): boolean {
-    return (
-      this.inFlightThreadCommandsByEnvironmentId
-        .get(entry.environmentId)
-        ?.has(threadId) ?? false
     );
   }
 

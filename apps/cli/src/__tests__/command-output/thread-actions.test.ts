@@ -22,6 +22,30 @@ describe("bb thread action command output", () => {
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
+  for (const status of ["released", "busy", "unknown"] as const) {
+    it(`idle release exposes the ${status} outcome through the shared SDK route`, async () => {
+      const result = {
+        status,
+        reason:
+          status === "released"
+            ? "runtime_released"
+            : status === "busy"
+              ? "pending_work"
+              : "release_unconfirmed",
+      };
+      const post = vi.fn(async () => result);
+      stubServerApi({ "v1.threads.:id.release-idle.$post": post });
+      await runCommand(
+        ["thread", "release-idle", "thread-idle", "--json"],
+        register,
+      );
+      expect(post).toHaveBeenCalledWith({ param: { id: "thread-idle" } });
+      expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
+        status,
+      );
+    });
+  }
+
   it("bb thread archive sends the thread id from args", async () => {
     const archivePost = vi.fn(async () => ({
       ok: true,

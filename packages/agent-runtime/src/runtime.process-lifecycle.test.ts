@@ -1208,6 +1208,35 @@ describe("createAgentRuntime process lifecycle", () => {
     }
   });
 
+  it("orders a replacement session after an idle release completes", async () => {
+    const runtime = createScriptedEchoRuntime({
+      runtime: { workspacePath: tmpDir, onEvent: () => {} },
+      launch: {
+        pluginId: "provider-claude-code",
+        scripted: { sessionRestorable: true },
+      },
+    });
+    const args = {
+      environmentId: "env-1",
+      threadId: "t1",
+      projectId: "p1",
+      providerId: "claude-code",
+      options: fullRuntimeOptions,
+    };
+    try {
+      await runtime.startThread(args);
+      expect(runtime.isThreadBusy("t1")).toBe(false);
+      const release = runtime.releaseIdleThread({ threadId: "t1" });
+      const replacement = runtime.startThread(args);
+      expect(await release).not.toBeNull();
+      await replacement;
+      expect(runtime.hasThread("t1")).toBe(true);
+      expect(runtime.getProviderSession("t1")).not.toBeNull();
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("marks a cold-resumed session restorable from the bridge's resume result", async () => {
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, onEvent: () => {} },

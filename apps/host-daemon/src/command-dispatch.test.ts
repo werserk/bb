@@ -146,6 +146,10 @@ function createRuntime(): FakeDispatchRuntime {
     }),
     runTurn: vi.fn(async () => ({ status: "started" as const })),
     steerTurn: vi.fn(async () => ({ status: "steered" as const })),
+    isThreadBusy: (threadId: string) => activeTurnsByThreadId.has(threadId),
+    async releaseIdleThread(args: { threadId: string }) {
+      return this.stopThread(args);
+    },
     stopThread: vi.fn(async (args: { threadId: string }) => {
       activeTurnsByThreadId.delete(args.threadId);
       hostedThreadIds.delete(args.threadId);

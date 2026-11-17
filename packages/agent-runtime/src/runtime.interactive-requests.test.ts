@@ -321,6 +321,58 @@ describe("createAgentRuntime interactive requests", () => {
     await runtime.shutdown();
   });
 
+  it("retains a pending provider question during conditional idle release", async () => {
+    let answer!: (value: PendingInteractionResolution) => void;
+    let received!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+    const events: ThreadEvent[] = [];
+    const runtime = createScriptedEchoRuntime({
+      runtime: {
+        workspacePath: tmpDir,
+        onEvent: (event) => events.push(event),
+        onInteractiveRequest: () => {
+          received();
+          return new Promise((resolve) => {
+            answer = resolve;
+          });
+        },
+      },
+    });
+    try {
+      await runtime.startThread({
+        environmentId: "env-1",
+        threadId: "t1",
+        projectId: "p1",
+        providerId: "fake",
+        options: fullRuntimeOptions,
+      });
+      await runtime.runTurn({
+        threadId: "t1",
+        clientRequestId: "creq_222222224m",
+        input: [promptTextInput({ text: "ask_user" })],
+        options: fullRuntimeOptions,
+      });
+      await pending;
+      expect(runtime.isThreadBusy("t1")).toBe(true);
+      expect(await runtime.releaseIdleThread({ threadId: "t1" })).toBeNull();
+      expect(runtime.hasThread("t1")).toBe(true);
+      answer({
+        kind: "user_answer",
+        answers: { q1: { selected: ["staging"] } },
+      });
+      await waitForThreadTurnCompleted({
+        events,
+        providerId: "fake",
+        runtime,
+        threadId: "t1",
+      });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("reaches the user through a provider-enforcing bridge end to end", async () => {
     const requests: PendingInteractionCreate[] = [];
     const events: ThreadEvent[] = [];
