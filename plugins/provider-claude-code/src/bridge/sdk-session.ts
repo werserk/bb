@@ -93,6 +93,7 @@ interface BuildSdkDoneErrorMessageArgs {
 }
 
 const SDK_STDERR_TAIL_MAX_CHARS = 4_000;
+const PROCESS_TERMINATION_TIMEOUT_MS = 10_000;
 
 export function isBypassPermissionsAvailable(): boolean {
   return process.getuid?.() !== 0;
@@ -122,10 +123,11 @@ function buildSdkDoneErrorMessage(args: BuildSdkDoneErrorMessageArgs): string {
   return `${errorMessage}\n\nClaude Code stderr:\n${stderrTail}`;
 }
 
-function spawnRecordedClaudeProcess(args: {
+function spawnTrackedClaudeProcess(args: {
   onStderr: (data: string) => void;
   spawnOptions: SpawnOptions;
   threadId: string | null;
+  track: (child: ReturnType<typeof spawn>) => void;
 }): SpawnedProcess {
   const child = spawn(args.spawnOptions.command, args.spawnOptions.args, {
     cwd: args.spawnOptions.cwd,
@@ -134,10 +136,13 @@ function spawnRecordedClaudeProcess(args: {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  args.track(child);
   child.stderr?.setEncoding("utf8").on("data", (data: string) => {
     args.onStderr(data);
   });
-  experimental_recordProviderChildIo(child, { threadId: args.threadId });
+  if (experimental_isProviderBridgeRecording()) {
+    experimental_recordProviderChildIo(child, { threadId: args.threadId });
+  }
   return child as SpawnedProcess;
 }
 
@@ -164,6 +169,9 @@ function buildSdkPermissionOptions(
 
 export class SdkSession {
   private query: Query | undefined;
+  private childTermination: Promise<void> | undefined;
+  private readiness: Promise<unknown> | undefined;
+  private readonly readinessWaiters = new Set<(error: Error) => void>();
   private sessionId: string | undefined;
   private inputResolve:
     | ((value: IteratorResult<SDKUserMessage>) => void)
@@ -252,16 +260,24 @@ export class SdkSession {
       cwd: this.options.cwd,
       systemPrompt: this.options.systemPrompt,
       ...permissionOptions,
-      ...(experimental_isProviderBridgeRecording()
-        ? {
-            spawnClaudeCodeProcess: (spawnOptions: SpawnOptions) =>
-              spawnRecordedClaudeProcess({
-                onStderr,
-                spawnOptions,
-                threadId: recordThreadId?.() ?? null,
-              }),
-          }
-        : {}),
+      spawnClaudeCodeProcess: (spawnOptions: SpawnOptions) => {
+        if (this.inputDone) {
+          throw new Error("Claude SDK session stopped before process start");
+        }
+        return spawnTrackedClaudeProcess({
+          onStderr,
+          spawnOptions,
+          threadId: recordThreadId?.() ?? null,
+          track: (child) => {
+            this.childTermination = new Promise<void>((resolve) => {
+              child.once("close", () => resolve());
+              child.once("error", () => {
+                if (child.pid === undefined) resolve();
+              });
+            });
+          },
+        });
+      },
       includePartialMessages: true,
       settingSources: ["user", "project", "local"],
       persistSession: true,
@@ -316,6 +332,8 @@ export class SdkSession {
       throw translateMissingClaudeCliError(error);
     }
 
+    this.readiness = this.query.initializationResult();
+    void this.readiness.catch(() => {});
     void this.consumeStream();
   }
 
@@ -323,39 +341,42 @@ export class SdkSession {
     text: string,
     promptId?: NonNullable<SDKUserMessage["uuid"]>,
   ): Promise<void> {
-    const message: SDKUserMessage = {
-      type: "user",
-      message: { role: "user", content: text },
-      parent_tool_use_id: null,
-      session_id: this.sessionId ?? "",
-      ...(promptId !== undefined ? { uuid: promptId } : {}),
-    };
-
-    if (this.inputDone) {
+    const capturedQuery = this.query;
+    const readiness = this.readiness;
+    if (!capturedQuery || !readiness || this.inputDone) {
       return Promise.reject(new Error("Claude SDK input stream is closed"));
     }
-
-    let resolveConsumed = (): void => {};
-    let rejectConsumed = (_error: Error): void => {};
-    const consumed = new Promise<void>((resolve, reject) => {
-      resolveConsumed = resolve;
-      rejectConsumed = reject;
+    return new Promise<void>((resolveConsumed, rejectConsumed) => {
+      this.readinessWaiters.add(rejectConsumed);
+      void readiness.then(
+        () => {
+          this.readinessWaiters.delete(rejectConsumed);
+          if (this.inputDone || this.query !== capturedQuery) {
+            rejectConsumed(new Error("Claude SDK input stream is closed"));
+            return;
+          }
+          const message: SDKUserMessage = {
+            type: "user",
+            message: { role: "user", content: text },
+            parent_tool_use_id: null,
+            session_id: this.sessionId ?? "",
+            ...(promptId !== undefined ? { uuid: promptId } : {}),
+          };
+          if (this.inputResolve) {
+            const resolve = this.inputResolve;
+            this.inputResolve = null;
+            resolve({ value: message, done: false });
+            resolveConsumed();
+          } else {
+            this.inputQueue.push({ message, rejectConsumed, resolveConsumed });
+          }
+        },
+        (error) => {
+          this.readinessWaiters.delete(rejectConsumed);
+          rejectConsumed(error);
+        },
+      );
     });
-
-    if (this.inputResolve) {
-      const resolve = this.inputResolve;
-      this.inputResolve = null;
-      resolve({ value: message, done: false });
-      resolveConsumed();
-      return consumed;
-    }
-
-    this.inputQueue.push({
-      message,
-      rejectConsumed,
-      resolveConsumed,
-    });
-    return consumed;
   }
 
   stop(): void {
@@ -367,6 +388,34 @@ export class SdkSession {
     this.query = undefined;
   }
 
+  async stopAndWait(timeoutMs = PROCESS_TERMINATION_TIMEOUT_MS): Promise<void> {
+    this.stop();
+    await this.waitForTermination(timeoutMs);
+  }
+
+  private async waitForTermination(timeoutMs: number): Promise<void> {
+    if (!this.childTermination) return;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.childTermination,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Claude process termination was not confirmed within ${timeoutMs}ms`,
+                ),
+              ),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
   async closeGracefully(timeoutMs: number): Promise<void> {
     this.inputDone = true;
     this.rejectQueuedInputs("Claude SDK session closed before input consumed");
@@ -374,6 +423,7 @@ export class SdkSession {
     const query = this.query;
     if (!query) {
       this.resolveInputDone();
+      await this.waitForTermination(PROCESS_TERMINATION_TIMEOUT_MS);
       return;
     }
 
@@ -398,6 +448,7 @@ export class SdkSession {
         clearTimeout(timeout);
       }
     }
+    await this.waitForTermination(PROCESS_TERMINATION_TIMEOUT_MS);
   }
 
   private async interruptAndDrain(query: Query): Promise<void> {
@@ -449,6 +500,8 @@ export class SdkSession {
 
   private rejectQueuedInputs(message: string): void {
     const error = new Error(message);
+    for (const reject of this.readinessWaiters) reject(error);
+    this.readinessWaiters.clear();
     while (this.inputQueue.length > 0) {
       const queued = this.inputQueue.shift();
       if (!queued) {

@@ -81,8 +81,6 @@ schedule does not emit `message.queued`; creation and changed waits still do.
 This prevents bookkeeping retries from driving project-state rebuilds without
 changing message priority, queue storage or public contracts.
 
-
-
 ### Thread lifecycle ownership
 
 `lifecycleOwnerThreadId` is an optional relationship set only at creation and
@@ -499,3 +497,25 @@ introduced; host protocol 269 gates the new commands on enrolled machines.
 ### Composer context previews
 
 ComposerContextDock displays the existing source registrations as compact accessible counters. Counters reveal and scroll to sections in a flat panel; arrow/Home/End navigation and Escape retain pane-local focus. Questions navigate to their native chat card. The public experimental_ComposerContextStrip moves a plugin-owned inline preview between strip and panel without remounting or regenerating it. The host routes Tab/Escape to the active preview. Prompt Suggestion generates from a captured conversation snapshot and validates only cancellation, output and protected mentions on completion; application protects draft and composer identity. Conversation and memory changes do not invalidate a manual proposal. Empty-draft helper activation accepts an existing ghost through the shared suggestion controller.
+
+### Conditional native runtime release
+
+Thread idle release is serialized with retained start/submit/rewind work by the
+runtime manager's thread control lane across environments. The runtime refuses
+active, pending or background work and orders new operations after asynchronous
+release. The idle reaper uses the same conditional runtime primitive with its
+additional age policy. `release-idle` has no manual Stop settlement side effects;
+ordinary Stop may still interrupt and cancel interactions. Protocol 270 requires
+updated daemons for these strengthened semantics.
+
+Claude SDK input waits for the captured Query initialization before entering the
+prompt iterator; closure rejects readiness waiters. Iterator consumption remains
+a handoff, not proof that native execution accepted or completed the prompt.
+
+Claude resident session replacement tracks the actual host child process on every
+spawn, independently of optional I/O recording. A new query waits for the previous
+child to close, rather than interpreting SDK abort or iterator completion as process
+termination. Concurrent replacements share the same handoff; Stop invalidates it
+before a successor can start. Termination timeouts retain closing ownership and
+reject new work until a later close proves the previous child has exited. This
+keeps inherited native account locks authoritative during same-session continuation.

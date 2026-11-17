@@ -36,6 +36,111 @@ import {
 } from "../../src/services/threads/thread-lifecycle.js";
 
 describe("thread runtime stop", () => {
+  it("idle release preserves a question arriving after the precheck", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "idle", visibility: "hidden" },
+      });
+      const response = harness.app.request(
+        `/api/v1/threads/${thread.id}/release-idle`,
+        { method: "POST" },
+      );
+      const command = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" && command.threadId === thread.id,
+      );
+      expect(command.command).toMatchObject({ intent: "release-idle" });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        turnId: "late-turn",
+        providerThreadId: "late-provider",
+      });
+      harness.deps.pendingInteractions.registerPendingInteraction({
+        interaction: {
+          threadId: thread.id,
+          turnId: "late-turn",
+          providerId: thread.providerId,
+          providerThreadId: "late-provider",
+          providerRequestId: "late-question",
+          payload: createUserQuestionPayload(),
+        },
+      });
+      await reportQueuedCommandSuccess(harness, command, {
+        providerCheckpointId: null,
+      });
+      expect(await (await response).json()).toEqual({
+        status: "released",
+        reason: "runtime_released",
+      });
+      expect(
+        harness.deps.pendingInteractions.listPendingThreadInteractions(
+          thread.id,
+        ),
+      ).toHaveLength(1);
+      const busy = await harness.app.request(
+        `/api/v1/threads/${thread.id}/release-idle`,
+        { method: "POST" },
+      );
+      expect(await busy.json()).toEqual({
+        status: "busy",
+        reason: "pending_work",
+      });
+    });
+  });
+
+  it("reports an unconfirmed host release as unknown", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "idle", visibility: "hidden" },
+      });
+      const response = harness.app.request(
+        `/api/v1/threads/${thread.id}/release-idle`,
+        { method: "POST" },
+      );
+      const command = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" && command.threadId === thread.id,
+      );
+      await reportQueuedCommandError(harness, command, {
+        errorCode: "host_unavailable",
+        errorMessage: "Host disconnected",
+      });
+      expect(await (await response).json()).toEqual({
+        status: "unknown",
+        reason: "release_unconfirmed",
+      });
+      expect(listQueuedCommands(harness, "thread.stop")).toEqual([]);
+    });
+  });
+
+  it("idle release never escalates retained work into interrupt", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "idle", visibility: "hidden" },
+      });
+      const response = harness.app.request(
+        `/api/v1/threads/${thread.id}/release-idle`,
+        { method: "POST" },
+      );
+      const command = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" && command.threadId === thread.id,
+      );
+      await reportQueuedCommandSuccess(harness, command, {
+        providerCheckpointId: null,
+        activeTurnRetained: true,
+      });
+      expect(await (await response).json()).toEqual({
+        status: "busy",
+        reason: "pending_work",
+      });
+      expect(listQueuedCommands(harness, "thread.stop")).toEqual([]);
+    });
+  });
+
   it("releases and dismisses a question when the runtime ends during a failed interrupt", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadFixture(harness, {

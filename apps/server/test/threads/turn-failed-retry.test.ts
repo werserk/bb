@@ -1,3 +1,7 @@
+import {
+  waitForQueuedCommand,
+  reportQueuedCommandError,
+} from "../helpers/commands.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -377,6 +381,111 @@ async function drainRecoveries(
 }
 
 describe("the turn.failed announcement", () => {
+  it("retains the actual first prompt after startup rejects before acceptance", async () => {
+    await withTestHarness(async (harness) => {
+      const { project, environment } = seedFailableThread(
+        harness,
+        "host-first-init",
+      );
+      const text = "Original first prompt before initialization";
+      const response = await harness.app.request("/api/v1/threads", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          origin: "app",
+          projectId: project.id,
+          providerId: "codex",
+          model: "gpt-5",
+          input: [{ type: "text", text }],
+          environment: { type: "reuse", environmentId: environment.id },
+        }),
+      });
+      expect(response.status).toBe(201);
+      const created = z.object({ id: z.string() }).parse(await response.json());
+      const command = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.start" && command.threadId === created.id,
+      );
+      const requestId = lastTurnRequest(harness, created.id).requestId;
+      await reportQueuedCommandError(harness, command, {
+        errorCode: "command_failed",
+        errorMessage: "native cell busy before initialization",
+      });
+      failThread(harness, created.id);
+      expect(buildTurnFailedEvent(harness.db, created.id)?.inputAccepted).toBe(
+        false,
+      );
+      await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, created.id),
+        request: {
+          turnRequestId: requestId,
+          sendAt: Date.now() + 60_000,
+          reason: "Retry original first prompt",
+        },
+      });
+      await sweepPastResume(harness);
+      expect(lastTurnRequest(harness, created.id).input[0]?.text).toBe(text);
+    });
+  });
+
+  for (const mode of ["send", "drained-queue"] as const) {
+    it(`retains original ${mode} bytes after a pre-acceptance command failure`, async () => {
+      await withTestHarness(async (harness) => {
+        const { thread } = seedFailableThread(harness, `host-init-${mode}`);
+        if (mode === "send")
+          applyLoggedThreadLifecycleEvent(harness.deps, {
+            event: { type: "run.succeeded" },
+            threadId: thread.id,
+          });
+        const text = `Original ${mode} input, never accepted`;
+        await sendNewMessage(harness, { threadId: thread.id, text });
+        if (mode === "drained-queue") {
+          expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(
+            1,
+          );
+          applyLoggedThreadLifecycleEvent(harness.deps, {
+            event: { type: "run.succeeded" },
+            threadId: thread.id,
+          });
+          await runQueuedMessageDispatch(harness.deps, {
+            kind: "thread-ready",
+            threadId: thread.id,
+          });
+        }
+        const command = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            (command.type === "thread.start" ||
+              command.type === "turn.submit") &&
+            command.threadId === thread.id,
+        );
+        const requestId = lastTurnRequest(harness, thread.id).requestId;
+        await reportQueuedCommandError(harness, command, {
+          errorCode: "command_failed",
+          errorMessage: "native cell busy before initialization",
+        });
+        failThread(harness, thread.id);
+        expect(buildTurnFailedEvent(harness.db, thread.id)?.inputAccepted).toBe(
+          false,
+        );
+        await retryFailedTurn(harness.deps, {
+          thread: requireThread(harness, thread.id),
+          request: {
+            turnRequestId: requestId,
+            sendAt: Date.now() + 60_000,
+            reason: "Retry original",
+          },
+        });
+        await sweepPastResume(harness);
+        const retried = lastTurnRequest(harness, thread.id);
+        expect(retried.retryOfRequestId).toBe(requestId);
+        expect(retried.input[0]?.text).toBe(text);
+        expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      });
+    });
+  }
+
   it("carries the failed turn's ids and the provider's failure facts", async () => {
     await withTestHarness(async (harness) => {
       const { environment, requestId, thread } = seedFailableThread(

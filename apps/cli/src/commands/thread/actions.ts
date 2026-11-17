@@ -646,6 +646,22 @@ export function registerActionsCommands(
       ),
     );
 
+  parent
+    .command("release-idle [id]")
+    .description("Release an idle runtime without interrupting work")
+    .option("--self", "Target the current thread (from BB_THREAD_ID)")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string | undefined, opts: ThreadActionOptions) => {
+        const threadId = requireThreadIdOrSelf(id, opts);
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).threads.experimental_releaseIdle({ threadId });
+        if (outputJson(opts, { threadId, ...result })) return;
+        console.log(`Thread ${threadId}: ${result.status} (${result.reason})`);
+      }),
+    );
+
   for (const { name, description, method, done } of [
     {
       name: "stop",

@@ -200,6 +200,7 @@ Use `--selected-model <model-id>` to discover its reasoning choices and include 
 - `bb thread message`
 - `bb thread send`
 - `bb thread retry`
+- `bb thread release-idle`
 - `bb thread stop`
 - `bb thread compact`
 - `bb thread context`

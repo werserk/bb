@@ -1,3 +1,4 @@
+import type { ThreadReleaseIdleResult } from "./api/threads.js";
 import {
   conversationQuestionPublicationInputSchema,
   conversationQuestionAnswerSchema,
@@ -1555,6 +1556,12 @@ export const publicApiRoutes = {
       method: "delete",
       request: noRequest<PathThreadAndQueuedMessage>(),
       response: jsonResponse<{ ok: true }>(),
+    }),
+    releaseIdle: defineRoute({
+      path: "/threads/:id/release-idle",
+      method: "post",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ThreadReleaseIdleResult>(),
     }),
     stop: defineRoute({
       path: "/threads/:id/stop",

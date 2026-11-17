@@ -24,6 +24,8 @@ import {
 import {
   DEFAULT_TURN_RETRY_REASON,
   threadTabsResponseSchema,
+  threadReleaseIdleResultSchema,
+  type ThreadReleaseIdleResult,
 } from "@bb/server-contract";
 import type {
   CreateQueuedMessageRequest,
@@ -788,6 +790,9 @@ export interface ThreadsArea {
    * treating the stop as confirmed.
    */
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
+  experimental_releaseIdle(
+    args: ThreadActionArgs,
+  ): Promise<ThreadReleaseIdleResult>;
   tabs: ThreadTabsArea;
   context(args: ThreadStatusArgs): Promise<ThreadContextResult>;
   timeline(
@@ -1737,6 +1742,15 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads.$post({
           json: spawnJson(input),
         }),
+      );
+    },
+    async experimental_releaseIdle(input) {
+      return threadReleaseIdleResultSchema.parse(
+        await transport.readJson(
+          transport.api.v1.threads[":id"]["release-idle"].$post({
+            param: { id: input.threadId },
+          }),
+        ),
       );
     },
     async stop(input) {

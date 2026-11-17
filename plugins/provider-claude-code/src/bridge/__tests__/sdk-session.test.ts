@@ -1,3 +1,4 @@
+import { ChildProcess } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Options,
@@ -6,6 +7,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 const mockQueryInstance = {
+  initializationResult: vi.fn().mockResolvedValue({}),
   applyFlagSettings: vi.fn(),
   close: vi.fn(),
   interrupt: vi.fn(),
@@ -13,8 +15,20 @@ const mockQueryInstance = {
   setPermissionMode: vi.fn(),
   [Symbol.asyncIterator]: vi.fn(),
 };
-const { queryMock } = vi.hoisted(() => ({
+const { queryMock, spawnMock, recordingMock, recordMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  recordingMock: vi.fn(() => false),
+  recordMock: vi.fn(),
   queryMock: vi.fn(),
+}));
+
+vi.mock("@get-bb/plugin-sdk/process", () => ({
+  experimental_spawnHostProcess: spawnMock,
+}));
+
+vi.mock("@get-bb/plugin-sdk/provider-bridge", () => ({
+  experimental_isProviderBridgeRecording: recordingMock,
+  experimental_recordProviderChildIo: recordMock,
 }));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
@@ -75,6 +89,8 @@ function waitForAsyncWork(): Promise<void> {
 describe("SdkSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recordingMock.mockReturnValue(false);
+    mockQueryInstance.initializationResult.mockResolvedValue({});
     queryMock.mockImplementation(() => mockQueryInstance);
     mockQueryInstance.applyFlagSettings.mockResolvedValue(undefined);
     mockQueryInstance.interrupt.mockResolvedValue(undefined);
@@ -88,6 +104,220 @@ describe("SdkSession", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])(
+    "waits for child termination with recording=%s",
+    async (recording) => {
+      recordingMock.mockReturnValue(recording);
+      const child = new ChildProcess();
+      Object.defineProperty(child, "pid", { value: 123 });
+      spawnMock.mockReturnValue(child);
+      queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+        options.spawnClaudeCodeProcess?.({
+          command: "fake",
+          args: [],
+          env: {},
+          signal: new AbortController().signal,
+        });
+        return mockQueryInstance;
+      });
+      const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+      session.start();
+      await waitForAsyncWork();
+      let stopped = false;
+      const closing = session.stopAndWait(1_000).then(() => {
+        stopped = true;
+      });
+      await waitForAsyncWork();
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(recordMock).toHaveBeenCalledTimes(recording ? 1 : 0);
+      expect(stopped).toBe(false);
+      child.emit("close", 0, null);
+      await closing;
+      expect(stopped).toBe(true);
+    },
+  );
+
+  it("keeps an unresolved child owned after timeout and permits confirmed later closure", async () => {
+    vi.useFakeTimers();
+    const child = new ChildProcess();
+    Object.defineProperty(child, "pid", { value: 123 });
+    spawnMock.mockReturnValue(child);
+    queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+      options.spawnClaudeCodeProcess?.({
+        command: "fake",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      });
+      return mockQueryInstance;
+    });
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    try {
+      session.start();
+      const closing = session.stopAndWait(100);
+      const rejected = expect(closing).rejects.toThrow(
+        "termination was not confirmed",
+      );
+      child.emit("error", new Error("signal failed"));
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      child.emit("close", 0, null);
+      await session.stopAndWait(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a failed spawn with no child PID without waiting for a close deadline", async () => {
+    const child = new ChildProcess();
+    spawnMock.mockReturnValue(child);
+    queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+      options.spawnClaudeCodeProcess?.({
+        command: "missing",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      });
+      return mockQueryInstance;
+    });
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    child.emit("error", new Error("ENOENT"));
+    await session.stopAndWait(100);
+  });
+
+  it("stops a never-started session and refuses a delayed spawn after Stop", async () => {
+    const neverStarted = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    await neverStarted.stopAndWait(100);
+    keepSdkStreamOpen();
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await session.stopAndWait(100);
+    expect(() =>
+      getLatestQueryCall().options.spawnClaudeCodeProcess?.({
+        command: "fake",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("stopped before process start");
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("holds FIFO input until the captured query initializes", async () => {
+    keepSdkStreamOpen();
+    let ready!: () => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((resolve) => {
+        ready = resolve;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const iterator = getLatestPrompt()[Symbol.asyncIterator]();
+    const received: string[] = [];
+    const first = iterator.next().then((item) => {
+      received.push(JSON.stringify(item.value));
+      return item;
+    });
+    const one = session.pushInput("first");
+    const two = session.pushInput("second");
+    await waitForAsyncWork();
+    expect(received).toEqual([]);
+    ready();
+    expect((await first).value.message.content).toBe("first");
+    expect((await iterator.next()).value.message.content).toBe("second");
+    await Promise.all([one, two]);
+    expect(mockQueryInstance.initializationResult).toHaveBeenCalledTimes(1);
+    session.stop();
+  });
+
+  it("rejects initialization failure without yielding input", async () => {
+    keepSdkStreamOpen();
+    let fail!: (error: Error) => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("original");
+    const assertion = expect(consumed).rejects.toThrow(
+      "busy before initialization",
+    );
+    fail(new Error("busy before initialization"));
+    await assertion;
+    session.stop();
+    expect((await getLatestPrompt()[Symbol.asyncIterator]().next()).done).toBe(
+      true,
+    );
+  });
+
+  it("settles a readiness waiter on Stop even if SDK initialization never settles", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise(() => {}),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("original");
+    const assertion = expect(consumed).rejects.toThrow(
+      "stopped before input consumed",
+    );
+    session.stop();
+    await assertion;
+    expect((await getLatestPrompt()[Symbol.asyncIterator]().next()).done).toBe(
+      true,
+    );
+  });
+
+  it("refuses input when readiness belongs to a replaced query", async () => {
+    keepSdkStreamOpen();
+    let ready!: () => void;
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise<void>((resolve) => {
+        ready = resolve;
+      }),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    const consumed = session.pushInput("stale");
+    const assertion = expect(consumed).rejects.toThrow(
+      "input stream is closed",
+    );
+    queryMock.mockReturnValue({
+      ...mockQueryInstance,
+      initializationResult: () => Promise.resolve({}),
+    });
+    session.start();
+    ready();
+    await assertion;
+    session.stop();
+  });
+
+  it("settles readiness waiters when the SDK output stream ends", async () => {
+    mockQueryInstance.initializationResult.mockReturnValue(
+      new Promise(() => {}),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await expect(session.pushInput("never delivered")).rejects.toThrow(
+      "stream ended before input consumed",
+    );
+  });
+
+  it("handles rejected initialization without submitted input", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockRejectedValue(
+      new Error("startup failed"),
+    );
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await waitForAsyncWork();
+    session.stop();
   });
 
   it("preserves injected question aliases alongside native tool exclusions", () => {
@@ -114,8 +344,10 @@ describe("SdkSession", () => {
 
   it("rejects queued input when the SDK input stream closes before consumption", async () => {
     const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    keepSdkStreamOpen();
+    session.start();
     const consumed = session.pushInput("hello");
-
+    await waitForAsyncWork();
     session.stop();
     expect(session.canPushInput()).toBe(false);
 

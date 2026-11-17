@@ -44,6 +44,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 import { handleLine } from "../bridge.js";
+import { SdkSession } from "../sdk-session.js";
 import { buildSessionOptions } from "../session-options.js";
 import {
   type ClaudePermissionMode,
@@ -320,7 +321,7 @@ function createControlledClaudeQuery(): ControlledClaudeQuery {
       .fn()
       .mockResolvedValue([{ name: "bb-bridge", status: "connected" }]),
     getContextUsage: vi.fn().mockResolvedValue(null),
-    initializationResult: vi.fn(),
+    initializationResult: vi.fn().mockResolvedValue({}),
     interrupt: vi.fn().mockResolvedValue(undefined),
     setModel: vi.fn().mockResolvedValue(undefined),
     setPermissionMode: vi.fn().mockResolvedValue(undefined),
@@ -685,6 +686,7 @@ async function forwardAskUserQuestion({
 describe("bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    if (process.getuid) vi.spyOn(process, "getuid").mockReturnValue(1000);
     contextQueryMock.mockImplementation(() => createControlledClaudeQuery());
     queryMock.mockReturnValue({
       initializationResult: vi.fn().mockResolvedValue({
@@ -724,6 +726,7 @@ describe("bridge", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     for (const tempDir of tempDirs.splice(0)) {
       rmSync(tempDir, { recursive: true, force: true });
@@ -4262,6 +4265,181 @@ describe("bridge", () => {
     }
   });
 
+  it.each(["normal", "stop", "concurrent"])(
+    "waits for old process termination during %s handoff",
+    async (scenario) => {
+      const bridge = createBridgeJsonRpcTestHarness(handleLine);
+      const queries: ControlledClaudeQuery[] = [];
+      queryMock.mockImplementation(() => {
+        const query = createControlledClaudeQuery();
+        queries.push(query);
+        return query;
+      });
+      let terminated!: () => void;
+      const termination = new Promise<void>((resolve) => {
+        terminated = resolve;
+      });
+      const wait = vi
+        .spyOn(SdkSession.prototype, "stopAndWait")
+        .mockImplementation(async function (this: SdkSession) {
+          this.stop();
+          await termination;
+        });
+      const graceful = vi
+        .spyOn(SdkSession.prototype, "closeGracefully")
+        .mockImplementation(async function (this: SdkSession) {
+          this.stop();
+          await termination;
+        });
+      const stopDuringHandoff = scenario === "stop";
+      const threadId = `handoff-${scenario}`;
+      try {
+        bridge.sendRequest(1, "thread/start", {
+          threadId,
+          cwd: "/tmp/worktree",
+          instructionMode: "append",
+          dynamicTools: [
+            {
+              name: "handoff_probe",
+              description: "Probe",
+              inputSchema: { type: "object" },
+            },
+          ],
+          options: {
+            permissionMode: "accept-edits",
+            permissionScope: "workspace",
+            approvalReviewer: "user",
+            permissionEscalation: "ask",
+            instructions: "test",
+            providerOptions: { workflowsEnabled: false },
+          },
+        });
+        await bridge.waitForResponse(1);
+        bridge.sendRequest(
+          2,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            providerThreadId: threadId,
+            input: [{ type: "text", text: "first" }],
+          }),
+        );
+        await readNextPrompt(getLatestQueryCall());
+        await bridge.waitForResponse(2);
+        queries[0]?.emit(createSuccessfulResultMessage(threadId));
+        await bridge.flushWork();
+        bridge.sendRequest(
+          3,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            providerThreadId: threadId,
+            input: [{ type: "text", text: "next" }],
+          }),
+        );
+        await bridge.flushWork();
+        expect(wait).toHaveBeenCalledTimes(1);
+        expect(queries).toHaveLength(1);
+        if (stopDuringHandoff) {
+          bridge.sendRequest(4, "thread/stop", {
+            threadId,
+            providerThreadId: threadId,
+            intent: "interrupt",
+            activeTurnId: null,
+          });
+          await bridge.flushWork();
+        }
+        if (scenario === "concurrent") {
+          bridge.sendRequest(
+            5,
+            "turn/start",
+            canonicalTurnParams({
+              threadId,
+              providerThreadId: threadId,
+              input: [{ type: "text", text: "concurrent" }],
+            }),
+          );
+          await bridge.flushWork();
+          expect(wait).toHaveBeenCalledTimes(1);
+          expect(queries).toHaveLength(1);
+        }
+        terminated();
+        await bridge.flushWork();
+        if (stopDuringHandoff) {
+          await bridge.waitForResponse(4);
+          expect(queries).toHaveLength(1);
+        } else {
+          expect(queries).toHaveLength(2);
+          await readNextPrompt(getLatestQueryCall());
+          await bridge.waitForResponse(3);
+          if (scenario === "concurrent") {
+            await readNextPrompt(getLatestQueryCall());
+            await bridge.waitForResponse(5);
+            expect(queries).toHaveLength(2);
+          }
+        }
+      } finally {
+        terminated();
+        queries.forEach((query) => query.finish());
+        wait.mockRestore();
+        graceful.mockRestore();
+        bridge.restore();
+      }
+    },
+  );
+
+  it("retains closing ownership after termination failure and blocks replacement start", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+    const failure = new Error("termination not confirmed");
+    const graceful = vi
+      .spyOn(SdkSession.prototype, "closeGracefully")
+      .mockRejectedValue(failure);
+    const forced = vi
+      .spyOn(SdkSession.prototype, "stopAndWait")
+      .mockRejectedValue(failure);
+    const threadId = "handoff-unresolved-close";
+    const start = {
+      threadId,
+      cwd: "/tmp/worktree",
+      instructionMode: "append",
+      options: canonicalOptions({}),
+    };
+    try {
+      bridge.sendRequest(1, "thread/start", start);
+      await bridge.waitForResponse(1);
+      bridge.sendRequest(2, "thread/stop", {
+        threadId,
+        providerThreadId: threadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      expect((await bridge.waitForResponse(2)).error).toBeDefined();
+      bridge.sendRequest(3, "thread/start", start);
+      expect((await bridge.waitForResponse(3)).error).toBeDefined();
+      expect(forced).toHaveBeenCalledOnce();
+      expect(queries).toHaveLength(1);
+      graceful.mockResolvedValue(undefined);
+      bridge.sendRequest(4, "thread/stop", {
+        threadId,
+        providerThreadId: threadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      expect((await bridge.waitForResponse(4)).error).toBeUndefined();
+    } finally {
+      queries.forEach((query) => query.finish());
+      graceful.mockRestore();
+      forced.mockRestore();
+      bridge.restore();
+    }
+  });
+
   it.each(["chromeEnabled", "disable1MContext", "artifactsEnabled"])(
     "restarts the Claude process before the next turn when %s changes",
     async (setting) => {
@@ -5903,6 +6081,42 @@ describe("bridge", () => {
       await bridge.flushWork();
       queries[1]?.finish();
       await bridge.waitForResponse(14);
+    } finally {
+      bridge.restore();
+    }
+  });
+
+  it("does not emit acceptance when SDK initialization rejects before input handoff", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const query = createControlledClaudeQuery();
+    let fail!: (error: Error) => void;
+    query.initializationResult.mockReturnValue(
+      new Promise<void>((_, reject) => {
+        fail = reject;
+      }),
+    );
+    queryMock.mockReturnValue(query);
+    try {
+      await startBridgeThread({ bridge, threadId: "thread-init-rejected" });
+      bridge.sendRequest(10, "turn/start", {
+        threadId: "thread-init-rejected",
+        providerThreadId: "thread-init-rejected",
+        input: [{ type: "text", text: "Retain this original" }],
+        clientRequestId: "creq_abcdefghjk",
+        options: canonicalOptions({}),
+      });
+      await bridge.flushWork();
+      expect(bridge.hasResponse(10)).toBe(false);
+      fail(new Error("native cell busy before initialization"));
+      const response = await bridge.waitForResponse(10);
+      expect(response.error).toBeDefined();
+      expect(
+        assembleCapturedThreadEvents(bridge.messages, "claude-code").filter(
+          (event) => event.type === "turn/input/accepted",
+        ),
+      ).toEqual([]);
+      query.finish();
+      await bridge.flushWork();
     } finally {
       bridge.restore();
     }

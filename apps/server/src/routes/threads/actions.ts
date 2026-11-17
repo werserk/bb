@@ -72,7 +72,10 @@ import {
   prepareTurnSubmitCommandPayload,
 } from "../../services/threads/thread-commands.js";
 import { getLastProviderThreadId } from "../../services/threads/thread-events.js";
-import { stopThreadForCurrentState } from "../../services/threads/thread-lifecycle.js";
+import {
+  stopThreadForCurrentState,
+  releaseIdleThreadForCurrentState,
+} from "../../services/threads/thread-lifecycle.js";
 import {
   buildThreadStatusChangeMetadata,
   getThreadPromptBannerActivity,
@@ -487,6 +490,13 @@ export function registerThreadActionRoutes(
       threadId: queuedMessage.threadId,
     });
     return context.json({ ok: true });
+  });
+
+  post(routes.releaseIdle, async (context) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    return context.json(
+      await releaseIdleThreadForCurrentState(deps, thread.id),
+    );
   });
 
   post(routes.stop, async (context) => {
