@@ -2,6 +2,7 @@ import { experimental_AI_MODEL_ID_MAX_LENGTH } from "@get-bb/plugin-sdk";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { taskStateSchema } from "./task-state.js";
+import { helperRequestSchema, helperResponseSchema } from "./helper.js";
 import { resultSchema } from "./generate.js";
 export const requestSchema = z
   .object({
@@ -82,6 +83,11 @@ export const taskMemorySchema = z
   })
   .strict();
 export const rpcContract = defineRpcContract({
+  helper: { input: helperRequestSchema, output: helperResponseSchema },
+  helperContext: {
+    input: threadSchema,
+    output: z.object({ revision: z.string().nullable() }).strict(),
+  },
   track: { input: clientSchema, output: jobViewSchema },
   state: {
     input: threadSchema,
@@ -160,6 +166,15 @@ export const rpcContract = defineRpcContract({
       tracked: z.number(),
       queued: z.number(),
       admitted: z.number(),
+      helper: z.object({
+        requests: z.number(),
+        completed: z.number(),
+        none: z.number(),
+        errors: z.number(),
+        cancelled: z.number(),
+        active: z.number(),
+        lastLatencyMs: z.number(),
+      }),
       memory: z.object({
         completed: z.number(),
         errors: z.number(),

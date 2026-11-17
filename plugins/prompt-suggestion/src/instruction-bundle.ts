@@ -1,3 +1,4 @@
+import { HELPER_INSTRUCTIONS, HELPER_OUTPUT_CONTRACT } from "./helper.js";
 import { createHash } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import {
@@ -8,7 +9,11 @@ import {
   MEMORY_OUTPUT_CONTRACT,
 } from "./instructions.js";
 
-export function instructionBundle(bb: BbPluginApi, guidance: string, role: "suggestion" | "memory" = "suggestion") {
+export function instructionBundle(
+  bb: BbPluginApi,
+  guidance: string,
+  role: "suggestion" | "memory" | "helper" = "suggestion",
+) {
   const owner = bb.experimental_userInstructions?.read();
   if (!owner || owner.kind !== "ready") return null;
   return composeInstructionBundle(owner, guidance, role);
@@ -17,15 +22,23 @@ export function instructionBundle(bb: BbPluginApi, guidance: string, role: "sugg
 export function composeInstructionBundle(
   owner: { content: string; revision: string },
   guidance: string,
-  role: "suggestion" | "memory" = "suggestion",
+  role: "suggestion" | "memory" | "helper" = "suggestion",
 ) {
   const additional =
     guidance === LEGACY_INSTRUCTIONS || guidance === DEFAULT_INSTRUCTIONS
       ? ""
       : guidance.trim();
   const content = [
-    role === "memory" ? MEMORY_INSTRUCTIONS : DEFAULT_INSTRUCTIONS,
-    role === "memory" ? MEMORY_OUTPUT_CONTRACT : OUTPUT_CONTRACT,
+    role === "helper"
+      ? HELPER_INSTRUCTIONS
+      : role === "memory"
+        ? MEMORY_INSTRUCTIONS
+        : DEFAULT_INSTRUCTIONS,
+    role === "helper"
+      ? HELPER_OUTPUT_CONTRACT
+      : role === "memory"
+        ? MEMORY_OUTPUT_CONTRACT
+        : OUTPUT_CONTRACT,
     "The following owner base instructions apply within your assigned tool-free role. No tools or other execution capabilities are available.",
     "<owner_instructions>",
     owner.content,

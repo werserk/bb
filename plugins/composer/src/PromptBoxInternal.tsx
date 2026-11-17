@@ -3462,6 +3462,9 @@ export function PromptBoxInternal({
         className="hidden"
         onChange={handleAttachmentInputChange}
       />
+      {contributions.experimental_InlinePanels ? (
+        <contributions.experimental_InlinePanels />
+      ) : null}
       {handoff ? (
         <div
           inert={showVoiceActionGroup ? true : undefined}
@@ -3726,7 +3729,7 @@ export function PromptBoxInternal({
                 inert={showVoiceActionGroup ? true : undefined}
               >
                 <>
-                  {!showCompactLayout ? <contributions.Actions /> : null}
+                  <contributions.Actions />
                   {compactBeforeSend}
                   {!showCompactLayout || showCompactVoiceAction ? (
                     <>

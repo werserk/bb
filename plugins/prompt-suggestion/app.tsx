@@ -1,3 +1,4 @@
+import { PromptHelperAction, PromptHelperPanel } from "./src/prompt-helper.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   definePluginApp,
@@ -208,6 +209,10 @@ export default definePluginApp((app) => {
   app.composer.customize({
     id: "prompt-suggestion",
     scopes: ["thread"],
+    actions: [{ id: "prompt-helper", component: PromptHelperAction }],
+    experimental_inlinePanels: [
+      { id: "prompt-helper", component: PromptHelperPanel },
+    ],
     banners: [
       {
         id: "suggestion-controller",

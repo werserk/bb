@@ -5,6 +5,9 @@ import {
 export function fixture(
   options: {
     queued?: number;
+    noHistory?: boolean;
+    contextBoundary?: number;
+    threadStatus?: "idle" | "active";
     turnId?: string;
     status?: "completed" | "failed";
     openQuestion?: boolean;
@@ -58,33 +61,36 @@ export function fixture(
           makeThreadResponse({
             id: "thread",
             providerId: options.providerId ?? "codex",
+            status: options.threadStatus ?? "idle",
             queuedMessageCount: options.queued ?? 0,
           }),
         timeline: async () => ({
-          rows: options.turnRow
-            ? [
-                ...messages,
-                {
-                  id: "summary",
-                  kind: "turn" as const,
-                  threadId: "thread",
-                  turnId: "turn",
-                  sourceSeqStart: 2,
-                  sourceSeqEnd: 4,
-                  startedAt: 0,
-                  createdAt: 0,
-                  completedAt: 1,
-                  status: options.status ?? "completed",
-                  summaryCount: 0,
-                  children: [],
-                },
-              ]
-            : messages.map((message) =>
-                message.role === "assistant"
-                  ? { ...message, turnId: options.turnId ?? "turn" }
-                  : message,
-              ),
-          contextBoundarySeq: null,
+          rows: options.noHistory
+            ? []
+            : options.turnRow
+              ? [
+                  ...messages,
+                  {
+                    id: "summary",
+                    kind: "turn" as const,
+                    threadId: "thread",
+                    turnId: "turn",
+                    sourceSeqStart: 2,
+                    sourceSeqEnd: 4,
+                    startedAt: 0,
+                    createdAt: 0,
+                    completedAt: 1,
+                    status: options.status ?? "completed",
+                    summaryCount: 0,
+                    children: [],
+                  },
+                ]
+              : messages.map((message) =>
+                  message.role === "assistant"
+                    ? { ...message, turnId: options.turnId ?? "turn" }
+                    : message,
+                ),
+          contextBoundarySeq: options.contextBoundary ?? null,
           completedTurnDisplay: "flat" as const,
           activePromptMode: null,
           activeThinking: null,
@@ -153,35 +159,38 @@ export function fixture(
               : [],
         },
         events: {
-          list: async () => [
-            {
-              id: "e4",
-              threadId: "thread",
-              seq: 4,
-              createdAt: 1,
-              type: "turn/completed" as const,
-              scope: {
-                kind: "turn" as const,
-                turnId: options.turnId ?? "turn",
-              },
-              data: {
-                providerThreadId: "p",
-                status: options.status ?? "completed",
-              },
-            },
-            {
-              id: "e2",
-              threadId: "thread",
-              seq: 2,
-              createdAt: 0,
-              type: "turn/started" as const,
-              scope: {
-                kind: "turn" as const,
-                turnId: options.turnId ?? "turn",
-              },
-              data: { providerThreadId: "p" },
-            },
-          ],
+          list: async () =>
+            options.noHistory
+              ? []
+              : [
+                  {
+                    id: "e4",
+                    threadId: "thread",
+                    seq: 4,
+                    createdAt: 1,
+                    type: "turn/completed" as const,
+                    scope: {
+                      kind: "turn" as const,
+                      turnId: options.turnId ?? "turn",
+                    },
+                    data: {
+                      providerThreadId: "p",
+                      status: options.status ?? "completed",
+                    },
+                  },
+                  {
+                    id: "e2",
+                    threadId: "thread",
+                    seq: 2,
+                    createdAt: 0,
+                    type: "turn/started" as const,
+                    scope: {
+                      kind: "turn" as const,
+                      turnId: options.turnId ?? "turn",
+                    },
+                    data: { providerThreadId: "p" },
+                  },
+                ],
         },
       },
     },

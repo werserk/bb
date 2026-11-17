@@ -1,3 +1,4 @@
+import { ComposerInlinePanels } from "../plugin/PluginComposerInlinePanels";
 import { createComposerSuggestionController } from "@get-bb/plugin-sdk/internal/composer-handle";
 import {
   createContext,
@@ -716,6 +717,9 @@ function useComposerRendererHostApi({
     plusMenuItems,
     sendMenuItems,
     Actions: suppress ? NoComposerPluginActions : ComposerPluginActions,
+    experimental_InlinePanels: suppress
+      ? NoComposerPluginActions
+      : ComposerInlinePanels,
     Popup: PluginComposerPopup,
     MenuEntry: ComposerMenuEntry,
   };

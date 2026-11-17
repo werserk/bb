@@ -124,3 +124,42 @@ it.each(["pending", "error", "none"])(
     expect(submit).not.toHaveBeenCalled();
   },
 );
+
+describe("manual composer assistance suspension", () => {
+  it("clears ghost text without accepting it and resumes only after every holder releases", () => {
+    const { controller, replace } = setup();
+    const snapshot = controller.getSnapshot().snapshot!;
+    const first = controller.experimental_suspend();
+    const second = controller.experimental_suspend();
+    expect(controller.getSnapshot().candidate).toBeNull();
+    expect(controller.getSnapshot().snapshot).toBe(snapshot);
+    expect(controller.experimental_begin("new", snapshot)).toBe(false);
+    expect(
+      controller.show({ requestId: "new", snapshot, text: "Ignored" }),
+    ).toBe(false);
+    expect(controller.accept("one")).toBe("ineligible");
+    first();
+    first();
+    expect(controller.getSnapshot().eligible).toBe(false);
+    second();
+    expect(controller.getSnapshot().eligible).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+  });
+  it("does not resurrect a disposed composer when releasing a suspension", () => {
+    const store = createComposerSuggestionController(vi.fn());
+    store.update({
+      composerKey: "pane",
+      threadId: "thread",
+      completedTurnId: "turn",
+      contextRevision: "r",
+      eligible: true,
+    });
+    const release = store.controller.experimental_suspend();
+    store.dispose();
+    release();
+    expect(store.controller.getSnapshot()).toMatchObject({
+      eligible: false,
+      snapshot: null,
+    });
+  });
+});

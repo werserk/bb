@@ -721,6 +721,25 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
       },
       {
+        id: "composer-inline-panels",
+        title: "Inline composer panels",
+        summary:
+          "Preview assistance inside the composer border while keeping the draft editable.",
+        bullets: [
+          "Register experimental_inlinePanels with app.composer.customize; the bundled Composer renders them above the draft on desktop and compact layouts.",
+          "Use a toolbar action for opening the panel; keep state scoped to the mounted composer and cancel asynchronous work on disposal.",
+          "experimental_suggestions.experimental_suspend clears competing ghost text until its idempotent release function is called. It does not disable automatic suggestions globally.",
+          "Apply through useComposer().replace with a captured immutable draft guard; preserve structured mentions and omit attachments to keep them unchanged. Never submit implicitly.",
+        ],
+        apiSymbols: [
+          "ComposerCustomization.experimental_inlinePanels",
+          "ExperimentalComposerContributions.experimental_InlinePanels",
+          "experimental_ComposerSuggestionController.experimental_suspend",
+        ],
+        firstParty: ["Composer", "Prompt Suggestion"],
+        experimental: true,
+      },
+      {
         id: "composer-suggestions",
         title: "Next-message suggestions",
         summary:

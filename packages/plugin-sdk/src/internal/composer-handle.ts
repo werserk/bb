@@ -392,7 +392,20 @@ export function createComposerHandleBinding(
     get experimental_suggestions() {
       return target().suggestions ?? unsupportedSuggestions;
     },
-    replace: draftActions.replace,
+    replace(next) {
+      draftActions.replace(
+        typeof next === "function"
+          ? (current) => {
+              const snapshot = withLegacyDraftFields(
+                current,
+                target().getAttachmentCount(),
+              );
+              const result = next(snapshot);
+              return result === snapshot ? current : result;
+            }
+          : next,
+      );
+    },
     get scope() {
       return target().scope;
     },

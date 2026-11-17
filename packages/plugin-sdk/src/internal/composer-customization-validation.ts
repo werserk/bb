@@ -244,6 +244,7 @@ function parseRegions(
   seenPopupIds: Set<string>,
 ): Pick<
   ComposerCustomization,
+  | "experimental_inlinePanels"
   | "actions"
   | "banners"
   | "plusMenu"
@@ -260,6 +261,20 @@ function parseRegions(
       component: requireComponent(entryKind, entry?.component),
     };
   });
+  const inlinePanels = parseContributionArray<
+    NonNullable<ComposerCustomization["experimental_inlinePanels"]>[number]
+  >(
+    `${kind}.experimental_inlinePanels`,
+    registration.experimental_inlinePanels,
+    onRejected,
+    (entryKind, value) => {
+      const entry = value as Record<string, unknown> | null;
+      return {
+        id: requireSlotId(entryKind, entry?.id),
+        component: requireComponent(entryKind, entry?.component),
+      };
+    },
+  );
   const banners = parseContributionArray<
     NonNullable<ComposerCustomization["banners"]>[number]
   >(`${kind}.banners`, registration.banners, onRejected, (entryKind, value) => {
@@ -359,6 +374,9 @@ function parseRegions(
 
   return {
     ...(actions !== undefined ? { actions } : {}),
+    ...(inlinePanels !== undefined
+      ? { experimental_inlinePanels: inlinePanels }
+      : {}),
     ...(banners !== undefined ? { banners } : {}),
     ...(plusMenu !== undefined ? { plusMenu } : {}),
     ...(sendMenu !== undefined ? { sendMenu } : {}),

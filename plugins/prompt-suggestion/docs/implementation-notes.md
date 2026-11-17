@@ -1,0 +1,37 @@
+# Prompt Suggestion implementation notes
+
+Moved from the plugin overview to preserve the detailed architecture and verification boundaries while keeping the shipped overview within its size limit. Statements about local verification and unchanged production describe the implementation baseline, not current deployment status. Current usage is documented in [the plugin skill](../skills/prompt-suggestion/SKILL.md).
+
+# Prompt Suggestion
+
+Prompt Suggestion (formerly Autosay) prepares a source-linked task state and one next-message candidate to advance the owner's goal. It uses an explicitly selected model through BB's shared generation service, independently of the working agent. Default is disabled; no model is selected automatically.
+
+The server coordinator owns preparation, separate foreground and memory lanes, and shared admission history. A foreground visit tracks a thread for ten minutes, with at most eight tracked threads and one active request per lane. New foreground demand cancels companion memory. Background preparation is a separate setting. Typing dismisses the displayed candidate while preserving foreground interest. Navigation and unmount detach that client without cancelling a shared background job. A new completed foreground turn renews interest without detaching its current client. Tagged RPC state reads refresh through native invalidation without polling. Lifecycle events wake the same coordinator. Returning to a thread can attach its existing ready candidate.
+
+Task state distinguishes accepted criteria from proposals, reported progress from visible evidence, and remaining work from blockers. Facts carry source message IDs and revisions. The context-clear boundary discards earlier memory; bounded history can remain incomplete. Only explicit `inspect` exposes task data and sources. Diagnostics contain counters and timing, not conversation content.
+
+Each generation receives the full owner BIBLE through core's `experimental_userInstructions.read()` API and a content revision. Missing instructions fail closed. The plugin's task guidance and optional setting supplement this source. Admission identity includes thread, turn, context, configuration and instruction revision; a process-local rolling one-hour ledger survives cache clearing and settings reset, retaining suggestion, none and error outcomes without automatic retries. Plugin restart clears this in-memory ledger.
+
+The native suggestion controller keeps a candidate outside persisted draft text. Preparing appears only for queued or pending generation; none restores Ask, and failure/timeout uses the existing disclosure. Tab accepts editable text; plain Enter or native Send follows the ordinary host submission path. Open conversation questions do not suppress generation or display. Pending command/permission approvals still block suggestions; ordinary turn completion and draft guards still apply. No automatic send is introduced.
+
+The SDK RPC and `bb prompt-suggestion` CLI expose track, state, inspect, clear-cache, models, status, diagnostics and manual suggest/cancel. Manual cancellation uses an explicit capability and cannot cancel another client's shared ownership. See skills/prompt-suggestion/SKILL.md for usage. Tests exercise the official plugin harness and composer controller. Local verification is not an installed pilot or release; production remains unchanged.
+
+
+## Separate suggestion and memory roles
+
+Foreground generation returns only `{kind: "suggestion", text}` (at most 600 Unicode code points) or `{kind: "none"}`. CLI/RPC suggestion responses have no task state; `inspect --thread <id>` remains the derived memory surface. After a validated completed snapshot settles, an independent memory lane may refresh source-linked TaskState. Streaming snapshots do not trigger memory inference. Both roles receive the same selected model, effort, tier, full owner BIBLE and current messages; only the role contract and output cap differ. `outputTokenLimit` controls suggestions; `memoryOutputTokenLimit` controls memory (both default to 0, the provider default; positive caps require support).
+
+Both roles share the rolling-hour request budget, preserved across cache clear/reset. Memory reserves the final available request for foreground work, never runs with a limit of 1, and yields by cancellation to new foreground demand. Failed or cancelled admitted memory snapshots are not retried during that window. Memory failure does not remove a suggestion. Diagnostics expose separate memory counters; job latency and usage remain foreground-only. This is local scheduling priority, not a global SDK slot reservation. Shared slots stay occupied until provider cleanup settles, so foreground work can report `busy` during cancellation or other callers' activity; that admitted snapshot is not silently retried.
+
+The synthetic pilot accepts `--role suggestion` (default) or `--role memory`; each uses its matching production prompt and output schema. Historical full-state-plus-suggestion artifacts are not current-run output.
+
+
+## Manual prompt helper
+
+`bb prompt-suggestion helper --thread <id> --draft "Unsent request"` returns a meaning-preserving improved request and optional separate advice as JSON. Omit `--draft` for a grounded next step or `none`. The RPC `helper` uses the same service; `helperContext` returns a revision for scoped preview/application validation. The command never edits a draft or sends a message. `--request <UUID> --token <UUID>` and the existing `cancel` command provide capability-based cancellation; RPC disconnect also cancels the helper.
+
+The manual helper works with automatic suggestions disabled, but requires the configured model and full owner instructions. It accepts active threads and existing thread IDs without history. A new-thread composer without a thread ID is unsupported. Open conversation questions do not block it; pending command approvals and queued messages retain the existing gate. The unsent draft is explicitly a proposal, never evidence of an accepted instruction or permission and never an input to task-memory updates.
+
+Draft input is limited to 12000 Unicode code points before inference; oversized input fails without truncation. Results have at most 16000 code points of primary text and 2000 of separate optional advice. The helper always uses the provider-default output token limit, independently of the automatic suggestion and memory output settings; incomplete output is rejected without retry. Protected structured-mention tokens must be preserved exactly once, with no unknown tokens. UI application restores their exact original identities and checks the current draft and context revision. Attachments remain in the composer; generation itself does not modify them.
+
+Helper requests share the existing rolling-hour admission ledger with automatic suggestions and memory, including admitted failures and cancellations. One helper runs at a time; a click cancels active background memory and prevents new memory work until it settles. No automatic retries occur, including when provider cleanup temporarily returns `busy`. Settings reset and cache clearing preserve admission history. Diagnostics expose content-free helper request/result counters, active state and last duration separately. Neither drafts nor results are persisted by the helper.

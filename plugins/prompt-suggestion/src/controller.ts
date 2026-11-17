@@ -1,5 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { createHelperService } from "./helper-service.js";
+import type { HelperRequest } from "./helper.js";
 import { readContext } from "./context.js";
 import { generate, generateMemory } from "./generate.js";
 import { instructionBundle } from "./instruction-bundle.js";
@@ -23,7 +25,11 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       const settings = getSettings();
       if (!settings.enabled || !settings.model) return null;
       const bundle = instructionBundle(bb, settings.instructions);
-      const memoryBundle = instructionBundle(bb, settings.instructions, "memory");
+      const memoryBundle = instructionBundle(
+        bb,
+        settings.instructions,
+        "memory",
+      );
       if (!bundle || !memoryBundle) return null;
       const context = await readContext(
         bb,
@@ -49,7 +55,16 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
     },
     async generateMemory(_threadId, prepared, signal) {
       const settings = getSettings();
-      return generateMemory(bb.experimental_aiServices, { ...settings, instructions: prepared.memoryInstructions, outputTokenLimit: settings.memoryOutputTokenLimit }, prepared.context.text, signal);
+      return generateMemory(
+        bb.experimental_aiServices,
+        {
+          ...settings,
+          instructions: prepared.memoryInstructions,
+          outputTokenLimit: settings.memoryOutputTokenLimit,
+        },
+        prepared.context.text,
+        signal,
+      );
     },
     async generate(threadId, prepared, signal, measured) {
       const settings = getSettings();
@@ -86,6 +101,7 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       );
     },
   });
+  const helper = createHelperService(bb, getSettings, coordinator);
   const rememberView = async (threadId: string) => {
     const view = await coordinator.state(threadId);
     if (view.jobId && view.phase === "ready" && !observed.has(view.jobId)) {
@@ -101,11 +117,27 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
     },
     state: rememberView,
     detach: coordinator.detach,
-    clearCache: coordinator.clearCache,
+    helperContext: helper.context,
+    helper(input: HelperRequest, signal?: AbortSignal) {
+      if (manual.has(input.requestId) || helper.has(input.requestId))
+        return Promise.resolve({
+          kind: "unavailable" as const,
+          reason: "duplicate_request",
+        });
+      return helper.generate(input, signal);
+    },
+    clearCache(threadId: string) {
+      helper.clear(threadId);
+      coordinator.clearCache(threadId);
+    },
     inspect: coordinator.inspect,
     wake: coordinator.wake,
-    dispose: coordinator.dispose,
+    dispose() {
+      helper.dispose();
+      coordinator.dispose();
+    },
     reset() {
+      helper.reset();
       configRevision++;
       affinity = null;
       coordinator.reset();
@@ -132,7 +164,7 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       }
       if (callerSignal?.aborted)
         return { kind: "unavailable" as const, reason: "cancelled" };
-      if (manual.has(input.requestId))
+      if (manual.has(input.requestId) || helper.has(input.requestId))
         return { kind: "unavailable" as const, reason: "duplicate_request" };
       manual.set(input.requestId, {
         token: input.token,
@@ -160,6 +192,7 @@ export function createService(bb: BbPluginApi, getSettings: () => Settings) {
       }
     },
     cancel(requestId: string, token: string) {
+      if (helper.has(requestId)) return helper.cancel(requestId, token);
       const item = manual.get(requestId);
       return (
         !!item &&

@@ -1,6 +1,6 @@
 # Composer Prompt Helper
 
-Status: behavior and visual variant A accepted; implementation has not started.
+Status: behavior and visual variant A accepted; implementation and immediate release authorized by the owner on 2026-11-17.
 
 ## Intent and decisions
 
@@ -53,7 +53,7 @@ Expose the manual generation action through the plugin RPC and `bb` CLI as well 
 
 ## Scope and release constraints
 
-This design adds no second chat, autonomous sending, persistent personal writing profile, provider/model switch, release or deployment. Existing local companion code and its previously measured speed/quality limitations remain the baseline. Previous paid pilot budgets are exhausted. Implementation and deterministic verification require a subsequent owner instruction; new paid evaluations require a separate explicit budget.
+This design adds no second chat, autonomous sending, persistent personal writing profile or provider/model switch. The owner subsequently authorized implementation and immediate release on 2026-11-17. Existing local companion code and its previously measured speed/quality limitations remain the baseline. Previous paid pilot budgets are exhausted. Implementation, deterministic verification and release are authorized; new paid evaluations still require a separate explicit budget.
 
 ## Self-review
 

@@ -6,6 +6,7 @@ import {
   clientSchema,
   threadSchema,
 } from "./src/contracts.js";
+import { helperRequestSchema } from "./src/helper.js";
 import { createService } from "./src/controller.js";
 import { settingDescriptors, settingsSchema } from "./src/settings.js";
 export default async function plugin(bb: BbPluginApi) {
@@ -59,6 +60,9 @@ export default async function plugin(bb: BbPluginApi) {
       }),
     );
   bb.rpc.register(rpcContract, {
+    helper: (input, ctx) => service.helper(input, ctx.experimental_signal),
+    helperContext: (input, ctx) =>
+      service.helperContext(input.threadId, ctx.experimental_signal),
     models: (_input, ctx) => models(ctx.experimental_signal),
     selectModel: async (input, ctx) => {
       if (
@@ -93,6 +97,46 @@ export default async function plugin(bb: BbPluginApi) {
       description:
         "Prompt Suggestion generates a draft suggestion without sending or modifying a thread.",
       commands: {
+        helper: cliCommand({
+          summary: "Improve an unsent draft or suggest a grounded next step",
+          description:
+            "Returns a preview without editing or sending. Works independently of automatic suggestions; uses the provider default output token limit.",
+          options: {
+            thread: {
+              type: "string",
+              required: true,
+              description: "Thread ID",
+            },
+            draft: {
+              type: "string",
+              description:
+                "Unsent draft, at most 12000 Unicode code points; omit for a next step",
+            },
+            request: {
+              type: "string",
+              description: "Request UUID for cancellation",
+            },
+            token: {
+              type: "string",
+              description: "Cancellation capability UUID",
+            },
+          },
+          run: async (input) => ({
+            stdout: JSON.stringify(
+              await service.helper(
+                helperRequestSchema.parse({
+                  threadId: input.options.thread,
+                  requestId: input.options.request ?? randomUUID(),
+                  token: input.options.token ?? randomUUID(),
+                  draft: input.options.draft ?? "",
+                  protectedMentions: [],
+                  expectedContextRevision: null,
+                }),
+              ),
+            ),
+            exitCode: 0,
+          }),
+        }),
         track: cliCommand({
           summary: "Track a thread for ten minutes without sending",
           options: {

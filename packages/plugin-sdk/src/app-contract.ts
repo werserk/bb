@@ -3382,6 +3382,8 @@ export interface ExperimentalComposerContributions {
   readonly sendMenuItems: readonly ExperimentalComposerSendMenuContribution[];
   /** Other plugins' inline actions, for the composer's action row. */
   readonly Actions: ComponentType;
+  /** Render inside the composer border above the draft, on every layout. */
+  readonly experimental_InlinePanels: ComponentType;
   readonly Popup: ComponentType<ExperimentalComposerPopupProps>;
   readonly MenuEntry: ComponentType<ExperimentalComposerMenuEntryProps>;
 }
@@ -4338,6 +4340,11 @@ export interface ComposerCustomization {
   /** Composer kinds where this customization is active; omit for all kinds. */
   scopes?: readonly PluginComposerScope["kind"][];
   actions?: readonly { id: string; component: ComponentType }[];
+  /** Inline panels inside the composer border, above its editable draft. */
+  experimental_inlinePanels?: readonly {
+    id: string;
+    component: ComponentType;
+  }[];
   banners?: readonly {
     id: string;
     /** Host chrome around the banner. Defaults to `"card"`. */
@@ -4633,6 +4640,8 @@ export interface experimental_ComposerSuggestionEvent {
 
 /** Memory-only, scoped to one mounted composer. Acceptance replaces the draft, never sends. */
 export interface experimental_ComposerSuggestionController {
+  /** Suspend ghost suggestions until the idempotent release function is called. */
+  experimental_suspend(): () => void;
   getSnapshot(): experimental_ComposerSuggestionState;
   subscribe(listener: () => void): () => void;
   experimental_begin(

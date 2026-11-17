@@ -3,6 +3,7 @@ import type {
   experimental_AiGenerationResult,
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { helperResultSchema } from "./helper.js";
 import { taskStateSchema } from "./task-state.js";
 
 export const resultSchema = z.discriminatedUnion("kind", [
@@ -26,6 +27,7 @@ export type GeneratorConfig = {
   outputTokenLimit: number;
   reasoningEffort: string;
   serviceTier: string;
+  responseByteLimit?: number;
   sessionAffinity?: string | null;
 };
 
@@ -75,15 +77,28 @@ async function generateValue(
   if (signal.aborted) throw new Error("Generation cancelled");
   if (result.finishReason !== "stop")
     throw new IncompleteGenerationError(config.outputTokenLimit || null);
-  if (new TextEncoder().encode(result.text).length > 65536)
+  if (
+    new TextEncoder().encode(result.text).length >
+    (config.responseByteLimit ?? 65536)
+  )
     throw new Error("Suggestion response too large");
   return JSON.parse(result.text);
 }
 
-export async function generate(...args: Parameters<typeof generateValue>): Promise<GenerationResult> {
+export async function generate(
+  ...args: Parameters<typeof generateValue>
+): Promise<GenerationResult> {
   return resultSchema.parse(await generateValue(...args));
 }
 
-export async function generateMemory(...args: Parameters<typeof generateValue>) {
+export async function generateMemory(
+  ...args: Parameters<typeof generateValue>
+) {
   return taskStateSchema.parse(await generateValue(...args));
+}
+
+export async function generateHelper(
+  ...args: Parameters<typeof generateValue>
+) {
+  return helperResultSchema.parse(await generateValue(...args));
 }

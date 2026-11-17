@@ -7,7 +7,11 @@ export async function readContext(
   threadId: string,
   limit: number,
   signal?: AbortSignal,
-  options: { allowActive?: boolean; memory?: TaskMemory | null } = {},
+  options: {
+    allowActive?: boolean;
+    helper?: boolean;
+    memory?: TaskMemory | null;
+  } = {},
 ) {
   const [thread, timeline, interactions, events] = await Promise.all([
     bb.sdk.threads.get({ threadId, signal }),
@@ -41,8 +45,8 @@ export async function readContext(
   const start = events.find(
     (event) => event.type === "turn/started" && !event.data.parentToolCallId,
   );
-  if (!start || start.scope.kind !== "turn") return null;
-  const turnId = start.scope.turnId;
+  if ((!start || start.scope.kind !== "turn") && !options.helper) return null;
+  const turnId = start?.scope.kind === "turn" ? start.scope.turnId : null;
   const completion = events.find(
     (event) =>
       event.type === "turn/completed" &&
@@ -50,6 +54,7 @@ export async function readContext(
       event.scope.turnId === turnId,
   );
   const completed = !(
+    !start ||
     !completion ||
     completion.type !== "turn/completed" ||
     completion.data.status !== "completed" ||
@@ -92,7 +97,7 @@ export async function readContext(
     timeline.contextBoundarySeq ?? null,
     timeline.timelinePage.olderCursor !== null,
   );
-  if (!input) return null;
+  if (!input && !(options.helper && messages.length === 0)) return null;
   return {
     projectId: thread.projectId,
     turnId,
@@ -105,7 +110,15 @@ export async function readContext(
         messages.map((message) => [message.id, message.text]),
       ]),
     ),
-    ...input,
+    ...(input ?? {
+      text: JSON.stringify({
+        messages: [],
+        priorState: null,
+        contextComplete: timeline.timelinePage.olderCursor === null,
+      }),
+      messages: [],
+      contextComplete: timeline.timelinePage.olderCursor === null,
+    }),
   };
 }
 export type CompanionContext = NonNullable<

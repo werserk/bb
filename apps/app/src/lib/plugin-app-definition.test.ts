@@ -762,6 +762,7 @@ describe("collectPluginAppRegistrations", () => {
         id: "composer",
         scopes: ["thread", "new-thread"],
         actions: [{ id: "action", component: Component }],
+        experimental_inlinePanels: [{ id: "preview", component: Component }],
         banners: [{ id: "banner", component: Component }],
         plusMenu: [{ id: "menu", label: "Menu", run }],
         richText: {

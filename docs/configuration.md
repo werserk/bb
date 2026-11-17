@@ -1671,6 +1671,8 @@ The same preference is available through `sdk.system.uiPreferences`.
 
 ## Prompt Suggestion
 
+The manual Prompt helper works independently of the automatic `enabled` setting when a model is configured. It uses the provider-default output token limit, not `outputTokenLimit` or `memoryOutputTokenLimit`. Draft and result character limits are enforced separately. Helper requests share `maxRequestsPerHour` and `timeoutMs`, preempt companion memory, and are counted separately in diagnostics. No new model, fallback or automatic retry is introduced.
+
 The optional Prompt Suggestion plugin (formerly Autosay) starts disabled with no selected model. Its native settings and model picker select an explicitly available BB generation model and its host/profile identity. Provider authentication remains with that adapter. Reasoning effort and processing speed are explicit settings: Provider default sends no override; unsupported values fail before generation, and changing the model never silently resets them. Fast may consume a higher quota or cost more. Settings also configure instructions, bounded context and timeout (15 seconds by default, at most 30 seconds), hourly request cap and allowed project IDs. `outputTokenLimit` bounds the short suggestion; `memoryOutputTokenLimit` independently bounds the task-memory refresh. Both default to 0 (the model default); a positive limit fails before dispatch if the model does not support it. Both roles use the same selected model, reasoning effort, processing speed and complete owner instructions. No fallback model or additional conversation corpus is used. See `plugins/prompt-suggestion/skills/prompt-suggestion/SKILL.md` for commands and migration.
 
 ## AI Gateway

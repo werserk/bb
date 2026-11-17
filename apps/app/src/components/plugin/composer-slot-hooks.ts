@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import type { PluginComposerScope } from "@get-bb/plugin-sdk";
 import {
   resolveComposerActions,
+  resolveComposerInlinePanels,
   resolveComposerPopups,
   resolveComposerBanners,
   resolveComposerDraftObservers,
@@ -91,4 +92,12 @@ export function useResolvedComposerEditor(scopeKind: ComposerScopeKind) {
 
 export function useResolvedComposerPopups(scopeKind: ComposerScopeKind) {
   return useResolvedComposerSlot(scopeKind, resolveComposerPopups, emptyList);
+}
+
+export function useResolvedComposerInlinePanels(scopeKind: ComposerScopeKind) {
+  return useResolvedComposerSlot(
+    scopeKind,
+    resolveComposerInlinePanels,
+    emptyList,
+  );
 }

@@ -455,6 +455,30 @@ describe.each(["core", "plugin"] as const)(
       sizeBytes: 12,
     } as const;
 
+    it("passes the exact public snapshot to guarded replacements and rejects an edit-away-and-back race", () => {
+      const stored = makeTarget({
+        text: "original",
+        mentions: [],
+        attachments: [attachment],
+      });
+      const actions = actionsFor(stored.target);
+      const captured = actions.draft;
+      actions.replace((current) => {
+        expect(current).toBe(captured);
+        return current;
+      });
+      expect(actions.draft).toBe(captured);
+      actions.replace({ text: "edited", mentions: [] });
+      actions.replace({ text: "original", mentions: [] });
+      actions.replace((current) =>
+        current === captured
+          ? { text: "stale replacement", mentions: [] }
+          : current,
+      );
+      expect(actions.draft.text).toBe("original");
+      expect(actions.draft.attachments).toEqual([attachment]);
+    });
+
     it("restores a structured history snapshot atomically and replaces pills even when text is unchanged", () => {
       const history: PromptDraftState = {
         text: "x".repeat(54),

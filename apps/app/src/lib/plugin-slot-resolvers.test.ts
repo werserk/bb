@@ -9,6 +9,7 @@ import {
   BUILT_IN_FILE_OPENER_PREFERENCE,
   buildFileOpenerRef,
   resolveComposerActions,
+  resolveComposerInlinePanels,
   resolveComposerBanners,
   resolveComposerDraftObservers,
   resolveComposerEditorEffects,
@@ -52,11 +53,15 @@ describe("Composer slot resolvers", () => {
       id: "thread",
       scopes: ["thread"],
       actions: [{ id: "thread-action", component: Component }],
+      experimental_inlinePanels: [{ id: "preview", component: Component }],
     });
     const newThread = composerCustomization({
       id: "new-thread",
       scopes: ["new-thread"],
       actions: [{ id: "hidden", component: Component }],
+      experimental_inlinePanels: [
+        { id: "hidden-preview", component: Component },
+      ],
     });
 
     expect(resolveComposerActions([all, thread, newThread], "thread")).toEqual([
@@ -67,6 +72,12 @@ describe("Composer slot resolvers", () => {
       expect.objectContaining({
         key: "composer-plugin/1/thread/thread-action",
         customizationId: "thread",
+      }),
+    ]);
+    expect(resolveComposerInlinePanels([thread, newThread], "thread")).toEqual([
+      expect.objectContaining({
+        key: "composer-plugin/1/thread/preview",
+        panel: { id: "preview", component: Component },
       }),
     ]);
     expect(resolveComposerBanners([all], "thread")[0]?.banner.id).toBe(

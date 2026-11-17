@@ -33,6 +33,7 @@ export function createComposerSuggestionController(
   canUse: () => boolean = () => true,
 ) {
   let revision = 0;
+  const suspensions = new Set<symbol>();
   let latestRequestId: string | null = null;
   let input: ComposerSuggestionInput = {
     composerKey: "",
@@ -79,7 +80,7 @@ export function createComposerSuggestionController(
     latestRequestId = null;
     const old = state.candidate;
     publish({
-      eligible: input.eligible,
+      eligible: input.eligible && suspensions.size === 0,
       snapshot:
         input.threadId === null
           ? null
@@ -96,6 +97,21 @@ export function createComposerSuggestionController(
     if (cause) emit("dismissed", old?.requestId ?? null, cause);
   };
   const controller: experimental_ComposerSuggestionController = {
+    experimental_suspend() {
+      const token = Symbol();
+      suspensions.add(token);
+      latestRequestId = null;
+      const old = state.candidate;
+      publish({ ...state, eligible: false, candidate: null, request: null });
+      if (old) emit("dismissed", old.requestId, "programmatic");
+      return () => {
+        if (!suspensions.delete(token)) return;
+        publish({
+          ...state,
+          eligible: input.eligible && suspensions.size === 0,
+        });
+      };
+    },
     getSnapshot: () => state,
     subscribe(listener) {
       listeners.add(listener);

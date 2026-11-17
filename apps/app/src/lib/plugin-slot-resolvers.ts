@@ -102,6 +102,20 @@ export function resolveComposerActions(
   return resolved;
 }
 
+export function resolveComposerInlinePanels(
+  customizations: readonly PluginComposerCustomizationSlot[],
+  scopeKind: PluginComposerScope["kind"],
+) {
+  return customizations
+    .filter((entry) => composerCustomizationApplies(entry, scopeKind))
+    .flatMap((entry) =>
+      (entry.experimental_inlinePanels ?? []).map((panel) => ({
+        ...resolvedComposerContribution(entry, panel.id),
+        panel,
+      })),
+    );
+}
+
 export function resolveComposerBanners(
   customizations: readonly PluginComposerCustomizationSlot[],
   scopeKind: PluginComposerScope["kind"],

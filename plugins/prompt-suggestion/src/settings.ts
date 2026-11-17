@@ -84,13 +84,14 @@ export const settingDescriptors = {
     experimental_schema: settingsSchema.shape.memoryOutputTokenLimit.unwrap(),
     type: "number",
     label: "Memory output token limit",
-    description: "0 uses the model default. A positive limit requires model support.",
+    description:
+      "0 uses the model default. A positive limit requires model support.",
     default: 0,
   },
   outputTokenLimit: {
     experimental_schema: settingsSchema.shape.outputTokenLimit.unwrap(),
     type: "number",
-    label: "Output token limit",
+    label: "Automatic suggestion output token limit",
     description:
       "0 uses the model default. A positive limit requires model support; unsupported limits fail without a request.",
     default: 0,
