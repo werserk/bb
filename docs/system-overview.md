@@ -506,3 +506,11 @@ updated daemons for these strengthened semantics.
 Claude SDK input waits for the captured Query initialization before entering the
 prompt iterator; closure rejects readiness waiters. Iterator consumption remains
 a handoff, not proof that native execution accepted or completed the prompt.
+
+Claude resident session replacement tracks the actual host child process on every
+spawn, independently of optional I/O recording. A new query waits for the previous
+child to close, rather than interpreting SDK abort or iterator completion as process
+termination. Concurrent replacements share the same handoff; Stop invalidates it
+before a successor can start. Termination timeouts retain closing ownership and
+reject new work until a later close proves the previous child has exited. This
+keeps inherited native account locks authoritative during same-session continuation.

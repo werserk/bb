@@ -44,6 +44,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 import { handleLine } from "../bridge.js";
+import { SdkSession } from "../sdk-session.js";
 import { buildSessionOptions } from "../session-options.js";
 import {
   type ClaudePermissionMode,
@@ -4260,6 +4261,181 @@ describe("bridge", () => {
       await bridge.waitForResponse(3);
     } finally {
       queries.forEach((query) => query.finish());
+      bridge.restore();
+    }
+  });
+
+  it.each(["normal", "stop", "concurrent"])(
+    "waits for old process termination during %s handoff",
+    async (scenario) => {
+      const bridge = createBridgeJsonRpcTestHarness(handleLine);
+      const queries: ControlledClaudeQuery[] = [];
+      queryMock.mockImplementation(() => {
+        const query = createControlledClaudeQuery();
+        queries.push(query);
+        return query;
+      });
+      let terminated!: () => void;
+      const termination = new Promise<void>((resolve) => {
+        terminated = resolve;
+      });
+      const wait = vi
+        .spyOn(SdkSession.prototype, "stopAndWait")
+        .mockImplementation(async function (this: SdkSession) {
+          this.stop();
+          await termination;
+        });
+      const graceful = vi
+        .spyOn(SdkSession.prototype, "closeGracefully")
+        .mockImplementation(async function (this: SdkSession) {
+          this.stop();
+          await termination;
+        });
+      const stopDuringHandoff = scenario === "stop";
+      const threadId = `handoff-${scenario}`;
+      try {
+        bridge.sendRequest(1, "thread/start", {
+          threadId,
+          cwd: "/tmp/worktree",
+          instructionMode: "append",
+          dynamicTools: [
+            {
+              name: "handoff_probe",
+              description: "Probe",
+              inputSchema: { type: "object" },
+            },
+          ],
+          options: {
+            permissionMode: "accept-edits",
+            permissionScope: "workspace",
+            approvalReviewer: "user",
+            permissionEscalation: "ask",
+            instructions: "test",
+            providerOptions: { workflowsEnabled: false },
+          },
+        });
+        await bridge.waitForResponse(1);
+        bridge.sendRequest(
+          2,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            providerThreadId: threadId,
+            input: [{ type: "text", text: "first" }],
+          }),
+        );
+        await readNextPrompt(getLatestQueryCall());
+        await bridge.waitForResponse(2);
+        queries[0]?.emit(createSuccessfulResultMessage(threadId));
+        await bridge.flushWork();
+        bridge.sendRequest(
+          3,
+          "turn/start",
+          canonicalTurnParams({
+            threadId,
+            providerThreadId: threadId,
+            input: [{ type: "text", text: "next" }],
+          }),
+        );
+        await bridge.flushWork();
+        expect(wait).toHaveBeenCalledTimes(1);
+        expect(queries).toHaveLength(1);
+        if (stopDuringHandoff) {
+          bridge.sendRequest(4, "thread/stop", {
+            threadId,
+            providerThreadId: threadId,
+            intent: "interrupt",
+            activeTurnId: null,
+          });
+          await bridge.flushWork();
+        }
+        if (scenario === "concurrent") {
+          bridge.sendRequest(
+            5,
+            "turn/start",
+            canonicalTurnParams({
+              threadId,
+              providerThreadId: threadId,
+              input: [{ type: "text", text: "concurrent" }],
+            }),
+          );
+          await bridge.flushWork();
+          expect(wait).toHaveBeenCalledTimes(1);
+          expect(queries).toHaveLength(1);
+        }
+        terminated();
+        await bridge.flushWork();
+        if (stopDuringHandoff) {
+          await bridge.waitForResponse(4);
+          expect(queries).toHaveLength(1);
+        } else {
+          expect(queries).toHaveLength(2);
+          await readNextPrompt(getLatestQueryCall());
+          await bridge.waitForResponse(3);
+          if (scenario === "concurrent") {
+            await readNextPrompt(getLatestQueryCall());
+            await bridge.waitForResponse(5);
+            expect(queries).toHaveLength(2);
+          }
+        }
+      } finally {
+        terminated();
+        queries.forEach((query) => query.finish());
+        wait.mockRestore();
+        graceful.mockRestore();
+        bridge.restore();
+      }
+    },
+  );
+
+  it("retains closing ownership after termination failure and blocks replacement start", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const queries: ControlledClaudeQuery[] = [];
+    queryMock.mockImplementation(() => {
+      const query = createControlledClaudeQuery();
+      queries.push(query);
+      return query;
+    });
+    const failure = new Error("termination not confirmed");
+    const graceful = vi
+      .spyOn(SdkSession.prototype, "closeGracefully")
+      .mockRejectedValue(failure);
+    const forced = vi
+      .spyOn(SdkSession.prototype, "stopAndWait")
+      .mockRejectedValue(failure);
+    const threadId = "handoff-unresolved-close";
+    const start = {
+      threadId,
+      cwd: "/tmp/worktree",
+      instructionMode: "append",
+      options: canonicalOptions({}),
+    };
+    try {
+      bridge.sendRequest(1, "thread/start", start);
+      await bridge.waitForResponse(1);
+      bridge.sendRequest(2, "thread/stop", {
+        threadId,
+        providerThreadId: threadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      expect((await bridge.waitForResponse(2)).error).toBeDefined();
+      bridge.sendRequest(3, "thread/start", start);
+      expect((await bridge.waitForResponse(3)).error).toBeDefined();
+      expect(forced).toHaveBeenCalledOnce();
+      expect(queries).toHaveLength(1);
+      graceful.mockResolvedValue(undefined);
+      bridge.sendRequest(4, "thread/stop", {
+        threadId,
+        providerThreadId: threadId,
+        intent: "interrupt",
+        activeTurnId: null,
+      });
+      expect((await bridge.waitForResponse(4)).error).toBeUndefined();
+    } finally {
+      queries.forEach((query) => query.finish());
+      graceful.mockRestore();
+      forced.mockRestore();
       bridge.restore();
     }
   });

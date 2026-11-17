@@ -264,6 +264,7 @@ interface ThreadSession {
   sessionSerial: number;
   closing: boolean;
   restartBeforeNextTurn: ClaudeSessionRestart | null;
+  replacement: Promise<ThreadSession | undefined> | null;
   launchedWithBypassPermissions: boolean;
   recoveryHintRaisedThisTurn: "authRequired" | "rateLimited" | null;
   streamEnded: boolean;
@@ -701,10 +702,12 @@ async function closeThreadSession(args: {
         await closeClaudeThreadSession(threadSession, args.graceful !== false);
       }
     })
-    .finally(() => {
+    .then(() => {
       if (threadAttachments.get(args.threadId) === attachment) {
         threadAttachments.delete(args.threadId);
       }
+    })
+    .finally(() => {
       closingSessions.delete(args.threadId);
     });
   closingSessions.set(args.threadId, closePromise);
@@ -1261,6 +1264,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
     sessionSerial,
     closing: false,
     restartBeforeNextTurn: null,
+    replacement: null,
     launchedWithBypassPermissions:
       attachment.sessionOptions.allowBypassPermissions &&
       isBypassPermissionsAvailable(),
@@ -1544,7 +1548,9 @@ function buildTrackedSessionOptions(
   return sessionOptions;
 }
 
-function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
+async function replaceThreadSession(
+  args: ReplaceThreadSessionArgs,
+): Promise<ThreadSession | undefined> {
   args.threadSession.closing = true;
   resolvePendingSessionWork(args.threadSession, args.restart.reason);
   emitSessionReplacement({
@@ -1554,7 +1560,13 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
     threadId: args.threadId,
     threadSession: args.threadSession,
   });
-  args.threadSession.session.stop();
+  await args.threadSession.session.stopAndWait();
+  if (
+    threadAttachments.get(args.threadId) !== args.attachment ||
+    args.attachment.closing ||
+    args.attachment.residentSession !== args.threadSession
+  )
+    return undefined;
 
   const replacementSession = createThreadSession(args.attachment);
   args.attachment.residentSession = replacementSession;
@@ -1564,9 +1576,9 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
   return replacementSession;
 }
 
-function replaceThreadSessionBeforeNextTurn(
+async function replaceThreadSessionBeforeNextTurn(
   args: ReplaceThreadSessionBeforeNextTurnArgs,
-): ThreadSession | undefined {
+): Promise<ThreadSession | undefined> {
   const providerThreadId =
     args.attachment.providerThreadId ??
     args.threadSession.session.getSessionId();
@@ -1596,6 +1608,8 @@ async function getWritableThreadSession(
   if (!threadSession) {
     return undefined;
   }
+  if (threadSession.replacement) return threadSession.replacement;
+  if (threadSession.closing) return undefined;
   const replacement: ClaudeSessionRestart | null = threadSession.streamEnded
     ? {
         reason: "Thread session replaced after Claude SDK stream ended",
@@ -1613,12 +1627,13 @@ async function getWritableThreadSession(
   if (replacement === null) {
     return threadSession;
   }
-  return replaceThreadSessionBeforeNextTurn({
+  threadSession.replacement = replaceThreadSessionBeforeNextTurn({
     attachment,
     restart: replacement,
     threadId,
     threadSession,
   });
+  return threadSession.replacement;
 }
 
 function getAuthenticationFailureRestartReason(
@@ -1868,7 +1883,7 @@ async function closeClaudeThreadSession(
   if (graceful) {
     await threadSession.session.closeGracefully(THREAD_STOP_CLOSE_TIMEOUT_MS);
   } else {
-    threadSession.session.stop();
+    await threadSession.session.stopAndWait();
   }
 }
 

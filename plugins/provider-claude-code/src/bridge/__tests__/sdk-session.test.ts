@@ -1,3 +1,4 @@
+import { ChildProcess } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Options,
@@ -14,8 +15,20 @@ const mockQueryInstance = {
   setPermissionMode: vi.fn(),
   [Symbol.asyncIterator]: vi.fn(),
 };
-const { queryMock } = vi.hoisted(() => ({
+const { queryMock, spawnMock, recordingMock, recordMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  recordingMock: vi.fn(() => false),
+  recordMock: vi.fn(),
   queryMock: vi.fn(),
+}));
+
+vi.mock("@get-bb/plugin-sdk/process", () => ({
+  experimental_spawnHostProcess: spawnMock,
+}));
+
+vi.mock("@get-bb/plugin-sdk/provider-bridge", () => ({
+  experimental_isProviderBridgeRecording: recordingMock,
+  experimental_recordProviderChildIo: recordMock,
 }));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
@@ -76,6 +89,7 @@ function waitForAsyncWork(): Promise<void> {
 describe("SdkSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recordingMock.mockReturnValue(false);
     mockQueryInstance.initializationResult.mockResolvedValue({});
     queryMock.mockImplementation(() => mockQueryInstance);
     mockQueryInstance.applyFlagSettings.mockResolvedValue(undefined);
@@ -90,6 +104,106 @@ describe("SdkSession", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])(
+    "waits for child termination with recording=%s",
+    async (recording) => {
+      recordingMock.mockReturnValue(recording);
+      const child = new ChildProcess();
+      Object.defineProperty(child, "pid", { value: 123 });
+      spawnMock.mockReturnValue(child);
+      queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+        options.spawnClaudeCodeProcess?.({
+          command: "fake",
+          args: [],
+          env: {},
+          signal: new AbortController().signal,
+        });
+        return mockQueryInstance;
+      });
+      const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+      session.start();
+      await waitForAsyncWork();
+      let stopped = false;
+      const closing = session.stopAndWait(1_000).then(() => {
+        stopped = true;
+      });
+      await waitForAsyncWork();
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(recordMock).toHaveBeenCalledTimes(recording ? 1 : 0);
+      expect(stopped).toBe(false);
+      child.emit("close", 0, null);
+      await closing;
+      expect(stopped).toBe(true);
+    },
+  );
+
+  it("keeps an unresolved child owned after timeout and permits confirmed later closure", async () => {
+    vi.useFakeTimers();
+    const child = new ChildProcess();
+    Object.defineProperty(child, "pid", { value: 123 });
+    spawnMock.mockReturnValue(child);
+    queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+      options.spawnClaudeCodeProcess?.({
+        command: "fake",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      });
+      return mockQueryInstance;
+    });
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    try {
+      session.start();
+      const closing = session.stopAndWait(100);
+      const rejected = expect(closing).rejects.toThrow(
+        "termination was not confirmed",
+      );
+      child.emit("error", new Error("signal failed"));
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      child.emit("close", 0, null);
+      await session.stopAndWait(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a failed spawn with no child PID without waiting for a close deadline", async () => {
+    const child = new ChildProcess();
+    spawnMock.mockReturnValue(child);
+    queryMock.mockImplementation(({ options }: ClaudeQueryPromptCall) => {
+      options.spawnClaudeCodeProcess?.({
+        command: "missing",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      });
+      return mockQueryInstance;
+    });
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    child.emit("error", new Error("ENOENT"));
+    await session.stopAndWait(100);
+  });
+
+  it("stops a never-started session and refuses a delayed spawn after Stop", async () => {
+    const neverStarted = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    await neverStarted.stopAndWait(100);
+    keepSdkStreamOpen();
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+    session.start();
+    await session.stopAndWait(100);
+    expect(() =>
+      getLatestQueryCall().options.spawnClaudeCodeProcess?.({
+        command: "fake",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("stopped before process start");
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it("holds FIFO input until the captured query initializes", async () => {
