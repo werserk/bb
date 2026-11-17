@@ -1,8 +1,9 @@
+import { ComposerContextRow } from "@/components/promptbox/context/ComposerContextRow";
 import {
   ComposerContextItem,
   useComposerContextSource,
 } from "@/components/promptbox/context/composer-context";
-import { useMemo, useRef, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ComposerView } from "@get-bb/plugin-sdk";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { useResolvedComposerBanners } from "./composer-slot-hooks";
@@ -88,6 +89,8 @@ function ComposerBannerContribution({
   banner: ReturnType<typeof useResolvedComposerBanners>[number]["banner"];
 }) {
   const source = useComposerContextSource();
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const content = source ? (
     <div ref={contentRef}>
@@ -113,7 +116,23 @@ function ComposerBannerContribution({
       group="context"
       contentRef={contentRef}
     >
-      {native}
+      <ComposerContextRow
+        icon="Blocks"
+        title={pluginId}
+        action={
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Hide details" : "Details"}
+          </button>
+        }
+      />
+      <div id={bodyId} hidden={!expanded}>
+        {content}
+      </div>
     </ComposerContextItem>
   );
 }

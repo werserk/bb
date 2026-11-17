@@ -667,6 +667,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalComposerRendererApi",
           "ExperimentalComposerInput",
           "experimental_ComposerRoot",
+          "ExperimentalComposerRootProps.experimental_onContextPreview",
           "ExperimentalComposerRootProps",
           "ExperimentalComposerEditor",
           "ExperimentalComposerEditorState",

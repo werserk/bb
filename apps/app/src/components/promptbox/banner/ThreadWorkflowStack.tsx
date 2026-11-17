@@ -1,3 +1,4 @@
+import { useComposerContextSource } from "../context/composer-context";
 import { useId } from "react";
 import { cn } from "@bb/shared-ui/lib/utils";
 import type { TimelineWorkflowWorkRow } from "@bb/server-contract";
@@ -8,6 +9,7 @@ import {
 } from "@/components/promptbox/banner/PromptStackCard";
 import {
   ThreadWorkflowCard,
+  ThreadWorkflowContextRow,
   ThreadWorkflowSummary,
 } from "@/components/promptbox/banner/ThreadWorkflowCard";
 import {
@@ -33,6 +35,7 @@ export function ThreadWorkflowStack({
   expandedWorkflowIds,
   onToggleWorkflow,
 }: ThreadWorkflowStackProps) {
+  const compact = useComposerContextSource() !== null;
   const listId = useId();
   const focus = useDisclosureFocusHandoff(isStackExpanded, onToggleStack);
   const running = workflows.filter((workflow) => workflow.status === "pending");
@@ -40,6 +43,23 @@ export function ThreadWorkflowStack({
   if (!front) {
     return null;
   }
+  if (compact)
+    return (
+      <PromptStackCard
+        ariaLabel="Workflows"
+        context={{ label: "Workflows", icon: "Workflow", group: "work" }}
+        contextSummary={running.length}
+      >
+        {running.map((workflow) => (
+          <ThreadWorkflowContextRow
+            key={workflow.id}
+            workflow={workflow}
+            isExpanded={expandedWorkflowIds.has(workflow.id)}
+            onToggle={() => onToggleWorkflow(workflow.id)}
+          />
+        ))}
+      </PromptStackCard>
+    );
   const stacked = running.length > 1;
   if (stacked && !isStackExpanded) {
     return (

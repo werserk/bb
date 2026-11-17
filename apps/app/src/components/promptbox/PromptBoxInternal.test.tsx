@@ -2545,6 +2545,71 @@ describe("ComposerBox submit shortcuts", () => {
 });
 
 describe("ComposerBox escape", () => {
+  it.each([false, true])(
+    "keeps the expanded draft open when its portaled send menu handles Escape (compact: %s)",
+    async (compact) => {
+      const height = vi
+        .spyOn(HTMLElement.prototype, "clientHeight", "get")
+        .mockReturnValue(120);
+      const scroll = vi
+        .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+        .mockReturnValue(360);
+      const { container } = render(
+        <CompactViewportOverrideProvider isCompactViewport={compact}>
+          <div data-promptbox-shell="">
+            <ComposerBox
+              {...createPromptBoxProps({
+                value: "Keep the expanded draft",
+                onCollapse: vi.fn(),
+                submission: {
+                  onModifierSubmit: vi.fn(),
+                  showModifierSubmitAction: true,
+                },
+              })}
+            />
+          </div>
+        </CompactViewportOverrideProvider>,
+      );
+      try {
+        fireEvent.click(
+          await screen.findByRole("button", { name: "Expand ⤢" }),
+        );
+        const editor = getPromptEditorElement();
+        const form = editor.closest("form");
+        expect(form?.hasAttribute("data-editor-expanded")).toBe(true);
+        expect(
+          screen.queryByRole("button", { name: "Collapse prompt box" }),
+        ).toBeNull();
+        expect(container.contains(editor)).toBe(false);
+        expect(focusPaneComposer(container)).toBe(true);
+        expect(document.activeElement).toBe(editor);
+        const options = screen.getByRole("button", { name: "Send options" });
+        if (compact) fireEvent.click(options);
+        else
+          fireEvent.pointerDown(options, {
+            button: 0,
+            ctrlKey: false,
+            pointerType: "mouse",
+          });
+        const action = await screen.findByRole("menuitem", { name: "Steer" });
+        fireEvent.keyDown(action, { key: "Escape" });
+        await waitFor(() =>
+          expect(screen.queryByRole("menuitem", { name: "Steer" })).toBeNull(),
+        );
+        expect(form?.hasAttribute("data-editor-expanded")).toBe(true);
+        fireEvent.keyDown(editor, { key: "Escape" });
+        expect(form?.hasAttribute("data-editor-expanded")).toBe(false);
+        expect(
+          screen.getByRole("button", { name: "Collapse prompt box" }),
+        ).toBeTruthy();
+        expect(editor.textContent).toBe("Keep the expanded draft");
+      } finally {
+        height.mockRestore();
+        scroll.mockRestore();
+      }
+    },
+  );
+
   it("blurs the editor when no host Escape action is provided", async () => {
     const promptBoxRef = createRef<PromptBoxHandle>();
     render(
@@ -2625,11 +2690,11 @@ describe("ComposerBox size controls", () => {
   it.each([
     [
       "thread",
-      "min(calc(var(--bb-shell-height) * 0.5 - 3rem), var(--composer-editor-available-height, 100dvh))",
+      "min(var(--composer-editor-cap, 40dvh), var(--composer-editor-available-height, 100dvh))",
     ],
     [
       "new-thread",
-      "min(calc(var(--bb-shell-height) * 0.7 - 3rem), var(--composer-editor-available-height, 100dvh))",
+      "min(var(--composer-editor-cap, 40dvh), var(--composer-editor-available-height, 100dvh))",
     ],
   ] as const)(
     "caps the %s editor at its share of the visible shell height or the host's available space",
@@ -2957,7 +3022,7 @@ describe("ComposerBox plugin composer actions", () => {
     expect(staleWrite).not.toHaveBeenCalled();
   });
 
-  it("does not mount plugin actions in compact layout", () => {
+  it("keeps plugin actions available in compact layout", () => {
     setPluginSlotRegistrations(
       "compact",
       pluginRegistrationSet([
@@ -2977,7 +3042,7 @@ describe("ComposerBox plugin composer actions", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Plugin action" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Plugin action" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Submit (Enter)" })).toBeTruthy();
   });
 });

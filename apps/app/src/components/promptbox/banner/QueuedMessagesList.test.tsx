@@ -2504,12 +2504,186 @@ it.each([true, false])(
   },
 );
 
-it("keeps the context queue flat and opens its full controls on demand", async () => {
+it("keeps the context queue as preview rows and opens full controls only on Edit", async () => {
+  const edit = vi.fn();
+  const send = vi.fn();
   render(
     <ComposerContextProvider>
       <ComposerContextSources>
         <QueuedMessagesList
           queuedMessages={[makeQueuedMessage("q_flat", "Then inspect PayPal")]}
+          sendDisabled={false}
+          actionDisabled={false}
+          processingMessageId={null}
+          processingAction={null}
+          onSend={send}
+          onReorder={noop}
+          onSetGroupBoundary={noop}
+          onEdit={edit}
+          onChangeSendTime={noopAsync}
+          onDelete={noop}
+        />
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
+  expect(
+    screen.getByText("Then inspect PayPal").closest(".composer-context-row"),
+  ).toBeTruthy();
+  expect(screen.getByText("Sends when the agent finishes")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Expand queued messages" }),
+  ).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Send queued message 1 now" }),
+  );
+  expect(send).toHaveBeenCalledWith("q_flat");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Edit queued message 1" }),
+  );
+  expect(edit).toHaveBeenCalledWith({
+    queuedMessageId: "q_flat",
+    queuedMessageIndex: 0,
+  });
+  expect(
+    await screen.findByRole("button", { name: "Reduce queued messages" }),
+  ).toBeTruthy();
+});
+
+it.each([
+  { kind: "noneditable", editable: false, question: false, processing: false },
+  {
+    kind: "question response",
+    editable: true,
+    question: true,
+    processing: false,
+  },
+  { kind: "processing", editable: true, question: false, processing: true },
+])(
+  "preserves $kind queue action guards in context rows",
+  ({ editable, question, processing }) => {
+    const edit = vi.fn();
+    const send = vi.fn();
+    const message = makeThreadQueuedMessage({
+      id: "guarded",
+      editable,
+      payload: question
+        ? {
+            kind: "questionResponse",
+            questionId: "qst_23456789ab",
+            revision: 1,
+          }
+        : { kind: "inline" },
+      content: [{ type: "text", text: "Guarded message", mentions: [] }],
+    });
+    render(
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          <QueuedMessagesList
+            queuedMessages={[message]}
+            sendDisabled={false}
+            actionDisabled={false}
+            processingMessageId={processing ? message.id : null}
+            processingAction={processing ? "send" : null}
+            onSend={send}
+            onReorder={noop}
+            onSetGroupBoundary={noop}
+            onEdit={edit}
+            onChangeSendTime={noopAsync}
+            onDelete={noop}
+          />
+        </ComposerContextSources>
+        <ComposerContextDock>
+          <textarea />
+        </ComposerContextDock>
+      </ComposerContextProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
+    if (processing) {
+      expect(
+        screen
+          .getByRole("button", { name: "Edit queued message 1" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      expect(
+        screen.queryByRole("button", { name: "Send queued message 1 now" }),
+      ).toBeNull();
+      expect(screen.getByText("Sending…")).toBeTruthy();
+    } else {
+      expect(
+        screen.queryByRole("button", { name: "Edit queued message 1" }),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Details for queued message 1" }),
+      );
+      expect(
+        screen.getByRole("button", { name: "Delete queued message 1" }),
+      ).toBeTruthy();
+      expect(edit).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it("keeps deletion and scheduling reachable while a queued message is edited", () => {
+  const remove = vi.fn();
+  const message = makeThreadQueuedMessage({
+    id: "editing",
+    state: "scheduled",
+    sendAt: Date.now() + 60000,
+  });
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <QueuedMessagesList
+          queuedMessages={[message]}
+          inlineEditor={{
+            queuedMessageId: message.id,
+            queuedMessageIndex: 0,
+            content: <textarea aria-label="Queued draft" />,
+            onDismiss: noop,
+          }}
+          sendDisabled={false}
+          actionDisabled={false}
+          processingMessageId={null}
+          processingAction={null}
+          onSend={noop}
+          onReorder={noop}
+          onSetGroupBoundary={noop}
+          onEdit={noop}
+          onChangeSendTime={noopAsync}
+          onDelete={remove}
+        />
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
+  expect(screen.getByRole("textbox", { name: "Queued draft" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Change when queued message 1 sends" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Delete queued message 1" }),
+  );
+  expect(remove).toHaveBeenCalledWith(message.id);
+});
+
+it("keeps a failure reason visible in a compact queue even with no wait target", () => {
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <QueuedMessagesList
+          queuedMessages={[
+            makeThreadQueuedMessage({
+              failureReason: "Provider unavailable",
+              waitingOn: null,
+            }),
+          ]}
           sendDisabled={false}
           actionDisabled={false}
           processingMessageId={null}
@@ -2523,25 +2697,11 @@ it("keeps the context queue flat and opens its full controls on demand", async (
         />
       </ComposerContextSources>
       <ComposerContextDock>
-        <textarea aria-label="Draft" />
+        <textarea />
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
-  expect(screen.getByText("1 queued message")).toBeTruthy();
-  expect(
-    screen.queryByRole("button", { name: "Collapse queued messages" }),
-  ).toBeNull();
-  const expand = screen.getByRole("button", { name: "Expand queued messages" });
-  focusWithKeyboard(expand);
-  fireEvent.click(expand);
-  const reduce = await screen.findByRole("button", {
-    name: "Reduce queued messages",
-  });
-  expect(document.activeElement).toBe(reduce);
-  fireEvent.click(reduce);
-  expect(screen.getByText("1 queued message")).toBeTruthy();
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Expand queued messages" }),
-  );
+  expect(screen.getByText("Provider unavailable")).toBeTruthy();
+  expect(screen.queryByText("Sends when the agent finishes")).toBeNull();
 });

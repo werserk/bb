@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { ComposerContextRow } from "./ComposerContextRow";
+import { useEffect, useRef, useState } from "react";
 import { useEnvironment } from "@/hooks/queries/environment-queries";
 import { useThreadPendingInteractions } from "@/hooks/queries/thread-queries";
 import { useThreadPlanFocus } from "@/views/thread-detail/useThreadPlanFocus";
@@ -27,84 +28,87 @@ export function ComposerPlanSteps({
   executing: boolean;
   onQuestion: (id: string) => void;
 }) {
+  const [doneOpen, setDoneOpen] = useState(false);
   const done = snapshot.items.filter(
     (step) => step.status === "completed",
   ).length;
   return (
     <div className="composer-context-plan space-y-2">
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <Icon name="ListTodo" className="size-3.5" aria-hidden />
-        <span className="tabular-nums">
-          Plan · {done} / {snapshot.items.length}
-        </span>
-      </div>
       {snapshot.staleSince !== undefined && (
         <p className="text-xs text-muted-foreground">
           Plan from an earlier turn
         </p>
       )}
-      <progress
+      <div
+        role="progressbar"
         aria-label="Completed plan steps"
-        className="h-1 w-full"
-        value={done}
-        max={Math.max(1, snapshot.items.length)}
-      />
-      {snapshot.items.map((step) => (
-        <div
-          key={step.id}
-          className="flex items-start gap-2 py-1 text-xs"
-          tabIndex={-1}
-          data-plan-step={step.id}
-          data-plan-step-status={step.status}
-          aria-label={`${step.status}: ${step.text}`}
+        aria-valuenow={done}
+        aria-valuemin={0}
+        aria-valuemax={snapshot.items.length}
+        className="composer-plan-segments"
+      >
+        {snapshot.items.map((step) => (
+          <span key={step.id} data-status={step.status} />
+        ))}
+      </div>
+      {done > 0 && (
+        <button
+          type="button"
+          className="composer-plan-done"
+          aria-expanded={doneOpen}
+          onClick={() => setDoneOpen(!doneOpen)}
         >
-          <Icon
-            name={
-              step.status === "completed"
-                ? "Check"
-                : step.status === "failed"
-                  ? "CircleX"
-                  : step.status === "needs_input"
-                    ? "CircleQuestion"
-                    : step.status === "in_progress" && executing
-                      ? "Spinner"
-                      : "Circle"
-            }
-            className={`mt-0.5 size-3.5 shrink-0 ${step.status === "failed" ? "text-destructive-text" : step.status === "needs_input" ? "text-attention" : "text-muted-foreground"} ${step.status === "in_progress" && executing ? "motion-safe:animate-spin" : ""}`}
-            aria-hidden
-          />
-          <div className="min-w-0 flex-1">
-            <p
-              className={
+          ✓ {done} done {doneOpen ? "▾" : "▸"}
+        </button>
+      )}
+      {snapshot.items
+        .filter((step) => doneOpen || step.status !== "completed")
+        .map((step) => (
+          <div
+            key={step.id}
+            className="composer-plan-step text-xs"
+            tabIndex={-1}
+            data-plan-step={step.id}
+            data-plan-step-status={step.status}
+            aria-label={`${step.status}: ${step.text}`}
+          >
+            <ComposerContextRow
+              icon={
                 step.status === "completed"
-                  ? "text-muted-foreground"
-                  : "text-foreground"
+                  ? "Check"
+                  : step.status === "failed"
+                    ? "CircleX"
+                    : step.status === "needs_input"
+                      ? "CircleQuestion"
+                      : step.status === "in_progress" && executing
+                        ? "Spinner"
+                        : "Circle"
               }
-            >
-              {step.text}
-            </p>
-            {step.actor && (
-              <p className="text-muted-foreground">{step.actor}</p>
-            )}
-            {step.note && (
-              <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">
-                {step.note}
-              </p>
-            )}
-            {step.interactionIds.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className="mt-1 inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-attention"
-                onClick={() => onQuestion(id)}
-              >
-                Answer
-                <Icon name="ExternalLink" className="size-3" aria-hidden />
-              </button>
-            ))}
+              tone={
+                step.status === "needs_input"
+                  ? "attention"
+                  : step.status === "in_progress"
+                    ? "working"
+                    : undefined
+              }
+              title={step.text}
+              subline={[step.actor, step.note].filter(Boolean).join(" · ")}
+              action={
+                step.interactionIds.length > 0
+                  ? step.interactionIds.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => onQuestion(id)}
+                      >
+                        Answer
+                      </button>
+                    ))
+                  : undefined
+              }
+            />
           </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 }
@@ -263,7 +267,7 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
             </button>
           ))}
         {plan?.historyTruncated && (
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-2 text-2xs text-subtle-foreground">
             Earlier plan history truncated
           </p>
         )}

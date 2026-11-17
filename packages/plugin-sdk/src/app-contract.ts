@@ -3270,6 +3270,8 @@ export interface ExperimentalComposerEditorVoice {
 
 /** Props of `experimental_ComposerRoot`. */
 export interface ExperimentalComposerRootProps {
+  /** Expose the native context strip when a plugin preview becomes available. */
+  experimental_onContextPreview?: () => void;
   /** The composer's outermost element. */
   rootRef: RefObject<HTMLElement | null>;
   editor: ExperimentalComposerEditor;

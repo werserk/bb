@@ -270,3 +270,33 @@ it("does not treat an unrelated client error as legacy coverage", async () => {
   expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
   expect(api.list).not.toHaveBeenCalled();
 });
+
+it("shows each open question as a flat Answer row without a second picker in composer context", async () => {
+  const { ComposerContextProvider, ComposerContextSources } =
+    await import("@/components/promptbox/context/composer-context");
+  const { ComposerContextDock } =
+    await import("@/components/promptbox/context/ComposerContextDock");
+  api.list.mockResolvedValue([q("Newest", 2), q("Oldest", 1)]);
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <QuestionNavigator threadId="thr_test" />
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+    { wrapper: createQueryClientTestHarness().wrapper },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Needs you: 2" }));
+  const rows = [...document.querySelectorAll(".composer-context-row")];
+  expect(
+    rows.map(
+      (row) => row.querySelector(".composer-context-row-title")?.textContent,
+    ),
+  ).toEqual(["Oldest", "Newest"]);
+  expect(screen.getAllByText("Answer ↑")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Question · 1 Oldest" }));
+  expect(api.navigate).toHaveBeenCalledWith("Oldest", "question");
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+});

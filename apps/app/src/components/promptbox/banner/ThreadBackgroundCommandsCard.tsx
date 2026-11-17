@@ -1,3 +1,5 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
+import { useComposerContextSource } from "../context/composer-context";
 import { useRef, useState } from "react";
 import { isBackgroundAgentTaskType } from "@bb/domain";
 import type { TimelineWorkflowWorkRow } from "@bb/server-contract";
@@ -167,6 +169,7 @@ export function ThreadBackgroundCommandsCard({
   isExpanded,
   onToggle,
 }: ThreadBackgroundCommandsCardProps) {
+  const compact = useComposerContextSource() !== null;
   const isCompactViewport = useIsCompactViewport();
   const cardRef = useRef<HTMLElement>(null!);
   const [isCompactCard, setIsCompactCard] = useState<boolean | null>(null);
@@ -195,6 +198,30 @@ export function ThreadBackgroundCommandsCard({
   const primaryDisplay = backgroundActivityDisplay(primary);
   const groupLabel = backgroundActivityGroupLabel(commands);
 
+  if (compact)
+    return (
+      <PromptStackCard
+        ariaLabel={groupLabel}
+        context={{ label: groupLabel, icon: "Terminal", group: "work" }}
+        contextSummary={commands.length}
+      >
+        {commands.map((row) => (
+          <ComposerContextRow
+            key={row.id}
+            icon={backgroundActivityDisplay(row).icon}
+            tone="working"
+            title={row.description}
+            mono
+            subline={backgroundActivityModel(row)}
+            action={
+              <span className="tabular-nums text-muted-foreground">
+                <LiveDurationText startedAt={row.startedAt} />
+              </span>
+            }
+          />
+        ))}
+      </PromptStackCard>
+    );
   return (
     <PromptStackCard
       rootRef={cardRef}

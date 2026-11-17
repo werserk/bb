@@ -4794,3 +4794,7 @@ cleanup and explicit Stop use the same runtime conditional release primitive;
 explicit Stop retains its separate interruption and question cancellation policy.
 Stabilization requires cross-environment start/steer/rewind race coverage,
 question preservation, unknown-host coverage and SDK/CLI contract parity.
+
+## Composer context preview visibility
+
+`ExperimentalComposerRootProps.experimental_onContextPreview` asks a renderer to expose the native strip whenever it contains an active plugin preview. Core `ComposerRoot` observes the same context store used by native counters and `experimental_ComposerContextStrip`; the bundled Composer collapses its expanded editor through this callback. Preview generation and draft acceptance stay plugin-owned. Stabilization requires multiple-renderer coverage, preview lifecycle and expanded-editor focus/selection checks. The bundled Composer is the current renderer caller; Prompt Suggestion exercises it through the public strip.

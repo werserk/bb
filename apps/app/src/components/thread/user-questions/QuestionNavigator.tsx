@@ -1,3 +1,4 @@
+import { ComposerContextRow } from "@/components/promptbox/context/ComposerContextRow";
 import {
   ComposerContextItem,
   useComposerContextSource,
@@ -156,6 +157,40 @@ export function QuestionNavigator({
             <span role="status" className="px-2 text-xs text-muted-foreground">
               Questions · Loading…
             </span>
+          ) : contextSource && questions.length > 0 ? (
+            <div className="w-full">
+              {questions.map((question) => (
+                <ComposerContextRow
+                  key={question.id}
+                  icon="MessageQuestion"
+                  tone="attention"
+                  title={questionTitle(question.publication)}
+                  action={
+                    <button
+                      type="button"
+                      aria-label={`${legacy ? "Recent question" : "Question"} · 1 ${questionTitle(question.publication)}`}
+                      disabled={navigation?.pending}
+                      onClick={() => go(question.id)}
+                    >
+                      Answer ↑
+                    </button>
+                  }
+                />
+              ))}
+              {query.data?.nextCursor && !incomplete ? (
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={query.isFetching}
+                  onClick={() => {
+                    windowSize.current.pages++;
+                    void query.refetch();
+                  }}
+                >
+                  {query.isFetching ? "Loading…" : "Load more"}
+                </button>
+              ) : null}
+            </div>
           ) : total === 1 && questions.length === 1 && !incomplete ? (
             <button
               type="button"

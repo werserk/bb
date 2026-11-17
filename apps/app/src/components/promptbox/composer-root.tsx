@@ -1,9 +1,11 @@
+import { useComposerContextStore } from "./context/composer-context";
 import {
   createContext,
   useContext,
   useEffect,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import type {
   ExperimentalComposerContributions,
@@ -27,6 +29,10 @@ import {
   ComposerCommand,
   ComposerCommandOwnerProvider,
 } from "./composer-commands";
+
+const EMPTY_CONTEXT_ENTRIES: readonly { strip?: object }[] = [];
+const emptySnapshot = () => EMPTY_CONTEXT_ENTRIES;
+const emptySubscribe = () => () => {};
 
 type PublishedEditor = Pick<
   ExperimentalComposerEditor,
@@ -91,6 +97,7 @@ export function ComposerRoot({
   editor,
   menuRef,
   menuOpen = false,
+  experimental_onContextPreview: exposeContextPreview,
 }: ExperimentalComposerRootProps) {
   const host = useContext(ComposerRootHostContext);
   if (host === null) {
@@ -98,6 +105,16 @@ export function ComposerRoot({
       "experimental_ComposerRoot is only available inside an experimental_composer component.",
     );
   }
+  const contextStore = useComposerContextStore();
+  const entries = useSyncExternalStore(
+    contextStore?.subscribe ?? emptySubscribe,
+    contextStore?.snapshot ?? emptySnapshot,
+    emptySnapshot,
+  );
+  const hasPreview = entries.some((entry) => entry.strip);
+  useLayoutEffect(() => {
+    if (hasPreview) exposeContextPreview?.();
+  }, [hasPreview, exposeContextPreview]);
   const { key, registerEditor, attachEditor, onFocusCommand } = host;
   const { runsPluginCommands } = host;
   const { isFocusedPane } = host;
@@ -162,19 +179,22 @@ export function ComposerRoot({
   useEffect(() => {
     const element = rootRef.current;
     if (element === null) return;
-    const unregisterFocus = registerPaneComposerFocus(element, () =>
-      editorRef.current.focus(),
-    );
     const dropTarget =
       element.closest<HTMLElement>("[data-promptbox-shell]") ?? element;
-    const unregisterDrop = registerThreadMentionDropTarget(dropTarget, {
-      accepts: () => editorRef.current.acceptsThreadDrop(),
-      insert: (threads, x, y) =>
-        editorRef.current.insertDroppedThreads(threads, x, y),
-    });
+    const targets = [...new Set([element, dropTarget])];
+    const unregisterFocus = targets.map((target) =>
+      registerPaneComposerFocus(target, () => editorRef.current.focus()),
+    );
+    const unregisterDrops = targets.map((target) =>
+      registerThreadMentionDropTarget(target, {
+        accepts: () => editorRef.current.acceptsThreadDrop(),
+        insert: (threads, x, y) =>
+          editorRef.current.insertDroppedThreads(threads, x, y),
+      }),
+    );
     return () => {
-      unregisterFocus();
-      unregisterDrop();
+      for (const unregister of unregisterFocus) unregister();
+      for (const unregister of unregisterDrops) unregister();
     };
   }, [rootRef]);
 

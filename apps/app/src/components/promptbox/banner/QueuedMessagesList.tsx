@@ -1,3 +1,4 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
 import {
   QuestionResponseBody,
   questionResponseClass,
@@ -712,15 +713,18 @@ function QueuedMessagePreview({
 }
 
 function QueuedMessageWaitLine({
-  pluginDisplayName,
   queuedMessage,
   threadStatus,
 }: {
-  pluginDisplayName: string;
   queuedMessage: ThreadQueuedMessage;
   threadStatus: ThreadStatus;
 }) {
   const now = useSecondTick();
+  const pluginDisplayName = usePluginDisplayName(
+    queuedMessage.waitingOn?.kind === "plugin"
+      ? queuedMessage.waitingOn.pluginId
+      : "",
+  );
   const label = describeQueuedMessageWait({
     failureReason: queuedMessage.failureReason,
     now,
@@ -783,15 +787,9 @@ function QueuedMessagesHeaderWait({
         queuedMessageHasWaitLine(queuedMessage),
     ) ??
     newestFirst.find(queuedMessageHasWaitLine);
-  const pluginDisplayName = usePluginDisplayName(
-    attentionMessage?.waitingOn?.kind === "plugin"
-      ? attentionMessage.waitingOn.pluginId
-      : "",
-  );
   if (!attentionMessage) return null;
   return (
     <QueuedMessageWaitLine
-      pluginDisplayName={pluginDisplayName}
       queuedMessage={attentionMessage}
       threadStatus={threadStatus}
     />
@@ -876,11 +874,6 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
   const attachmentCount = useMemo(
     () => countQueuedMessageAttachments(queuedMessage.content),
     [queuedMessage.content],
-  );
-  const pluginDisplayName = usePluginDisplayName(
-    queuedMessage.waitingOn?.kind === "plugin"
-      ? queuedMessage.waitingOn.pluginId
-      : "",
   );
   const hasWaitLine = queuedMessageHasWaitLine(queuedMessage);
   const sendAllowed =
@@ -1022,7 +1015,6 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                 <QueuedMessageProcessingLine label={processingLabel} />
               ) : hasWaitLine ? (
                 <QueuedMessageWaitLine
-                  pluginDisplayName={pluginDisplayName}
                   queuedMessage={queuedMessage}
                   threadStatus={threadStatus}
                 />
@@ -1810,41 +1802,91 @@ export function QueuedMessagesList({
     );
   }
 
+  const editingMessage = inlineEditor
+    ? queuedMessages.find(
+        (message) => message.id === inlineEditor.queuedMessageId,
+      )
+    : undefined;
+  const editingIndex = editingMessage
+    ? queuedMessages.indexOf(editingMessage)
+    : -1;
   if (queuedMessages.length === 0 && !inlineEditor) return null;
 
   if (compactContext && !workspaceOpen && !inlineEditor) {
-    const first = queuedMessages[0];
     return (
       <PromptStackCard
         ariaLabel="Queued messages"
         context={{ label: "Queue", icon: "ListView", group: "queue" }}
         contextSummary={queuedMessages.length}
       >
-        <div className="flex min-w-0 items-center gap-2.5 text-xs">
-          <Icon name="ListView" className="size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1">
-            {queuedMessages.length} queued{" "}
-            {queuedMessages.length === 1 ? "message" : "messages"}
-          </span>
-          <button
-            ref={setCompactExpandRef}
-            type="button"
-            aria-label="Expand queued messages"
-            onClick={() => {
-              handoffWorkspaceFocus.current = true;
-              onExpandedChange(true);
-              setWorkspaceOpen(true);
-            }}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-          >
-            Expand
-          </button>
-        </div>
-        {first && (
-          <p className="mt-1 truncate pl-6 text-xs text-muted-foreground">
-            {formatQueuedMessagePreview(first.content)}
-          </p>
-        )}
+        {queuedMessages.map((message, index) => {
+          const editable =
+            message.editable && message.payload.kind !== "questionResponse";
+          const processing = processingMessageId === message.id;
+          const sendAllowed =
+            sendAction === "steer-when-ready" ||
+            isQueuedMessageSendNowAllowed(message);
+          return (
+            <ComposerContextRow
+              key={message.id}
+              icon="ListView"
+              title={
+                <QueuedMessagePreview
+                  compact
+                  queuedMessage={message}
+                  resolveMentionLink={resolveMentionLink}
+                />
+              }
+              subline={
+                processing ? (
+                  processingLabel
+                ) : !queuedMessageHasWaitLine(message) ? (
+                  "Sends when the agent finishes"
+                ) : (
+                  <QueuedMessageWaitLine
+                    queuedMessage={message}
+                    threadStatus={threadStatus}
+                  />
+                )
+              }
+              action={
+                <button
+                  type="button"
+                  disabled={actionDisabled || processing}
+                  ref={index === 0 ? setCompactExpandRef : undefined}
+                  aria-label={`${editable ? "Edit" : "Details for"} queued message ${index + 1}`}
+                  onClick={() => {
+                    if (editable)
+                      handleEdit({
+                        queuedMessageId: message.id,
+                        queuedMessageIndex: index,
+                      });
+                    else {
+                      handoffWorkspaceFocus.current = true;
+                      openWorkspace();
+                    }
+                  }}
+                >
+                  {editable ? "Edit" : "Details"}
+                </button>
+              }
+              secondary={
+                sendAllowed && !processing ? (
+                  <button
+                    type="button"
+                    disabled={actionDisabled || sendDisabled}
+                    aria-label={`${sendAction === "steer-when-ready" ? "Steer" : "Send"} queued message ${index + 1} ${sendAction === "steer-when-ready" ? "when ready" : "now"}`}
+                    onClick={() => onSend(message.id)}
+                  >
+                    {sendAction === "steer-when-ready"
+                      ? "Steer when ready"
+                      : "Send now"}
+                  </button>
+                ) : undefined
+              }
+            />
+          );
+        })}
       </PromptStackCard>
     );
   }
@@ -1908,6 +1950,31 @@ export function QueuedMessagesList({
             count={queuedMessages.length}
           />
         </button>
+        {compactContext &&
+        editingMessage &&
+        processingMessageId !== editingMessage.id ? (
+          <div className="flex items-center gap-3 px-3 text-xs text-muted-foreground">
+            {editingMessage.state === "scheduled" &&
+              editingMessage.systemNotice === null && (
+                <button
+                  type="button"
+                  disabled={actionDisabled}
+                  aria-label={`Change when queued message ${editingIndex + 1} sends`}
+                  onClick={() => handleOpenSendTime(editingMessage.id)}
+                >
+                  Schedule
+                </button>
+              )}
+            <button
+              type="button"
+              disabled={actionDisabled}
+              aria-label={`Delete queued message ${editingIndex + 1}`}
+              onClick={() => onDelete(editingMessage.id)}
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
         {isExpanded && !inlineEditor ? (
           <button
             ref={workspaceControl}

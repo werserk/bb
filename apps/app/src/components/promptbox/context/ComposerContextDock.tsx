@@ -159,10 +159,17 @@ export function ComposerContextDock({
     });
   }, [store, onBlurCapture]);
   const hasFacts = entries.length > 0;
-  if (!hasFacts && expanded) {
+  useLayoutEffect(() => {
+    if (!expanded || active) return;
     setExpanded(false);
     setSelected(null);
-  }
+    const target = trigger.current?.isConnected
+      ? trigger.current
+      : root.current?.querySelector<HTMLElement>(
+          '[contenteditable="true"], textarea',
+        );
+    target?.focus({ preventScroll: true });
+  }, [expanded, active]);
   const summaryEntries = [...facts].sort(
     (a, b) =>
       Number(b.tone === "error") * 2 +
@@ -219,6 +226,20 @@ export function ComposerContextDock({
               }
             }}
           >
+            {active && !active.strip && (
+              <header className="composer-context-panel-header">
+                <Icon name={active.icon} className="size-4" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{active.label}</span>
+                <span>{active.summary}</span>
+                <button
+                  type="button"
+                  aria-label="Close thread context"
+                  onClick={close}
+                >
+                  <Icon name="X" className="size-4" aria-hidden />
+                </button>
+              </header>
+            )}
             <div
               className={cn(
                 "composer-context-canvas",
@@ -227,7 +248,11 @@ export function ComposerContextDock({
             >
               {helper && <ContextBody entry={helper} visible />}
               {bodyEntries.map((entry) => (
-                <ContextBody key={entry.id} entry={entry} visible />
+                <ContextBody
+                  key={entry.id}
+                  entry={entry}
+                  visible={active?.id === entry.id}
+                />
               ))}
             </div>
           </Popover.Content>

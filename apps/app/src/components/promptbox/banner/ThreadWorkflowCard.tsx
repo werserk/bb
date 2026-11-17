@@ -1,3 +1,5 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
+import { useComposerContextSource } from "../context/composer-context";
 import { useId } from "react";
 import { isSettledWorkflowAgentState } from "@bb/domain";
 import type { TimelineWorkflowWorkRow } from "@bb/server-contract";
@@ -77,11 +79,52 @@ export function ThreadWorkflowSummary({
   );
 }
 
+export function ThreadWorkflowContextRow({
+  workflow,
+  isExpanded,
+  onToggle,
+}: ThreadWorkflowCardProps) {
+  const id = useId();
+  const name = workflow.workflowName ?? workflow.description;
+  return (
+    <>
+      <ComposerContextRow
+        icon="Workflow"
+        tone="working"
+        title={name}
+        subline={
+          <>
+            {agentProgressLabel(workflow)} ·{" "}
+            <LiveDurationText startedAt={workflow.startedAt} />
+          </>
+        }
+        action={
+          <button
+            type="button"
+            aria-label={`Workflow: ${name}`}
+            aria-expanded={isExpanded}
+            aria-controls={id}
+            onClick={onToggle}
+          >
+            {isExpanded ? "Hide details" : "Details"}
+          </button>
+        }
+      />
+      <div id={id} hidden={!isExpanded}>
+        {isExpanded && (
+          <WorkflowWorkRowBody row={workflow} size="base" collapsiblePhases />
+        )}
+      </div>
+    </>
+  );
+}
+
 export function ThreadWorkflowCard({
   workflow,
   isExpanded,
   onToggle,
 }: ThreadWorkflowCardProps) {
+  const compact = useComposerContextSource() !== null;
   const bodyId = useId();
   const toggleId = useId();
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
@@ -89,6 +132,19 @@ export function ThreadWorkflowCard({
     return null;
   }
   const name = workflow.workflowName ?? workflow.description;
+  if (compact)
+    return (
+      <PromptStackCard
+        ariaLabel="Workflow"
+        context={{ label: "Workflow", icon: "Workflow", group: "work" }}
+      >
+        <ThreadWorkflowContextRow
+          workflow={workflow}
+          isExpanded={isExpanded}
+          onToggle={onToggle}
+        />
+      </PromptStackCard>
+    );
   return (
     <PromptStackCard
       ariaLabel="Workflow"

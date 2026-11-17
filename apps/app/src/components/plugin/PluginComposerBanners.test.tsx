@@ -281,6 +281,12 @@ it.each(["bare", "card"] as const)(
       expect(screen.getByRole("button", { name: "conditional" })).toBeTruthy(),
     );
     fireEvent.click(screen.getByRole("button", { name: "conditional" }));
+    expect(
+      screen.getByText("conditional", {
+        selector: ".composer-context-row-title",
+      }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss extension" }));
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "conditional" })).toBeNull(),

@@ -1,3 +1,4 @@
+import { ComposerEditorFrame } from "./ComposerEditorFrame";
 import { resolveComposerSuggestions } from "./composer-suggestions";
 import {
   acceptComposerSuggestion,
@@ -1093,6 +1094,7 @@ export function PromptBoxInternal({
   const isIPadOSWebKitDevice = useMemo(isIPadOSWebKit, []);
   const editorEnterKeyHint = isPointerCoarse ? "enter" : "send";
   const formRef = useRef<HTMLFormElement>(null);
+  const [editorExpanded, setEditorExpanded] = useState(false);
   const typeaheadMenuRef = useRef<HTMLDivElement>(null);
   const blurAfterPointerSubmitRef = useRef(false);
   const lastObservedHeightRef = useRef<number | null>(null);
@@ -3285,6 +3287,11 @@ export function PromptBoxInternal({
         return true;
 
       if (event.key === "Escape") {
+        if (editorExpanded) {
+          event.preventDefault();
+          setEditorExpanded(false);
+          return true;
+        }
         if (onEscape) {
           onEscape();
           return true;
@@ -3397,6 +3404,7 @@ export function PromptBoxInternal({
       handleComposerMenuKeyDown,
       history,
       isPointerCoarse,
+      editorExpanded,
       onEscape,
       onModifierSubmit,
       postCompositionKeyDownEvents,
@@ -3426,10 +3434,11 @@ export function PromptBoxInternal({
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [cancelVoiceInput, showVoiceActionGroup, voice]);
 
-  return (
+  const content = (
     <form
       ref={formRef}
       data-promptbox=""
+      data-editor-expanded={editorExpanded || undefined}
       data-promptbox-compact={showCompactLayout ? "" : undefined}
       data-promptbox-collapsed={
         compact === undefined ||
@@ -3440,7 +3449,21 @@ export function PromptBoxInternal({
       }
       data-promptbox-voice-active={showVoiceActionGroup ? "" : undefined}
       onSubmit={handleSubmit}
-      onKeyDown={(event) => handleComposerMenuKeyDown(event.nativeEvent)}
+      onKeyDown={(event) => {
+        handleComposerMenuKeyDown(event.nativeEvent);
+        if (
+          editorExpanded &&
+          event.key === "Escape" &&
+          event.target instanceof Node &&
+          event.currentTarget.contains(event.target) &&
+          !event.defaultPrevented
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setEditorExpanded(false);
+          editor?.commands.focus();
+        }
+      }}
       onMouseDown={handlePromptBoxMouseDown}
       onDragOver={(event) => {
         if (!onAttachFiles) return;
@@ -3458,6 +3481,26 @@ export function PromptBoxInternal({
         showCompactLayout && "overflow-hidden",
       )}
     >
+      {editorExpanded && (
+        <div className="composer-editor-header">
+          <span>Message</span>
+          <span className="text-muted-foreground">
+            {value.length} characters
+          </span>
+          <button
+            type="button"
+            aria-expanded="true"
+            onClick={() => {
+              setEditorExpanded(false);
+              requestAnimationFrame(() => {
+                if (editor && !editor.isDestroyed) editor.commands.focus();
+              });
+            }}
+          >
+            Collapse ⤡
+          </button>
+        </div>
+      )}
       <input
         ref={attachmentInputRef}
         type="file"
@@ -3530,11 +3573,13 @@ export function PromptBoxInternal({
                     shortcut={focusComposerShortcut}
                     className={cn(
                       "absolute top-2 z-20 group-focus-within/promptbox:hidden",
-                      onCollapse ? "right-10" : "right-2",
+                      onCollapse && !editorExpanded ? "right-10" : "right-2",
                     )}
                   />
                 </div>
-                {onCollapse && suggestionState.candidate === null ? (
+                {onCollapse &&
+                !editorExpanded &&
+                suggestionState.candidate === null ? (
                   <div
                     data-promptbox-expanded-only=""
                     data-promptbox-standard-actions=""
@@ -3591,6 +3636,13 @@ export function PromptBoxInternal({
             )}
             <ComposerEditorSlot
               editor={editor}
+              expanded={editorExpanded}
+              onExpandedChange={(next) => {
+                setEditorExpanded(next);
+                requestAnimationFrame(() => {
+                  if (editor && !editor.isDestroyed) editor.commands.focus();
+                });
+              }}
               scrollContainerRef={editorScrollContainerRef}
               inputLocked={composerInputLocked}
               isCompactLayout={showCompactLayout}
@@ -3603,6 +3655,9 @@ export function PromptBoxInternal({
 
           <>
             <ComposerRoot
+              experimental_onContextPreview={
+                editorExpanded ? () => setEditorExpanded(false) : undefined
+              }
               rootRef={formRef}
               editor={composerEditor}
               menuRef={typeaheadMenuRef}
@@ -3860,5 +3915,10 @@ export function PromptBoxInternal({
         </div>
       </div>
     </form>
+  );
+  return (
+    <ComposerEditorFrame expanded={editorExpanded}>
+      {content}
+    </ComposerEditorFrame>
   );
 }

@@ -155,7 +155,7 @@ it("leaves Escape in the editor alone when the disclosure is closed", () => {
   expect(document.activeElement).toBe(draft);
 });
 
-it("keeps plan and native questions in the overview even when other sources mount first", () => {
+it("shows only the selected section even when attention and other sources mount first", () => {
   render(
     <ComposerContextProvider>
       <ComposerContextSources>
@@ -207,12 +207,12 @@ it("keeps plan and native questions in the overview even when other sources moun
   );
   expect(
     screen.getByText("Native question links").closest("section")?.hidden,
-  ).toBe(false);
+  ).toBe(true);
   expect(screen.getByText("Children detail").closest("section")?.hidden).toBe(
-    false,
+    true,
   );
   expect(screen.getByText("Machine detail").closest("section")?.hidden).toBe(
-    false,
+    true,
   );
   expect(screen.queryByRole("contentinfo")).toBeNull();
   expect(screen.getByRole("button", { name: "Machine status" })).toBeTruthy();
@@ -280,14 +280,14 @@ it("toggles the selected summary, switches sections and preserves draft and clic
   expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
 });
 
-it("labels counted sections and keeps attention visible while switching", () => {
+it("labels counted sections and keeps attention hidden until selected", () => {
   render(<Fixture />);
   const plan = screen.getByRole("button", { name: "Plan: 2/6" });
   expect(plan.getAttribute("aria-label")).toBe("Plan: 2/6");
   fireEvent.click(plan);
-  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Retry questions" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Queue: 3" }));
-  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Retry questions" })).toBeNull();
   const disclosure = screen.getByRole("button", { name: "Queue: 3" });
   fireEvent.keyDown(disclosure, { key: "Escape" });
   expect(document.activeElement).toBe(disclosure);
@@ -410,4 +410,21 @@ it("moves one mounted plugin preview between strip and panel and routes Tab/Esca
   fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
   expect(dismiss).toHaveBeenCalledOnce();
   expect(document.activeElement).toBe(screen.getByRole("textbox"));
+});
+
+it("connects each counter to its panel, shows the selected header and closes with its button", () => {
+  render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(plan);
+  const panel = screen.getByRole("region", { name: "Thread context" });
+  expect(plan.getAttribute("aria-controls")).toBe(panel.id);
+  expect(panel.querySelector("header")?.textContent).toBe("Plan2/6");
+  expect(
+    within(panel).queryByRole("button", { name: "Retry questions" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close thread context" }));
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(plan);
 });
