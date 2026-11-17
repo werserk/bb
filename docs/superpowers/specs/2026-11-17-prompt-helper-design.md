@@ -1,16 +1,16 @@
 # Composer Prompt Helper
 
-Status: interaction choices accepted; complete design awaiting owner review.
+Status: behavior and visual variant A accepted; implementation has not started.
 
 ## Intent and decisions
 
 Help the owner express an intended request and choose the next useful action toward the conversation's accepted goal. Extend Prompt Suggestion and its goal companion rather than introduce another conversation or agent.
 
-The owner selected preservation of draft meaning with separate advice, and preview before application. Authoritative decisions: `qst_2f9gh2pyjq` revision 1, `suggest_separately`; `qst_wfy4j6qkpc` revision 1, `preview`.
+The owner selected preservation of draft meaning with separate advice, and preview before application. Authoritative decisions: `qst_2f9gh2pyjq` revision 1, `suggest_separately`; `qst_wfy4j6qkpc` revision 1, `preview`; `qst_byg2nc62dd` revision 1, `inline_a`. The selected visual reference is variant A in the question material snapshots, including desktop and mobile captures.
 
 ## Interaction
 
-One small accessible composer action, labelled `Prompt helper`, opens a compact preview. Its accessible label and tooltip identify the action; the icon alone is not the only description. Desktop uses an anchored panel; compact screens use BB's shared responsive drawer. It is usable by keyboard and touch.
+One small accessible composer action, labelled `Prompt helper`, opens a compact preview. Its accessible label and tooltip identify the action; the icon alone is not the only description. On desktop and compact screens, the preview expands inside the composer border above the original draft (variant A). The conversation moves above the expanded composer instead of being covered by a floating panel. The result, separate advice and apply controls remain visually grouped with the draft. It is usable by keyboard and touch; no floating helper panel or drawer is part of this selected design.
 
 With a nonempty draft, the primary result is `Improved request`: clearer wording and structure while preserving the intended action, scope, constraints, uncertainty and tone. It may resolve references from known conversation facts, but must not invent facts, acceptance criteria or owner decisions. An ambiguous intent remains ambiguous or produces a concise clarification request; no silent choice is made.
 
@@ -45,7 +45,7 @@ Expose the manual generation action through the plugin RPC and `bb` CLI as well 
 - Preview, dismissal, failure and retry never silently modify or send a draft.
 - Only explicit application can replace/insert; edits, context changes and composer switches reject stale results.
 - Existing attachments and valid mention identity survive application; ordinary submission still works.
-- Keyboard and touch can open, inspect, apply and dismiss the helper; compact presentation uses the shared drawer.
+- Keyboard and touch can open, inspect, apply and dismiss the helper; both desktop and compact layouts use the selected inline composer block.
 - Open conversation questions do not disable assistance. Existing approvals are neither resolved nor bypassed.
 - Manual assistance works with automatic suggestions disabled when a model is configured; automatic suggestions resume after closing the helper.
 - RPC/CLI and UI share generation policy, validation and budget accounting.
@@ -57,4 +57,4 @@ This design adds no second chat, autonomous sending, persistent personal writing
 
 ## Self-review
 
-The design incorporates both accepted interaction choices. Draft intent and alternate advice have distinct roles; generation is separate from application and sending. Existing pending-question behavior is preserved. SDK details and test execution belong to the implementation plan, not unverified claims of existing capability. No release or quality/speed target is claimed achieved by this document.
+The design incorporates both accepted interaction choices and the selected inline desktop/mobile layout. Draft intent and alternate advice have distinct roles; generation is separate from application and sending. Existing pending-question behavior is preserved. SDK details and test execution belong to the implementation plan, not unverified claims of existing capability. No release or quality/speed target is claimed achieved by this document.
