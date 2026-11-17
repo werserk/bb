@@ -1,3 +1,9 @@
+import { listStoredEventRows, listQueuedThreadMessages } from "@bb/db";
+import { turnRequestEventDataSchema } from "@bb/domain";
+import {
+  queuedSubmissionMembership,
+  queuedInputGroups,
+} from "./submission-membership.js";
 import { classifyLocalQuestionAnswer } from "@bb/db";
 import { resolveDeferredSteerQueuedMessage } from "./deferred-steer.js";
 import {
@@ -539,9 +545,7 @@ async function sendClaimedQueuedMessageForThreadImpl(
     queuedMessages[0]!,
   );
   const queuedMessage = deferred?.message ?? queuedMessages[0]!;
-  const inputGroups =
-    deferred?.inputGroups ??
-    queuedMessages.map((queuedMessage) => queuedMessage.content);
+  const inputGroups = queuedInputGroups(deps.db, queuedMessages);
   const input = flattenPromptInputGroups(inputGroups);
   const lead = args.queuedMessages[0]!;
   const mode =
@@ -559,6 +563,15 @@ async function sendClaimedQueuedMessageForThreadImpl(
             lead.senderThreadId,
           )
         : { input, mode }),
+      ...(systemNotice === null
+        ? {
+            clientSubmissions: queuedSubmissionMembership(
+              deps.db,
+              queuedMessages,
+            ),
+            sourceQueuedMessageIds: queuedMessages.map((row) => row.id),
+          }
+        : {}),
       ...(inputGroups.length > 1 ? { inputGroups } : {}),
     },
     source: {
@@ -686,9 +699,37 @@ export async function sendQueuedMessageNow(
     threadId: string;
   },
 ): Promise<
-  | { delivery: "sent" }
-  | { delivery: "queued"; queuedMessage: ThreadQueuedMessage }
+  | {
+      delivery: "sent";
+      sourceQueuedMessageIds?: string[];
+      submissionIds?: string[];
+      requested?: {
+        requestId: import("@bb/domain").ClientTurnRequestId;
+        sequence: number;
+      };
+    }
+  | {
+      delivery: "queued";
+      queuedMessage: ThreadQueuedMessage;
+      sourceQueuedMessageIds?: string[];
+      submissionIds?: string[];
+    }
 > {
+  const before = listQueuedThreadMessages(deps.db, args.threadId).map(
+    toThreadQueuedMessage,
+  );
+  const index = before.findIndex((row) => row.id === args.queuedMessageId);
+  const selection: ThreadQueuedMessage[] = [];
+  if (index === 0) {
+    for (const row of before) {
+      selection.push(row);
+      if (!row.groupWithNext) break;
+    }
+  } else if (index > 0) selection.push(before[index]!);
+  const sourceQueuedMessageIds = selection.map((row) => row.id);
+  const submissionIds = queuedSubmissionMembership(deps.db, selection).map(
+    (entry) => entry.id,
+  );
   await sendQueuedMessage(deps, {
     claimPolicy: { kind: "explicit-send" },
     mode: args.mode,
@@ -699,12 +740,42 @@ export async function sendQueuedMessageNow(
     deps.db,
     args.queuedMessageId,
   );
+  if (!remainingQueuedMessage) {
+    for (const row of listStoredEventRows(deps.db, {
+      threadId: args.threadId,
+      types: ["client/turn/requested"],
+      limit: 1000,
+      order: "desc",
+    })) {
+      const request = turnRequestEventDataSchema.safeParse(
+        JSON.parse(row.data),
+      );
+      if (
+        request.success &&
+        sourceQueuedMessageIds.length &&
+        sourceQueuedMessageIds.every((id) =>
+          request.data.sourceQueuedMessageIds?.includes(id),
+        )
+      )
+        return {
+          delivery: "sent",
+          sourceQueuedMessageIds,
+          submissionIds,
+          requested: {
+            requestId: request.data.requestId,
+            sequence: row.sequence,
+          },
+        };
+    }
+  }
   return remainingQueuedMessage
     ? {
+        sourceQueuedMessageIds,
+        submissionIds,
         delivery: "queued",
         queuedMessage: toThreadQueuedMessage(remainingQueuedMessage),
       }
-    : { delivery: "sent" };
+    : { delivery: "sent", sourceQueuedMessageIds, submissionIds };
 }
 
 export async function sendNextQueuedMessageIfPresent(

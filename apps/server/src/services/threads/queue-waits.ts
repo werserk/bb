@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  assertSubmissionNotAdmitted,
+  submissionAdmissionFloor,
+} from "./submission-admission.js";
+import {
   moveQueuedThreadMessageToFrontInTransaction,
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessageInTransaction,
@@ -65,6 +69,7 @@ export interface SettleQueueRowArgs {
 
 /** The message a queued row will carry, as the queueing site supplies it. */
 export interface QueuedDispatchMessage {
+  clientSubmissionId?: string;
   serviceTurn?: import("@bb/domain").ServiceTurnDescriptor;
   input: PromptInput[];
   execution: ResolvedThreadExecutionOptions;
@@ -127,8 +132,20 @@ export function recordQueuedMessageWait(
     row = deps.db.transaction(
       (tx) => {
         assertThreadHostAcceptsWork(tx, args.thread);
+        if (args.message.clientSubmissionId)
+          assertSubmissionNotAdmitted(
+            tx,
+            args.thread.id,
+            args.message.clientSubmissionId,
+            submissionAdmissionFloor(
+              deps.db,
+              args.thread.id,
+              args.message.clientSubmissionId,
+            ),
+          );
         const created = createQueuedThreadMessageInTransaction(tx, {
           threadId: args.thread.id,
+          clientSubmissionId: args.message.clientSubmissionId,
           content: args.message.input,
           serviceTurn: args.message.serviceTurn,
           senderThreadId: args.message.senderThreadId,

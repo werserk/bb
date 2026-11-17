@@ -157,6 +157,9 @@ export function registerSystemRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.system;
+  app.get("/capabilities/pending-send-overlay", (context) =>
+    context.json({ pendingSendOverlay: { version: 1 } }),
+  );
   app.get("/capabilities/service-turns", (context) =>
     context.json({ serviceTurns: { version: 1 } }),
   );

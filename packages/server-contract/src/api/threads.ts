@@ -284,6 +284,7 @@ export const forkThreadRequestSchema = z
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 
 const sendMessageRequestFieldsSchema = z.object({
+  clientSubmissionId: z.uuid().optional(),
   serviceTurn: serviceTurnDescriptorSchema.optional(),
   input: z.array(promptInputSchema).min(1),
   model: z.string().optional(),
@@ -334,11 +335,25 @@ export type SendMessageDelivery = z.infer<typeof sendMessageDeliverySchema>;
  * for now" would invite every caller to check fields that cannot exist.
  */
 export const sendMessageResponseSchema = z.discriminatedUnion("delivery", [
-  z.object({ ok: z.literal(true), delivery: z.literal("sent") }),
+  z.object({
+    ok: z.literal(true),
+    delivery: z.literal("sent"),
+    submissionIds: z.array(z.uuid()).optional(),
+    sourceQueuedMessageIds: z.array(z.string()).optional(),
+    requested: z
+      .object({
+        requestId: clientTurnRequestIdSchema,
+        sequence: z.number().int(),
+      })
+      .optional(),
+    command: z.literal(true).optional(),
+  }),
   z.object({
     ok: z.literal(true),
     delivery: z.literal("queued"),
     queuedMessage: threadQueuedMessageSchema,
+    submissionIds: z.array(z.uuid()).optional(),
+    sourceQueuedMessageIds: z.array(z.string()).optional(),
   }),
 ]);
 export type SendMessageResponse = z.infer<typeof sendMessageResponseSchema>;
@@ -347,6 +362,7 @@ export type SendMessageResponse = z.infer<typeof sendMessageResponseSchema>;
 // already been dispatched, so there is nothing left to schedule.
 export const editMessageRequestSchema = sendMessageRequestFieldsSchema
   .omit({
+    clientSubmissionId: true,
     mode: true,
     sendAt: true,
     pluginSubmission: true,
@@ -1417,3 +1433,36 @@ export const threadReleaseIdleResultSchema = z
 export type ThreadReleaseIdleResult = z.infer<
   typeof threadReleaseIdleResultSchema
 >;
+export const queueSnapshotRequestSchema = z.object({
+  knownAdmittedQueueIds: z.array(z.string().min(1)).max(200),
+});
+export type QueueSnapshotRequest = z.infer<typeof queueSnapshotRequestSchema>;
+export const queuePlacementSchema = z.object({
+  queueId: z.string(),
+  submissionIds: z.array(z.string()),
+  state: z.enum([
+    "queued",
+    "requested",
+    "deferred",
+    "rejected",
+    "removed",
+    "unresolved",
+  ]),
+  requestId: clientTurnRequestIdSchema.optional(),
+  requestSequence: z.number().int().optional(),
+  deferredToQueuedMessageId: z.string().optional(),
+});
+export type QueuePlacement = z.infer<typeof queuePlacementSchema>;
+export const queueSnapshotResponseSchema = z.object({
+  rows: threadQueuedMessageListResponseSchema,
+  eventMaxSeq: z.number().int(),
+  queuePresence: z.array(z.object({ id: z.string(), present: z.boolean() })),
+  coverage: z.enum(["complete", "partial"]),
+  placements: z.array(queuePlacementSchema),
+  diagnostics: z.object({
+    scannedRows: z.number(),
+    scannedBytes: z.number(),
+    elapsedMs: z.number(),
+  }),
+});
+export type QueueSnapshotResponse = z.infer<typeof queueSnapshotResponseSchema>;

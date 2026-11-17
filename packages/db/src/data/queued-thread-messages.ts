@@ -1,4 +1,5 @@
 import { prepareCachedQuery } from "../connection.js";
+import { clientSubmissionQueueId } from "@bb/domain";
 import { requireQuestionResponseDeliverable } from "./conversation-questions.js";
 import { markQuestionResolutionSubmitted } from "./question-resolution-events.js";
 import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
@@ -72,6 +73,7 @@ import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
 import { liveThread } from "./threads.js";
 
 export interface CreateQueuedThreadMessageInput {
+  clientSubmissionId?: string;
   serviceTurn?: ServiceTurnDescriptor;
   threadId: string;
   content: PromptInput[];
@@ -838,7 +840,7 @@ export function createQueuedThreadMessageInTransaction(
     input.threadId,
     projectAttachmentPaths(input.content),
   );
-  const id = createQueuedThreadMessageId();
+  const id = input.clientSubmissionId === undefined ? createQueuedThreadMessageId() : clientSubmissionQueueId(input.clientSubmissionId);
   const lastQueuedMessage = getLastQueuedThreadMessage(tx, input.threadId);
   const sortKey = lastQueuedMessage
     ? createOrderKeyAfter({ previousKey: lastQueuedMessage.sortKey })

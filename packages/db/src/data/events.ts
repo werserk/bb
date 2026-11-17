@@ -1489,7 +1489,7 @@ export function listEvents(db: DbConnection, options: ListEventsOptions) {
 }
 
 export function listStoredEventRows(
-  db: DbConnection,
+  db: DbQueryConnection,
   args: ListStoredEventRowsArgs,
 ): StoredEventRow[] {
   if (args.types?.length === 0) {

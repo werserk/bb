@@ -178,6 +178,7 @@ Use `--selected-model <model-id>` to discover its reasoning choices and include 
 - `bb thread count`
 - `bb thread queue`
 - `bb thread queue list`
+- `bb thread queue snapshot`
 - `bb thread queue create`
 - `bb thread queue update`
 - `bb thread queue send`
@@ -355,3 +356,5 @@ The customization guide documents `threadHeader.pinned` under UI preferences.
 - `bb thread questions resolve`
 - `bb thread questions show`
 - `bb thread questions withdraw`
+
+- `bb thread queue snapshot`: admitted queue presence and bounded lineage (`bb guide thread-messaging`).

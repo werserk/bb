@@ -1334,6 +1334,7 @@ export function ThreadDetailPromptArea({
         if (request) {
           await sendMessage.mutateAsync({
             ...request,
+            clientSubmissionId: crypto.randomUUID(),
             ...(sendAt === undefined ? {} : { sendAt }),
             ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
           });
@@ -1401,6 +1402,7 @@ export function ThreadDetailPromptArea({
               try {
                 await sendMessage.mutateAsync({
                   ...shortcutRequest.request,
+                  clientSubmissionId: crypto.randomUUID(),
                   ...(sendAt === undefined ? {} : { sendAt }),
                   ...(pluginSubmission === undefined
                     ? {}

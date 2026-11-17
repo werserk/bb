@@ -516,3 +516,13 @@ termination. Concurrent replacements share the same handoff; Stop invalidates it
 before a successor can start. Termination timeouts retain closing ownership and
 reject new work until a later close proves the previous child has exited. This
 keeps inherited native account locks authoritative during same-session continuation.
+
+### Pending owner sends
+
+[Pending send overlay](pending-send-overlay.md) documents the app-lifetime
+presentation owner, per-action submission identity, per-group requested-event
+associations, queue lineage and bounded membership snapshots. Local sends compose
+after authoritative timeline merging and queue reads; they do not enter those
+caches. Legacy handoff requires a joint post-receipt timeline/queue read. Optional
+session recovery uses exclusive Web Locks with cancellable reload acquisition.
+No database migration, index, daemon protocol or dependency change is introduced.

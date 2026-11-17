@@ -1,3 +1,7 @@
+import {
+  usePendingSendOwner,
+  composePendingSends,
+} from "@/hooks/cache-owners/pending-send-owner";
 import { useCallback, useEffect, useState } from "react";
 import {
   useQueryClient,
@@ -146,6 +150,7 @@ export function useThreadTimelineController({
   threadId,
 }: UseThreadTimelineControllerArgs): UseThreadTimelineControllerResult {
   const queryClient = useQueryClient();
+  usePendingSendOwner(queryClient);
   const notifyOnChangeProps = useCallback((): TimelineQueryResultProp[] => {
     if (hasThreadTimelineUnseenEvents(queryClient, threadId)) {
       return TIMELINE_CONTROLLER_PROPS_WITHOUT_ROWS;
@@ -304,17 +309,26 @@ export function useThreadTimelineController({
     isLoadingError: latestTimelineQuery.isLoadingError,
     isRecoverableLoadingError: isTransientReadError(latestTimelineQuery.error),
   });
+  const pendingRows = composePendingSends(
+    queryClient,
+    threadId,
+    timelineRows,
+  ).rows;
+  const hasPendingContent = pendingRows.length > timelineRows.length;
   const timelineLoading =
-    latestTimelineQuery.isLoading ||
-    (!hasResolvedTimeline &&
-      (timelineQueryState.status === "loading" ||
-        latestTimelineQuery.isFetching));
+    !hasPendingContent &&
+    (latestTimelineQuery.isLoading ||
+      (!hasResolvedTimeline &&
+        (timelineQueryState.status === "loading" ||
+          latestTimelineQuery.isFetching)));
   const isCatchingUpTimeline =
     enabled &&
     hasThreadTimelineUnseenEvents(queryClient, threadId) &&
     timelineRows.length > 0;
   const timelineError =
-    timelineLoading || timelineQueryState.status !== "unavailable"
+    hasPendingContent ||
+    timelineLoading ||
+    timelineQueryState.status !== "unavailable"
       ? null
       : latestTimelineQuery.error;
 
@@ -335,6 +349,6 @@ export function useThreadTimelineController({
     pendingTodos: latestTimeline?.pendingTodos ?? null,
     timelineError,
     timelineLoading,
-    timelineRows,
+    timelineRows: pendingRows,
   };
 }

@@ -53,6 +53,7 @@ export type ThreadRuntimeState = z.infer<typeof threadRuntimeStateSchema>;
 export type ThreadActivityState = z.infer<typeof threadActivityStateSchema>;
 
 export const threadQueuedMessageSchema = z.object({
+  clientSubmissionIds: z.array(z.uuid()).optional(),
   serviceTurn: serviceTurnDescriptorSchema.nullish(),
   id: z.string(),
   origin: threadCreateOriginSchema.nullable(),

@@ -393,7 +393,9 @@ describe("user message telemetry", () => {
 
       const request = listEvents(harness.db, { threadId: thread.id })
         .filter((event) => event.type === "client/turn/requested")
-        .map((event) => JSON.parse(event.data) as { input: { text?: string }[] })
+        .map(
+          (event) => JSON.parse(event.data) as { input: { text?: string }[] },
+        )
         .at(-1);
       const text = request?.input[0]?.text ?? "";
       expect(text).toContain(`[bb message from thread:${senderThread.id}]`);
@@ -2547,3 +2549,120 @@ it.each([
     });
   },
 );
+describe("pending send admission provenance", () => {
+  it.each(["cold", "provider"] as const)(
+    "commits %s owner admission before the receipt and rejects a retained repeat",
+    async (kind) => {
+      await withTestHarness(async (harness) => {
+        const fixture =
+          kind === "cold"
+            ? seedColdIdleThreadFixture({ harness, value: 9871 })
+            : seedProviderThreadFixture({ harness, value: 9872 });
+        const clientSubmissionId = crypto.randomUUID();
+        const payload = {
+          clientSubmissionId,
+          input: textInput("identical owner words"),
+          mode: "start" as const,
+          model: "gpt-5",
+          permissionMode: "full" as const,
+          reasoningLevel: "medium",
+          serviceTier: "default" as const,
+        };
+        const beforeRequests = listEvents(harness.db, {
+          threadId: fixture.thread.id,
+        }).filter((row) => row.type === "client/turn/requested").length;
+        const result = await acceptThreadSendRequest(harness.deps, {
+          thread: fixture.thread,
+          payload,
+        });
+        expect(result).toMatchObject({
+          delivery: "sent",
+          submissionIds: [clientSubmissionId],
+          requested: {
+            requestId: expect.any(String),
+            sequence: expect.any(Number),
+          },
+        });
+        const requested = listEvents(harness.db, {
+          threadId: fixture.thread.id,
+        }).filter((row) => row.type === "client/turn/requested");
+        expect(requested).toHaveLength(beforeRequests + 1);
+        expect(JSON.parse(requested.at(-1)!.data)).toMatchObject({
+          clientSubmissions: [{ id: clientSubmissionId, inputGroupIndex: 0 }],
+        });
+        await expect(
+          acceptThreadSendRequest(harness.deps, {
+            thread: fixture.thread,
+            payload,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: { code: "submission_already_admitted" },
+        });
+        expect(
+          listEvents(harness.db, { threadId: fixture.thread.id }).filter(
+            (row) => row.type === "client/turn/requested",
+          ),
+        ).toHaveLength(beforeRequests + 1);
+      });
+    },
+  );
+  it("preserves all selected queue aliases through the idle provider fast path", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedProviderThreadFixture({ harness, value: 9873 });
+      const ids = [crypto.randomUUID(), crypto.randomUUID()];
+      const { createQueuedThreadMessageInTransaction } = await import("@bb/db");
+      const queues = harness.db.transaction((tx) =>
+        ids.map((clientSubmissionId) =>
+          createQueuedThreadMessageInTransaction(tx, {
+            threadId: thread.id,
+            clientSubmissionId,
+            content: textInput("same"),
+            model: "gpt-5",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            serviceTier: "default",
+            sendAt: null,
+            waitingOn: null,
+            payload: { kind: "inline" },
+            systemNotice: null,
+          }),
+        ),
+      );
+      setQueuedThreadMessageGroupBoundary({
+        db: harness.db,
+        notifier: harness.hub,
+        threadId: thread.id,
+        groupBoundaryQueuedMessageId: queues[1]!.id,
+        expectedGroupedPrefixQueuedMessageIds: queues.map((row) => row.id),
+      });
+      const result = await sendQueuedMessageNow(harness.deps, {
+        threadId: thread.id,
+        queuedMessageId: queues[0]!.id,
+        mode: "auto",
+      });
+      expect(result).toMatchObject({
+        delivery: "sent",
+        submissionIds: ids,
+        sourceQueuedMessageIds: queues.map((row) => row.id),
+        requested: { requestId: expect.any(String) },
+      });
+      const requested = listEvents(harness.db, { threadId: thread.id }).filter(
+        (row) => row.type === "client/turn/requested",
+      );
+      expect(
+        requested.filter((row) =>
+          JSON.parse(row.data).sourceQueuedMessageIds?.includes(queues[0]!.id),
+        ),
+      ).toHaveLength(1);
+      expect(JSON.parse(requested.at(-1)!.data)).toMatchObject({
+        clientSubmissions: ids.map((id, inputGroupIndex) => ({
+          id,
+          inputGroupIndex,
+        })),
+        sourceQueuedMessageIds: queues.map((row) => row.id),
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    });
+  });
+});
