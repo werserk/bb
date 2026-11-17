@@ -25,6 +25,7 @@ export interface ComposerContextFact {
 export interface ComposerContextEntry extends ComposerContextFact {
   element: HTMLDivElement;
   sourceId: string;
+  strip?: { onAccept?(): void; onDismiss(): void };
 }
 export class ComposerContextStore {
   private entries = new Map<string, ComposerContextEntry>();
@@ -50,6 +51,18 @@ export class ComposerContextStore {
   reveal = (sourceId: string) => this.onReveal?.(sourceId);
   private onDismiss: (() => void) | null = null;
   dismiss = () => this.onDismiss?.();
+  previewKey = (key: "Tab" | "Escape") => {
+    const preview = this.current.find((entry) => entry.strip)?.strip;
+    if (!preview) return false;
+    if (key === "Tab") {
+      if (!preview.onAccept) return false;
+      preview.onAccept();
+    } else {
+      preview.onDismiss();
+      this.dismiss();
+    }
+    return true;
+  };
   connect(handlers: {
     dismiss: () => void;
     reveal: (sourceId: string) => void;

@@ -33,8 +33,9 @@ export function ComposerPlanSteps({
   return (
     <div className="composer-context-plan space-y-2">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <Icon name="ListTodo" className="size-3.5" aria-hidden />
         <span className="tabular-nums">
-          {done} / {snapshot.items.length} steps done
+          Plan · {done} / {snapshot.items.length}
         </span>
       </div>
       {snapshot.staleSince !== undefined && (

@@ -15,6 +15,7 @@ import {
   ComposerContextItem,
   useComposerContextStore,
 } from "./composer-context";
+import { ComposerContextStrip } from "./ComposerContextStrip";
 import { ComposerContextDock } from "./ComposerContextDock";
 
 afterEach(cleanup);
@@ -137,7 +138,7 @@ it("keeps native provider context and local detail state while the panel is clos
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  const toggle = screen.getByRole("button", { name: "Toggle thread context" });
+  const toggle = screen.getByRole("button", { name: "Queue" });
   fireEvent.click(toggle);
   fireEvent.click(screen.getByRole("button", { name: "Native queue 0" }));
   fireEvent.keyDown(toggle, { key: "Escape" });
@@ -200,9 +201,7 @@ it("keeps plan and native questions in the overview even when other sources moun
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Toggle thread context" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
   expect(screen.getByText("Preferred plan").closest("section")?.hidden).toBe(
     false,
   );
@@ -210,10 +209,10 @@ it("keeps plan and native questions in the overview even when other sources moun
     screen.getByText("Native question links").closest("section")?.hidden,
   ).toBe(false);
   expect(screen.getByText("Children detail").closest("section")?.hidden).toBe(
-    true,
+    false,
   );
   expect(screen.getByText("Machine detail").closest("section")?.hidden).toBe(
-    true,
+    false,
   );
   expect(screen.queryByRole("contentinfo")).toBeNull();
   expect(screen.getByRole("button", { name: "Machine status" })).toBeTruthy();
@@ -284,15 +283,13 @@ it("toggles the selected summary, switches sections and preserves draft and clic
 it("labels counted sections and keeps attention visible while switching", () => {
   render(<Fixture />);
   const plan = screen.getByRole("button", { name: "Plan: 2/6" });
-  expect(plan.textContent).toContain("Plan");
+  expect(plan.getAttribute("aria-label")).toBe("Plan: 2/6");
   fireEvent.click(plan);
   expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Queue: 3" }));
   expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
-  const disclosure = screen.getByRole("button", {
-    name: "Toggle thread context",
-  });
-  fireEvent.click(disclosure);
+  const disclosure = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.keyDown(disclosure, { key: "Escape" });
   expect(document.activeElement).toBe(disclosure);
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
 });
@@ -370,18 +367,47 @@ it("opens overflow sections and returns Escape focus to the external disclosure"
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  const disclosure = screen.getByRole("button", {
-    name: "Toggle thread context",
-  });
-  expect(disclosure.textContent).toContain("+2");
-  fireEvent.click(disclosure);
-  const overflow = screen.getByRole("navigation", {
-    name: "More thread context sections",
-  });
-  fireEvent.click(within(overflow).getByRole("button", { name: "Context 6" }));
+  expect(
+    screen.queryByRole("button", { name: "Toggle thread context" }),
+  ).toBeNull();
+  const counter = screen.getByRole("button", { name: "Context 6" });
+  fireEvent.click(counter);
   const action = screen.getByRole("button", { name: "Action 6" });
   action.focus();
   fireEvent.keyDown(action, { key: "Escape" });
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
-  expect(document.activeElement).toBe(disclosure);
+  expect(document.activeElement).toBe(counter);
+});
+
+it("moves one mounted plugin preview between strip and panel and routes Tab/Escape from the editor", () => {
+  const accept = vi.fn();
+  const dismiss = vi.fn();
+  const mounted = vi.fn();
+  function Preview() {
+    useLayoutEffect(mounted, []);
+    return <span>Snapshot proposal</span>;
+  }
+  render(
+    <ComposerContextProvider>
+      <ComposerContextDock>
+        <ComposerContextStrip onAccept={accept} onDismiss={dismiss}>
+          <Preview />
+        </ComposerContextStrip>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  expect(
+    screen.getByText("Snapshot proposal").closest(".composer-context-strip"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByText("Snapshot proposal"));
+  expect(
+    screen.getByText("Snapshot proposal").closest(".composer-context-panel"),
+  ).toBeTruthy();
+  expect(mounted).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Tab" });
+  expect(accept).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+  expect(dismiss).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
 });

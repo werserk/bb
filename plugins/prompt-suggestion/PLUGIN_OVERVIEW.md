@@ -4,7 +4,7 @@ Prompt Suggestion (formerly Autosay) helps you direct the working agent toward t
 
 ## Prompt helper
 
-Open Prompt helper in an existing thread composer to preview an improved request or, with an empty draft, a grounded next step. Advice appears separately. Replace draft or Insert applies the result as editable text; application never sends it. Dismiss preserves the original draft. Changes to the draft or conversation invalidate the preview. Structured mention identities and attachments are preserved.
+Open Prompt helper in an existing thread composer to preview an improved request or, with an empty draft, a grounded next step. The proposal takes over the context strip and expands into its panel. Advice appears in the star tooltip. Tab applies the result as editable text; application never sends it. Escape preserves the original draft. Changes to the draft or composer identity prevent application; conversation and memory changes do not discard a snapshot proposal. With an existing empty-draft ghost, the star accepts that suggestion. Structured mention identities and attachments are preserved.
 
 The helper works while automatic suggestions are disabled and while the working agent is active. It supports existing threads without history, but not a new-thread composer without a thread ID. Open conversation questions do not block assistance; command approvals and queued messages retain their existing gates. An unsent draft is a proposal, never an accepted decision or permission.
 

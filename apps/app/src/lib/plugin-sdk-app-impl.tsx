@@ -1,3 +1,4 @@
+import { ComposerContextStrip } from "@/components/promptbox/context/ComposerContextStrip";
 import { focusThreadPlan } from "@/views/thread-detail/thread-plan-focus";
 import { ThreadPlanSteps } from "@/views/thread-detail/ThreadPlanSteps";
 import { useThreadPlans } from "@/hooks/queries/thread-plans";
@@ -225,6 +226,7 @@ export const pluginSdkAppImplementation = {
   experimental_Diff: LazyPluginDiff,
   experimental_InfoSection: InfoSection,
   experimental_CollapsibleStackCard: CollapsibleStackCard,
+  experimental_ComposerContextStrip: ComposerContextStrip,
   experimental_ThreadRowMetadata: ThreadRowMetadata,
   experimental_DetailRow: DetailRow,
   experimental_ThreadContextCardRow: ThreadContextCardRow,

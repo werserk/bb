@@ -494,3 +494,8 @@ be disabled. The bounded, cancellable transport rejects tools, refusals and
 unknown finish reasons, does not retry or run an agent loop, and reports only
 upstream model/usage evidence. No additional SDK surface or credential store is
 introduced; host protocol 269 gates the new commands on enrolled machines.
+
+
+### Composer context previews
+
+ComposerContextDock displays the existing source registrations as compact accessible counters. Counters reveal and scroll to sections in a flat panel; arrow/Home/End navigation and Escape retain pane-local focus. Questions navigate to their native chat card. The public experimental_ComposerContextStrip moves a plugin-owned inline preview between strip and panel without remounting or regenerating it. The host routes Tab/Escape to the active preview. Prompt Suggestion generates from a captured conversation snapshot and validates only cancellation, output and protected mentions on completion; application protects draft and composer identity. Conversation and memory changes do not invalidate a manual proposal. Empty-draft helper activation accepts an existing ghost through the shared suggestion controller.

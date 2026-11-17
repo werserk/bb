@@ -18,6 +18,11 @@ import {
   makeThreadQueuedMessage,
 } from "@bb/test-helpers/domain-fixtures";
 import type { Active, DroppableContainer } from "@dnd-kit/core";
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+} from "../context/composer-context";
+import { ComposerContextDock } from "../context/ComposerContextDock";
 import { focusWithKeyboard } from "@/test/keyboard-focus";
 import {
   QueuedMessagesList as QueuedMessagesListComponent,
@@ -1068,7 +1073,9 @@ describe("QueuedMessagesList", () => {
 
     expect(surface?.style.height).toBe("240px");
     expect(
-      screen.queryByRole("button", { name: /^(Expand|Reduce) queued messages$/ }),
+      screen.queryByRole("button", {
+        name: /^(Expand|Reduce) queued messages$/,
+      }),
     ).toBeNull();
 
     rerender(<QueuedMessagesList {...sharedProps} />);
@@ -2473,9 +2480,7 @@ it.each([true, false])(
       />,
     );
     expandQueue();
-    expect(
-      screen.getByText("Question response"),
-    ).toBeTruthy();
+    expect(screen.getByText("Question response")).toBeTruthy();
     if (valid) {
       expect(screen.getByText("Readable label")).toBeTruthy();
       expect(screen.getByText("Owner note")).toBeTruthy();
@@ -2498,3 +2503,45 @@ it.each([true, false])(
     expect(onSend).toHaveBeenCalled();
   },
 );
+
+it("keeps the context queue flat and opens its full controls on demand", async () => {
+  render(
+    <ComposerContextProvider>
+      <ComposerContextSources>
+        <QueuedMessagesList
+          queuedMessages={[makeQueuedMessage("q_flat", "Then inspect PayPal")]}
+          sendDisabled={false}
+          actionDisabled={false}
+          processingMessageId={null}
+          processingAction={null}
+          onSend={noop}
+          onReorder={noop}
+          onSetGroupBoundary={noop}
+          onEdit={noop}
+          onChangeSendTime={noopAsync}
+          onDelete={noop}
+        />
+      </ComposerContextSources>
+      <ComposerContextDock>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
+  expect(screen.getByText("1 queued message")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Collapse queued messages" }),
+  ).toBeNull();
+  const expand = screen.getByRole("button", { name: "Expand queued messages" });
+  focusWithKeyboard(expand);
+  fireEvent.click(expand);
+  const reduce = await screen.findByRole("button", {
+    name: "Reduce queued messages",
+  });
+  expect(document.activeElement).toBe(reduce);
+  fireEvent.click(reduce);
+  expect(screen.getByText("1 queued message")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Expand queued messages" }),
+  );
+});

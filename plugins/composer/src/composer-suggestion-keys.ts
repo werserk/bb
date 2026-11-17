@@ -21,6 +21,18 @@ export function handleComposerSuggestionKey(
   submit: () => boolean,
 ): boolean {
   if (blocked || event.isComposing || event.keyCode === 229) return false;
+  if (
+    (event.key === "Tab" || event.key === "Escape") &&
+    !event.shiftKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    !event.repeat &&
+    controller.experimental_handleContextPreviewKey?.(event.key)
+  ) {
+    event.preventDefault();
+    return true;
+  }
   if (event.key === "Escape") {
     controller.dismiss();
     return false;

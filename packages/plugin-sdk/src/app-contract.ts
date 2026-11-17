@@ -2108,6 +2108,13 @@ export interface ExperimentalCollapsibleStackCardDismiss {
   onDismiss(): Promise<void>;
 }
 
+/** Plugin-owned preview in the composer context strip and expanded panel. */
+export interface ExperimentalComposerContextStripProps {
+  children: ReactNode;
+  onAccept?(): void;
+  onDismiss(): void;
+}
+
 /**
  * Props of the host-owned `experimental_CollapsibleStackCard`: bb's
  * collapsible card for the stack above a thread's composer, the one bb's Plan
@@ -4642,6 +4649,8 @@ export interface experimental_ComposerSuggestionEvent {
 export interface experimental_ComposerSuggestionController {
   /** Suspend ghost suggestions until the idempotent release function is called. */
   experimental_suspend(): () => void;
+  /** Called by composer editors after their menus handle the key. Never submits. */
+  experimental_handleContextPreviewKey?(key: "Tab" | "Escape"): boolean;
   getSnapshot(): experimental_ComposerSuggestionState;
   subscribe(listener: () => void): () => void;
   experimental_begin(
@@ -6336,6 +6345,8 @@ export interface PluginSdkApp {
    * thread-scoped composer banner with `chrome: "bare"`. Experimental: see
    * docs/api_to_audit.md.
    */
+  /** A scoped composer preview, moved between the context strip and panel without remounting. */
+  experimental_ComposerContextStrip: ComponentType<ExperimentalComposerContextStripProps>;
   experimental_CollapsibleStackCard: ComponentType<ExperimentalCollapsibleStackCardProps>;
   /**
    * The thread Info tab's label and value row (see

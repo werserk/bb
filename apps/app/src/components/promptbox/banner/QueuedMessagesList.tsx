@@ -20,6 +20,7 @@ import {
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { useComposedRefs } from "@radix-ui/react-compose-refs";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -46,6 +47,7 @@ import type {
   QueuedMessagesListProps,
 } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { QueuedMessagesCountPill } from "@/components/promptbox/banner/QueuedMessagesCountPill";
+import { useComposerContextSource } from "../context/composer-context";
 import { QueuedMessageSendTimeDialog } from "@/components/promptbox/banner/QueuedMessageSendTimeDialog";
 import {
   getQueuedMessagesDrawerHeight,
@@ -1322,6 +1324,7 @@ export function QueuedMessagesList({
   onExpandedChange,
   threadStatus,
 }: QueuedMessagesListProps) {
+  const compactContext = useComposerContextSource() !== null;
   const senderThreadMetadataById = useSenderThreadMetadataById();
   const processingLabel =
     processingAction === "edit"
@@ -1338,6 +1341,13 @@ export function QueuedMessagesList({
     }),
   );
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const workspaceControl = useRef<HTMLButtonElement>(null);
+  const handoffWorkspaceFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!handoffWorkspaceFocus.current) return;
+    handoffWorkspaceFocus.current = false;
+    workspaceControl.current?.focus();
+  }, [workspaceOpen]);
   const mode: QueueSurfaceMode = workspaceOpen
     ? "workspace"
     : expanded
@@ -1666,6 +1676,10 @@ export function QueuedMessagesList({
     isExpanded,
     isExpanded ? collapseDrawer : showDrawer,
   );
+  const setCompactExpandRef = useComposedRefs(
+    focus.triggerRef,
+    workspaceControl,
+  );
   const handleEdit = useCallback(
     (request: QueuedMessageEditRequest) => {
       setExpandedMobileActionsId(null);
@@ -1798,6 +1812,43 @@ export function QueuedMessagesList({
 
   if (queuedMessages.length === 0 && !inlineEditor) return null;
 
+  if (compactContext && !workspaceOpen && !inlineEditor) {
+    const first = queuedMessages[0];
+    return (
+      <PromptStackCard
+        ariaLabel="Queued messages"
+        context={{ label: "Queue", icon: "ListView", group: "queue" }}
+        contextSummary={queuedMessages.length}
+      >
+        <div className="flex min-w-0 items-center gap-2.5 text-xs">
+          <Icon name="ListView" className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">
+            {queuedMessages.length} queued{" "}
+            {queuedMessages.length === 1 ? "message" : "messages"}
+          </span>
+          <button
+            ref={setCompactExpandRef}
+            type="button"
+            aria-label="Expand queued messages"
+            onClick={() => {
+              handoffWorkspaceFocus.current = true;
+              onExpandedChange(true);
+              setWorkspaceOpen(true);
+            }}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            Expand
+          </button>
+        </div>
+        {first && (
+          <p className="mt-1 truncate pl-6 text-xs text-muted-foreground">
+            {formatQueuedMessagePreview(first.content)}
+          </p>
+        )}
+      </PromptStackCard>
+    );
+  }
+
   return (
     <PromptStackCard
       rootRef={surfaceRef}
@@ -1827,7 +1878,11 @@ export function QueuedMessagesList({
           aria-label="Toggle queued messages"
           aria-expanded={isExpanded}
           aria-controls={listId}
-          onClick={focus.onTriggerClick}
+          onClick={
+            compactContext && isExpanded
+              ? focus.onCollapseClick
+              : focus.onTriggerClick
+          }
           className={cn(
             PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
             "flex-1 hover:bg-state-hover focus-visible:bg-state-hover active:bg-state-hover",
@@ -1855,6 +1910,7 @@ export function QueuedMessagesList({
         </button>
         {isExpanded && !inlineEditor ? (
           <button
+            ref={workspaceControl}
             type="button"
             aria-label={
               mode === "workspace"
@@ -1862,7 +1918,10 @@ export function QueuedMessagesList({
                 : "Expand queued messages"
             }
             aria-controls={listId}
-            onClick={() => setWorkspaceOpen(mode !== "workspace")}
+            onClick={() => {
+              handoffWorkspaceFocus.current = compactContext;
+              setWorkspaceOpen(mode !== "workspace");
+            }}
             className="shrink-0 px-3 text-xs text-muted-foreground hover:bg-state-hover focus-visible:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             {mode === "workspace" ? "Reduce" : "Expand"}

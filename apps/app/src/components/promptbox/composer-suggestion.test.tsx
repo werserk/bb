@@ -163,3 +163,51 @@ describe("manual composer assistance suspension", () => {
     });
   });
 });
+
+it("routes preview keys after menus/IME and leaves modified Tab and Enter alone", () => {
+  const preview = vi.fn((_key: "Tab" | "Escape") => true);
+  const store = createComposerSuggestionController(
+    vi.fn(),
+    () => true,
+    preview,
+  );
+  for (const init of [
+    { key: "Tab", shiftKey: true },
+    { key: "Tab", isComposing: true },
+    { key: "Enter" },
+  ]) {
+    expect(
+      handleComposerSuggestionKey(
+        new KeyboardEvent("keydown", init),
+        store.controller,
+        false,
+        true,
+        vi.fn(),
+      ),
+    ).toBe(false);
+  }
+  expect(
+    handleComposerSuggestionKey(
+      new KeyboardEvent("keydown", { key: "Tab" }),
+      store.controller,
+      true,
+      true,
+      vi.fn(),
+    ),
+  ).toBe(false);
+  expect(preview).not.toHaveBeenCalled();
+  for (const key of ["Tab", "Escape"]) {
+    const event = new KeyboardEvent("keydown", { key, cancelable: true });
+    expect(
+      handleComposerSuggestionKey(
+        event,
+        store.controller,
+        false,
+        true,
+        vi.fn(),
+      ),
+    ).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  }
+  expect(preview.mock.calls.map(([key]) => key)).toEqual(["Tab", "Escape"]);
+});

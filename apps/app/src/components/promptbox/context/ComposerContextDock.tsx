@@ -21,9 +21,11 @@ import "./composer-context.css";
 function ContextBody({
   entry,
   visible,
+  onExpand,
 }: {
   entry: ComposerContextEntry;
   visible: boolean;
+  onExpand?: (element: HTMLElement) => void;
 }) {
   const target = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -33,8 +35,23 @@ function ContextBody({
       if (entry.element.parentNode === container) entry.element.remove();
     };
   }, [entry.element]);
+  useLayoutEffect(() => {
+    const node = target.current;
+    if (!node || !onExpand) return;
+    const click = (event: MouseEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button, a, input")
+      )
+        return;
+      onExpand(node);
+    };
+    node.addEventListener("click", click);
+    return () => node.removeEventListener("click", click);
+  }, [onExpand]);
   return (
     <section
+      data-context-id={entry.id}
       hidden={!visible}
       data-context-group={entry.group}
       data-context-tone={entry.tone}
@@ -66,13 +83,15 @@ export function ComposerContextDock({
   );
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const trigger = useRef<HTMLButtonElement | null>(null);
+  const trigger = useRef<HTMLElement | null>(null);
   const summaryButtons = useRef(new Map<string, HTMLButtonElement>());
   const panelId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const disclosure = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const helper = entries.find((entry) => entry.strip);
+  const facts = entries.filter((entry) => !entry.strip);
   const active = entries.find((entry) => entry.id === selected);
-  const prioritized = [...entries].sort(
+  const prioritized = [...facts].sort(
     (a, b) =>
       Number(Boolean(b.overview)) - Number(Boolean(a.overview)) ||
       Number(b.tone === "error") - Number(a.tone === "error") ||
@@ -85,10 +104,10 @@ export function ComposerContextDock({
   const bodyEntries = [
     ...(attention ? [attention] : []),
     ...(main ? [main] : []),
-    ...entries.filter((entry) => entry !== main && entry !== attention),
+    ...facts.filter((entry) => entry !== main && entry !== attention),
   ];
   const overview = active === undefined;
-  const open = (id: string | null, button: HTMLButtonElement) => {
+  const open = (id: string | null, button: HTMLElement) => {
     trigger.current = button;
     entries.find((entry) => entry.id === id)?.onReveal?.();
     if (id === null) {
@@ -97,15 +116,23 @@ export function ComposerContextDock({
     }
     setSelected(id);
     setExpanded(true);
+    requestAnimationFrame(() => {
+      const section = store?.panel.current?.querySelector<HTMLElement>(
+        `[data-context-id="${(id ?? "").replaceAll('"', '\\"')}"]`,
+      );
+      section?.scrollIntoView?.({ block: "nearest" });
+    });
   };
   const close = () => {
     setExpanded(false);
-    (trigger.current?.isConnected
+    const target = trigger.current?.isConnected
       ? trigger.current
-      : disclosure.current
-    )?.focus({ preventScroll: true });
+      : (root.current?.querySelector<HTMLElement>(
+          '[contenteditable="true"], textarea',
+        ) ?? summaryButtons.current.values().next().value);
+    target?.focus({ preventScroll: true });
   };
-  const toggleSection = (id: string, button: HTMLButtonElement) => {
+  const toggleSection = (id: string, button: HTMLElement) => {
     if (expanded && active?.id === id) {
       trigger.current = button;
       close();
@@ -124,8 +151,7 @@ export function ComposerContextDock({
           .find((item) => item.sourceId === sourceId);
         if (!entry) return;
         entry.onReveal?.();
-        trigger.current =
-          summaryButtons.current.get(entry.id) ?? disclosure.current;
+        trigger.current = summaryButtons.current.get(entry.id) ?? null;
         setSelected(entry.id);
         setExpanded(true);
       },
@@ -137,15 +163,13 @@ export function ComposerContextDock({
     setExpanded(false);
     setSelected(null);
   }
-  const summaryEntries = [...entries]
-    .sort(
-      (a, b) =>
-        Number(b.tone === "error") * 2 +
-        Number(b.group === "attention") -
-        Number(a.tone === "error") * 2 -
-        Number(a.group === "attention"),
-    )
-    .slice(0, 5);
+  const summaryEntries = [...facts].sort(
+    (a, b) =>
+      Number(b.tone === "error") * 2 +
+      Number(b.group === "attention") -
+      Number(a.tone === "error") * 2 -
+      Number(a.group === "attention"),
+  );
   return (
     <Popover.Root
       open={expanded && hasFacts}
@@ -153,6 +177,7 @@ export function ComposerContextDock({
       modal={false}
     >
       <div
+        ref={root}
         className="composer-context-dock"
         onBlurCapture={onBlurCapture}
         onKeyDown={(event) => {
@@ -177,6 +202,7 @@ export function ComposerContextDock({
             onInteractOutside={(event) => event.preventDefault()}
             onEscapeKeyDown={(event) => {
               event.preventDefault();
+              helper?.strip?.onDismiss();
               close();
             }}
             ref={store?.setPanel ?? panel}
@@ -199,49 +225,11 @@ export function ComposerContextDock({
                 overview && "composer-context-overview",
               )}
             >
+              {helper && <ContextBody entry={helper} visible />}
               {bodyEntries.map((entry) => (
-                <ContextBody
-                  key={entry.id}
-                  entry={entry}
-                  visible={
-                    overview
-                      ? entry === main ||
-                        entry === attention ||
-                        (!main && !attention)
-                      : entry === active || entry === attention
-                  }
-                />
+                <ContextBody key={entry.id} entry={entry} visible />
               ))}
             </div>
-            {overview && entries.length > summaryEntries.length && (
-              <nav
-                className="composer-context-more"
-                aria-label="More thread context sections"
-              >
-                {entries
-                  .filter((entry) => !summaryEntries.includes(entry))
-                  .map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => {
-                        if (disclosure.current)
-                          open(entry.id, disclosure.current);
-                      }}
-                    >
-                      <Icon
-                        name={entry.icon}
-                        className="size-3.5"
-                        aria-hidden
-                      />
-                      {entry.label}
-                      {entry.summary !== undefined && (
-                        <span>{entry.summary}</span>
-                      )}
-                    </button>
-                  ))}
-              </nav>
-            )}
           </Popover.Content>
         </Popover.Portal>
         {hasFacts && (
@@ -249,9 +237,33 @@ export function ComposerContextDock({
             <div
               ref={setSummaryRef}
               className="composer-context-strip"
+              data-context-helper={Boolean(helper) || undefined}
               role="toolbar"
               aria-label="Thread context summary"
             >
+              {helper && !expanded && (
+                <div
+                  className="composer-context-preview"
+                  tabIndex={0}
+                  role="group"
+                  aria-label="Composer preview"
+                  onKeyDown={(event) => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      open(helper.id, event.currentTarget);
+                    }
+                  }}
+                >
+                  <ContextBody
+                    entry={helper}
+                    visible
+                    onExpand={(element) => open(helper.id, element)}
+                  />
+                </div>
+              )}
               <div
                 className="composer-context-tabs"
                 onKeyDown={(event) => {
@@ -307,7 +319,6 @@ export function ComposerContextDock({
                           ? "text-attention"
                           : "text-muted-foreground",
                     )}
-                    title={`${expanded && active?.id === entry.id ? "Collapse" : "Show"} ${entry.label}`}
                     onClick={(event) =>
                       toggleSection(entry.id, event.currentTarget)
                     }
@@ -328,39 +339,6 @@ export function ComposerContextDock({
                   </button>
                 ))}
               </div>
-              <button
-                ref={disclosure}
-                type="button"
-                className="composer-context-disclosure"
-                aria-label="Toggle thread context"
-                aria-controls={panelId}
-                aria-expanded={expanded && hasFacts}
-                title={
-                  expanded ? "Collapse thread context" : "Show thread context"
-                }
-                onClick={(event) => {
-                  if (expanded) {
-                    trigger.current = event.currentTarget;
-                    close();
-                  } else {
-                    open(
-                      entries.length > summaryEntries.length
-                        ? null
-                        : (main?.id ?? attention?.id ?? null),
-                      event.currentTarget,
-                    );
-                  }
-                }}
-              >
-                {entries.length > summaryEntries.length && (
-                  <span>+{entries.length - summaryEntries.length}</span>
-                )}
-                <Icon
-                  name={expanded ? "ChevronUp" : "ChevronDown"}
-                  aria-hidden
-                  className="size-3.5"
-                />
-              </button>
             </div>
           </Popover.Anchor>
         )}

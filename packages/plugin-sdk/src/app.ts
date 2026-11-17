@@ -386,3 +386,7 @@ export const experimental_ThreadPlanSteps = runtimeComponent(
 export const experimental_focusThreadPlan = runtimeFunction(
   "experimental_focusThreadPlan",
 );
+
+export const experimental_ComposerContextStrip = runtimeComponent(
+  "experimental_ComposerContextStrip",
+);

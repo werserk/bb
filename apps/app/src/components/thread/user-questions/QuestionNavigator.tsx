@@ -159,7 +159,7 @@ export function QuestionNavigator({
           ) : total === 1 && questions.length === 1 && !incomplete ? (
             <button
               type="button"
-              className={buttonClass}
+              className={`${buttonClass} w-full justify-start`}
               aria-label={`${legacy ? "Recent question" : "Question"} · 1 ${questionTitle(questions[0]!.publication)}`}
               disabled={navigation?.pending}
               onClick={() => go(questions[0]!.id)}
@@ -168,13 +168,12 @@ export function QuestionNavigator({
                 name="MessageQuestion"
                 className="size-4 shrink-0 text-attention"
               />
-              <span className="shrink-0">
-                {legacy ? "Recent question · 1" : "Question · 1"}
-              </span>
               <span className="max-w-64 truncate">
                 {questionTitle(questions[0]!.publication)}
               </span>
-              <Icon name="ChevronRight" className="size-3 shrink-0" />
+              <span className="ml-auto shrink-0 text-muted-foreground">
+                Answer ↑
+              </span>
             </button>
           ) : total > 1 || incomplete ? (
             <Popover

@@ -733,8 +733,10 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
         apiSymbols: [
           "ComposerCustomization.experimental_inlinePanels",
+          "experimental_ComposerContextStrip",
           "ExperimentalComposerContributions.experimental_InlinePanels",
           "experimental_ComposerSuggestionController.experimental_suspend",
+          "experimental_ComposerSuggestionController.experimental_handleContextPreviewKey",
         ],
         firstParty: ["Composer", "Prompt Suggestion"],
         experimental: true,

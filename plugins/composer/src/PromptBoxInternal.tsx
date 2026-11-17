@@ -3534,7 +3534,7 @@ export function PromptBoxInternal({
                     )}
                   />
                 </div>
-                {onCollapse ? (
+                {onCollapse && suggestionState.candidate === null ? (
                   <div
                     data-promptbox-expanded-only=""
                     data-promptbox-standard-actions=""

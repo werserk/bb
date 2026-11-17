@@ -23,10 +23,6 @@ export const helperRequestSchema = z
     token: z.string().uuid(),
     draft: boundedText(12000),
     protectedMentions: z.array(z.string().max(100)).max(128),
-    expectedContextRevision: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .nullable(),
   })
   .strict()
   .superRefine((input, ctx) => {
