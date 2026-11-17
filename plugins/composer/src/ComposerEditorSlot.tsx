@@ -108,9 +108,10 @@ export function ComposerEditorSlot({
               "[&_.ProseMirror_p]:m-0",
               "[&_.ProseMirror_blockquote]:my-1 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-surface-selected-border [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none",
-              "[&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0",
-              suggestionVisible &&
-                "[&_.ProseMirror_p.is-editor-empty:first-child::after]:block [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]",
+              suggestionVisible
+                ? // A suggestion shows at most two lines; Tab still accepts the full text.
+                  "[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child::before]:absolute [&_.ProseMirror_p.is-editor-empty:first-child::before]:inset-x-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:top-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::before]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]"
+                : "[&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:text-subtle-foreground",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:font-light",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:opacity-70",
