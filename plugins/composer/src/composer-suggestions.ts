@@ -15,6 +15,7 @@ const unavailableSuggestions: experimental_ComposerSuggestionController = {
   subscribe: () => () => {},
   experimental_begin: () => false,
   experimental_finish: () => false,
+  experimental_suspend: () => () => {},
   show: () => false,
   clear: () => {},
   dismiss: () => {},

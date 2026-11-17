@@ -20,6 +20,10 @@ describe("older composer hosts", () => {
     const changed = vi.fn();
     controller.subscribe(changed)();
     controller.dismiss();
+    const release = controller.experimental_suspend();
+    release();
+    release();
+    expect(controller.getSnapshot().eligible).toBe(false);
     expect(changed).not.toHaveBeenCalled();
     expect(acceptComposerSuggestion(controller)).toBe(false);
   });
