@@ -3621,14 +3621,18 @@ export function PromptBoxInternal({
               </span>
             )}
             {suggestionState.request?.phase === "error" && (
-              <details className="px-3 text-xs text-muted-foreground">
+              // Sits where the pending spinner was, so it never shifts the draft line.
+              <details className="absolute right-10 top-3 z-20 text-xs text-muted-foreground">
                 <summary
                   aria-label="Suggestion error details"
                   className="cursor-pointer list-none w-fit"
                 >
                   <SdkIcon name="AlertCircle" className="size-4" />
                 </summary>
-                <p role="status">
+                <p
+                  role="status"
+                  className="absolute right-0 top-full mt-1 w-max max-w-64 rounded-md border border-border bg-popover px-2 py-1 text-popover-foreground shadow-sm"
+                >
                   {suggestionState.request.error === "timeout"
                     ? "Suggestion timed out. You can continue typing."
                     : "Could not prepare a suggestion. You can continue typing."}
