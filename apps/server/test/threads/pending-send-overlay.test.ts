@@ -9,6 +9,7 @@ import { threadScope, turnScope } from "@bb/domain";
 import { readQueueSnapshot } from "../../src/services/threads/queue-snapshot.js";
 import {
   assertSubmissionNotAdmitted,
+  findRequestedSubmission,
   guardSubmission,
   submissionAdmissionFloor,
 } from "../../src/services/threads/submission-admission.js";
@@ -195,9 +196,10 @@ it("measures bounded placements and fenced admission on aged histories", async (
           (tx) => {
             const heldAt = performance.now();
             const scanned = assertSubmissionNotAdmitted(tx, thread.id, id);
+            // SQLite filters the 1000-row window; no row reaches JS.
             expect(scanned).toEqual({
-              scannedRows: 1000,
-              scannedBytes: fullScans.at(-1)!.scannedBytes,
+              scannedRows: 0,
+              scannedBytes: 0,
               parsedRows: 0,
             });
             fullLocked.push(performance.now() - heldAt);
@@ -762,7 +764,34 @@ it("prefilters requested events by the raw submission id with the same admission
     };
     expect(answer(admitted)).toBe("submission_already_admitted");
     expect(answer(escaped)).toBe("submission_already_admitted");
-    expect(answer(mentioned)).toMatchObject({ scannedRows: 53, parsedRows: 2 });
-    expect(answer(absent)).toMatchObject({ scannedRows: 53, parsedRows: 1 });
+    // Only the mentioning row and the \u-escaped row leave SQLite.
+    expect(answer(mentioned)).toMatchObject({ scannedRows: 2, parsedRows: 2 });
+    expect(answer(absent)).toMatchObject({ scannedRows: 1, parsedRows: 1 });
+    // The window stays the newest 1000 requested events, as before the
+    // prefilter: an admission older than that is outside it.
+    h.db.transaction((tx) => {
+      for (let i = 0; i < 997; i++)
+        appendThreadEventInTransaction(tx, {
+          threadId: thread.id,
+          type: "client/turn/requested",
+          scope: threadScope(),
+          data: requested(`newer ${i}`),
+        });
+    });
+    expect(
+      findRequestedSubmission(h.db, thread.id, admitted).requested,
+    ).toBeDefined();
+    h.db.transaction((tx) =>
+      appendThreadEventInTransaction(tx, {
+        threadId: thread.id,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: requested("one more"),
+      }),
+    );
+    expect(
+      findRequestedSubmission(h.db, thread.id, admitted).requested,
+    ).toBeUndefined();
+    expect(answer(admitted)).toMatchObject({ scannedRows: 1 });
   });
 });

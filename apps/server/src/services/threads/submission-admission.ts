@@ -2,6 +2,7 @@ import {
   getLatestThreadSequence,
   getQueuedThreadMessage,
   listStoredEventRows,
+  listStoredEventRowsContaining,
   type DbQueryConnection,
 } from "@bb/db";
 import { turnRequestEventDataSchema } from "@bb/domain";
@@ -45,7 +46,7 @@ export function assertSubmissionNotAdmitted(
  * The newest `client/turn/requested` event (of the last 1000) that admitted
  * submission `id`. A row whose JSON names `id` contains it literally, unless
  * the text uses a \u escape (the only other JSON spelling of [0-9A-Za-z-]),
- * so other rows skip JSON and schema parsing.
+ * so SQLite returns only rows containing either; only those are parsed.
  */
 export function findRequestedSubmission(
   db: DbQueryConnection,
@@ -53,20 +54,26 @@ export function findRequestedSubmission(
   id: string,
   afterSequence?: number,
 ) {
-  const rows = listStoredEventRows(db, {
-    threadId,
-    types: ["client/turn/requested"],
-    limit: 1000,
-    order: "desc",
-    ...(afterSequence === undefined ? {} : { afterSequence }),
-  });
   const literal = /^[0-9A-Za-z-]+$/u.test(id);
+  const rows = literal
+    ? listStoredEventRowsContaining(db, {
+        threadId,
+        type: "client/turn/requested",
+        window: 1000,
+        needles: [id, "\\u"],
+        ...(afterSequence === undefined ? {} : { afterSequence }),
+      })
+    : listStoredEventRows(db, {
+        threadId,
+        types: ["client/turn/requested"],
+        limit: 1000,
+        order: "desc",
+        ...(afterSequence === undefined ? {} : { afterSequence }),
+      });
   let scannedBytes = 0;
   let parsedRows = 0;
   for (const row of rows) {
     scannedBytes += Buffer.byteLength(row.data);
-    if (literal && !row.data.includes(id) && !row.data.includes("\\u"))
-      continue;
     parsedRows++;
     const request = turnRequestEventDataSchema.safeParse(JSON.parse(row.data));
     if (
@@ -113,7 +120,10 @@ export function guardSubmission(
   threadId: string,
   id: string,
   payload: unknown,
-  send: () => Promise<import("@bb/server-contract").SendMessageResponse>,
+  /** `floor`: the thread's last sequence before this submission's checks. */
+  send: (
+    floor: number,
+  ) => Promise<import("@bb/server-contract").SendMessageResponse>,
 ) {
   let active = inflight.get(db);
   if (!active) {
@@ -141,7 +151,7 @@ export function guardSubmission(
   }
   checkpoints.set(key, sequence);
   const result = Promise.resolve()
-    .then(send)
+    .then(() => send(sequence))
     .finally(() => {
       active!.delete(key);
       checkpoints!.delete(key);

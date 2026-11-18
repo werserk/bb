@@ -364,6 +364,7 @@ export {
   listStoredClientTurnRequestRowsByKeys,
   listStoredEventRowsByParentToolCallIds,
   listStoredEventRows,
+  listStoredEventRowsContaining,
   listItemEventSpansByItems,
   listStoredBufferedTextDeltaRowsByItems,
   getStoredItemLifecycleSequenceRange,

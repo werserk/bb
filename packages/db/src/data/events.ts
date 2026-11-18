@@ -1488,6 +1488,60 @@ export function listEvents(db: DbConnection, options: ListEventsOptions) {
   return q.all();
 }
 
+export interface ListStoredEventRowsContainingArgs {
+  afterSequence?: number;
+  /** Rows whose stored JSON text contains any of these strings. */
+  needles: readonly string[];
+  threadId: string;
+  type: ThreadEventType;
+  /** Only the newest `window` rows of `type` (after `afterSequence`) count. */
+  window: number;
+}
+
+/**
+ * Newest first: the rows among the newest `window` rows of one type whose
+ * stored data contains a needle. The window is chosen on the type index and
+ * `instr` runs inside SQLite, so only matching rows reach the caller.
+ */
+export function listStoredEventRowsContaining(
+  db: DbQueryConnection,
+  args: ListStoredEventRowsContainingArgs,
+): StoredEventRow[] {
+  if (args.needles.length === 0 || args.window <= 0) return [];
+  const indexed = sql`${events} INDEXED BY events_thread_type_sequence_idx`;
+  const scope = and(
+    eq(events.threadId, args.threadId),
+    eq(events.type, args.type),
+    args.afterSequence === undefined
+      ? undefined
+      : gt(events.sequence, args.afterSequence),
+  );
+  const oldest = db
+    .select({ sequence: sql<number>`${events.sequence}` })
+    .from(indexed)
+    .where(scope)
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .offset(args.window - 1)
+    .get()?.sequence;
+  return db
+    .select(storedEventRowSqlFields(null))
+    .from(indexed)
+    .where(
+      and(
+        scope,
+        oldest === undefined ? undefined : gte(events.sequence, oldest),
+        or(
+          ...args.needles.map(
+            (needle) => sql`instr(${events.data}, ${needle}) > 0`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .all();
+}
+
 export function listStoredEventRows(
   db: DbQueryConnection,
   args: ListStoredEventRowsArgs,

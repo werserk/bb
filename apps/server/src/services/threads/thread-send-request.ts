@@ -105,13 +105,19 @@ export async function acceptThreadSendRequest(
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
   const id = args.payload.clientSubmissionId;
-  const send = async () => {
+  const send = async (floor?: number) => {
     const result = await acceptThreadSendRequestOnce(deps, args);
     if (!id) return result;
     if (result.delivery === "queued") return { ...result, submissionIds: [id] };
     if (isStandaloneBuiltinClearCommand(args.payload.input))
       return { ...result, submissionIds: [id], command: true as const };
-    const { requested } = findRequestedSubmission(deps.db, args.thread.id, id);
+    // Only rows appended since the submission's checks can be its receipt.
+    const { requested } = findRequestedSubmission(
+      deps.db,
+      args.thread.id,
+      id,
+      floor,
+    );
     return requested ? { ...result, submissionIds: [id], requested } : result;
   };
   return id
