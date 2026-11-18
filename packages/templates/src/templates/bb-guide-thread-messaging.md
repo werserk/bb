@@ -16,6 +16,7 @@ Messaging:
                                            Read the message from a file; `-` reads stdin. Use this for
                                            multi-line or Markdown messages: inside double quotes the
                                            shell runs `backticks` and $(...) before bb sees them
+    --client-submission-id <uuid>          Optional stable identity for one send action; repeats are rejected after admission
     --mode <mode>                          Message mode: steer (default), queue, or auto
     --model <model>                        Model override for this turn
     --reasoning-level <level>              Reasoning level override
@@ -259,3 +260,7 @@ Russian letters and astral emoji count one each; joined emoji count by their
 constituent code points. Publication rejects excess with actual/limit feedback.
 Put the full report in a declared material with a short label, and ask a short
 actionable question. Existing stored cards remain readable and answerable.
+
+  bb thread queue snapshot <threadId> [queueIds...] --json
+    Read queue presence and bounded request/rejection lineage for up to 200 already admitted queue IDs.
+    A partial unresolved result does not prove removal or delivery. The existing queue list remains an array.

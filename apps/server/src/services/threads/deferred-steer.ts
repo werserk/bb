@@ -64,6 +64,7 @@ function immutableOwnerInput(request: TurnRequestEventData) {
     senderThreadId: request.senderThreadId,
     serviceTurn: request.serviceTurn,
     input: request.input,
+    clientSubmissions: request.clientSubmissions ?? [],
     inputGroups: request.inputGroups ?? [request.input],
     provenance: request.dispatchProvenance,
     questionResponse:
@@ -247,6 +248,7 @@ export function resolveDeferredSteerQueuedMessage(
         request.execution.permissionMode,
       ),
     },
+    clientSubmissions: request.clientSubmissions,
     inputGroups: request.inputGroups ?? [request.input],
     dispatchProvenance: request.dispatchProvenance,
     sourceRequestId: message.payload.sourceRequestId,

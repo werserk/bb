@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { sdk } from "@/lib/sdk";
 import { composerSuggestionContext } from "@/lib/composer-suggestion-host";
 import { useThreadTimeline } from "@/hooks/queries/thread-panel-queries";
+import { settleFailedPendingSend } from "@/hooks/cache-owners/pending-send-owner";
 import { useServerConnectionState } from "@/hooks/useServerConnectionState";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
 import { visibleQueuedMessages } from "@/lib/queued-system-notice";
@@ -1114,6 +1115,7 @@ export function ThreadDetailPromptArea({
   );
   const suggestionTimeline = useThreadTimeline(thread.id);
   const suggestionConnection = useServerConnectionState();
+  const queryClient = useQueryClient();
   const suggestionEvents = useQuery({
     queryKey: [
       "composer-suggestion-events",
@@ -1324,6 +1326,7 @@ export function ThreadDetailPromptArea({
       promptDraft.clearIfCurrentMatches(submittedDraft);
       setBottomAttachmentError(null);
 
+      const clientSubmissionId = crypto.randomUUID();
       try {
         const request = buildAutoFollowUpRequest({
           compactFirst: compactFirst && sendAt === undefined,
@@ -1334,6 +1337,7 @@ export function ThreadDetailPromptArea({
         if (request) {
           await sendMessage.mutateAsync({
             ...request,
+            clientSubmissionId,
             ...(sendAt === undefined ? {} : { sendAt }),
             ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
           });
@@ -1342,7 +1346,12 @@ export function ThreadDetailPromptArea({
           }
         }
       } catch (nextError) {
-        promptDraft.restoreIfEmpty(submittedDraft);
+        settleFailedPendingSend(
+          queryClient,
+          thread.id,
+          clientSubmissionId,
+          () => promptDraft.restoreIfEmpty(submittedDraft),
+        );
         throw reportMutationError({
           error: nextError,
           fallbackMessage: isQueuingMessage
@@ -1398,16 +1407,23 @@ export function ThreadDetailPromptArea({
           await runWhileFollowUpShortcutSending(
             setIsFollowUpShortcutSending,
             async () => {
+              const clientSubmissionId = crypto.randomUUID();
               try {
                 await sendMessage.mutateAsync({
                   ...shortcutRequest.request,
+                  clientSubmissionId,
                   ...(sendAt === undefined ? {} : { sendAt }),
                   ...(pluginSubmission === undefined
                     ? {}
                     : { pluginSubmission }),
                 });
               } catch (nextError) {
-                promptDraft.restoreIfEmpty(submittedDraft);
+                settleFailedPendingSend(
+                  queryClient,
+                  thread.id,
+                  clientSubmissionId,
+                  () => promptDraft.restoreIfEmpty(submittedDraft),
+                );
                 throw reportMutationError({
                   error: nextError,
                   fallbackMessage: "Failed to send message",

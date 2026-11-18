@@ -47,6 +47,32 @@ describe("bb thread organization commands", () => {
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
+  it("reads admitted queue placement through the bounded snapshot API", async () => {
+    const result = {
+      rows: [],
+      eventMaxSeq: 8,
+      queuePresence: [{ id: "legacy", present: false }],
+      coverage: "partial",
+      placements: [
+        { queueId: "legacy", submissionIds: [], state: "unresolved" },
+      ],
+      diagnostics: { scannedRows: 100, scannedBytes: 1024, elapsedMs: 2 },
+    };
+    const post = vi.fn(async () => result);
+    stubServerApi({ "v1.threads.:id.queue-snapshot.$post": post });
+    await runCommand(
+      ["thread", "queue", "snapshot", "thread-1", "legacy", "--json"],
+      register,
+    );
+    expect(post).toHaveBeenCalledWith({
+      param: { id: "thread-1" },
+      json: { knownAdmittedQueueIds: ["legacy"] },
+    });
+    expect(
+      JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
+    ).toEqual(result);
+  });
+
   it("creates a named thread section", async () => {
     const create = vi.fn(async () => ({
       id: "section-review",
@@ -411,32 +437,29 @@ describe("bb thread organization commands", () => {
       sendAt: Date.parse("2026-10-30T12:00:00Z") + 2 * 3_600_000,
     },
     { flags: ["--clear-send-at"], sendAt: null },
-  ])(
-    "changes only the send time with $flags",
-    async ({ flags, sendAt }) => {
-      vi.useFakeTimers({ now: Date.parse("2026-10-30T12:00:00Z") });
-      try {
-        const list = vi.fn(async () => [{ id: "queued-1", updatedAt: 42 }]);
-        const update = vi.fn(async () => ({ id: "queued-1", sendAt }));
-        stubServerApi({
-          "v1.threads.:id.queued-messages.$get": list,
-          "v1.threads.:id.queued-messages.:queuedMessageId.$patch": update,
-        });
+  ])("changes only the send time with $flags", async ({ flags, sendAt }) => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-30T12:00:00Z") });
+    try {
+      const list = vi.fn(async () => [{ id: "queued-1", updatedAt: 42 }]);
+      const update = vi.fn(async () => ({ id: "queued-1", sendAt }));
+      stubServerApi({
+        "v1.threads.:id.queued-messages.$get": list,
+        "v1.threads.:id.queued-messages.:queuedMessageId.$patch": update,
+      });
 
-        await runCommand(
-          ["thread", "queue", "update", "thread-1", "queued-1", ...flags],
-          register,
-        );
+      await runCommand(
+        ["thread", "queue", "update", "thread-1", "queued-1", ...flags],
+        register,
+      );
 
-        expect(update).toHaveBeenCalledWith({
-          param: { id: "thread-1", queuedMessageId: "queued-1" },
-          json: { expectedUpdatedAt: 42, sendAt },
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
+      expect(update).toHaveBeenCalledWith({
+        param: { id: "thread-1", queuedMessageId: "queued-1" },
+        json: { expectedUpdatedAt: 42, sendAt },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("changes only the execution options, mapping workspace-write to accept-edits", async () => {
     const list = vi.fn(async () => [{ id: "queued-1", updatedAt: 42 }]);

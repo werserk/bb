@@ -548,6 +548,9 @@ function convertMessage(
           kind: "conversation",
           role: "user",
           messageSeq: message.messageSeq,
+          submissionRequestId: message.submissionRequestId,
+          clientSubmissionIds: message.clientSubmissionIds,
+          sourceQueuedMessageIds: message.sourceQueuedMessageIds,
           text: message.text,
           mentions: message.mentions,
           attachments: toConversationAttachments(message.attachments),
@@ -915,6 +918,9 @@ function convertSteerMessage(
     systemMessageKind: message.systemMessageKind,
     systemMessageSubject: message.systemMessageSubject,
     turnRequest: message.turnRequest,
+    submissionRequestId: message.submissionRequestId,
+    clientSubmissionIds: message.clientSubmissionIds,
+    sourceQueuedMessageIds: message.sourceQueuedMessageIds,
   };
 }
 

@@ -1,3 +1,6 @@
+import { guardSubmission } from "./submission-admission.js";
+import { listStoredEventRows } from "@bb/db";
+import { turnRequestEventDataSchema } from "@bb/domain";
 import {
   isStandaloneBuiltinClearCommand,
   isStandaloneBuiltinCompactCommand,
@@ -20,7 +23,7 @@ interface AcceptThreadSendRequestArgs {
   thread: Thread;
 }
 
-export async function acceptThreadSendRequest(
+async function acceptThreadSendRequestOnce(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
@@ -94,4 +97,45 @@ export async function acceptThreadSendRequest(
 
 function throwInvalidCompactFirst(reason: string): never {
   throw new ApiError(400, "invalid_request", `compactFirst ${reason}`);
+}
+
+export async function acceptThreadSendRequest(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: AcceptThreadSendRequestArgs,
+): Promise<SendMessageResponse> {
+  const id = args.payload.clientSubmissionId;
+  const send = async () => {
+    const result = await acceptThreadSendRequestOnce(deps, args);
+    if (!id) return result;
+    if (result.delivery === "queued") return { ...result, submissionIds: [id] };
+    if (isStandaloneBuiltinClearCommand(args.payload.input))
+      return { ...result, submissionIds: [id], command: true as const };
+    const rows = listStoredEventRows(deps.db, {
+      threadId: args.thread.id,
+      types: ["client/turn/requested"],
+      limit: 1000,
+      order: "desc",
+    });
+    for (const row of rows) {
+      const request = turnRequestEventDataSchema.safeParse(
+        JSON.parse(row.data),
+      );
+      if (
+        request.success &&
+        request.data.clientSubmissions?.some((entry) => entry.id === id)
+      )
+        return {
+          ...result,
+          submissionIds: [id],
+          requested: {
+            requestId: request.data.requestId,
+            sequence: row.sequence,
+          },
+        };
+    }
+    return result;
+  };
+  return id
+    ? guardSubmission(deps.db, args.thread.id, id, args.payload, send)
+    : send();
 }

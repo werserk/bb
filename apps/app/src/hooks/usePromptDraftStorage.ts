@@ -258,7 +258,7 @@ export interface PromptDraftController {
   ) => void;
   clear: () => void;
   clearIfCurrentMatches: (expectedDraft: PromptDraftState) => boolean;
-  restoreIfEmpty: (nextDraft: PromptDraftState) => void;
+  restoreIfEmpty: (nextDraft: PromptDraftState) => boolean;
 }
 
 function createPromptDraftController(
@@ -316,9 +316,8 @@ function createPromptDraftController(
       writePromptDraft(storageKey, EMPTY_PROMPT_DRAFT);
       return true;
     },
-    restoreIfEmpty: (nextDraft) => {
-      restorePromptDraftIfEmpty(storageKey, nextDraft);
-    },
+    restoreIfEmpty: (nextDraft) =>
+      restorePromptDraftIfEmpty(storageKey, nextDraft),
   };
 }
 

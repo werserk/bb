@@ -1,3 +1,13 @@
+import { prepareSendRequest } from "./mutation-request-types";
+import { pendingSendGeneration } from "../cache-owners/pending-send-owner";
+import { sendMessageResponseSchema } from "@bb/server-contract";
+import {
+  dispatchPendingSend,
+  pendingSendOwner,
+  refreshPendingSends,
+} from "../cache-owners/pending-send-owner";
+import { z } from "zod";
+import { clientTurnRequestIdSchema } from "@bb/domain";
 import { notifyComposerSubmitted } from "@/lib/composer-submissions";
 import {
   mutationOptions,
@@ -162,19 +172,100 @@ export function useCreateThread() {
 
 export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
+    retry: false,
     meta: {
       errorMessage: "Failed to send message.",
       lifecycleOperation: "send_message",
       showErrorToast: false,
     },
-    mutationFn: async ({ id, ...request }: SendThreadMessageMutationRequest) =>
-      await sdk.threads.send({ threadId: id, ...request }),
+    mutationFn: async (variables: SendThreadMessageMutationRequest) => {
+      const { id, ...request } = prepareSendRequest(variables);
+      return dispatchPendingSend(
+        queryClient,
+        id,
+        request.clientSubmissionId ?? crypto.randomUUID(),
+        request,
+        [],
+        async () => {
+          const receipt = sendMessageResponseSchema.parse(
+            await sdk.threads.send({ threadId: id, ...request }),
+          );
+          if (
+            receipt.submissionIds !== undefined &&
+            request.clientSubmissionId &&
+            !receipt.submissionIds.includes(request.clientSubmissionId)
+          )
+            throw new Error("Unrecognized submission receipt");
+          return receipt;
+        },
+      );
+    },
     onMutate: async (variables): Promise<SendThreadMessageTransaction> =>
       beginSendThreadMessageTransaction({
         queryClient,
         request: variables,
       }),
     onError: (_error, variables, context) => {
+      if (
+        !context ||
+        (context.kind === "accepted-turn" &&
+          context.generation !== pendingSendGeneration(queryClient))
+      )
+        return;
+      variables = prepareSendRequest(variables);
+      if (variables.clientSubmissionId && _error instanceof BbHttpError) {
+        if (_error.code === "submission_already_admitted") {
+          const parsed = z
+            .object({
+              details: z.object({
+                requested: z
+                  .object({
+                    requestId: clientTurnRequestIdSchema,
+                    sequence: z.number().int(),
+                  })
+                  .optional(),
+                queuedMessageId: z.string().optional(),
+              }),
+            })
+            .safeParse(_error.body);
+          if (parsed.success && parsed.data.details.requested) {
+            pendingSendOwner(queryClient).receipt(
+              variables.id,
+              variables.clientSubmissionId,
+              {
+                ok: true,
+                delivery: "sent",
+                submissionIds: [variables.clientSubmissionId],
+                requested: parsed.data.details.requested,
+              },
+            );
+            void refreshPendingSends(queryClient, variables.id).catch(() => {});
+            return;
+          }
+          if (parsed.success && parsed.data.details.queuedMessageId) {
+            pendingSendOwner(queryClient).admittedQueue(
+              variables.id,
+              variables.clientSubmissionId,
+              parsed.data.details.queuedMessageId,
+            );
+            void refreshPendingSends(queryClient, variables.id).catch(() => {});
+            if (context?.kind === "accepted-turn") context.prediction?.fail();
+            return;
+          }
+        }
+        if (
+          _error.status >= 400 &&
+          _error.status < 500 &&
+          _error.status !== 408 &&
+          _error.code !== "submission_already_admitted"
+        )
+          pendingSendOwner(queryClient).fail(
+            variables.id,
+            variables.clientSubmissionId,
+            true,
+            getHttpErrorBodyMessage(_error) ?? "Not sent",
+          );
+      }
       rollbackSendThreadMessageTransaction({
         queryClient,
         request: variables,
@@ -275,7 +366,24 @@ export function sendThreadQueuedMessageMutationOptions(
       mode,
       queuedMessageId,
     }: SendThreadQueuedMessageMutationRequest): Promise<SendQueuedMessageResponse> =>
-      sdk.threads.queuedMessages.send({ threadId: id, queuedMessageId, mode }),
+      dispatchPendingSend(
+        queryClient,
+        id,
+        `queue:${queuedMessageId}`,
+        { mode },
+        pendingSendOwner(queryClient)
+          .list(id)
+          .find((entry) => entry.queueIds.includes(queuedMessageId))
+          ?.queueIds ?? [queuedMessageId],
+        async () =>
+          sendMessageResponseSchema.parse(
+            await sdk.threads.queuedMessages.send({
+              threadId: id,
+              queuedMessageId,
+              mode,
+            }),
+          ),
+      ),
     onMutate: async (variables): Promise<RemoveQueuedMessageTransaction> =>
       beginSendQueuedMessageTransaction({
         queryClient,
@@ -424,6 +532,10 @@ export function deleteThreadQueuedMessageMutationOptions(
       });
     },
     onSuccess: (_data, variables) => {
+      pendingSendOwner(queryClient).removed(
+        variables.id,
+        variables.queuedMessageId,
+      );
       applyQueuedMessageDeleteResult({
         queryClient,
         threadId: variables.id,

@@ -350,6 +350,7 @@ type ExpectedProvidersKey = "catalog" | "list" | "models" | "setEnabled";
 type ExpectedStatusKey = "get";
 
 type ExpectedSystemKey =
+  | "pendingSendOverlay"
   | "acknowledgeAppUpdate"
   | "mobileAppDownloads"
   | "mobileAppReleases"
@@ -392,6 +393,7 @@ type ExpectedThreadSectionsKey = "create" | "delete" | "list" | "update";
 
 type ExpectedThreadsKey =
   | "experimental_releaseIdle"
+  | "queueSnapshot"
   | "experimental_listAncestors"
   | "experimental_listDescendants"
   | "experimental_listCascade"
