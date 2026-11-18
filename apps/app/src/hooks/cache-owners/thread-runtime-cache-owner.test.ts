@@ -704,6 +704,58 @@ describe("thread runtime cache owner", () => {
     );
   });
 
+  it("keeps one queued row when the stay-queued receipt arrives after a read dropped the row from the queue cache", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      makeQueuedMessage({ id: "qmsg-1" }),
+    ]);
+    queryClient.setQueryData(threadQueryKey("thread-1"), {
+      id: "thread-1",
+      status: "idle",
+      updatedAt: 1,
+      runtime: { displayStatus: "idle" },
+    });
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeTimelineResponse(),
+    );
+    const request = {
+      id: "thread-1",
+      mode: "auto" as const,
+      queuedMessageId: "qmsg-1",
+    };
+    const transaction = await beginSendQueuedMessageTransaction({
+      queryClient,
+      request,
+    });
+    // A queue read taken while the server held the row claimed omits it.
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), []);
+    const authoritative = makeQueuedMessage({ id: "qmsg-1", updatedAt: 2 });
+    applyQueuedMessageSendResult({
+      queryClient,
+      request,
+      result: { ok: true, delivery: "queued", queuedMessage: authoritative },
+      transaction,
+    });
+    expect(
+      queryClient.getQueryData(threadQueuedMessagesQueryKey("thread-1")),
+    ).toEqual([]);
+    expect(composePendingSends(queryClient, "thread-1").queue).toEqual([
+      authoritative,
+    ]);
+    expect(composedTimeline(queryClient)?.rows).toEqual([]);
+    // The next authoritative read carries the row; still one row.
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      authoritative,
+    ]);
+    expect(composePendingSends(queryClient, "thread-1").queue).toEqual([
+      authoritative,
+    ]);
+  });
+
   it("reads the thread back and invalidates thread, queue, timeline and list queries after a queued message is sent", async () => {
     const queryClient = createAppQueryClient({
       defaultOptions: { queries: { gcTime: Infinity, retry: false } },
