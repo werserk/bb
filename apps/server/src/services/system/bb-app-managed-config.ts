@@ -11,6 +11,10 @@ import {
 import { validateOptionalUrl } from "@bb/config/public-url";
 import type { ServerLogger, ServerRuntimeConfig } from "../../types.js";
 import type { NotificationHub } from "../../ws/hub.js";
+import {
+  configChanged,
+  notifyConfigChangedIfChanged,
+} from "./config-change.js";
 
 interface ApplyBbAppManagedConfigArgs {
   baseConfig: ServerRuntimeConfig;
@@ -146,6 +150,15 @@ export async function createBbAppManagedConfigReloader(
   const envPath = formatBbAppEnvPath(args.config.dataDir);
   const managedEnvKeys = new Set<string>();
 
+  function managedState() {
+    return {
+      config: cloneRuntimeConfig(args.config),
+      env: Object.fromEntries(
+        [...managedEnvKeys].map((key) => [key, process.env[key]]),
+      ),
+    };
+  }
+
   async function reload(
     reloadArgs: ReloadBbAppManagedConfigArgs,
   ): Promise<void> {
@@ -154,6 +167,7 @@ export async function createBbAppManagedConfigReloader(
       logger: args.logger,
     });
     const managedEnvFile = await readBbAppManagedEnv({ envPath });
+    const before = managedState();
     const nextConfig = cloneRuntimeConfig(args.config);
     applyBbAppManagedConfig({
       baseConfig,
@@ -167,7 +181,10 @@ export async function createBbAppManagedConfigReloader(
     });
     replaceRuntimeConfig(args.config, nextConfig);
     if (reloadArgs.notify) {
-      args.hub.notifySystem(["config-changed"]);
+      notifyConfigChangedIfChanged(
+        args.hub,
+        configChanged(before, managedState()),
+      );
     }
   }
 

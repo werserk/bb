@@ -19,6 +19,10 @@ import {
   sanitizeGeneratedCommitMessage,
 } from "./commit-message.js";
 import { sanitizeGeneratedTitle } from "../threads/title-generation.js";
+import {
+  configChanged,
+  notifyConfigChangedIfChanged,
+} from "../system/config-change.js";
 
 type AiServicesViewDeps = Pick<
   LoggedWorkSessionDeps,
@@ -90,8 +94,12 @@ export async function updateAiServiceSelection(
       );
     }
   }
+  const before = getAiServiceSelections(deps.db);
   setAiServiceSelection(deps.db, task, selection);
-  deps.hub.notifySystem(["config-changed"]);
+  notifyConfigChangedIfChanged(
+    deps.hub,
+    configChanged(before, getAiServiceSelections(deps.db)),
+  );
   return buildAiServicesView(deps);
 }
 

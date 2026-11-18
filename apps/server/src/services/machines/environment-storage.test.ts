@@ -279,3 +279,196 @@ it("migrates legacy settings without changing ciphertext or requiring its key", 
   );
   expect(readMachineEnvironment(db)[0]?.encryptionVersion).toBe(2);
 });
+
+function corruptRow(name: string): void {
+  const row = readMachineEnvironment(db).find((entry) => entry.name === name);
+  if (row === undefined) throw new Error(`Missing ${name}`);
+  const bytes = Buffer.from(row.ciphertext, "base64");
+  bytes[28] = bytes[28]! ^ 1;
+  db.update(environmentVariables)
+    .set({ ciphertext: bytes.toString("base64") })
+    .where(eq(environmentVariables.name, name))
+    .run();
+}
+
+it("reports a set as changed only when the note or the decrypted value differs", async () => {
+  const set = (value: string, note: string | null) =>
+    setMachineEnvironmentVariable(
+      db,
+      dataDir,
+      { name: "TOKEN", value, note },
+      null,
+    );
+  expect(await set("fake-one", null)).toEqual({ changed: true });
+  const ciphertext = readMachineEnvironment(db)[0]?.ciphertext;
+  expect(await set("fake-one", null)).toEqual({ changed: false });
+  expect(readMachineEnvironment(db)[0]?.ciphertext).not.toBe(ciphertext);
+  expect(await set("fake-two", null)).toEqual({ changed: true });
+  expect(await set("fake-two", "Deploy")).toEqual({ changed: true });
+  expect(await set("fake-two", "Deploy")).toEqual({ changed: false });
+});
+
+it("reports a note change from null to text as changed", async () => {
+  await setMachineEnvironmentVariable(
+    db,
+    dataDir,
+    { name: "TOKEN", value: "fake", note: null },
+    null,
+  );
+  expect(
+    await setMachineEnvironmentVariable(
+      db,
+      dataDir,
+      {
+        name: "TOKEN",
+        value: "fake",
+        note: "Global machine environment setting",
+      },
+      null,
+    ),
+  ).toEqual({ changed: true });
+});
+
+it("reports a delete as changed only when a row was removed", async () => {
+  await setMachineEnvironmentVariable(
+    db,
+    dataDir,
+    { name: "TOKEN", value: "fake", note: null },
+    null,
+  );
+  expect(await deleteMachineEnvironmentVariable(db, "MISSING", null)).toEqual({
+    changed: false,
+  });
+  expect(await deleteMachineEnvironmentVariable(db, "TOKEN", null)).toEqual({
+    changed: true,
+  });
+});
+
+it("reports a replace as changed only when a name, a note or a given value differs", async () => {
+  const initial = [
+    { name: "REGION", value: "fake-region", note: "Deploy" },
+    { name: "TOKEN", value: "fake-token", note: null },
+  ];
+  expect(
+    await replaceMachineEnvironment(db, dataDir, { variables: initial }),
+  ).toEqual({ changed: true });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, { variables: initial }),
+  ).toEqual({ changed: false });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "REGION", value: null, note: "Deploy" },
+        { name: "TOKEN", value: "fake-token", note: null },
+      ],
+    }),
+  ).toEqual({ changed: false });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "REGION", value: null, note: "Deploy" },
+        { name: "TOKEN", value: null, note: null },
+      ],
+    }),
+  ).toEqual({ changed: false });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "REGION", value: null, note: "Deploy" },
+        { name: "TOKEN", value: "fake-other", note: null },
+      ],
+    }),
+  ).toEqual({ changed: true });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "REGION", value: null, note: "Deploy" },
+        { name: "TOKEN", value: null, note: null },
+        { name: "ADDED", value: "fake-added", note: null },
+      ],
+    }),
+  ).toEqual({ changed: true });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [{ name: "REGION", value: null, note: "Deploy" }],
+    }),
+  ).toEqual({ changed: true });
+});
+
+it("Undecryptable row: set and delete still succeed and emit", async () => {
+  await replaceMachineEnvironment(db, dataDir, {
+    variables: [
+      { name: "TOKEN", value: "fake-token", note: null },
+      { name: "OTHER", value: "fake-other", note: null },
+    ],
+  });
+  corruptRow("TOKEN");
+  expect(
+    await setMachineEnvironmentVariable(
+      db,
+      dataDir,
+      { name: "TOKEN", value: "fake-token", note: null },
+      null,
+    ),
+  ).toEqual({ changed: true });
+  const repaired = readMachineEnvironment(db).find(
+    (row) => row.name === "TOKEN",
+  );
+  expect(await decryptMachineEnvironment(dataDir, repaired!)).toBe(
+    "fake-token",
+  );
+
+  corruptRow("TOKEN");
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "TOKEN", value: "fake-token", note: null },
+        { name: "OTHER", value: null, note: null },
+      ],
+    }),
+  ).toEqual({ changed: true });
+
+  corruptRow("TOKEN");
+  expect(await deleteMachineEnvironmentVariable(db, "TOKEN", null)).toEqual({
+    changed: true,
+  });
+  expect(readMachineEnvironment(db).map((row) => row.name)).toEqual(["OTHER"]);
+});
+
+it("keeps today's lost-key behaviour: removals succeed, writes with a value fail and no key is created", async () => {
+  await replaceMachineEnvironment(db, dataDir, {
+    variables: [
+      { name: "TOKEN", value: "fake-token", note: null },
+      { name: "OTHER", value: "fake-other", note: null },
+      { name: "THIRD", value: "fake-third", note: null },
+    ],
+  });
+  const keyPath = join(dataDir, "machine-environment-key");
+  await rm(keyPath);
+
+  expect(await deleteMachineEnvironmentVariable(db, "THIRD", null)).toEqual({
+    changed: true,
+  });
+  expect(
+    await replaceMachineEnvironment(db, dataDir, {
+      variables: [
+        { name: "TOKEN", value: null, note: "Kept" },
+        { name: "OTHER", value: null, note: null },
+      ],
+    }),
+  ).toEqual({ changed: true });
+  await expect(
+    setMachineEnvironmentVariable(
+      db,
+      dataDir,
+      { name: "TOKEN", value: "fake-new", note: null },
+      null,
+    ),
+  ).rejects.toThrow("restore it from backup");
+  await expect(
+    replaceMachineEnvironment(db, dataDir, {
+      variables: [{ name: "TOKEN", value: "fake-new", note: null }],
+    }),
+  ).rejects.toThrow("restore it from backup");
+  await expect(readFile(keyPath)).rejects.toMatchObject({ code: "ENOENT" });
+});
