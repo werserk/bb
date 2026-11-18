@@ -54,6 +54,7 @@ export class PendingSendOverlay {
   private freshness = new Map<string, number>();
   private settledQueues = new Set<string>();
   private entries = new Map<string, PendingSend>();
+  private outcomes = new Map<string, "accepted" | "rejected">();
   private listeners = new Set<() => void>();
   private entrySnapshot: readonly PendingSend[] = [];
   private revision = 0;
@@ -73,6 +74,7 @@ export class PendingSendOverlay {
     this.observedRows = new WeakMap();
     this.entries.clear();
     this.settledQueues.clear();
+    this.outcomes.clear();
     this.freshness.clear();
     this.changed();
   }
@@ -205,7 +207,31 @@ export class PendingSendOverlay {
     return true;
   }
   hide(threadId: string, id: string) {
-    if (this.entries.delete(`${threadId}/${id}`)) this.changed();
+    const entry = this.entries.get(`${threadId}/${id}`);
+    if (!entry) return;
+    if (entry.state === "failed") this.markRejected(threadId, id);
+    this.entries.delete(`${threadId}/${id}`);
+    this.changed();
+  }
+  markRejected(threadId: string, id: string) {
+    this.record(`${threadId}/${id}`, "rejected");
+  }
+  outcome(threadId: string, id: string): "accepted" | "rejected" | undefined {
+    const key = `${threadId}/${id}`;
+    const entry = this.entries.get(key);
+    if (entry)
+      return entry.state === "failed"
+        ? "rejected"
+        : entry.state === "sending" || entry.state === "unconfirmed"
+          ? undefined
+          : "accepted";
+    return this.outcomes.get(key);
+  }
+  private record(key: string, outcome: "accepted" | "rejected") {
+    this.outcomes.delete(key);
+    this.outcomes.set(key, outcome);
+    if (this.outcomes.size > 512)
+      this.outcomes.delete(this.outcomes.keys().next().value!);
   }
   fail(threadId: string, id: string, definitive: boolean, error: string) {
     const entry = this.entries.get(`${threadId}/${id}`);
@@ -269,8 +295,10 @@ export class PendingSendOverlay {
   }
   applyLegacyJointRead(threadId: string, started: number) {
     for (const entry of this.list(threadId))
-      if (entry.legacyFence !== undefined && entry.legacyFence < started)
+      if (entry.legacyFence !== undefined && entry.legacyFence < started) {
+        this.record(`${threadId}/${entry.id}`, "accepted");
         this.entries.delete(`${threadId}/${entry.id}`);
+      }
     this.changed();
   }
   restoreQueue(threadId: string, id: string) {
@@ -282,8 +310,11 @@ export class PendingSendOverlay {
   }
   removed(threadId: string, queueId: string) {
     for (const entry of this.list(threadId))
-      if (entry.queueIds.includes(queueId))
+      if (entry.queueIds.includes(queueId)) {
+        if (entry.state !== "failed")
+          this.record(`${threadId}/${entry.id}`, "accepted");
         this.entries.delete(`${threadId}/${entry.id}`);
+      }
     this.changed();
   }
   observe(
@@ -458,6 +489,7 @@ export class PendingSendOverlay {
       ...entry.submissionIds.map((id) => `qsub_${id}`),
     ])
       this.settledQueues.add(`${entry.threadId}/${id}`);
+    this.record(`${entry.threadId}/${entry.id}`, "accepted");
     this.entries.delete(`${entry.threadId}/${entry.id}`);
     this.freshness.delete(`${entry.threadId}/${entry.id}`);
   }

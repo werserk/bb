@@ -206,7 +206,12 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
         request: variables,
       }),
     onError: (_error, variables, context) => {
-      if (!context) return;
+      if (!context) {
+        const { id, clientSubmissionId } = prepareSendRequest(variables);
+        if (clientSubmissionId)
+          pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
+        return;
+      }
       if (
         context.kind === "accepted-turn" &&
         context.generation !== pendingSendGeneration(queryClient)

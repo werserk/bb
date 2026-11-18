@@ -516,10 +516,9 @@ export function settleFailedPendingSend(
   restoreDraft: () => boolean,
 ): boolean {
   const owner = pendingSendOwner(client);
-  const entry = owner.list(threadId).find((candidate) => candidate.id === id);
-  if (entry && entry.state !== "failed") return false;
+  if (owner.outcome(threadId, id) !== "rejected") return false;
   const restored = restoreDraft();
-  if (restored && entry) owner.hide(threadId, id);
+  if (restored) owner.hide(threadId, id);
   return restored;
 }
 export function newPendingSend(
@@ -568,8 +567,10 @@ export function dispatchPendingSend(
   const generation = state.generation;
   const result = Promise.resolve()
     .then(() => {
-      if (state.generation !== generation)
+      if (state.generation !== generation) {
+        owner.markRejected(threadId, id);
         throw Error("Pending send scope changed");
+      }
       return send();
     })
     .finally(() => {

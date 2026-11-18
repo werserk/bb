@@ -975,3 +975,34 @@ it("repairs grouping when a settled queue member disappears with no remaining cu
     { ...first, groupWithNext: false },
   ]);
 });
+
+it("records the outcome of a submission after its entry is gone", () => {
+  const owner = new PendingSendOverlay();
+  const begin = (id: string) =>
+    owner.begin({
+      id,
+      threadId: "thread-1",
+      row: userRow({ id: `optimistic-${id}`, sequence: 0 }),
+      submissionIds: [id],
+      queueIds: [],
+      queueRows: [],
+      state: "sending",
+      sequence: 0,
+    });
+  expect(owner.outcome("thread-1", "unknown")).toBeUndefined();
+  begin("lost");
+  owner.fail("thread-1", "lost", false, "Delivery unconfirmed");
+  expect(owner.outcome("thread-1", "lost")).toBeUndefined();
+  const canonical = userRow({ id: "canonical", sequence: 12 });
+  canonical.clientSubmissionIds = ["lost"];
+  owner.observe("thread-1", [canonical], []);
+  expect(owner.list("thread-1")).toHaveLength(0);
+  expect(owner.outcome("thread-1", "lost")).toBe("accepted");
+  begin("refused");
+  owner.fail("thread-1", "refused", true, "Not sent");
+  expect(owner.outcome("thread-1", "refused")).toBe("rejected");
+  owner.hide("thread-1", "refused");
+  expect(owner.outcome("thread-1", "refused")).toBe("rejected");
+  owner.clear();
+  expect(owner.outcome("thread-1", "lost")).toBeUndefined();
+});
