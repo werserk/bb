@@ -871,7 +871,7 @@ describe("Account Pool plugin", () => {
           "content-type": "application/json",
           "openai-beta": "responses=experimental",
         },
-        body: JSON.stringify({ model: "gpt-5", input: [] }),
+        body: JSON.stringify({ model: "gpt-5", input: [], stream: true }),
       },
     );
     expect(httpResponse.status).toBe(200);
@@ -898,7 +898,7 @@ describe("Account Pool plugin", () => {
           "x-bb-account-pool-token": routed.token,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ model: "gpt-5", input }),
+        body: JSON.stringify({ model: "gpt-5", input, stream: true }),
       });
     const first = await postResponses([
       { type: "message", id: "prefix" },
@@ -980,7 +980,7 @@ describe("Account Pool plugin", () => {
       "/v1/responses",
       {
         headers: { "x-bb-account-pool-token": routed.token },
-        body: JSON.stringify({ model: "gpt-5", input: [] }),
+        body: JSON.stringify({ model: "gpt-5", input: [], stream: true }),
       },
     );
     expect(blocked.status).toBe(429);
@@ -1094,7 +1094,7 @@ describe("Account Pool plugin", () => {
           "x-bb-account-pool-token": token,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ model: "gpt-5", input: [] }),
+        body: JSON.stringify({ model: "gpt-5", input: [], stream: true }),
         signal: client.signal,
       },
     );
@@ -4521,7 +4521,7 @@ describe("Account Pool plugin", () => {
             body:
               provider === "claude"
                 ? claudeBody("pooled-retry")
-                : JSON.stringify({ model: "gpt-5", input: [] }),
+                : JSON.stringify({ model: "gpt-5", input: [], stream: true }),
           },
         );
         expect(response.status).toBe(429);
@@ -4604,7 +4604,7 @@ describe("Account Pool plugin", () => {
               body:
                 provider === "claude"
                   ? claudeBody(sessionId)
-                  : JSON.stringify({ model: "gpt-5", input: [] }),
+                  : JSON.stringify({ model: "gpt-5", input: [], stream: true }),
             },
           );
         const expectAccount = async (account: string) => {
@@ -4718,6 +4718,7 @@ describe("Account Pool plugin", () => {
           headers,
           body: JSON.stringify({
             model: "gpt-5",
+            stream: true,
             prompt_cache_key: "shared-parent-cache",
             client_metadata: {
               session_id: session,
