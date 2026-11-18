@@ -66,3 +66,36 @@ describe("handleResponses request shapes", () => {
     expect(JSON.parse(seen)).toEqual({ prompt_cache_key: "k" });
   });
 });
+
+describe("handleResponses fidelity", () => {
+  it("forwards compressed bodies byte for byte", async () => {
+    const bytes = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0x00, 0x80]);
+    let seen = new Uint8Array();
+    await handleResponses(
+      new Request("http://pool/v1/responses", {
+        method: "POST",
+        headers: { "content-encoding": "zstd" },
+        body: bytes,
+      }),
+      async (req) => {
+        seen = new Uint8Array(await req.arrayBuffer());
+        return new Response("{}");
+      },
+    );
+    expect(Array.from(seen)).toEqual(Array.from(bytes));
+  });
+
+  it("maps a rate-limit failure in the stream to 429", async () => {
+    const res = await handleResponses(post({ model: "m", input: [] }), async () =>
+      sse([{ type: "response.failed", response: { error: { code: "rate_limit_exceeded" } } }]),
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("treats completed without a response as a failure", async () => {
+    const res = await handleResponses(post({ model: "m", input: [] }), async () =>
+      sse([{ type: "response.completed" }]),
+    );
+    expect(res.status).toBe(502);
+  });
+});

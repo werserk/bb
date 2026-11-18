@@ -25,7 +25,11 @@ export async function collectFinalResponse(
       return null;
     }
     if (event.type === "response.completed" || event.type === "response.incomplete")
-      return Promise.resolve({ response: event.response });
+      return Promise.resolve(
+        event.response === undefined || event.response === null
+          ? { failure: event }
+          : { response: event.response },
+      );
     if (event.type === "response.failed" || event.type === "error")
       return Promise.resolve({ failure: event });
     return null;
@@ -33,7 +37,8 @@ export async function collectFinalResponse(
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (value !== undefined) buffer += decoder.decode(value, { stream: !done });
+      if (value !== undefined) buffer += decoder.decode(value, { stream: true });
+      if (done) buffer += decoder.decode();
       buffer = buffer.replace(/\r\n/gu, "\n");
       let split = buffer.indexOf("\n\n");
       while (split !== -1) {
@@ -52,14 +57,35 @@ export async function collectFinalResponse(
   return { failure: { type: "error", message: "stream ended without response.completed" } };
 }
 
+function failureStatus(failure: unknown): number {
+  const text = JSON.stringify(failure) ?? "";
+  if (text.includes("rate_limit") || text.includes("usage_limit")) return 429;
+  if (text.includes("context_length") || text.includes("invalid_prompt"))
+    return 400;
+  return 502;
+}
+
 export async function handleResponses(
   request: Request,
   handle: Handle,
 ): Promise<Response> {
-  const text = await request.text();
+  const bytes = await request.arrayBuffer();
+  const passThrough = () =>
+    handle(
+      new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: bytes,
+        signal: request.signal,
+      }),
+    );
+  const encoding = (request.headers.get("content-encoding") ?? "identity")
+    .trim()
+    .toLowerCase();
+  if (encoding !== "identity" && encoding !== "") return passThrough();
   let payload: Record<string, unknown> | null = null;
   try {
-    const parsed: unknown = JSON.parse(text);
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
       payload = parsed as Record<string, unknown>;
   } catch {}
@@ -68,7 +94,7 @@ export async function handleResponses(
     typeof payload.model === "string" &&
     "input" in payload;
   if (payload === null || !isResponsesRequest || payload.stream === true)
-    return handle(new Request(request, { body: text }));
+    return passThrough();
 
   const headers = new Headers(request.headers);
   headers.delete("content-length");
@@ -88,5 +114,8 @@ export async function handleResponses(
     return upstream;
   const result = await collectFinalResponse(upstream.body);
   if ("response" in result) return Response.json(result.response);
-  return Response.json({ error: result.failure }, { status: 502 });
+  return Response.json(
+    { error: result.failure },
+    { status: failureStatus(result.failure) },
+  );
 }
