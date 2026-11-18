@@ -4,6 +4,7 @@ import { memo, useContext } from "react";
 import { PendingSendPresentationContext } from "./pending-send-presentation";
 import { systemConfigQueryKey } from "@/hooks/queries/query-keys";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
+import { seedPendingSendThread } from "@/test/fixtures/pending-send";
 import {
   pendingSendOwner,
   clearPendingSendScope,
@@ -116,7 +117,7 @@ it("keeps the presentation context stable across unrelated parent renders", () =
   }
 });
 
-it("clears custody for an actual server scope change and explicit logout, not query removal", async () => {
+it("hands custody back to the draft on an actual server scope change and explicit logout, not query removal", async () => {
   const client = createAppQueryClient();
   client.setQueryData(
     systemConfigQueryKey(),
@@ -131,6 +132,7 @@ it("clears custody for an actual server scope change and explicit logout, not qu
         input: [{ type: "text", text: "owner", mentions: [] }],
       },
     });
+  const draft = seedPendingSendThread(client);
   try {
     await send();
     const owner = pendingSendOwner(client);
@@ -140,11 +142,20 @@ it("clears custody for an actual server scope change and explicit logout, not qu
       systemConfigQueryKey(),
       makeSystemConfig({ primaryHostId: "host-b", dataDir: "/fixture-b" }),
     );
+    // The unacknowledged text leaves custody for its (empty) draft.
     expect(owner.list()).toEqual([]);
+    expect(draft.getCurrent().text).toBe("owner");
+    draft.clear();
     await send();
     clearPendingSendScope(client);
     expect(owner.list()).toEqual([]);
+    expect(draft.getCurrent().text).toBe("owner");
+    // With the draft occupied, the only copy stays visible instead.
+    await send();
+    clearPendingSendScope(client);
+    expect(owner.list()).toMatchObject([{ row: { text: "owner" } }]);
   } finally {
+    draft.clear();
     clearPendingSendScope(client);
     client.clear();
   }
