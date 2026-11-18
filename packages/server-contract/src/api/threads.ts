@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   activeThinkingSchema,
+  clientSubmissionIdSchema,
   serviceTurnDescriptorSchema,
   callerExecutionInputSourceSchema,
   completedTurnDisplaySchema,
@@ -284,7 +285,7 @@ export const forkThreadRequestSchema = z
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 
 const sendMessageRequestFieldsSchema = z.object({
-  clientSubmissionId: z.uuid().optional(),
+  clientSubmissionId: clientSubmissionIdSchema.optional(),
   serviceTurn: serviceTurnDescriptorSchema.optional(),
   input: z.array(promptInputSchema).min(1),
   model: z.string().optional(),

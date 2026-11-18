@@ -2275,3 +2275,16 @@ it("keeps legacy admission decoders and excludes submission identity from edit r
     }).success,
   ).toBe(false);
 });
+
+describe("send message client submission identity", () => {
+  it("normalizes UUID casing at ingress so dedup keys match", () => {
+    const parsed = sendMessageRequestSchema.parse({
+      clientSubmissionId: "0A1B2C3D-0000-4000-8000-ABCDEF012345",
+      mode: "auto",
+      input: [{ type: "text", text: "hello", mentions: [] }],
+    });
+    expect(parsed.clientSubmissionId).toBe(
+      "0a1b2c3d-0000-4000-8000-abcdef012345",
+    );
+  });
+});
