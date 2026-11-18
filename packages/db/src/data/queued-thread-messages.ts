@@ -1412,7 +1412,20 @@ function ordinaryQueuedMessagesForThread(
   return db
     .select({ id: ordinary.id })
     .from(ordinary)
-    .where(and(eq(ordinary.threadId, threadId), isNull(ordinary.serviceTurn)));
+    .where(
+      and(
+        eq(ordinary.threadId, threadId),
+        isNull(ordinary.serviceTurn),
+        // werserk fork: a `provisioning` wait ends only when this thread's
+        // first dispatch provisions it. When the waiting service turn is that
+        // first dispatch, yielding to the row would be a cycle that keeps the
+        // thread pending forever; the row is released once the turn starts.
+        or(
+          isNull(ordinary.waitingOn),
+          sql`json_extract(${ordinary.waitingOn}, '$.kind') != 'provisioning'`,
+        ),
+      ),
+    );
 }
 
 export function hasOrdinaryQueuedThreadMessages(
