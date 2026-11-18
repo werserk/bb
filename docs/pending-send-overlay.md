@@ -78,7 +78,8 @@ unloading predecessor's text in the same tab survives the race. Inherited entrie
 are not shown while their document holds the lock. A direct send's journal
 entry keeps its full request as a resend payload, except when the request holds a
 `data:` image, exceeds 256 KiB, or would exceed the 1 MiB per-journal budget; the
-smaller fallback form written on a quota failure has no payloads. A reloaded
+smaller fallback form written on a quota failure has no payloads, for own and
+inherited entries alike. A reloaded
 unconfirmed entry with a payload offers Resend with the same `clientSubmissionId`;
 otherwise it offers Copy text.
 Nonwaiting requests use `ifAvailable` without `signal`, as required by Web Locks;
@@ -125,7 +126,10 @@ error) the draft is not restored and the entry offers Resend, which reuses the s
 `submission_already_admitted`), and Hide. That holds only while this tab owns its
 journal. Without an owned journal (no Web Locks, identity pending, quota), the
 unconfirmed entry is the only copy, so its text goes back to the draft, bound to
-its id as above. A failed entry also offers Hide next to Retry; Retry uses a new id.
+its id as above. When the server answers a bound resend with
+`submission_already_admitted`, or the owner already records the submission as
+accepted, the composer treats the send as delivered: no failure toast, no draft
+restore. A failed entry also offers Hide next to Retry; Retry uses a new id.
 A send whose scope changed in flight settles normally: a definite 4xx marks it
 rejected and restores the draft, a network error leaves it unconfirmed with the
 draft restored and bound. The draft is restored only when the owner holds a recorded rejection of this very submission (a `failed` entry, or a client-side refusal before the request left the client). The overlay keeps a small in-memory `accepted`/`rejected` record per submission id; the owner writes `accepted` when it learns of the acceptance (receipt, timeline or queue observation, queue-row removal, legacy joint read), so an entry that disappeared because the server accepted the send can never be mistaken for a rejection. A missing entry or record is never read as rejected: an indeterminate error such as a lost response never restores the draft, even when the message is already in the timeline. Resend needs the entry's request: the current tab's entries
@@ -168,15 +172,18 @@ The plugin-owned fork patch ledger was updated in plugin commit
 
 ## S3 whole-change review rework (`port/s3-rework-049`)
 
-| Review item                   | Disposition                                                                                                     | Remaining risk                                                                                  |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 1a scope/identity reset       | Unacknowledged direct sends go back to an empty draft, bound to their id; an entry with an occupied draft stays | A handed-back send that later succeeds still leaves its text in the draft (a resend is deduped) |
-| 1b in-flight scope change     | Real `onError` path: definite 4xx → rejected + restore; network error → unconfirmed + bound restore             | None identified                                                                                 |
-| 1c no own journal             | Unconfirmed text goes back to the draft, bound to the same id                                                   | Bound id is per tab (session storage)                                                           |
-| 2 SQL prefilter / second scan | `instr` in SQLite over the 1000-row window; receipts bounded to the send                                        | Hand-escaped ids are not matched; Resend outside the window can duplicate                       |
-| 3 fresh journal overwrite     | Predecessor entries kept as `inherited`, adopted when their lock is free                                        | Shown only after an acquire finds the lock free (e.g. next reload)                              |
-| 4 rollback deferred steer     | `clientSubmissions` no longer part of `immutableOwnerInput` (0.49 fields)                                       | None identified                                                                                 |
-| 5 tests                       | Added for each item above, plus a stay-queued receipt with the row absent from the queue cache                  | Live browser/Web Locks/duplicate-tab proof: lab controller                                      |
+| Review item                   | Disposition                                                                                                      | Remaining risk                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 1a scope/identity reset       | Unacknowledged direct sends go back to an empty draft, bound to their id; an entry with an occupied draft stays  | A handed-back send that later succeeds still leaves its text in the draft (a resend is deduped) |
+| 1b in-flight scope change     | Real `onError` path: definite 4xx → rejected + restore; network error → unconfirmed + bound restore              | None identified                                                                                 |
+| 1c no own journal             | Unconfirmed text goes back to the draft, bound to the same id                                                    | Bound id is per tab (session storage)                                                           |
+| 2 SQL prefilter / second scan | `instr` in SQLite over the 1000-row window; receipts bounded to the send                                         | Hand-escaped ids are not matched; Resend outside the window can duplicate                       |
+| 3 fresh journal overwrite     | Predecessor entries kept as `inherited`, adopted when their lock is free                                         | Shown only after an acquire finds the lock free (e.g. next reload)                              |
+| 4 rollback deferred steer     | `clientSubmissions` no longer part of `immutableOwnerInput` (0.49 fields)                                        | None identified                                                                                 |
+| 5 tests                       | Added for each item above, plus a stay-queued receipt with the row absent from the queue cache                   | Live browser/Web Locks/duplicate-tab proof: lab controller                                      |
+| Delta 1 deduped bound resend  | Composer: an admitted or accepted submission is a success (no toast, no restore), both submit actions            | None identified                                                                                 |
+| Delta 3 inherited quota       | Quota fallback also drops resend payloads from inherited entries                                                 | Inherited journals are bounded by count (8), not bytes                                          |
+| Delta 2, 4                    | Recorded follow-ups (draft left after a later success; cross-tab new id; handback keeps agent-only, drops image) | See `PORT-NOTES-rework.md`                                                                      |
 
 No release readiness is inferred from unit/typecheck/build evidence. Stored-format,
 Chrome/Electron Web Locks and packaged native/embedded proof remain separate gates.
