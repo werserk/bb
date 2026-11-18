@@ -170,6 +170,17 @@ export function useCreateThread() {
   return useMutation(createThreadMutationOptions(queryClient));
 }
 
+/** A 4xx answer that proves the server did not admit the submission. */
+function isDefiniteSendRejection(error: unknown): error is BbHttpError {
+  return (
+    error instanceof BbHttpError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.code !== "submission_already_admitted"
+  );
+}
+
 export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     retry: false,
@@ -217,6 +228,11 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
         context.generation !== pendingSendGeneration(queryClient)
       ) {
         context.prediction?.fail();
+        // The scope reset dropped the entry; a definite rejection still
+        // records itself so the composer restores the draft.
+        const { id, clientSubmissionId } = prepareSendRequest(variables);
+        if (clientSubmissionId && isDefiniteSendRejection(_error))
+          pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
         return;
       }
       variables = prepareSendRequest(variables);
@@ -260,12 +276,7 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
             return;
           }
         }
-        if (
-          _error.status >= 400 &&
-          _error.status < 500 &&
-          _error.status !== 408 &&
-          _error.code !== "submission_already_admitted"
-        )
+        if (isDefiniteSendRejection(_error))
           pendingSendOwner(queryClient).fail(
             variables.id,
             variables.clientSubmissionId,

@@ -592,3 +592,47 @@ it("resolves the accepted-turn prediction when an error arrives after the accoun
   await settled;
   expect(displayStatus()).toBe("idle");
 });
+it.each([
+  [
+    "a definite rejection restores the draft",
+    () =>
+      new BbHttpError({
+        status: 422,
+        code: "invalid_request",
+        message: "rejected",
+        body: { error: "rejected" },
+      }),
+    true,
+  ],
+  ["a network error keeps the draft untouched", () => Error("network"), false],
+] as const)(
+  "after an in-flight scope change, %s",
+  async (_name, error, restored) => {
+    const client = createTestQueryClient(),
+      id = crypto.randomUUID();
+    const response = createDeferredPromise<never>();
+    vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+    const settled = new MutationObserver(
+      client,
+      sendThreadMessageMutationOptions(client),
+    )
+      .mutate({
+        id: "thread-1",
+        clientSubmissionId: id,
+        mode: "auto",
+        input: [{ type: "text", text: "scope change", mentions: [] }],
+      })
+      .catch(() => undefined);
+    await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+    const { clearPendingSendScope, settleFailedPendingSend } =
+      await import("../cache-owners/pending-send-owner");
+    clearPendingSendScope(client);
+    response.reject(error());
+    await settled;
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, "thread-1", id, restore)).toBe(
+      restored,
+    );
+    expect(restore).toHaveBeenCalledTimes(restored ? 1 : 0);
+  },
+);
