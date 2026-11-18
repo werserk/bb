@@ -18,6 +18,7 @@ import {
   listEvents,
   listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
+  setQueuedThreadMessageFailureReason,
   setThreadExecutionOverride,
 } from "@bb/db";
 import type { ThreadQueuedMessage } from "@bb/domain";
@@ -1321,6 +1322,126 @@ describe("a queued retry", () => {
           waitingOn: { kind: "superseded" },
         }),
       ]);
+    });
+  });
+});
+
+// werserk fork: a service turn yields only to ordinary rows that will leave
+// the queue by themselves. A row whose retries ran out (`failed_exhausted`) is
+// never claimed automatically again; only the user resends or deletes it, so
+// yielding to it held the service turn forever.
+describe("a service turn behind a failed ordinary row", () => {
+  function queueOrdinaryRow(harness: TestAppHarness, threadId: string) {
+    return createQueuedThreadMessage(harness.db, harness.deps.hub, {
+      threadId,
+      content: textInput("Ordinary follow-up"),
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+    });
+  }
+
+  function queueServiceTurn(harness: TestAppHarness, threadId: string) {
+    return createQueuedThreadMessage(harness.db, harness.deps.hub, {
+      threadId,
+      content: textInput("Check the background tasks"),
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+      serviceTurn: {
+        version: 1,
+        visibility: "hidden",
+        reason: "coordinator-background",
+        origin: { pluginId: "wprojects", senderThreadId: null },
+      },
+    });
+  }
+
+  async function failOrdinaryThenIdle(
+    harness: TestAppHarness,
+    hostId: string,
+    retryDelaysMs: readonly number[],
+  ) {
+    const { thread } = seedFailableThread(harness, hostId);
+    const ordinary = queueOrdinaryRow(harness, thread.id);
+    const failed = setQueuedThreadMessageFailureReason(
+      harness.db,
+      harness.deps.hub,
+      {
+        id: ordinary.id,
+        threadId: thread.id,
+        failureReason: "The message could not be sent.",
+        now: Date.now(),
+        retryDelaysMs,
+      },
+    );
+    applyLoggedThreadLifecycleEvent(harness.deps, {
+      event: { type: "run.succeeded" },
+      threadId: thread.id,
+    });
+    queueServiceTurn(harness, thread.id);
+    return { failed, thread };
+  }
+
+  it("is not held back by a row whose retries ran out", async () => {
+    await withTestHarness(async (harness) => {
+      const { failed, thread } = await failOrdinaryThenIdle(
+        harness,
+        "host-exhausted-not-blocking",
+        [],
+      );
+      expect(failed?.state).toBe("failed_exhausted");
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual([
+        "Do the thing",
+        "Check the background tasks",
+      ]);
+      expect(liveQueue(harness, thread.id)).toEqual([
+        expect.objectContaining({ id: failed?.id, state: "failed_exhausted" }),
+      ]);
+    });
+  });
+
+  it("still waits behind a row with a retry booked", async () => {
+    await withTestHarness(async (harness) => {
+      const { failed, thread } = await failOrdinaryThenIdle(
+        harness,
+        "host-retrying-blocking",
+        [60_000],
+      );
+      expect(failed?.state).toBe("failed_retrying");
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).not.toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual(["Do the thing"]);
     });
   });
 });
