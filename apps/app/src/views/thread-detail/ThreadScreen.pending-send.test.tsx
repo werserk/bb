@@ -7,7 +7,6 @@ import {
   clearPendingSendScope,
 } from "@/hooks/cache-owners/pending-send-owner";
 import { beginSendThreadMessageTransaction } from "@/hooks/cache-owners/thread-runtime-cache-owner";
-import { sdk } from "@/lib/sdk";
 import { MemoryRouter } from "react-router-dom";
 import { expect, it, vi } from "vitest";
 import type { UseThreadTimelineControllerResult } from "@/components/thread/timeline";
