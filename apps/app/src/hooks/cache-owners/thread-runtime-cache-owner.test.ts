@@ -811,6 +811,37 @@ describe("thread runtime cache owner", () => {
     );
   });
 
+  it("shows an auto send on an active thread as a steer row and on an idle thread as a message row", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    const input = [{ type: "text" as const, text: "go", mentions: [] }];
+    for (const [threadId, status, kind] of [
+      ["thread-active", "active", "steer"],
+      ["thread-idle", "idle", "message"],
+    ] as const) {
+      queryClient.setQueryData(threadQueryKey(threadId), {
+        id: threadId,
+        status,
+        updatedAt: 1,
+        runtime: { displayStatus: status },
+      });
+      await beginSendThreadMessageTransaction({
+        queryClient,
+        request: {
+          id: threadId,
+          clientSubmissionId: crypto.randomUUID(),
+          mode: "auto",
+          input,
+        },
+      });
+      expect(
+        pendingSendOwner(queryClient).list(threadId)[0]?.row.turnRequest.kind,
+      ).toBe(kind);
+    }
+  });
+
   it("neither predicts a turn nor begins custody when the queued message is not in the cache", async () => {
     const queryClient = createAppQueryClient({
       defaultOptions: { queries: { gcTime: Infinity, retry: false } },

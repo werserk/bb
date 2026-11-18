@@ -58,6 +58,12 @@ import {
   type ThreadDetailSentMessageEdit,
 } from "./ThreadDetailPromptArea";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
+import {
+  clearPendingSendScope,
+  pendingSendOwner,
+} from "@/hooks/cache-owners/pending-send-owner";
+import { beginSendThreadMessageTransaction } from "@/hooks/cache-owners/thread-runtime-cache-owner";
+import type { SendThreadMessageMutationRequest } from "@/hooks/mutations/mutation-request-types";
 
 vi.mock("@/hooks/usePromptDraftStorage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/usePromptDraftStorage")>()),
@@ -326,6 +332,56 @@ describe("shared draft submission ownership", () => {
       },
     );
   });
+
+  it.each([
+    ["ordinary", false],
+    ["modifier", false],
+    ["ordinary", true],
+    ["modifier", true],
+  ] as const)(
+    "%s submit with a definite=%s failure keeps or restores the draft through the pending owner",
+    async (action, definite) => {
+      const threadId = `thr_fail_${++nextId}`;
+      const draft = draftFor(threadId);
+      const original = { text: "keep me", mentions: [], attachments: [] };
+      draft.setDraft(original);
+      mocks.sendMessageMutateAsync.mockImplementationOnce(
+        async (request: SendThreadMessageMutationRequest) => {
+          await beginSendThreadMessageTransaction({
+            queryClient: testQueryClient,
+            request,
+          });
+          pendingSendOwner(testQueryClient).fail(
+            threadId,
+            request.clientSubmissionId!,
+            definite,
+            definite ? "Not sent" : "Delivery unconfirmed",
+          );
+          throw new Error("send failed");
+        },
+      );
+      const view = openComposer(threadId);
+      try {
+        await act(async () => {
+          await view[action]().catch(() => undefined);
+        });
+        const entries = pendingSendOwner(testQueryClient).list(threadId);
+        if (definite) {
+          expect(draft.getCurrent()).toEqual(original);
+          expect(entries).toHaveLength(0);
+        } else {
+          expect(draft.getCurrent()).toEqual(
+            expect.objectContaining({ text: "" }),
+          );
+          expect(entries).toMatchObject([{ state: "unconfirmed" }]);
+          expect(entries[0]?.request?.clientSubmissionId).toBe(entries[0]?.id);
+        }
+      } finally {
+        clearPendingSendScope(testQueryClient);
+        view.unmount();
+      }
+    },
+  );
 
   it("allows a different thread to submit while one scope is pending", async () => {
     const firstId = `thr_parallel_${++nextId}`;
