@@ -146,6 +146,7 @@ async function send(
   harness: TestAppHarness,
   threadId: string,
   groups = inputGroups,
+  clientSubmissionId?: string,
 ) {
   const thread = getThread(harness.db, threadId);
   if (thread === null) throw new Error("Missing thread");
@@ -153,6 +154,7 @@ async function send(
     systemNotice: null,
     thread,
     payload: {
+      ...(clientSubmissionId ? { clientSubmissionId } : {}),
       mode: "steer",
       input: groups.flat(),
       inputGroups: groups,
@@ -865,6 +867,57 @@ it.each(["input", "groups", "execution", "provenance"])(
     });
   },
 );
+
+it("restores a competing deferred request written without submission membership (0.49 rollback)", async () => {
+  await withTestHarness(async (harness) => {
+    const { thread, environment, host, commands } = fixture(harness, () =>
+      refusal(),
+    );
+    const id = crypto.randomUUID();
+    await send(harness, thread.id, inputGroups, id);
+    await expect
+      .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+      .toBe(1);
+    const source = requests(harness, thread.id).at(-1)!;
+    expect(source.clientSubmissions).toEqual([{ id, inputGroupIndex: 0 }]);
+    // 0.49 dispatched the deferred steer and dropped the membership it
+    // does not know; the refusal is reported after upgrading back.
+    const { clientSubmissions: _dropped, ...withoutMembership } = source;
+    const deferred = turnRequestEventDataSchema.parse({
+      ...withoutMembership,
+      requestId: "creq_2345678956",
+      target: { kind: "new-turn" },
+      deferredFromRequestId: source.requestId,
+    });
+    expect(deferred.clientSubmissions).toBeUndefined();
+    seedEvent(harness.deps, {
+      threadId: thread.id,
+      environmentId: environment.id,
+      sequence:
+        getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+      type: "client/turn/requested",
+      scope: threadScope(),
+      data: deferred,
+    });
+    replay(
+      harness,
+      {
+        ...commands[0]!,
+        requestId: deferred.requestId,
+        target: { mode: "start" },
+      },
+      host.id,
+      false,
+      "competing_turn",
+    );
+    const rejected = listEvents(harness.db, { threadId: thread.id })
+      .filter((e) => e.type === "client/turn/rejected")
+      .map((e) => JSON.parse(e.data))
+      .find((e) => e.requestId === deferred.requestId);
+    expect(rejected).toMatchObject({ reason: "competing_turn" });
+    expect(rejected.deferredToQueuedMessageId).toEqual(expect.any(String));
+  });
+});
 
 function questionResponseFixture(harness: TestAppHarness, threadId: string) {
   const question = createConversationQuestion(harness.db, {

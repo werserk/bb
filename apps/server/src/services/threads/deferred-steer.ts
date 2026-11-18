@@ -64,7 +64,6 @@ function immutableOwnerInput(request: TurnRequestEventData) {
     senderThreadId: request.senderThreadId,
     serviceTurn: request.serviceTurn,
     input: request.input,
-    clientSubmissions: request.clientSubmissions ?? [],
     inputGroups: request.inputGroups ?? [request.input],
     provenance: request.dispatchProvenance,
     questionResponse:
