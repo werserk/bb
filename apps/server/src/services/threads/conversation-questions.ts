@@ -607,8 +607,7 @@ export async function closeConversationQuestion(
   const execution =
     args.action === "withdraw" &&
     !before.self &&
-    (before.question.status === "open" ||
-      before.question.status === "answered")
+    (before.question.status === "open" || before.question.status === "answered")
       ? await buildExecutionOptions(deps, {}, { threadId: args.threadId })
       : null;
   const accepted = await withQuestionResolutionActor(
@@ -641,11 +640,11 @@ export async function closeConversationQuestion(
                 "Question resolution operationId was reused with different content",
                 current,
               );
-            return { question: current, created: false, delivered: false };
+            return { question: current, created: false };
           }
           const status = args.action === "dismiss" ? "dismissed" : "withdrawn";
           if (!call && current.status === status)
-            return { question: current, created: false, delivered: false };
+            return { question: current, created: false };
           if (call?.invocation && current.status !== "open")
             conflict(`Question is ${current.status}`, current);
           const row =
@@ -721,11 +720,7 @@ export async function closeConversationQuestion(
             request,
             attribution: { ...attribution, deliveryId },
           });
-          return {
-            question: rowToQuestion(tx, row),
-            created: true,
-            delivered: deliveryId !== null,
-          };
+          return { question: rowToQuestion(tx, row), created: true };
         },
         { behavior: "immediate" },
       ),
@@ -736,7 +731,7 @@ export async function closeConversationQuestion(
       ["interactions-changed", "queue-changed"],
       { projectId: publicThread(deps.db, args.threadId, true).projectId },
     );
-    if (args.action === "withdraw" && accepted.delivered)
+    if (args.action === "withdraw" && !before.self)
       requestQueuedMessageDispatch(deps, {
         kind: "thread-ready",
         threadId: args.threadId,

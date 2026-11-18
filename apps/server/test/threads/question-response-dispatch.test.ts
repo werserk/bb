@@ -21,7 +21,7 @@ import {
 } from "../../src/services/plugins/plugin-hook-registry.js";
 import { registerQuestionResolutionScope } from "../../src/services/threads/question-resolution-scope.js";
 import { createDeferredPromise } from "@bb/test-helpers";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   answerConversationQuestion,
   closeConversationQuestion,
@@ -118,6 +118,51 @@ function finishSource(
     event: { type: "run.succeeded" },
   });
 }
+/**
+ * Makes a fresh coordinator thread the parent of the asking thread, so its
+ * resolutions are made by someone other than the asker and stay delivered.
+ */
+function seedAncestorActor(
+  h: TestAppHarness,
+  fixture: Awaited<ReturnType<typeof prepareQuestion>>,
+) {
+  const actor = seedThread(h.deps, {
+    projectId: fixture.thread.projectId,
+    environmentId: fixture.environment.id,
+    status: "active",
+  });
+  updateThread(h.db, h.hub, fixture.thread.id, { parentThreadId: actor.id });
+  seedTurnStarted(h.deps, {
+    threadId: actor.id,
+    environmentId: fixture.environment.id,
+    turnId: "actor",
+    providerThreadId: "actor-provider",
+  });
+  const child = getThread(h.db, fixture.thread.id)!;
+  onTestFinished(
+    registerQuestionResolutionScope("wprojects", (_context, accept) =>
+      accept({
+        relationship: "ancestor",
+        role: "coordinator",
+        isCurrent: () => true,
+        hostChain: [child, actor].map((row) => ({
+          id: row.id,
+          projectId: row.projectId,
+          parentThreadId: row.parentThreadId,
+          archived: false,
+        })),
+      }),
+    ),
+  );
+  return {
+    actor,
+    invocation: {
+      threadId: actor.id,
+      turnId: "actor",
+      providerThreadId: "actor-provider",
+    },
+  };
+}
 function requests(h: TestAppHarness, threadId: string) {
   return listEvents(h.db, { threadId }).filter(
     (event) => event.type === "client/turn/requested",
@@ -184,14 +229,12 @@ describe("independent question response dispatch", () => {
         revision: 1,
         action: "withdraw" as const,
       };
+      // The asker's own withdrawal is never delivered; its coordinator's is.
+      const ancestor = seedAncestorActor(h, fixture);
       const call = {
         operationId: "cancel-scope",
         reason: "The accepted scope no longer needs the answer",
-        invocation: {
-          threadId: fixture.thread.id,
-          turnId: fixture.source.turnId,
-          providerThreadId: fixture.source.providerThreadId,
-        },
+        invocation: ancestor.invocation,
       };
       const accepted = await closeConversationQuestion(h.deps, ref, call);
       const retry = await closeConversationQuestion(h.deps, ref, call);
@@ -404,12 +447,11 @@ describe("independent question response dispatch", () => {
 it.each(
   (
     [
+      // A self withdrawal queues nothing (question-self-withdrawal.test.ts).
       { relationship: "self", action: "answer", hooked: false },
-      { relationship: "self", action: "withdraw", hooked: false },
       { relationship: "ancestor", action: "answer", hooked: false },
       { relationship: "ancestor", action: "withdraw", hooked: false },
       { relationship: "self", action: "answer", hooked: true },
-      { relationship: "self", action: "withdraw", hooked: true },
       { relationship: "ancestor", action: "answer", hooked: true },
       { relationship: "ancestor", action: "withdraw", hooked: true },
     ] as const
@@ -429,163 +471,125 @@ it.each(
       vi.useFakeTimers();
       const fixture = await prepareQuestion(h);
       const actor =
-        relationship === "self"
-          ? fixture.thread
-          : seedThread(h.deps, {
-              projectId: fixture.thread.projectId,
-              environmentId: fixture.environment.id,
-              status: "active",
-            });
-      let dispose = () => {};
-      if (relationship === "ancestor") {
-        updateThread(h.db, h.hub, fixture.thread.id, {
-          parentThreadId: actor.id,
+        relationship === "ancestor"
+          ? seedAncestorActor(h, fixture).actor
+          : fixture.thread;
+      if (hooked) {
+        const registry: {
+          [K in PluginHookName]: PluginHookRegistration<K>[];
+        } = {
+          "message.dispatch": [
+            {
+              pluginId: "probe",
+              handler: async () => ({ action: "proceed" }),
+            },
+          ],
+        };
+        setPluginHookProvider({
+          listHooks: (hook) => registry[hook],
+          invokeHook: async (_registration, _label, run) => ({
+            ok: true,
+            value: await run(),
+          }),
+          decisionTimeoutMs: 10000,
         });
-        seedTurnStarted(h.deps, {
+      }
+      const call = {
+        operationId: "dispatch-actor",
+        reason: "Settled by the responsible agent",
+        invocation: {
           threadId: actor.id,
-          environmentId: fixture.environment.id,
-          turnId: "actor",
-          providerThreadId: "actor-provider",
-        });
-        const child = getThread(h.db, fixture.thread.id)!;
-        dispose = registerQuestionResolutionScope(
-          "wprojects",
-          (_context, accept) =>
-            accept({
-              relationship: "ancestor",
-              role: "coordinator",
-              isCurrent: () => true,
-              hostChain: [child, actor].map((row) => ({
-                id: row.id,
-                projectId: row.projectId,
-                parentThreadId: row.parentThreadId,
-                archived: false,
-              })),
-            }),
-        );
-      }
-      try {
-        if (hooked) {
-          const registry: {
-            [K in PluginHookName]: PluginHookRegistration<K>[];
-          } = {
-            "message.dispatch": [
-              {
-                pluginId: "probe",
-                handler: async () => ({ action: "proceed" }),
-              },
-            ],
-          };
-          setPluginHookProvider({
-            listHooks: (hook) => registry[hook],
-            invokeHook: async (_registration, _label, run) => ({
-              ok: true,
-              value: await run(),
-            }),
-            decisionTimeoutMs: 10000,
-          });
-        }
-        const call = {
-          operationId: "dispatch-actor",
-          reason: "Settled by the responsible agent",
-          invocation: {
-            threadId: actor.id,
-            turnId: relationship === "self" ? fixture.source.turnId : "actor",
-            providerThreadId:
-              relationship === "self"
-                ? fixture.source.providerThreadId
-                : "actor-provider",
-          },
-        };
-        const ref = {
-          threadId: fixture.thread.id,
-          questionId: fixture.question.id,
-          revision: 1,
-        };
-        const accepted =
-          action === "answer"
-            ? await answerConversationQuestion(
-                h.deps,
-                { ...ref, answers: { voice: { selected: ["a"] } } },
-                call,
-              )
-            : await closeConversationQuestion(h.deps, { ...ref, action }, call);
-        const delivery = getQueuedThreadMessage(
-          h.db,
-          accepted.resolutionAttribution!.deliveryId!,
-        )!;
-        expect(classifyLocalQuestionAnswer(h.db, [delivery])).toBeUndefined();
-        expect(
-          createAutomaticQueuedMessageGroupEligibility(h.deps, {
-            now: Date.now(),
-            retryingFailure: false,
-            thread: getThread(h.db, fixture.thread.id)!,
-          })([delivery]),
-        ).toBe(false);
-        seedEvent(h.deps, {
-          threadId: fixture.thread.id,
-          environmentId: fixture.environment.id,
+          turnId: relationship === "self" ? fixture.source.turnId : "actor",
+          providerThreadId:
+            relationship === "self"
+              ? fixture.source.providerThreadId
+              : "actor-provider",
+        },
+      };
+      const ref = {
+        threadId: fixture.thread.id,
+        questionId: fixture.question.id,
+        revision: 1,
+      };
+      const accepted =
+        action === "answer"
+          ? await answerConversationQuestion(
+              h.deps,
+              { ...ref, answers: { voice: { selected: ["a"] } } },
+              call,
+            )
+          : await closeConversationQuestion(h.deps, { ...ref, action }, call);
+      const delivery = getQueuedThreadMessage(
+        h.db,
+        accepted.resolutionAttribution!.deliveryId!,
+      )!;
+      expect(classifyLocalQuestionAnswer(h.db, [delivery])).toBeUndefined();
+      expect(
+        createAutomaticQueuedMessageGroupEligibility(h.deps, {
+          now: Date.now(),
+          retryingFailure: false,
+          thread: getThread(h.db, fixture.thread.id)!,
+        })([delivery]),
+      ).toBe(false);
+      seedEvent(h.deps, {
+        threadId: fixture.thread.id,
+        environmentId: fixture.environment.id,
+        providerThreadId: fixture.source.providerThreadId,
+        sequence:
+          listEvents(h.db, { threadId: fixture.thread.id }).at(-1)!.sequence +
+          1,
+        type: "turn/mainRun/updated",
+        scope: turnScope(fixture.source.turnId),
+        data: {
           providerThreadId: fixture.source.providerThreadId,
-          sequence:
-            listEvents(h.db, { threadId: fixture.thread.id }).at(-1)!.sequence +
-            1,
-          type: "turn/mainRun/updated",
-          scope: turnScope(fixture.source.turnId),
-          data: {
-            providerThreadId: fixture.source.providerThreadId,
-            state: "idle",
-          },
+          state: "idle",
+        },
+      });
+      expect(
+        createAutomaticQueuedMessageGroupEligibility(h.deps, {
+          now: Date.now(),
+          retryingFailure: false,
+          thread: getThread(h.db, fixture.thread.id)!,
+        })([delivery]),
+      ).toBe(true);
+      if (!activeMainIdle) finishSource(h, fixture);
+      const before = requests(h, fixture.thread.id).length;
+      if (automatic)
+        await runQueuedMessageDispatch(h.deps, {
+          kind: "thread-ready",
+          threadId: fixture.thread.id,
         });
-        expect(
-          createAutomaticQueuedMessageGroupEligibility(h.deps, {
-            now: Date.now(),
-            retryingFailure: false,
-            thread: getThread(h.db, fixture.thread.id)!,
-          })([delivery]),
-        ).toBe(true);
-        if (!activeMainIdle) finishSource(h, fixture);
-        const before = requests(h, fixture.thread.id).length;
-        if (automatic)
-          await runQueuedMessageDispatch(h.deps, {
-            kind: "thread-ready",
-            threadId: fixture.thread.id,
-          });
-        else
-          await sendQueuedMessageNow(h.deps, {
-            threadId: fixture.thread.id,
-            queuedMessageId: accepted.resolutionAttribution!.deliveryId!,
-            mode: "auto",
-          });
-        expect(requests(h, fixture.thread.id)).toHaveLength(before + 1);
-        const request = turnRequestEventDataSchema.parse(
-          JSON.parse(requests(h, fixture.thread.id).at(-1)!.data),
-        );
-        expect(request.questionResponse).toBeUndefined();
-        expect(providerSends(h).at(-1)).not.toHaveProperty("injectOnly");
-        expect(request.initiator).toBe("agent");
-        expect(request.senderThreadId).toBe(actor.id);
-        const text = request.input.find((part) => part.type === "text");
-        if (text?.type !== "text")
-          throw new Error("Missing native resolution text");
-        const envelope = parseAgentMessageEnvelope(text.text);
-        expect(envelope?.senderThreadId).toBe(actor.id);
-        expect(
-          parseQuestionResolutionNotice(text.text.slice(envelope!.bodyStart))
-            ?.resolution,
-        ).toMatchObject({
-          id: accepted.resolutionAttribution!.id,
-          action,
-          actor: { kind: "agent", threadId: actor.id },
+      else
+        await sendQueuedMessageNow(h.deps, {
+          threadId: fixture.thread.id,
+          queuedMessageId: accepted.resolutionAttribution!.deliveryId!,
+          mode: "auto",
         });
-        expect(
-          readConversationQuestion(h.deps, ref).resolutionDelivery?.kind,
-        ).toBe("submitted");
-        expect(listQueuedThreadMessages(h.db, fixture.thread.id)).toHaveLength(
-          0,
-        );
-      } finally {
-        dispose();
-      }
+      expect(requests(h, fixture.thread.id)).toHaveLength(before + 1);
+      const request = turnRequestEventDataSchema.parse(
+        JSON.parse(requests(h, fixture.thread.id).at(-1)!.data),
+      );
+      expect(request.questionResponse).toBeUndefined();
+      expect(providerSends(h).at(-1)).not.toHaveProperty("injectOnly");
+      expect(request.initiator).toBe("agent");
+      expect(request.senderThreadId).toBe(actor.id);
+      const text = request.input.find((part) => part.type === "text");
+      if (text?.type !== "text")
+        throw new Error("Missing native resolution text");
+      const envelope = parseAgentMessageEnvelope(text.text);
+      expect(envelope?.senderThreadId).toBe(actor.id);
+      expect(
+        parseQuestionResolutionNotice(text.text.slice(envelope!.bodyStart))
+          ?.resolution,
+      ).toMatchObject({
+        id: accepted.resolutionAttribution!.id,
+        action,
+        actor: { kind: "agent", threadId: actor.id },
+      });
+      expect(
+        readConversationQuestion(h.deps, ref).resolutionDelivery?.kind,
+      ).toBe("submitted");
+      expect(listQueuedThreadMessages(h.db, fixture.thread.id)).toHaveLength(0);
     });
   },
 );
