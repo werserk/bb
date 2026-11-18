@@ -25,6 +25,7 @@ export class PendingSendJournal {
   private release: (() => void) | undefined;
   private generation = 0;
   private journalId = "";
+  private pristine = false;
   private hydrate: (entries: unknown[]) => void = () => {};
   constructor(
     private options: {
@@ -48,6 +49,7 @@ export class PendingSendJournal {
     this.controller?.abort();
     this.release?.();
     const generation = ++this.generation;
+    this.pristine = fresh;
     const controller = new AbortController();
     this.controller = controller;
     const { storage, locks, key } = this.options;
@@ -151,6 +153,10 @@ export class PendingSendJournal {
   }
   save(entries: unknown[]) {
     if (this.status !== "owned" && this.status !== "unsaved") return;
+    if (this.pristine) {
+      if (entries.length === 0) return;
+      this.pristine = false;
+    }
     try {
       this.options.storage?.setItem(
         this.options.key,
@@ -171,7 +177,10 @@ export class PendingSendJournal {
     this.acquire(this.options.reload);
   }
   forget() {
-    if (this.status === "owned" || this.status === "unsaved") {
+    if (
+      !this.pristine &&
+      (this.status === "owned" || this.status === "unsaved")
+    ) {
       try {
         this.options.storage?.removeItem(this.options.key);
       } catch {}
