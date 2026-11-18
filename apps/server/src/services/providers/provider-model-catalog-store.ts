@@ -138,6 +138,14 @@ interface CatalogEntry {
   unavailableDetail: string | null;
   refresh: CatalogRefresh | null;
   selectedModels: Map<string, CatalogRefresh & { expiresAt: number }>;
+  pushedView: string;
+  appliedFingerprint: string | null;
+  heldShrink: HeldShrink | null;
+}
+
+interface HeldShrink {
+  models: AvailableModel[];
+  selectedOnlyModels: AvailableModel[];
 }
 
 type RefreshSettlement =
@@ -292,14 +300,36 @@ function currentState(entry: CatalogEntry, fingerprint: string) {
   return { good, failure, servable };
 }
 
+function catalogView(good: CatalogGood): string {
+  return `catalog:${good.modelsJson}\0${good.selectedOnlyModelsJson}`;
+}
+
 function pickerView(entry: CatalogEntry, fingerprint: string): string {
   const { failure, servable } = currentState(entry, fingerprint);
   if (servable !== null) {
-    return `catalog:${servable.modelsJson}\0${servable.selectedOnlyModelsJson}`;
+    return catalogView(servable);
   }
   return failure === null
     ? "none"
     : `error:${failure.code}\0${failure.detail ?? ""}`;
+}
+
+function dropsAppliedModel(
+  entry: CatalogEntry,
+  fingerprint: string,
+  candidate: CatalogGood,
+): boolean {
+  if (entry.appliedFingerprint !== fingerprint) return false;
+  const applied = currentState(entry, fingerprint).servable;
+  if (applied === null) return false;
+  const offered = new Set(
+    [...candidate.models, ...candidate.selectedOnlyModels].map(
+      (model) => model.model,
+    ),
+  );
+  return [...applied.models, ...applied.selectedOnlyModels].some(
+    (model) => !offered.has(model.model),
+  );
 }
 
 function lacksRequiredModel(
@@ -407,13 +437,17 @@ export function createProviderModelCatalogStore(options: {
       entries.set(mapKey, existing);
       return existing;
     }
+    const good = loadStoredGood(deps, key);
     const entry: CatalogEntry = {
       key,
-      good: loadStoredGood(deps, key),
+      good,
       failure: null,
       unavailableDetail: null,
       refresh: null,
       selectedModels: new Map(),
+      pushedView: good === null ? "none" : catalogView(good),
+      appliedFingerprint: good?.fingerprint ?? null,
+      heldShrink: null,
     };
     entries.set(mapKey, entry);
     for (const [victimKey, victim] of entries) {
@@ -438,6 +472,20 @@ export function createProviderModelCatalogStore(options: {
     }, options.pushCoalesceMs);
     timer.unref?.();
     pendingPushByHost.set(hostId, timer);
+  }
+
+  function pushIfVisible(
+    deps: WorkSessionDeps,
+    entry: CatalogEntry,
+    fingerprint: string,
+  ): boolean {
+    const view = pickerView(entry, fingerprint);
+    if (view === entry.pushedView) {
+      return false;
+    }
+    entry.pushedView = view;
+    schedulePush(deps, entry.key.hostId);
+    return true;
   }
 
   function persistGood(
@@ -510,24 +558,49 @@ export function createProviderModelCatalogStore(options: {
       return;
     }
     entry.refresh = null;
-    const before = pickerView(entry, refresh.fingerprint);
     let level: "info" | "warn" | "error" = "info";
     let fields: Record<string, unknown>;
     if (settlement.ok) {
-      entry.good = nextGood(entry, {
+      const candidate = nextGood(entry, {
         fingerprint: refresh.fingerprint,
         models: settlement.models,
         selectedOnlyModels: settlement.selectedOnlyModels,
         fetchedAt: refresh.markedStale ? 0 : now,
       });
-      entry.failure = null;
-      entry.unavailableDetail = null;
-      persistGood(deps, entry.key, entry.good);
       fields = {
         outcome: "success",
         modelCount:
           settlement.models.length + settlement.selectedOnlyModels.length,
       };
+      const held = entry.heldShrink;
+      const confirmed =
+        held !== null &&
+        catalogView(
+          nextGood(entry, {
+            fingerprint: refresh.fingerprint,
+            models: held.models,
+            selectedOnlyModels: held.selectedOnlyModels,
+            fetchedAt: 0,
+          }),
+        ) === catalogView(candidate);
+      if (
+        !confirmed &&
+        dropsAppliedModel(entry, refresh.fingerprint, candidate)
+      ) {
+        entry.heldShrink = {
+          models: settlement.models,
+          selectedOnlyModels: settlement.selectedOnlyModels,
+        };
+        if (entry.good !== null) {
+          entry.good.fetchedAt = 0;
+        }
+        log(level, { ...fields, held: true, changed: false });
+        return;
+      }
+      entry.good = candidate;
+      entry.failure = null;
+      entry.unavailableDetail = null;
+      persistGood(deps, entry.key, entry.good);
     } else {
       const { error } = settlement;
       const errorFields =
@@ -561,10 +634,9 @@ export function createProviderModelCatalogStore(options: {
       level = code === null ? "error" : "warn";
       fields = { outcome: code ?? "failed", ...errorFields };
     }
-    const changed = before !== pickerView(entry, refresh.fingerprint);
-    if (changed) {
-      schedulePush(deps, hostId);
-    }
+    entry.heldShrink = null;
+    entry.appliedFingerprint = refresh.fingerprint;
+    const changed = pushIfVisible(deps, entry, refresh.fingerprint);
     log(level, { ...fields, changed });
   }
 
@@ -697,7 +769,7 @@ export function createProviderModelCatalogStore(options: {
           selectedOnlyModelsJson: JSON.stringify(selectedOnlyModels),
         };
         persistGood(deps, entry.key, entry.good);
-        schedulePush(deps, entry.key.hostId);
+        pushIfVisible(deps, entry, fingerprint);
       } catch (error) {
         deps.logger.warn(
           {
@@ -759,20 +831,19 @@ export function createProviderModelCatalogStore(options: {
             ? args.cwd
             : "",
       });
-      const before = pickerView(entry, launch.fingerprint);
       entry.refresh = null;
       entry.failure = null;
       entry.unavailableDetail = null;
+      entry.heldShrink = null;
       entry.good = nextGood(entry, {
         fingerprint: launch.fingerprint,
         models: args.models,
         selectedOnlyModels: args.selectedOnlyModels,
         fetchedAt: options.now(),
       });
+      entry.appliedFingerprint = launch.fingerprint;
       persistGood(deps, entry.key, entry.good);
-      if (before !== pickerView(entry, launch.fingerprint)) {
-        schedulePush(deps, args.hostId);
-      }
+      pushIfVisible(deps, entry, launch.fingerprint);
     },
 
     async read(deps, args) {

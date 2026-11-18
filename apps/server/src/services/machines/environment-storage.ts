@@ -87,11 +87,7 @@ function encrypt(
   };
 }
 
-export async function decryptMachineEnvironment(
-  dataDir: string,
-  row: EncryptedVariable,
-): Promise<string> {
-  const key = await encryptionKey(dataDir, false);
+function decryptWithKey(key: Buffer, row: EncryptedVariable): string {
   try {
     if (row.encryptionVersion === 1 && row.projectId !== null)
       throw new Error("Invalid legacy scope");
@@ -111,6 +107,25 @@ export async function decryptMachineEnvironment(
     throw new Error(
       `Machine environment variable ${row.name} cannot be decrypted; restore its encryption key or set it again.`,
     );
+  }
+}
+
+export async function decryptMachineEnvironment(
+  dataDir: string,
+  row: EncryptedVariable,
+): Promise<string> {
+  return decryptWithKey(await encryptionKey(dataDir, false), row);
+}
+
+function valueDiffers(
+  key: Buffer,
+  row: EncryptedVariable,
+  value: string,
+): boolean {
+  try {
+    return decryptWithKey(key, row) !== value;
+  } catch {
+    return true;
   }
 }
 
@@ -145,12 +160,50 @@ async function keyForWrite(db: DbConnection, dataDir: string) {
   return encryptionKey(dataDir, existing === undefined);
 }
 
+export interface MachineEnvironmentWriteResult {
+  changed: boolean;
+}
+
+function readStoredVariable(
+  db: DbConnection,
+  projectId: string | null,
+  name: string,
+): EncryptedVariable | null {
+  const row = db
+    .select()
+    .from(environmentVariables)
+    .where(and(scope(projectId), eq(environmentVariables.name, name)))
+    .get();
+  if (row === undefined) return null;
+  const parsed = encryptedSchema.safeParse(row);
+  return parsed.success ? parsed.data : null;
+}
+
+function replaceChanged(
+  key: Buffer | null,
+  currentByName: ReadonlyMap<string, EncryptedVariable>,
+  input: MachineEnvironmentReplace,
+): boolean {
+  const names = new Set(input.variables.map((variable) => variable.name));
+  if (
+    names.size !== currentByName.size ||
+    [...names].some((name) => !currentByName.has(name))
+  )
+    return true;
+  return input.variables.some((variable) => {
+    const existing = currentByName.get(variable.name);
+    if (existing === undefined || existing.note !== variable.note) return true;
+    if (variable.value === null) return false;
+    return key === null || valueDiffers(key, existing, variable.value);
+  });
+}
+
 export function replaceMachineEnvironment(
   db: DbConnection,
   dataDir: string,
   input: MachineEnvironmentReplace,
   projectId: string | null = null,
-): Promise<void> {
+): Promise<MachineEnvironmentWriteResult> {
   return runSerialized(locks, db, async () => {
     const currentByName = new Map(
       readMachineEnvironment(db, projectId).map((row) => [row.name, row]),
@@ -172,10 +225,12 @@ export function replaceMachineEnvironment(
         );
       return { ...existing, note: variable.note };
     });
+    const changed = replaceChanged(key, currentByName, input);
     db.transaction((tx) => {
       tx.delete(environmentVariables).where(scope(projectId)).run();
       for (const row of replacements) save(tx, row);
     });
+    return { changed };
   });
 }
 
@@ -184,10 +239,17 @@ export function setMachineEnvironmentVariable(
   dataDir: string,
   input: MachineEnvironmentSet,
   projectId: string | null,
-): Promise<void> {
+): Promise<MachineEnvironmentWriteResult> {
   return runSerialized(locks, db, async () => {
-    const row = encrypt(await keyForWrite(db, dataDir), input, projectId);
+    const key = await keyForWrite(db, dataDir);
+    const existing = readStoredVariable(db, projectId, input.name);
+    const changed =
+      existing === null ||
+      existing.note !== input.note ||
+      valueDiffers(key, existing, input.value);
+    const row = encrypt(key, input, projectId);
     db.transaction((tx) => save(tx, row));
+    return { changed };
   });
 }
 
@@ -195,10 +257,12 @@ export function deleteMachineEnvironmentVariable(
   db: DbConnection,
   name: string,
   projectId: string | null,
-): Promise<void> {
+): Promise<MachineEnvironmentWriteResult> {
   return runSerialized(locks, db, async () => {
-    db.delete(environmentVariables)
+    const { changes } = db
+      .delete(environmentVariables)
       .where(and(scope(projectId), eq(environmentVariables.name, name)))
       .run();
+    return { changed: changes > 0 };
   });
 }

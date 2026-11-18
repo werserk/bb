@@ -24,6 +24,7 @@ import {
   seedHost,
   seedHostSession,
   seedProjectWithSource,
+  seedSession,
 } from "../helpers/seed.js";
 import { advanceUntilSettled } from "../helpers/fake-timers.js";
 import { requireRegistration } from "../helpers/provider-model-catalogs.js";
@@ -1483,6 +1484,85 @@ describe("resolveSystemExecutionOptions provider model catalog", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+});
+
+describe("provider discovery host lookup warning", () => {
+  const HOST_LOOKUP_WARNING = "Failed to resolve host for provider discovery";
+
+  function captureHostLookupLogs(harness: TestAppHarness) {
+    const warn = vi.fn();
+    const debug = vi.fn();
+    harness.deps.logger = { ...harness.deps.logger, warn, debug };
+    const count = (log: typeof warn) =>
+      log.mock.calls.filter(([, message]) => message === HOST_LOOKUP_WARNING)
+        .length;
+    return { warnings: () => count(warn), debugs: () => count(debug), warn };
+  }
+
+  it("Disconnected host, repeated requests: logs one warning and keeps returning the configured providers", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-discovery-warning-repeated",
+      });
+      harness.hub.unregisterDaemon(session.id);
+      const logs = captureHostLookupLogs(harness);
+
+      const answers: string[][] = [];
+      for (let request = 0; request < 50; request += 1) {
+        answers.push(
+          (await listSystemProviderInfos(harness.deps, { hostId: host.id }))
+            .map((provider) => provider.id)
+            .sort(),
+        );
+      }
+
+      expect(answers[0]).toContain("codex");
+      expect(
+        answers.every((answer) => answer.join() === answers[0]?.join()),
+      ).toBe(true);
+      expect(logs.warnings()).toBe(1);
+      expect(logs.debugs()).toBe(49);
+      expect(
+        logs.warn.mock.calls.find(
+          ([, message]) => message === HOST_LOOKUP_WARNING,
+        )?.[0],
+      ).toMatchObject({
+        errorCode: "host_unavailable",
+        errorDetails: expect.objectContaining({ reason: "disconnected" }),
+      });
+    });
+  });
+
+  it("Host returns and drops again: the next failing request logs one new warning", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-discovery-warning-episode",
+      });
+      harness.hub.unregisterDaemon(session.id);
+      const logs = captureHostLookupLogs(harness);
+
+      await listSystemProviderInfos(harness.deps, { hostId: host.id });
+      await listSystemProviderInfos(harness.deps, { hostId: host.id });
+      expect(logs.warnings()).toBe(1);
+
+      const reconnected = seedSession(harness.deps, host.id, {
+        instanceId: "instance-2",
+      });
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: reconnected.id,
+        handle: () => ({ ok: true, result: providerDiscoveryHealth(false) }),
+      });
+      await listSystemProviderInfos(harness.deps, { hostId: host.id });
+      expect(logs.warnings()).toBe(1);
+
+      harness.hub.unregisterDaemon(reconnected.id);
+      await listSystemProviderInfos(harness.deps, { hostId: host.id });
+      await listSystemProviderInfos(harness.deps, { hostId: host.id });
+      expect(logs.warnings()).toBe(2);
+      expect(logs.debugs()).toBe(2);
     });
   });
 });
