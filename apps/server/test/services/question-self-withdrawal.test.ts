@@ -80,6 +80,29 @@ it("does not deliver or wake the asker when an agent withdraws its own question"
     });
     expect(result.resolutionDelivery).toBeNull();
     expect(listQueuedThreadMessages(server.db, thread.id)).toHaveLength(before);
+    // A retry of the same operation stays quiet too.
+    const retry = await closeConversationQuestion(
+      server.deps,
+      {
+        threadId: thread.id,
+        questionId: card.id,
+        revision: card.revision,
+        action: "withdraw",
+      },
+      {
+        operationId: "self-withdraw",
+        reason: "Superseded by a fresh question",
+        invocation: {
+          threadId: thread.id,
+          turnId: "native",
+          providerThreadId: "p",
+        },
+      },
+    );
+    expect(retry.resolutionAttribution?.id).toBe(
+      result.resolutionAttribution?.id,
+    );
+    expect(listQueuedThreadMessages(server.db, thread.id)).toHaveLength(before);
   } finally {
     await server.close();
   }
