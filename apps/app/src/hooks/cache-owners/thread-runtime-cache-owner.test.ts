@@ -703,6 +703,51 @@ describe("thread runtime cache owner", () => {
     );
   });
 
+  it("invalidates thread, queue and timeline queries after a queued message is sent", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      makeQueuedMessage({ id: "qmsg-1" }),
+    ]);
+    queryClient.setQueryData(threadQueryKey("thread-1"), {
+      id: "thread-1",
+      status: "idle",
+      updatedAt: 1,
+      runtime: { displayStatus: "idle" },
+    });
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeTimelineResponse(),
+    );
+    const request = {
+      id: "thread-1",
+      mode: "auto" as const,
+      queuedMessageId: "qmsg-1",
+    };
+    const transaction = await beginSendQueuedMessageTransaction({
+      queryClient,
+      request,
+    });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    applyQueuedMessageSendResult({
+      queryClient,
+      request,
+      result: { ok: true, delivery: "sent" },
+      transaction,
+    });
+
+    const keys = invalidate.mock.calls.map((call) =>
+      JSON.stringify(call[0]?.queryKey),
+    );
+    expect(keys).toContain(
+      JSON.stringify(threadQueuedMessagesQueryKey("thread-1")),
+    );
+    expect(keys.some((key) => key.includes("threadTimeline"))).toBe(true);
+  });
+
   it("does not duplicate a queued-row steer or overwrite newer thread state after realtime wins", async () => {
     const queryClient = createAppQueryClient({
       defaultOptions: { queries: { gcTime: Infinity, retry: false } },

@@ -60,6 +60,7 @@ import {
   markThreadAcceptedMessageQueriesStale,
   invalidateProjectPromptHistoryQueries,
   invalidateThreadQueueQueries,
+  invalidateThreadQueuedMessageSendQueries,
   invalidateThreadListQueries,
   refetchThreadListsAfterComposerThreadCreate,
 } from "./mutation-cache-effects";
@@ -666,8 +667,10 @@ export function rollbackSendThreadMessageTransaction({
   if (
     transaction?.kind === "accepted-turn" &&
     transaction.generation !== pendingSendGeneration(queryClient)
-  )
+  ) {
+    transaction.prediction.fail();
     return;
+  }
   request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).fail(
@@ -688,8 +691,10 @@ export function applySendThreadMessageSuccess({
   if (
     transaction?.kind === "accepted-turn" &&
     transaction.generation !== pendingSendGeneration(queryClient)
-  )
+  ) {
+    transaction.prediction.fail();
     return;
+  }
   request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).receipt(
@@ -869,7 +874,11 @@ export async function beginSendQueuedMessageTransaction({
     optimisticQueueDataUpdateCount: 0,
     optimisticRowId: pending.id,
     sendGeneration: pendingSendGeneration(queryClient),
-    prediction: null,
+    prediction: predictAcceptedTurnThreadState({
+      createdAt: Date.now(),
+      queryClient,
+      threadId: request.id,
+    }),
     previousQueuedMessages,
   };
 }
@@ -881,13 +890,16 @@ export function rollbackRemoveQueuedMessageTransaction({
   if (
     transaction?.sendGeneration !== undefined &&
     transaction.sendGeneration !== pendingSendGeneration(queryClient)
-  )
+  ) {
+    transaction.prediction?.fail();
     return;
+  }
   if (transaction?.optimisticRowId?.startsWith("queue:")) {
     pendingSendOwner(queryClient).restoreQueue(
       request.id,
       transaction.optimisticRowId,
     );
+    transaction.prediction?.fail();
     return;
   }
   transaction?.prediction?.fail();
@@ -910,8 +922,10 @@ export function applyQueuedMessageSendResult({
   if (
     transaction?.sendGeneration !== undefined &&
     transaction.sendGeneration !== pendingSendGeneration(queryClient)
-  )
+  ) {
+    transaction.prediction?.fail();
     return;
+  }
   if (transaction?.optimisticRowId)
     pendingSendOwner(queryClient).receipt(
       request.id,
@@ -929,6 +943,14 @@ export function applyQueuedMessageSendResult({
           ?.map((row) => row.id),
       },
     );
+  if (result.delivery === "queued") transaction?.prediction?.fail();
+  else {
+    transaction?.prediction?.confirm([], readThreadBack(queryClient));
+    invalidateThreadQueuedMessageSendQueries({
+      queryClient,
+      threadId: request.id,
+    });
+  }
   void refreshPendingSends(queryClient, request.id).catch(() => {});
 }
 
