@@ -414,3 +414,36 @@ it("forget clears only an owned namespace, never a waiting predecessor's journal
   await held;
   expect(removes).toBe(1);
 });
+it("writes the smaller fallback form when storage refuses the full journal", async () => {
+  let grant!: (lock: object | null) => Promise<void>;
+  let value: string | null = null;
+  const journal = new PendingSendJournal({
+    key: "account",
+    reload: false,
+    storage: {
+      getItem: () => value,
+      setItem: (_key, next) => {
+        if (next.includes("resend payload")) throw Error("quota");
+        value = next;
+      },
+      removeItem: () => {},
+    },
+    locks: {
+      request: async (_name, _options, callback) => {
+        grant = callback;
+      },
+    },
+  });
+  journal.start(() => {});
+  const held = grant({});
+  await Promise.resolve();
+  journal.save([{ id: "a", request: "resend payload" }], () => [{ id: "a" }]);
+  expect(journal.status).toBe("owned");
+  expect(JSON.parse(value!).entries).toEqual([{ id: "a" }]);
+  journal.save([{ id: "a", request: "resend payload" }], () => [
+    { id: "a", request: "resend payload" },
+  ]);
+  expect(journal.status).toBe("unsaved");
+  journal.dispose();
+  await held;
+});

@@ -151,21 +151,32 @@ export class PendingSendJournal {
           this.setStatus("unavailable");
       });
   }
-  save(entries: unknown[]) {
+  /**
+   * `fallback` is a smaller form of the same entries (without resend
+   * payloads); it is written when storage refuses `entries`, so a quota
+   * failure never drops the visible entries from the journal.
+   */
+  save(entries: unknown[], fallback?: () => unknown[]) {
     if (this.status !== "owned" && this.status !== "unsaved") return;
     if (this.pristine) {
       if (entries.length === 0) return;
       this.pristine = false;
     }
-    try {
-      this.options.storage?.setItem(
-        this.options.key,
-        JSON.stringify({ version: 1, journalId: this.journalId, entries }),
-      );
-      this.setStatus("owned");
-    } catch {
-      this.setStatus("unsaved");
+    for (const candidate of fallback ? [entries, fallback] : [entries]) {
+      try {
+        this.options.storage?.setItem(
+          this.options.key,
+          JSON.stringify({
+            version: 1,
+            journalId: this.journalId,
+            entries: typeof candidate === "function" ? candidate() : candidate,
+          }),
+        );
+        this.setStatus("owned");
+        return;
+      } catch {}
     }
+    this.setStatus("unsaved");
   }
   hide() {
     ++this.generation;

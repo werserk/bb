@@ -117,11 +117,16 @@ function context(
     });
     current.owner.subscribe(() => {
       if (current.journal && !current.identityPending && !current.resetting)
-        current.journal.save(current.owner.journalEntries());
+        saveJournal(current);
     });
   }
   ensureJournal(client, state);
   return state;
+}
+function saveJournal(state: OwnerContext) {
+  state.journal?.save(state.owner.journalEntries(), () =>
+    state.owner.journalEntries({ requests: false }),
+  );
 }
 function ensureJournal(client: QueryClient, state: OwnerContext) {
   if (typeof window === "undefined" || state.identityPending || state.resetting)
@@ -204,7 +209,7 @@ export function setPendingSendIdentity(
   if (resumed) {
     if (state.resumeWaitingJournal && state.journal?.status === "hidden")
       state.journal.refresh();
-    else state.journal?.save(state.owner.journalEntries());
+    else saveJournal(state);
     state.resumeWaitingJournal = false;
   }
   state.owner.notify();
