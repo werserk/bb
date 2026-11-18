@@ -62,6 +62,17 @@ describe("currentEventLoopWorkLabel", () => {
     await expect(detached).resolves.toBe("plugin:wprojects rpc projectState");
   });
 
+  it("Bounded lineage", () => {
+    const nest = (depth: number): string | null =>
+      depth === 0
+        ? currentEventLoopWorkLabel()
+        : runEventLoopWorkSync(`frame ${depth}`, () => nest(depth - 1));
+    const label = runEventLoopWorkSync("root", () => nest(20));
+    expect(label).toBe(
+      "root > … > frame 6 > frame 5 > frame 4 > frame 3 > frame 2 > frame 1",
+    );
+  });
+
   it("returns null outside any frame", () => {
     expect(currentEventLoopWorkLabel()).toBeNull();
   });

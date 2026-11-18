@@ -33,6 +33,15 @@ interface EventLoopWorkContext {
 }
 
 const currentFrame = new AsyncLocalStorage<EventLoopWorkContext>();
+const lineageLimit = 8;
+
+function childLineage(
+  parent: readonly string[],
+  label: string,
+): readonly string[] {
+  if (parent.length < lineageLimit) return [...parent, label];
+  return [parent[0] ?? label, "…", ...parent.slice(-(lineageLimit - 3)), label];
+}
 const completedInWindow: CompletedEventLoopWork[] = [];
 let nextFrameId = 1;
 let lastCompleted: CompletedEventLoopWork | null = null;
@@ -51,7 +60,7 @@ function enterEventLoopWork(
     parentId: parent?.id ?? null,
     startedAt: performance.now(),
   });
-  return { id, lineage: [...(parent?.lineage ?? []), label] };
+  return { id, lineage: childLineage(parent?.lineage ?? [], label) };
 }
 
 export function currentEventLoopWorkLabel(): string | null {
