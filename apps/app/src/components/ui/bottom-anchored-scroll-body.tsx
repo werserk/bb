@@ -276,6 +276,26 @@ export function BottomAnchoredScrollBody({
     };
   }, [hasFooter]);
 
+  // The footer (composer, its context panel) is sticky over the end of the
+  // timeline. When it grows while the reader is not at the bottom, move the
+  // timeline up by the same amount so nothing slides under it.
+  useLayoutEffect(() => {
+    const scrollFooter = scrollFooterRef.current;
+    if (!scrollFooter || typeof ResizeObserver === "undefined") return;
+    let previous = scrollFooter.getBoundingClientRect().height;
+    const observer = new ResizeObserver(() => {
+      const height = scrollFooter.getBoundingClientRect().height;
+      const delta = height - previous;
+      previous = height;
+      const scrollArea = scrollAreaRef.current;
+      if (!scrollArea || Math.abs(delta) < 1 || positionKeeper.isAttached())
+        return;
+      positionKeeper.scrollTo(scrollArea.scrollTop + delta, "instant");
+    });
+    observer.observe(scrollFooter);
+    return () => observer.disconnect();
+  }, [hasFooter, positionKeeper]);
+
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
     if (!scrollArea) return;
