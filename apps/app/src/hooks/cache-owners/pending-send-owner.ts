@@ -517,9 +517,9 @@ export function settleFailedPendingSend(
 ): boolean {
   const owner = pendingSendOwner(client);
   const entry = owner.list(threadId).find((candidate) => candidate.id === id);
-  if (entry?.state === "unconfirmed") return false;
+  if (entry && entry.state !== "failed") return false;
   const restored = restoreDraft();
-  if (restored && entry?.state === "failed") owner.hide(threadId, id);
+  if (restored && entry) owner.hide(threadId, id);
   return restored;
 }
 export function newPendingSend(
