@@ -77,7 +77,9 @@ first dispatch ends that wait, and on a pending plugin thread that dispatch is
 the queued service turn (yielding to it left a replaced WProjects coordinator
 pending forever). On a thread already provisioning the service turn waits on
 the same condition, and readiness clears every provisioning wait before rows
-are retried, so ordinary rows still go first. By-id readiness
+are retried, so ordinary rows still go first. A Not sent (`superseded`) retry
+is not a blocker either: it is never sent automatically, so yielding to it held
+the service turn until the user sent or deleted it. By-id readiness
 wakes still run admission and convert a cleared plugin or host wait into an
 idle-drainable thread-busy wait when ordinary work blocks delivery. This keeps
 one-shot readiness signals effective after the blocker leaves. Native queue

@@ -1422,10 +1422,15 @@ function ordinaryQueuedMessagesForThread(
         // yielding would be a cycle that keeps the thread pending forever.
         // A thread already provisioning holds the service turn on the same
         // wait, and readiness clears every provisioning wait before either
-        // row is retried, so ordinary rows still go first.
+        // row is retried, so ordinary rows still go first. A `superseded`
+        // retry is never sent automatically, so yielding to it would hold
+        // the service turn until the user sends or deletes it.
         or(
           isNull(ordinary.waitingOn),
-          sql`json_extract(${ordinary.waitingOn}, '$.kind') != 'provisioning'`,
+          notInArray(sql<string>`json_extract(${ordinary.waitingOn}, '$.kind')`, [
+            "provisioning",
+            "superseded",
+          ]),
         ),
       ),
     );
