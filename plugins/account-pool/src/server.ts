@@ -34,6 +34,8 @@ import {
 import { createHub } from "./hub.js";
 import { PoolOperations } from "./operations.js";
 import { accountPoolRpcContract, createRpcHandlers } from "./rpc.js";
+import { codexGenerationRespondContract } from "./generation-contract.js";
+import { createCodexGenerationHandlers } from "./generation.js";
 import { ClaudeOAuthLogin } from "./oauth-login.js";
 import { CodexDeviceLogin } from "./codex-device-login.js";
 import {
@@ -295,6 +297,20 @@ export function createAccountPoolPlugin(
       }
       return operations.hasUsableEnabledAccount(provider);
     };
+    bb.rpc.register(
+      codexGenerationRespondContract,
+      createCodexGenerationHandlers({
+        basePath: HUB_BASE_PATH,
+        canServe: () => canServe("codex", true),
+        tokenFor: (hostId) => hubTokens.forHost(hostId),
+        handle: (request, routePath) => hub.handle(request, "codex", routePath),
+      }),
+      {
+        experimental_discoverable: true,
+        experimental_description:
+          "Account Pooler Codex text generation for provider-codex.",
+      },
+    );
     const markerEntries = (token: string): PoolEnvEntry[] => [
       {
         name: PARENT_URL_ENV,
