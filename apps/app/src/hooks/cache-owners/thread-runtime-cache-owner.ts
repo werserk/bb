@@ -685,13 +685,6 @@ export function rollbackSendThreadMessageTransaction({
   request,
   transaction,
 }: RollbackSendThreadMessageTransactionArgs): void {
-  if (
-    transaction?.kind === "accepted-turn" &&
-    transaction.generation !== pendingSendGeneration(queryClient)
-  ) {
-    transaction.prediction?.fail();
-    return;
-  }
   request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).fail(
@@ -709,13 +702,12 @@ export function applySendThreadMessageSuccess({
   transaction,
   realtimeConnected,
 }: ApplySendThreadMessageSuccessArgs): void {
-  if (
+  // After a scope reset an unacknowledged entry was kept: the receipt still
+  // settles it, but the old scope's caches are left alone.
+  const stale =
     transaction?.kind === "accepted-turn" &&
-    transaction.generation !== pendingSendGeneration(queryClient)
-  ) {
-    transaction.prediction?.fail();
-    return;
-  }
+    transaction.generation !== pendingSendGeneration(queryClient);
+  if (stale) transaction.prediction?.fail();
   request = prepareSendRequest(request);
   if (request.clientSubmissionId)
     pendingSendOwner(queryClient).receipt(
@@ -734,6 +726,7 @@ export function applySendThreadMessageSuccess({
           ?.map((row) => row.id),
       },
     );
+  if (stale) return;
   if (transaction?.kind === "accepted-turn") {
     if (result.delivery === "queued") transaction.prediction?.fail();
     else transaction.prediction?.confirm([], readThreadBack(queryClient));

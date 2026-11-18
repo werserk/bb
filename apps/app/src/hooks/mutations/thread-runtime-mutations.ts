@@ -223,18 +223,11 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
           pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
         return;
       }
-      if (
+      // After a scope reset the entry, if unacknowledged, was kept: settle
+      // it as usual; only the old scope's caches are left alone.
+      const stale =
         context.kind === "accepted-turn" &&
-        context.generation !== pendingSendGeneration(queryClient)
-      ) {
-        context.prediction?.fail();
-        // The scope reset dropped the entry; a definite rejection still
-        // records itself so the composer restores the draft.
-        const { id, clientSubmissionId } = prepareSendRequest(variables);
-        if (clientSubmissionId && isDefiniteSendRejection(_error))
-          pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
-        return;
-      }
+        context.generation !== pendingSendGeneration(queryClient);
       variables = prepareSendRequest(variables);
       if (variables.clientSubmissionId && _error instanceof BbHttpError) {
         if (_error.code === "submission_already_admitted") {
@@ -263,6 +256,8 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
               },
             );
             void refreshPendingSends(queryClient, variables.id).catch(() => {});
+            if (stale && context.kind === "accepted-turn")
+              context.prediction?.fail();
             return;
           }
           if (parsed.success && parsed.data.details.queuedMessageId) {
@@ -276,13 +271,20 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
             return;
           }
         }
-        if (isDefiniteSendRejection(_error))
+        if (isDefiniteSendRejection(_error)) {
+          // Recorded even when the entry is gone, so the composer restores
+          // the draft.
+          pendingSendOwner(queryClient).markRejected(
+            variables.id,
+            variables.clientSubmissionId,
+          );
           pendingSendOwner(queryClient).fail(
             variables.id,
             variables.clientSubmissionId,
             true,
             getHttpErrorBodyMessage(_error) ?? "Not sent",
           );
+        }
       }
       rollbackSendThreadMessageTransaction({
         queryClient,

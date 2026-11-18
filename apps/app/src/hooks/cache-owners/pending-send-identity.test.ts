@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createAppQueryClient } from "@/lib/query-client";
 import { sdk } from "@/lib/sdk";
 import { wsManager } from "@/lib/ws";
+import { seedPendingSendThread } from "@/test/fixtures/pending-send";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
 import { systemConfigQueryKey } from "../queries/query-keys";
 import { bindPendingSendIdentity } from "./pending-send-identity";
@@ -15,6 +16,7 @@ import {
   pendingSendJournal,
   composePendingSends,
   clearPendingSendScope,
+  pendingSendDraftId,
 } from "./pending-send-owner";
 import {
   beginSendThreadMessageTransaction,
@@ -23,6 +25,7 @@ import {
 
 it("clears custody across account payloads via mocked ws/sdk and fences old receipts and status reads", async () => {
   const client = createAppQueryClient();
+  const draft = seedPendingSendThread(client);
   let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
   const off = vi.fn();
   const listener = vi
@@ -79,6 +82,14 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
     await expect(oldSend).rejects.toThrow("scope changed");
     expect(send).not.toHaveBeenCalled();
     expect(pendingSendOwner(client).journalEntries()).toEqual([]);
+    // The unacknowledged text went back to its draft, not to the journal.
+    expect(draft.getCurrent().text).toBe("private A");
+    expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
+      "private A",
+    );
+    expect(pendingSendDraftId("thread-1", draft.getCurrent())).toBe(
+      request.clientSubmissionId,
+    );
     emit(status("b", 3));
     applySendThreadMessageSuccess({
       queryClient: client,
@@ -103,6 +114,7 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
 
 it("erases the owned account journal and rejects a late old-account Web Lock grant", async () => {
   const client = createAppQueryClient();
+  seedPendingSendThread(client);
   window.sessionStorage.clear();
   const grants: {
     signal: AbortSignal | undefined;
@@ -183,6 +195,7 @@ it("erases the owned account journal and rejects a late old-account Web Lock gra
 
 function identityHarness() {
   const client = createAppQueryClient();
+  const draft = seedPendingSendThread(client);
   window.sessionStorage.clear();
   let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
   let connect!: Parameters<typeof wsManager.onConnected>[0];
@@ -217,6 +230,7 @@ function identityHarness() {
   });
   return {
     client,
+    draft,
     reads,
     status,
     reconnect: () => connect({ reconnected: true, disconnectedAt: Date.now() }),
@@ -481,7 +495,12 @@ it("keeps an owned journal through profile uncertainty and saves memory sends wh
     expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
       "during uncertainty",
     );
-    expect(pendingSendOwner(h.client).list()).toEqual([]);
+    // The first unacknowledged text fills the empty draft; the second cannot
+    // overwrite it and stays visible under its own id.
+    expect(h.draft.getCurrent().text).toBe("before uncertainty");
+    expect(pendingSendOwner(h.client).list()).toMatchObject([
+      { row: { text: "during uncertainty" } },
+    ]);
   } finally {
     h.close();
     vi.unstubAllGlobals();

@@ -15,10 +15,12 @@ import {
   clearPendingSendScope,
   settleFailedPendingSend,
   dispatchPendingSend,
+  pendingSendDraftId,
 } from "./pending-send-owner";
 import {
   threadTimelineQueryKey,
   threadQueuedMessagesQueryKey,
+  threadPromptHistoryQueryKey,
 } from "../queries/query-keys";
 import type { SendThreadMessageMutationRequest } from "../mutations/mutation-request-types";
 
@@ -105,7 +107,11 @@ it("does not apply a recovery read after its server scope has been cleared", asy
     client.clear();
     resolve(makeThreadTimelineResponse({ rows: [] }));
     await refresh;
-    expect(pendingSendOwner(client).list()).toEqual([]);
+    // No draft could take the unacknowledged text, so the entry stays, and
+    // the old scope's read changed neither it nor the caches.
+    expect(pendingSendOwner(client).list()).toMatchObject([
+      { state: "sending", row: { text: "owner" } },
+    ]);
     expect(
       client.getQueryData(threadTimelineQueryKey(request.id)),
     ).toBeUndefined();
@@ -585,7 +591,7 @@ it("keeps a failed entry when the draft was not restored", async () => {
   }
 });
 
-it("does not restore the draft while delivery is unconfirmed and lets the same id be resent", async () => {
+it("without an owned journal hands an unconfirmed send back to the draft, bound to its id", async () => {
   const client = createAppQueryClient();
   const request: SendThreadMessageMutationRequest = {
     id: "thread-1",
@@ -593,22 +599,27 @@ it("does not restore the draft while delivery is unconfirmed and lets the same i
     mode: "auto",
     clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a12",
   };
+  const draft = { text: "draft", mentions: [], attachments: [] };
   try {
     await beginSendThreadMessageTransaction({ queryClient: client, request });
     const owner = pendingSendOwner(client);
     const id = request.clientSubmissionId!;
     owner.fail(request.id, id, false, "Delivery unconfirmed");
     const restore = vi.fn(() => true);
-    expect(settleFailedPendingSend(client, request.id, id, restore)).toBe(
-      false,
-    );
-    expect(restore).not.toHaveBeenCalled();
-    expect(owner.list(request.id)[0]?.state).toBe("unconfirmed");
-    expect(owner.resend(request.id, id)).toBe(true);
-    const resent = owner.list(request.id)[0];
-    expect(resent?.state).toBe("sending");
-    expect(resent?.id).toBe(id);
-    expect(owner.resend(request.id, id)).toBe(false);
+    expect(
+      settleFailedPendingSend(client, request.id, id, restore, draft),
+    ).toBe(true);
+    expect(restore).toHaveBeenCalledOnce();
+    expect(owner.list(request.id)).toEqual([]);
+    // Sending the restored draft unchanged reuses the id once, so the server
+    // dedupes it; an edited draft gets a new id.
+    expect(pendingSendDraftId(request.id, { ...draft })).toBe(id);
+    expect(pendingSendDraftId(request.id, draft)).not.toBe(id);
+    owner.fail(request.id, id, false, "Delivery unconfirmed");
+    settleFailedPendingSend(client, request.id, id, () => true, draft);
+    expect(
+      pendingSendDraftId(request.id, { ...draft, text: "draft, edited" }),
+    ).not.toBe(id);
   } finally {
     clearPendingSendScope(client);
     client.clear();
@@ -646,14 +657,14 @@ it("does not restore the draft once the owner has accepted the send", async () =
   }
 });
 
-it("does not restore the draft when the send is unknown to the owner", () => {
+it("hands the text back when the send is unknown to the owner", () => {
   const client = createAppQueryClient();
   try {
     const restore = vi.fn(() => true);
     expect(
       settleFailedPendingSend(client, "thread-1", "missing", restore),
-    ).toBe(false);
-    expect(restore).not.toHaveBeenCalled();
+    ).toBe(true);
+    expect(restore).toHaveBeenCalledOnce();
   } finally {
     client.clear();
   }
@@ -771,7 +782,10 @@ it("returns the server receipt when the account scope changes while the send is 
     clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a13",
   };
   try {
-    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const transaction = await beginSendThreadMessageTransaction({
+      queryClient: client,
+      request,
+    });
     let accept!: (value: { ok: true; delivery: "sent" }) => void;
     const result = dispatchPendingSend(
       client,
@@ -788,7 +802,24 @@ it("returns the server receipt when the account scope changes while the send is 
     clearPendingSendScope(client);
     accept({ ok: true, delivery: "sent" });
     await expect(result).resolves.toEqual({ ok: true, delivery: "sent" });
-    expect(pendingSendOwner(client).list(request.id)).toHaveLength(0);
+    // No draft could take the text, so the entry stayed; its own receipt
+    // settles it without touching the new scope's caches.
+    expect(pendingSendOwner(client).list(request.id)).toMatchObject([
+      { state: "sending" },
+    ]);
+    applySendThreadMessageSuccess({
+      queryClient: client,
+      request,
+      result: { ok: true, delivery: "sent" },
+      transaction,
+      realtimeConnected: true,
+    });
+    expect(
+      pendingSendOwner(client).outcome(request.id, request.clientSubmissionId!),
+    ).toBe("accepted");
+    expect(
+      client.getQueryData(threadPromptHistoryQueryKey(request.id)),
+    ).toBeUndefined();
   } finally {
     clearPendingSendScope(client);
     client.clear();

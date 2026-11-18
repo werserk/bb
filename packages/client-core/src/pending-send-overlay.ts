@@ -106,12 +106,17 @@ export class PendingSendOverlay {
   notify() {
     this.changed();
   }
-  clear() {
+  /** `keep` lists entries that stay (the only copy of their text). */
+  clear(options: { keep?: readonly PendingSend[] } = {}) {
     this.observedRows = new WeakMap();
-    this.entries.clear();
+    for (const [key, entry] of this.entries)
+      if (!options.keep?.includes(entry)) {
+        this.entries.delete(key);
+        this.freshness.delete(key);
+      }
+    if (!options.keep?.length) this.freshness.clear();
     this.settledQueues.clear();
     this.outcomes.clear();
-    this.freshness.clear();
     this.changed();
   }
   parseRecovered(value: unknown): PendingSend | null {

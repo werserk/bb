@@ -594,7 +594,7 @@ it("resolves the accepted-turn prediction when an error arrives after the accoun
 });
 it.each([
   [
-    "a definite rejection restores the draft",
+    "a definite rejection is recorded and restores the draft with a new id",
     () =>
       new BbHttpError({
         status: 422,
@@ -602,12 +602,18 @@ it.each([
         message: "rejected",
         body: { error: "rejected" },
       }),
+    "failed",
+    false,
+  ],
+  [
+    "a network error without an owned journal restores the draft bound to the same id",
+    () => Error("network"),
+    "unconfirmed",
     true,
   ],
-  ["a network error keeps the draft untouched", () => Error("network"), false],
 ] as const)(
   "after an in-flight scope change, %s",
-  async (_name, error, restored) => {
+  async (_name, error, state, bound) => {
     const client = createTestQueryClient(),
       id = crypto.randomUUID();
     const response = createDeferredPromise<never>();
@@ -624,15 +630,30 @@ it.each([
       })
       .catch(() => undefined);
     await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
-    const { clearPendingSendScope, settleFailedPendingSend } =
-      await import("../cache-owners/pending-send-owner");
+    const {
+      clearPendingSendScope,
+      pendingSendDraftId,
+      pendingSendOwner,
+      settleFailedPendingSend,
+    } = await import("../cache-owners/pending-send-owner");
     clearPendingSendScope(client);
+    // No draft could take the text (no window here), so the entry stayed
+    // and the real onError settles it.
+    expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+      { id, state: "sending" },
+    ]);
     response.reject(error());
     await settled;
+    expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+      { id, state },
+    ]);
+    const draft = { text: "scope change", mentions: [], attachments: [] };
     const restore = vi.fn(() => true);
-    expect(settleFailedPendingSend(client, "thread-1", id, restore)).toBe(
-      restored,
-    );
-    expect(restore).toHaveBeenCalledTimes(restored ? 1 : 0);
+    expect(
+      settleFailedPendingSend(client, "thread-1", id, restore, draft),
+    ).toBe(true);
+    expect(restore).toHaveBeenCalledOnce();
+    expect(pendingSendOwner(client).list("thread-1")).toEqual([]);
+    expect(pendingSendDraftId("thread-1", draft) === id).toBe(bound);
   },
 );
