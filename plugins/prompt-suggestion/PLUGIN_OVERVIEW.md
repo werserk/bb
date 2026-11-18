@@ -16,7 +16,7 @@ A foreground visit tracks a thread for ten minutes, with at most eight tracked t
 
 Source-linked task memory separates accepted criteria from proposals, reported progress from evidence, and remaining work from blockers. Context clearing discards earlier memory; bounded history remains explicitly incomplete. Each generation receives the complete owner instructions. Missing instructions fail closed.
 
-All three roles share the configured rolling-hour request budget, preserved across cache clearing and settings reset. Manual help preempts background memory. Memory reserves the final request for foreground work. Failed and cancelled admitted requests still count. There are no automatic retries; the optional **Fallback model** setting is tried once, with the provider's default effort and speed and without session affinity, when the generator model's request fails (for example on an exhausted quota). Diagnostics contain counters and timing, not conversation content. The helper stores no draft or result corpus.
+All three roles share the configured rolling-hour request budget, preserved across cache clearing and settings reset. Manual help preempts background memory. Memory reserves the final request for foreground work. Failed and cancelled admitted requests still count. There are no automatic retries; the optional **Fallback model** setting is tried once, with the provider's default effort and speed and without session affinity, when the generator model's request fails (for example on an exhausted quota); after such a failure the generator model is skipped for five minutes in that plugin process. Diagnostics contain counters and timing, not conversation content. The helper stores no draft or result corpus.
 
 ## CLI and details
 

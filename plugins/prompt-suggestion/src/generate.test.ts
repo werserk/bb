@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
-import { generate } from "./generate.js";
+import { generate, resetPrimaryCooldown } from "./generate.js";
 import { installGenerator } from "./generator-fixture.js";
 
 const config = {
@@ -12,8 +12,11 @@ const config = {
 };
 describe("native generation boundary", () => {
   it("retries once on the fallback model with provider defaults", async () => {
+    resetPrimaryCooldown();
     const host = createFakePluginHost({ pluginId: "prompt-suggestion" });
+    let primaryCalls = 0;
     const model = await installGenerator(host.bb, async () => {
+      primaryCalls++;
       throw new Error("quota exhausted");
     });
     const seen: unknown[] = [];
@@ -61,7 +64,6 @@ describe("native generation boundary", () => {
             fallbackModel: backup,
             reasoningEffort: "low",
             serviceTier: "fast",
-            sessionAffinity: "primary-affinity",
           },
           "context",
           new AbortController().signal,
@@ -74,6 +76,16 @@ describe("native generation boundary", () => {
           experimental_sessionAffinity: null,
         }),
       ]);
+      // While the primary cools down, the fallback is asked directly.
+      await generate(
+        host.bb.experimental_aiServices,
+        { ...config, model, fallbackModel: backup },
+        "context",
+        new AbortController().signal,
+      );
+      expect(primaryCalls).toBe(1);
+      expect(seen).toHaveLength(2);
+      resetPrimaryCooldown();
       await expect(
         generate(
           host.bb.experimental_aiServices,

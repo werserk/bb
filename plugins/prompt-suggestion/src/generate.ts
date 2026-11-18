@@ -45,6 +45,11 @@ export class IncompleteGenerationError extends Error {
   }
 }
 
+// A failing primary (an exhausted quota answers slowly) is skipped for a while
+// so the fallback gets the whole deadline instead of what the primary left.
+const PRIMARY_COOLDOWN_MS = 5 * 60_000;
+const primaryFailedAt = new Map<string, number>();
+
 async function generateValue(
   ai: BbPluginApi["experimental_aiServices"],
   config: GeneratorConfig,
@@ -80,10 +85,25 @@ async function generateValue(
       { signal },
     );
   const fallback = config.fallbackModel?.trim();
-  const result = await request(config.model, true).catch((error: unknown) => {
-    if (signal.aborted || !fallback || fallback === config.model) throw error;
-    return request(fallback, false);
-  });
+  const usable = !!fallback && fallback !== config.model;
+  const failedAt = primaryFailedAt.get(config.model);
+  const cooling =
+    failedAt !== undefined && Date.now() - failedAt < PRIMARY_COOLDOWN_MS;
+  const result =
+    usable && cooling
+      ? await request(fallback, false)
+      : await request(config.model, true).then(
+          (value) => {
+            primaryFailedAt.delete(config.model);
+            return value;
+          },
+          (error: unknown) => {
+            if (signal.aborted) throw error;
+            primaryFailedAt.set(config.model, Date.now());
+            if (!usable) throw error;
+            return request(fallback, false);
+          },
+        );
   measured?.({
     usage: result.usage,
     actualModel: result.actualModel,
@@ -99,6 +119,11 @@ async function generateValue(
   )
     throw new Error("Suggestion response too large");
   return JSON.parse(result.text);
+}
+
+/** Test seam: forget remembered primary failures. */
+export function resetPrimaryCooldown() {
+  primaryFailedAt.clear();
 }
 
 export async function generate(
