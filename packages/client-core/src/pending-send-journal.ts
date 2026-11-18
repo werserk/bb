@@ -44,7 +44,7 @@ export class PendingSendJournal {
     this.hydrate = hydrate;
     this.acquire(this.options.reload);
   }
-  private acquire(reload: boolean) {
+  private acquire(reload: boolean, fresh = false) {
     this.controller?.abort();
     this.release?.();
     const generation = ++this.generation;
@@ -55,27 +55,30 @@ export class PendingSendJournal {
       this.setStatus("unavailable");
       return;
     }
-    try {
-      const raw = storage.getItem(key);
-      const parsed: unknown = raw === null ? null : JSON.parse(raw);
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        "version" in parsed &&
-        parsed.version === 1 &&
-        "journalId" in parsed &&
-        typeof parsed.journalId === "string" &&
-        "entries" in parsed &&
-        Array.isArray(parsed.entries)
-      ) {
-        this.journalId = parsed.journalId;
-      } else if (raw !== null) {
+    if (fresh) this.journalId = crypto.randomUUID();
+    else {
+      try {
+        const raw = storage.getItem(key);
+        const parsed: unknown = raw === null ? null : JSON.parse(raw);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "version" in parsed &&
+          parsed.version === 1 &&
+          "journalId" in parsed &&
+          typeof parsed.journalId === "string" &&
+          "entries" in parsed &&
+          Array.isArray(parsed.entries)
+        ) {
+          this.journalId = parsed.journalId;
+        } else if (raw !== null) {
+          this.setStatus("unavailable");
+          return;
+        } else this.journalId = crypto.randomUUID();
+      } catch {
         this.setStatus("unavailable");
         return;
-      } else this.journalId = crypto.randomUUID();
-    } catch {
-      this.setStatus("unavailable");
-      return;
+      }
     }
     this.setStatus("waiting");
     void locks
@@ -89,21 +92,19 @@ export class PendingSendJournal {
           if (generation !== this.generation || controller.signal.aborted)
             return;
           if (lock === null) {
-            this.journalId = crypto.randomUUID();
-            try {
-              storage.setItem(
-                key,
-                JSON.stringify({
-                  version: 1,
-                  journalId: this.journalId,
-                  entries: [],
-                }),
-              );
-            } catch {
-              this.setStatus("unavailable");
-              return;
-            }
-            this.acquire(false);
+            if (fresh) this.setStatus("unavailable");
+            else this.acquire(false, true);
+            return;
+          }
+          if (fresh) {
+            this.hydrate([]);
+            this.setStatus("owned");
+            await new Promise<void>((resolve) => {
+              this.release = resolve;
+              controller.signal.addEventListener("abort", () => resolve(), {
+                once: true,
+              });
+            });
             return;
           }
           try {

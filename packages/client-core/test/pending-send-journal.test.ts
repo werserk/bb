@@ -288,6 +288,14 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
   expect(names[0]).not.toBe(names[1]);
   expect(waits).toEqual([false, false]);
   expect(hydrated).toEqual([]);
+  expect(JSON.parse(storage.get("account")!)).toMatchObject({
+    journalId: "inherited",
+    entries: ["private pending"],
+  });
+  journal.save(["own"]);
+  const saved = JSON.parse(storage.get("account")!);
+  expect(saved.journalId).not.toBe("inherited");
+  expect(saved.entries).toEqual(["own"]);
   journal.dispose();
   await held;
 });
