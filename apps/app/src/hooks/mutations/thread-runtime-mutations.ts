@@ -249,7 +249,7 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
               parsed.data.details.queuedMessageId,
             );
             void refreshPendingSends(queryClient, variables.id).catch(() => {});
-            if (context?.kind === "accepted-turn") context.prediction.fail();
+            if (context?.kind === "accepted-turn") context.prediction?.fail();
             return;
           }
         }

@@ -923,6 +923,37 @@ describe("thread runtime cache owner", () => {
     );
     expect(composedTimeline(queryClient)?.rows).toEqual([]);
   });
+  it("predicts an accepted turn for immediate sends but not for deferred ones", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    queryClient.setQueryData(threadQueryKey("thread-1"), {
+      id: "thread-1",
+      status: "idle",
+      updatedAt: 1,
+      runtime: { displayStatus: "idle" },
+    });
+    const input = [{ type: "text" as const, text: "later", mentions: [] }];
+    const immediate = await beginSendThreadMessageTransaction({
+      queryClient,
+      request: { id: "thread-1", mode: "auto", input },
+    });
+    const deferred = await beginSendThreadMessageTransaction({
+      queryClient,
+      request: {
+        id: "thread-1",
+        mode: "auto",
+        input,
+        sendAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(
+      immediate.kind === "accepted-turn" && immediate.prediction,
+    ).toBeTruthy();
+    expect(deferred.kind === "accepted-turn" && deferred.prediction).toBeNull();
+  });
   it("moves an optimistic turn into the queue when the server holds an idle send", async () => {
     const queryClient = createAppQueryClient({
       defaultOptions: { queries: { gcTime: Infinity, retry: false } },

@@ -33,7 +33,10 @@ import type {
   UpdateQueuedMessageRequest,
 } from "@bb/server-contract";
 import type { AppCreateThreadRequest } from "@bb/client-core";
-import { OPTIMISTIC_TIMELINE_ROW_ID_PREFIX } from "@bb/client-core";
+import {
+  OPTIMISTIC_TIMELINE_ROW_ID_PREFIX,
+  shouldQueueFollowUpMessage,
+} from "@bb/client-core";
 import { collectPromptAttachments } from "@/lib/prompt-attachments";
 import { prependPromptHistoryEntry } from "@/lib/prompt-history";
 import {
@@ -222,7 +225,7 @@ interface SendThreadMessageAcceptedTurnTransaction {
   optimisticCreatedAt: number;
   optimisticRowId: string;
   generation: number;
-  prediction: ThreadEntityPrediction;
+  prediction: ThreadEntityPrediction | null;
 }
 
 interface SendThreadMessageQueuedTransaction {
@@ -392,6 +395,18 @@ function hasUnmanagedCheckoutIntent(request: AppCreateThreadRequest): boolean {
     request.environment.type === "host" &&
     request.environment.workspace.type === "unmanaged" &&
     request.environment.workspace.branch !== undefined
+  );
+}
+
+function requestWillOptimisticallyQueue(
+  request: SendThreadMessageMutationRequest,
+  thread: ThreadWithRuntime | undefined,
+): boolean {
+  return (
+    (request.sendAt !== undefined && request.sendAt > Date.now()) ||
+    (request.mode === "queue-if-active" &&
+      thread !== undefined &&
+      shouldQueueFollowUpMessage(thread.runtime.displayStatus))
   );
 }
 
@@ -619,12 +634,15 @@ export async function beginSendThreadMessageTransaction({
   const prepared = prepareSendRequest(request);
   request = prepared;
   const createdAt = Date.now();
+  const previousThread = queryClient.getQueryData<ThreadResponse>(
+    threadQueryKey(request.id),
+  );
   const row = buildOptimisticUserMessageRow({
     createdAt,
     input: request.input,
     mode: request.mode,
     threadId: request.id,
-    threadStatus: null,
+    threadStatus: previousThread?.status ?? null,
   });
   row.id = `pending-send-${request.clientSubmissionId}`;
   pendingSendOwner(queryClient).begin(
@@ -652,11 +670,13 @@ export async function beginSendThreadMessageTransaction({
     optimisticCreatedAt: createdAt,
     optimisticRowId: row.id,
     generation: pendingSendGeneration(queryClient),
-    prediction: predictAcceptedTurnThreadState({
-      createdAt,
-      queryClient,
-      threadId: request.id,
-    }),
+    prediction: requestWillOptimisticallyQueue(request, previousThread)
+      ? null
+      : predictAcceptedTurnThreadState({
+          createdAt,
+          queryClient,
+          threadId: request.id,
+        }),
   };
 }
 export function rollbackSendThreadMessageTransaction({
@@ -668,7 +688,7 @@ export function rollbackSendThreadMessageTransaction({
     transaction?.kind === "accepted-turn" &&
     transaction.generation !== pendingSendGeneration(queryClient)
   ) {
-    transaction.prediction.fail();
+    transaction.prediction?.fail();
     return;
   }
   request = prepareSendRequest(request);
@@ -679,7 +699,7 @@ export function rollbackSendThreadMessageTransaction({
       false,
       "Delivery unconfirmed",
     );
-  if (transaction?.kind === "accepted-turn") transaction.prediction.fail();
+  if (transaction?.kind === "accepted-turn") transaction.prediction?.fail();
 }
 export function applySendThreadMessageSuccess({
   queryClient,
@@ -692,7 +712,7 @@ export function applySendThreadMessageSuccess({
     transaction?.kind === "accepted-turn" &&
     transaction.generation !== pendingSendGeneration(queryClient)
   ) {
-    transaction.prediction.fail();
+    transaction.prediction?.fail();
     return;
   }
   request = prepareSendRequest(request);
@@ -714,8 +734,8 @@ export function applySendThreadMessageSuccess({
       },
     );
   if (transaction?.kind === "accepted-turn") {
-    if (result.delivery === "queued") transaction.prediction.fail();
-    else transaction.prediction.confirm([], readThreadBack(queryClient));
+    if (result.delivery === "queued") transaction.prediction?.fail();
+    else transaction.prediction?.confirm([], readThreadBack(queryClient));
   }
   queryClient.setQueryData<PromptHistoryResponse>(
     threadPromptHistoryQueryKey(request.id),
@@ -852,7 +872,9 @@ export async function beginSendQueuedMessageTransaction({
     input: group.flatMap((item) => item.content),
     mode: request.mode,
     threadId: request.id,
-    threadStatus: null,
+    threadStatus:
+      queryClient.getQueryData<ThreadResponse>(threadQueryKey(request.id))
+        ?.status ?? null,
   });
   const id = `queue:${request.queuedMessageId}`;
   const pending = pendingSendOwner(queryClient).begin({
