@@ -109,7 +109,7 @@ export async function handleResponses(
   if (
     !upstream.ok ||
     upstream.body === null ||
-    !(upstream.headers.get("content-type") ?? "").includes("text/event-stream")
+    (upstream.headers.get("content-type") ?? "").includes("json")
   )
     return upstream;
   const result = await collectFinalResponse(upstream.body);
