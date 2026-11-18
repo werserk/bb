@@ -1,17 +1,45 @@
 import { createNodeBbSdk } from "@bb/sdk/node";
 import { readThreadPlan } from "../../src/services/threads/thread-plans.js";
 import { createUserQuestionPayload } from "../helpers/pending-interactions.js";
-import { describe, it, expect } from "vitest";
-import { turnScope, threadScope, toInteractionLifecycle } from "@bb/domain";
+import { describe, it, expect, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import {
+  conversationQuestionPublicationSchema,
+  turnScope,
+  threadScope,
+  toInteractionLifecycle,
+} from "@bb/domain";
+import {
+  deleteThreadEventSuffixInTransaction,
+  getLatestThreadSequence,
+  listPlanHistoryEventRows,
+  setQueuedThreadMessageFailureReason,
+  threads,
+} from "@bb/db";
 import { withTestHarness } from "../helpers/test-app.js";
+import {
+  closeConversationQuestion,
+  publishConversationQuestion,
+} from "../../src/services/threads/conversation-questions.js";
 import {
   seedEnvironment,
   seedHostSession,
   seedProjectWithSource,
+  seedQueuedMessage,
   seedThread,
+  seedThreadFixture,
+  seedThreadRuntimeState,
   seedEvent,
   seedTurnStarted,
 } from "../helpers/seed.js";
+
+vi.mock("@bb/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@bb/db")>();
+  return {
+    ...actual,
+    listPlanHistoryEventRows: vi.fn(actual.listPlanHistoryEventRows),
+  };
+});
 
 describe("canonical thread plans", () => {
   it("reads off-page identities, deduplicates updates and stops at empty clear", async () => {
@@ -321,5 +349,369 @@ it("keeps oversized-turn native input available without guessing a plan step or 
     expect(
       await sdk.threads.interactions.list({ threadId: thread.id }),
     ).toEqual(pendingBefore);
+  });
+});
+
+describe("conditional plan reads", () => {
+  type Harness = Parameters<Parameters<typeof withTestHarness>[0]>[0];
+  type Plans = {
+    plans: Record<string, { readRevision: string } & Record<string, unknown>>;
+    errors: Record<string, string>;
+    unchanged?: Record<string, { revision: number; readRevision: string }>;
+  };
+  const historyReads = vi.mocked(listPlanHistoryEventRows);
+  const post = (h: Harness, body: unknown) =>
+    h.app.request("/api/v1/threads/plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const plans = async (
+    h: Harness,
+    threadIds: string[],
+    known?: Record<string, string>,
+  ): Promise<Plans> => {
+    const res = await post(h, known ? { threadIds, known } : { threadIds });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Plans;
+  };
+  const writePlan = (
+    h: Harness,
+    threadId: string,
+    sequence: number,
+    text: string,
+  ) =>
+    seedEvent(h.deps, {
+      threadId,
+      sequence,
+      type: "item/completed",
+      scope: turnScope("turn"),
+      data: {
+        providerThreadId: "provider",
+        item: {
+          type: "planSteps",
+          id: `p${sequence}`,
+          planId: "plan",
+          status: "completed",
+          steps: [{ id: "step", step: text, status: "active" }],
+        },
+      },
+    });
+  const setup = (h: Harness, status: "idle" | "active" = "idle") => {
+    const { thread } = seedThreadFixture(h, {
+      thread: { providerId: "codex", status },
+    });
+    writePlan(h, thread.id, 1, "Build");
+    return thread;
+  };
+  const tokenOf = async (h: Harness, threadId: string) => {
+    const token = (await plans(h, [threadId])).plans[threadId]?.readRevision;
+    if (token === undefined) throw new Error("missing readRevision");
+    return token;
+  };
+
+  it("Caller without known", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const result = await plans(h, [thread.id]);
+      expect(result).toEqual({
+        errors: {},
+        plans: {
+          [thread.id]: {
+            threadId: thread.id,
+            revision: 1,
+            current: {
+              sourceSeq: 1,
+              updatedAt: expect.any(Number),
+              planId: "plan",
+              items: [
+                {
+                  id: "step",
+                  text: "Build",
+                  status: "in_progress",
+                  interactionIds: [],
+                },
+              ],
+            },
+            previousPlans: [],
+            historyTruncated: false,
+            questionAttention: { total: 0, firstQuestionId: null },
+            ownAttention: "none",
+            attentionInteractionIds: [],
+            unboundInteractionIds: [],
+            readRevision: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+        },
+      });
+      expect(result).not.toHaveProperty("unchanged");
+      expect(readThreadPlan(h.deps, thread)).toEqual(result.plans[thread.id]);
+    });
+  });
+
+  it("Unchanged thread", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const other = seedThread(h.deps, {
+        projectId: thread.projectId,
+        environmentId: thread.environmentId,
+        status: "idle",
+      });
+      writePlan(h, other.id, 1, "Other");
+      const token = await tokenOf(h, thread.id);
+      historyReads.mockClear();
+      const result = await plans(h, [thread.id], { [thread.id]: token });
+      expect(result).toEqual({
+        plans: {},
+        errors: {},
+        unchanged: { [thread.id]: { revision: 1, readRevision: token } },
+      });
+      expect(historyReads).not.toHaveBeenCalled();
+      const mixed = await plans(h, [thread.id, other.id], {
+        [thread.id]: token,
+      });
+      expect(Object.keys(mixed.plans)).toEqual([other.id]);
+      expect(mixed.unchanged).toEqual({
+        [thread.id]: { revision: 1, readRevision: token },
+      });
+      expect(historyReads).toHaveBeenCalled();
+      expect(
+        historyReads.mock.calls.every(([, args]) => args.threadId === other.id),
+      ).toBe(true);
+    });
+  });
+
+  it("Plan appended", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const token = await tokenOf(h, thread.id);
+      writePlan(h, thread.id, 2, "Verify");
+      const result = await plans(h, [thread.id], { [thread.id]: token });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({
+        revision: 2,
+        current: { sourceSeq: 2, items: [{ text: "Verify" }] },
+      });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(token);
+    });
+  });
+
+  it("Question withdrawn", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h, "active");
+      seedThreadRuntimeState(h.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "p",
+        permissionMode: "accept-edits",
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "origin",
+        providerThreadId: "p",
+      });
+      const question = await publishConversationQuestion(h.deps, {
+        threadId: thread.id,
+        source: { turnId: "origin", providerThreadId: "p", callId: "ask" },
+        publication: conversationQuestionPublicationSchema.parse({
+          body: "Context",
+          questions: [
+            {
+              id: "pick",
+              prompt: "Which?",
+              multiSelect: false,
+              allowFreeText: true,
+              options: [
+                { value: "a", label: "A" },
+                { value: "b", label: "B" },
+              ],
+            },
+          ],
+        }),
+      });
+      const before = (await plans(h, [thread.id])).plans[thread.id];
+      expect(before).toMatchObject({
+        questionAttention: { total: 1, firstQuestionId: question.id },
+      });
+      const sequence = getLatestThreadSequence(h.db, { threadId: thread.id });
+      await closeConversationQuestion(h.deps, {
+        threadId: thread.id,
+        questionId: question.id,
+        revision: 1,
+        action: "withdraw",
+      });
+      expect(getLatestThreadSequence(h.db, { threadId: thread.id })).toBe(
+        sequence,
+      );
+      const result = await plans(h, [thread.id], {
+        [thread.id]: before!.readRevision,
+      });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({
+        revision: sequence,
+        questionAttention: { total: 0, firstQuestionId: null },
+      });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(
+        before!.readRevision,
+      );
+    });
+  });
+
+  it("Queued send failed", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const queued = seedQueuedMessage(h.deps, {
+        threadId: thread.id,
+        content: [{ type: "text", text: "later" }],
+      });
+      const token = await tokenOf(h, thread.id);
+      setQueuedThreadMessageFailureReason(h.db, h.hub, {
+        threadId: thread.id,
+        id: queued.id,
+        failureReason: "Provider rejected dispatch",
+        now: Date.now(),
+        retryDelaysMs: [],
+      });
+      const result = await plans(h, [thread.id], { [thread.id]: token });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({
+        revision: 1,
+        ownAttention: "failed",
+      });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(token);
+    });
+  });
+
+  it("Status changed", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const token = await tokenOf(h, thread.id);
+      h.db
+        .update(threads)
+        .set({ status: "error" })
+        .where(eq(threads.id, thread.id))
+        .run();
+      const result = await plans(h, [thread.id], { [thread.id]: token });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({ revision: 1 });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(token);
+    });
+  });
+
+  it("Message edited (tail rewrite)", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      writePlan(h, thread.id, 2, "Verify");
+      const token = await tokenOf(h, thread.id);
+      h.db.transaction((tx) =>
+        deleteThreadEventSuffixInTransaction(tx, {
+          threadId: thread.id,
+          cutoffSequence: 2,
+          oldMaxSequence: 2,
+        }),
+      );
+      writePlan(h, thread.id, 2, "Ship");
+      const result = await plans(h, [thread.id], { [thread.id]: token });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({
+        revision: 2,
+        current: { sourceSeq: 2, items: [{ text: "Ship" }] },
+      });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(token);
+    });
+  });
+
+  it("Attention interaction settled in memory", async () => {
+    await withTestHarness(async (h) => {
+      const { thread } = seedThreadFixture(h, {
+        thread: { providerId: "claude-code", status: "idle" },
+      });
+      seedTurnStarted(h.deps, {
+        threadId: thread.id,
+        turnId: "turn",
+        providerThreadId: "provider",
+      });
+      const created = h.deps.pendingInteractions.registerPendingInteraction({
+        interaction: {
+          threadId: thread.id,
+          turnId: "turn",
+          providerId: "claude-code",
+          providerThreadId: "provider",
+          providerRequestId: "question",
+          payload: createUserQuestionPayload(),
+        },
+      });
+      if (created.outcome === "rejected") throw new Error(created.reason);
+      const before = (await plans(h, [thread.id])).plans[thread.id];
+      expect(before).toMatchObject({
+        attentionInteractionIds: [created.interaction.id],
+      });
+      vi.spyOn(
+        h.deps.pendingInteractions,
+        "listPendingThreadInteractions",
+      ).mockReturnValue([]);
+      const result = await plans(h, [thread.id], {
+        [thread.id]: before!.readRevision,
+      });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]).toMatchObject({
+        revision: before!.revision,
+        attentionInteractionIds: [],
+      });
+      expect(result.plans[thread.id]?.readRevision).not.toBe(
+        before!.readRevision,
+      );
+    });
+  });
+
+  it("Unknown token", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const token = await tokenOf(h, thread.id);
+      const result = await plans(h, [thread.id], {
+        [thread.id]: "0".repeat(64),
+      });
+      expect(result.unchanged).toEqual({});
+      expect(result.plans[thread.id]?.readRevision).toBe(token);
+    });
+  });
+
+  it("Missing id with known", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const missing = "thr_2222222222";
+      const token = await tokenOf(h, thread.id);
+      const without = await plans(h, [missing]);
+      expect(without.errors[missing]).toEqual(expect.any(String));
+      const result = await plans(h, [missing, thread.id], {
+        [missing]: token,
+        [thread.id]: token,
+      });
+      expect(result).toEqual({
+        plans: {},
+        errors: without.errors,
+        unchanged: { [thread.id]: { revision: 1, readRevision: token } },
+      });
+    });
+  });
+
+  it("refuses an oversized or malformed known with 400", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const alphabet = "23456789abcdefghijkmnpqrstuvwxyz";
+      const known = Object.fromEntries(
+        Array.from({ length: 41 }, (_, i) => [
+          `thr_aaaaaaaa${alphabet[Math.floor(i / 32)]}${alphabet[i % 32]}`,
+          "token",
+        ]),
+      );
+      expect(Object.keys(known)).toHaveLength(41);
+      for (const body of [
+        { threadIds: [thread.id], known },
+        { threadIds: [thread.id], known: { "not-a-thread": "token" } },
+        { threadIds: [thread.id], known: { [thread.id]: "x".repeat(129) } },
+        { threadIds: [thread.id], known: { [thread.id]: 1 } },
+      ])
+        expect((await post(h, body)).status).toBe(400);
+    });
   });
 });

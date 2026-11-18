@@ -2059,6 +2059,34 @@ describe("server-contract clients", () => {
     });
   });
 
+  it("bounds known plan revisions on the plans request", () => {
+    const schema = contract.publicApiRoutes.threads.plans.request.schema;
+    const id = "thr_aaaaaaaaaa";
+    const alphabet = "23456789abcdefghijkmnpqrstuvwxyz";
+    const ids = (count: number) =>
+      Array.from(
+        { length: count },
+        (_, i) =>
+          `thr_aaaaaaaa${alphabet[Math.floor(i / 32)]}${alphabet[i % 32]}`,
+      );
+    expect(schema.safeParse({ threadIds: [id] }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        threadIds: [id],
+        known: Object.fromEntries(ids(40).map((key) => [key, "a".repeat(128)])),
+      }).success,
+    ).toBe(true);
+    for (const known of [
+      Object.fromEntries(ids(41).map((key) => [key, "token"])),
+      { "not-a-thread": "token" },
+      { [id]: "" },
+      { [id]: "a".repeat(129) },
+      { [id]: 1 },
+      [],
+    ])
+      expect(schema.safeParse({ threadIds: [id], known }).success).toBe(false);
+  });
+
   it("keeps contract optional fields on an explicit allowlist", () => {
     const optionalFieldPaths = collectOptionalFieldPaths({
       apiErrorSchema: contract.apiErrorSchema,
