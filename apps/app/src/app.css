@@ -168,8 +168,10 @@
   }
 
   /* Native <select> popups: a transparent select gets a light OS list even
-   * under color-scheme: dark (Electron on Linux), so options carry the theme. */
-  :where(option, optgroup) {
+   * under color-scheme: dark (Electron on Linux), so options carry the theme.
+   * Not :where(): preflight's optgroup reset (0,0,1) would win over it. */
+  option,
+  optgroup {
     background-color: var(--popover);
     color: var(--popover-foreground);
   }
