@@ -447,3 +447,40 @@ it("writes the smaller fallback form when storage refuses the full journal", asy
   journal.dispose();
   await held;
 });
+it("forget on a scope change removes the stored key even before a fresh journal's first save", async () => {
+  const names: string[] = [];
+  let stored: string | null = JSON.stringify({
+    version: 1,
+    journalId: "predecessor",
+    entries: [{ id: "old scope message" }],
+  });
+  const journal = new PendingSendJournal({
+    key: "account",
+    reload: false,
+    storage: {
+      getItem: () => stored,
+      setItem: (_key, next) => {
+        stored = next;
+      },
+      removeItem: () => {
+        stored = null;
+      },
+    },
+    locks: {
+      request: async (name, _options, callback) => {
+        names.push(name);
+        if (names.length === 1) await callback(null);
+        else void callback({});
+      },
+    },
+  });
+  journal.start(() => {});
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(names).toHaveLength(2);
+  expect(journal.status).toBe("owned");
+  journal.save([]);
+  expect(stored).toContain("old scope message");
+  journal.forget();
+  expect(stored).toBeNull();
+});

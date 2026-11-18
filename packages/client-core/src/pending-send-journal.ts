@@ -187,11 +187,16 @@ export class PendingSendJournal {
   refresh() {
     this.acquire(this.options.reload);
   }
+  /**
+   * Scope change (sign-out, identity switch): remove this scope's stored
+   * entries. A pristine journal owns its fresh lock while the stored key
+   * still holds a previous document's entries (an unloading predecessor, or
+   * the copy a duplicated tab inherited). Session storage is per tab, so
+   * removing that key cannot touch another live document's journal. A
+   * waiting journal owns nothing and never touches storage.
+   */
   forget() {
-    if (
-      !this.pristine &&
-      (this.status === "owned" || this.status === "unsaved")
-    ) {
+    if (this.status === "owned" || this.status === "unsaved") {
       try {
         this.options.storage?.removeItem(this.options.key);
       } catch {}
