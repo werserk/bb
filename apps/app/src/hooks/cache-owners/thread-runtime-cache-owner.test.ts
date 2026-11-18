@@ -1,4 +1,5 @@
 import { composePendingSends, pendingSendOwner } from "./pending-send-owner";
+import { getThreadListInvalidationQueryKeys } from "./cache-invalidation-groups";
 import type { ThreadListEntry, ThreadQueuedMessage } from "@bb/domain";
 import type {
   SidebarBootstrapResponse,
@@ -703,7 +704,60 @@ describe("thread runtime cache owner", () => {
     );
   });
 
-  it("invalidates thread, queue and timeline queries after a queued message is sent", async () => {
+  it("reads the thread back and invalidates thread, queue, timeline and list queries after a queued message is sent", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      makeQueuedMessage({ id: "qmsg-1" }),
+    ]);
+    queryClient.setQueryData(threadQueryKey("thread-1"), {
+      id: "thread-1",
+      status: "idle",
+      updatedAt: 1,
+      runtime: { displayStatus: "idle" },
+    });
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeTimelineResponse(),
+    );
+    const request = {
+      id: "thread-1",
+      mode: "auto" as const,
+      queuedMessageId: "qmsg-1",
+    };
+    const transaction = await beginSendQueuedMessageTransaction({
+      queryClient,
+      request,
+    });
+    expect(transaction.prediction).toBeTruthy();
+    const confirm = vi.spyOn(transaction.prediction!, "confirm");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    applyQueuedMessageSendResult({
+      queryClient,
+      request,
+      result: { ok: true, delivery: "sent" },
+      transaction,
+    });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const keys = invalidate.mock.calls.map((call) =>
+      JSON.stringify(call[0]?.queryKey),
+    );
+    expect(keys).toContain(
+      JSON.stringify(threadQueuedMessagesQueryKey("thread-1")),
+    );
+    expect(keys.some((key) => key.includes("threadTimeline"))).toBe(true);
+    for (const listKey of getThreadListInvalidationQueryKeys({
+      projectId: undefined,
+      queryClient,
+    }))
+      expect(keys).toContain(JSON.stringify(listKey));
+  });
+
+  it("invalidates thread lists and timeline but keeps the queue custody when a queued message stays queued", async () => {
     const queryClient = createAppQueryClient({
       defaultOptions: { queries: { gcTime: Infinity, retry: false } },
       showMutationErrorToasts: false,
@@ -735,17 +789,51 @@ describe("thread runtime cache owner", () => {
     applyQueuedMessageSendResult({
       queryClient,
       request,
-      result: { ok: true, delivery: "sent" },
+      result: {
+        ok: true,
+        delivery: "queued",
+        queuedMessage: makeQueuedMessage({ id: "qmsg-1", updatedAt: 2 }),
+      },
       transaction,
     });
 
     const keys = invalidate.mock.calls.map((call) =>
       JSON.stringify(call[0]?.queryKey),
     );
-    expect(keys).toContain(
+    expect(keys.some((key) => key.includes("threadTimeline"))).toBe(true);
+    for (const listKey of getThreadListInvalidationQueryKeys({
+      projectId: undefined,
+      queryClient,
+    }))
+      expect(keys).toContain(JSON.stringify(listKey));
+    expect(keys).not.toContain(
       JSON.stringify(threadQueuedMessagesQueryKey("thread-1")),
     );
-    expect(keys.some((key) => key.includes("threadTimeline"))).toBe(true);
+  });
+
+  it("neither predicts a turn nor begins custody when the queued message is not in the cache", async () => {
+    const queryClient = createAppQueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+      showMutationErrorToasts: false,
+    });
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), []);
+    queryClient.setQueryData(threadQueryKey("thread-1"), {
+      id: "thread-1",
+      status: "idle",
+      updatedAt: 1,
+      runtime: { displayStatus: "idle" },
+    });
+    const transaction = await beginSendQueuedMessageTransaction({
+      queryClient,
+      request: {
+        id: "thread-1",
+        mode: "auto",
+        queuedMessageId: "missing",
+      },
+    });
+    expect(transaction.prediction).toBeNull();
+    expect(transaction.optimisticRowId).toBeNull();
+    expect(pendingSendOwner(queryClient).list("thread-1")).toHaveLength(0);
   });
 
   it("does not duplicate a queued-row steer or overwrite newer thread state after realtime wins", async () => {

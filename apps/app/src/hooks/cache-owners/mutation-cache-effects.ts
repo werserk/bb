@@ -167,6 +167,23 @@ export function invalidateThreadQueueQueries({
   });
 }
 
+export function invalidateThreadQueuedMessageStayedQueuedQueries({
+  queryClient,
+  threadId,
+}: ThreadArg): void {
+  invalidateQueryKeys({
+    queryClient,
+    queryKeys: [
+      ...getThreadDetailInvalidationQueryKeys({ threadId }),
+      ...getThreadTimelineInvalidationQueryKeys({ threadId }),
+      ...getThreadListInvalidationQueryKeys({
+        projectId: undefined,
+        queryClient,
+      }),
+    ],
+  });
+}
+
 export function invalidateThreadQueuedMessageSendQueries({
   queryClient,
   threadId,

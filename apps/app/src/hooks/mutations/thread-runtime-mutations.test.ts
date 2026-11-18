@@ -399,7 +399,7 @@ describe("thread runtime mutations", () => {
 
     expect(
       queryClient.getQueryData(threadQueuedMessagesQueryKey("thread-1")),
-    ).toEqual([queuedMessage]);
+    ).toEqual([provisioningQueuedMessage]);
     expect(composePendingSends(queryClient, "thread-1").queue).toEqual([
       provisioningQueuedMessage,
     ]);
