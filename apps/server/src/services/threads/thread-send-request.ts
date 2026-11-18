@@ -1,6 +1,7 @@
-import { guardSubmission } from "./submission-admission.js";
-import { listStoredEventRows } from "@bb/db";
-import { turnRequestEventDataSchema } from "@bb/domain";
+import {
+  findRequestedSubmission,
+  guardSubmission,
+} from "./submission-admission.js";
 import {
   isStandaloneBuiltinClearCommand,
   isStandaloneBuiltinCompactCommand,
@@ -110,30 +111,8 @@ export async function acceptThreadSendRequest(
     if (result.delivery === "queued") return { ...result, submissionIds: [id] };
     if (isStandaloneBuiltinClearCommand(args.payload.input))
       return { ...result, submissionIds: [id], command: true as const };
-    const rows = listStoredEventRows(deps.db, {
-      threadId: args.thread.id,
-      types: ["client/turn/requested"],
-      limit: 1000,
-      order: "desc",
-    });
-    for (const row of rows) {
-      const request = turnRequestEventDataSchema.safeParse(
-        JSON.parse(row.data),
-      );
-      if (
-        request.success &&
-        request.data.clientSubmissions?.some((entry) => entry.id === id)
-      )
-        return {
-          ...result,
-          submissionIds: [id],
-          requested: {
-            requestId: request.data.requestId,
-            sequence: row.sequence,
-          },
-        };
-    }
-    return result;
+    const { requested } = findRequestedSubmission(deps.db, args.thread.id, id);
+    return requested ? { ...result, submissionIds: [id], requested } : result;
   };
   return id
     ? guardSubmission(deps.db, args.thread.id, id, args.payload, send)

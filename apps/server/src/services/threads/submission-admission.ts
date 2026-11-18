@@ -27,6 +27,32 @@ export function assertSubmissionNotAdmitted(
       "Submission already admitted",
       { details: { queuedMessageId: queue.id, threadId: queue.threadId } },
     );
+  const scan = findRequestedSubmission(db, threadId, id, afterSequence);
+  if (scan.requested)
+    throw new ApiError(
+      409,
+      "submission_already_admitted",
+      "Submission already admitted",
+      { details: { requested: scan.requested } },
+    );
+  return {
+    scannedRows: scan.scannedRows,
+    scannedBytes: scan.scannedBytes,
+    parsedRows: scan.parsedRows,
+  };
+}
+/**
+ * The newest `client/turn/requested` event (of the last 1000) that admitted
+ * submission `id`. A row whose JSON names `id` contains it literally, unless
+ * the text uses a \u escape (the only other JSON spelling of [0-9A-Za-z-]),
+ * so other rows skip JSON and schema parsing.
+ */
+export function findRequestedSubmission(
+  db: DbQueryConnection,
+  threadId: string,
+  id: string,
+  afterSequence?: number,
+) {
   const rows = listStoredEventRows(db, {
     threadId,
     types: ["client/turn/requested"],
@@ -34,29 +60,35 @@ export function assertSubmissionNotAdmitted(
     order: "desc",
     ...(afterSequence === undefined ? {} : { afterSequence }),
   });
+  const literal = /^[0-9A-Za-z-]+$/u.test(id);
   let scannedBytes = 0;
+  let parsedRows = 0;
   for (const row of rows) {
     scannedBytes += Buffer.byteLength(row.data);
+    if (literal && !row.data.includes(id) && !row.data.includes("\\u"))
+      continue;
+    parsedRows++;
     const request = turnRequestEventDataSchema.safeParse(JSON.parse(row.data));
     if (
       request.success &&
       request.data.clientSubmissions?.some((entry) => entry.id === id)
     )
-      throw new ApiError(
-        409,
-        "submission_already_admitted",
-        "Submission already admitted",
-        {
-          details: {
-            requested: {
-              requestId: request.data.requestId,
-              sequence: row.sequence,
-            },
-          },
+      return {
+        requested: {
+          requestId: request.data.requestId,
+          sequence: row.sequence,
         },
-      );
+        scannedRows: rows.length,
+        scannedBytes,
+        parsedRows,
+      };
   }
-  return { scannedRows: rows.length, scannedBytes };
+  return {
+    requested: undefined,
+    scannedRows: rows.length,
+    scannedBytes,
+    parsedRows,
+  };
 }
 const floors = new WeakMap<object, Map<string, number>>();
 export function submissionAdmissionFloor(
