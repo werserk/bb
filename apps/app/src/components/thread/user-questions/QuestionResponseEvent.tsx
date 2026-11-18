@@ -20,6 +20,7 @@ import {
 import {
   QuestionResponseBody,
   questionResponseClass,
+  questionWithdrawnClass,
 } from "./QuestionResponseBody";
 import {
   QuestionNavigationFeedback,
@@ -87,6 +88,7 @@ export function QuestionResponseEvent({
   } catch {
     matches = false;
   }
+  const withdrawn = response.resolution?.action === "withdraw";
   const delivery =
     response.resolution?.action === "withdraw"
       ? question?.resolutionDelivery
@@ -98,9 +100,10 @@ export function QuestionResponseEvent({
       id={questionResponseId(threadId, response.questionId)}
       tabIndex={-1}
       data-question-response=""
-      className={questionResponseClass}
+      className={withdrawn ? questionWithdrawnClass : questionResponseClass}
     >
       <QuestionResponseBody
+        quiet={withdrawn}
         response={response}
         timestamp={timestamp}
         resolution={matches ? acceptedResolution : null}

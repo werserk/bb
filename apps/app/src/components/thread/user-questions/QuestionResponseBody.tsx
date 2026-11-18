@@ -12,16 +12,26 @@ import {
 export const questionResponseClass =
   "ml-auto min-w-0 w-[calc(100%-0.75rem)] max-w-xl space-y-2 rounded-xl rounded-tr-sm border border-timeline-accent/30 bg-timeline-accent/14 px-3 pt-2.5 pb-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent";
 
+/**
+ * A withdrawal is a fact about a card, not something the owner said, so it
+ * sits left-aligned in neutral grey instead of the right-aligned accent bubble
+ * an answer gets.
+ */
+export const questionWithdrawnClass =
+  "min-w-0 w-full max-w-xl space-y-2 rounded-xl border border-border bg-transparent px-3 pt-2.5 pb-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent";
+
 export function QuestionResponseBody({
   response,
   timestamp,
   footer,
   resolution,
+  quiet = false,
 }: {
   response: QuestionResponseSnapshot;
   timestamp?: number;
   footer?: ReactNode;
   resolution?: QuestionResolutionAttribution | null;
+  quiet?: boolean;
 }) {
   const single = response.publication.questions.length === 1;
   const prompt = response.publication.questions[0]?.prompt
@@ -31,8 +41,8 @@ export function QuestionResponseBody({
     <>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon
-          name="CircleCheck"
-          className="size-3.5 shrink-0 text-timeline-accent"
+          name={quiet ? "CircleX" : "CircleCheck"}
+          className={`size-3.5 shrink-0 ${quiet ? "text-muted-foreground" : "text-timeline-accent"}`}
           aria-hidden="true"
         />
         <span className="font-semibold text-foreground">
@@ -53,7 +63,7 @@ export function QuestionResponseBody({
       {single ? (
         <blockquote
           title={prompt}
-          className="line-clamp-1 border-l-2 border-timeline-accent/40 pl-2.5 text-xs text-muted-foreground sm:line-clamp-2"
+          className={`line-clamp-1 border-l-2 pl-2.5 text-xs text-muted-foreground sm:line-clamp-2 ${quiet ? "border-border" : "border-timeline-accent/40"}`}
         >
           {prompt}
         </blockquote>
@@ -93,7 +103,9 @@ export function QuestionResponseBody({
         />
       ) : null}
       {footer ? (
-        <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-3 border-t border-timeline-accent/18 text-xs text-muted-foreground pointer-coarse:min-h-11">
+        <div
+          className={`flex min-h-9 flex-wrap items-center justify-between gap-x-3 border-t text-xs text-muted-foreground pointer-coarse:min-h-11 ${quiet ? "border-border" : "border-timeline-accent/18"}`}
+        >
           {footer}
         </div>
       ) : null}
