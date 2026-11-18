@@ -572,11 +572,6 @@ export function dispatchPendingSend(
         throw Error("Pending send scope changed");
       return send();
     })
-    .then((result) => {
-      if (state.generation !== generation)
-        throw Error("Pending send scope changed");
-      return result;
-    })
     .finally(() => {
       for (const key of keys) active!.delete(key);
     });

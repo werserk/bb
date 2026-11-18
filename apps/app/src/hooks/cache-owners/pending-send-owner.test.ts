@@ -13,6 +13,7 @@ import {
   refreshPendingSends,
   clearPendingSendScope,
   settleFailedPendingSend,
+  dispatchPendingSend,
 } from "./pending-send-owner";
 import {
   threadTimelineQueryKey,
@@ -622,6 +623,39 @@ it("restores the draft when no pending entry exists for the send", () => {
     ).toBe(true);
     expect(restore).toHaveBeenCalledTimes(1);
   } finally {
+    client.clear();
+  }
+});
+
+it("returns the server receipt when the account scope changes while the send is in flight", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "in flight", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a13",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    let accept!: (value: { ok: true; delivery: "sent" }) => void;
+    const result = dispatchPendingSend(
+      client,
+      request.id,
+      request.clientSubmissionId!,
+      request,
+      [],
+      () =>
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+    );
+    await Promise.resolve();
+    clearPendingSendScope(client);
+    accept({ ok: true, delivery: "sent" });
+    await expect(result).resolves.toEqual({ ok: true, delivery: "sent" });
+    expect(pendingSendOwner(client).list(request.id)).toHaveLength(0);
+  } finally {
+    clearPendingSendScope(client);
     client.clear();
   }
 });
