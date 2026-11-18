@@ -3,6 +3,7 @@ import { sdk } from "@/lib/sdk";
 import { composerSuggestionContext } from "@/lib/composer-suggestion-host";
 import { useThreadTimeline } from "@/hooks/queries/thread-panel-queries";
 import {
+  pendingSendAdmitted,
   pendingSendDraftId,
   settleFailedPendingSend,
 } from "@/hooks/cache-owners/pending-send-owner";
@@ -1349,6 +1350,17 @@ export function ThreadDetailPromptArea({
           }
         }
       } catch (nextError) {
+        if (
+          pendingSendAdmitted(
+            queryClient,
+            thread.id,
+            clientSubmissionId,
+            nextError,
+          )
+        ) {
+          if (!isQueuingMessage) setFullHistoryThreadId(null);
+          return;
+        }
         settleFailedPendingSend(
           queryClient,
           thread.id,
@@ -1426,6 +1438,15 @@ export function ThreadDetailPromptArea({
                     : { pluginSubmission }),
                 });
               } catch (nextError) {
+                if (
+                  pendingSendAdmitted(
+                    queryClient,
+                    thread.id,
+                    clientSubmissionId,
+                    nextError,
+                  )
+                )
+                  return;
                 settleFailedPendingSend(
                   queryClient,
                   thread.id,

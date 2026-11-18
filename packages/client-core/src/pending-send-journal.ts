@@ -36,6 +36,12 @@ function inheritedOf(stored: unknown): InheritedJournal[] {
       Array.isArray(item.entries),
   );
 }
+function withoutRequest(entry: unknown) {
+  if (!entry || typeof entry !== "object" || !("request" in entry))
+    return entry;
+  const { request: _request, ...visible } = entry;
+  return visible;
+}
 export type JournalStatus =
   | "waiting"
   | "owned"
@@ -231,14 +237,21 @@ export class PendingSendJournal {
       this.pristine = false;
     }
     for (const candidate of fallback ? [entries, fallback] : [entries]) {
+      const smaller = typeof candidate === "function";
+      const inherited = smaller
+        ? this.inherited.map((journal) => ({
+            journalId: journal.journalId,
+            entries: journal.entries.map(withoutRequest),
+          }))
+        : this.inherited;
       try {
         this.options.storage?.setItem(
           this.options.key,
           JSON.stringify({
             version: 1,
             journalId: this.journalId,
-            entries: typeof candidate === "function" ? candidate() : candidate,
-            ...(this.inherited.length > 0 ? { inherited: this.inherited } : {}),
+            entries: smaller ? candidate() : candidate,
+            ...(inherited.length > 0 ? { inherited } : {}),
           }),
         );
         this.setStatus("owned");

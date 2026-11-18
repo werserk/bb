@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { promptAreaMocks as mocks } from "@/test/thread-detail-prompt-area-harness";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 
 import type {
   PendingInteraction,
@@ -46,7 +50,7 @@ import {
   getPromptDraftAccessor,
   usePromptDraftStorage,
 } from "@/hooks/usePromptDraftStorage";
-import { BbHttpError } from "@/lib/sdk";
+import { BbHttpError, sdk } from "@/lib/sdk";
 import type { ExperimentalComposerSelection } from "@get-bb/plugin-sdk";
 import { setComposerTextEffect } from "@/lib/composer-text-effects";
 import {
@@ -416,6 +420,92 @@ describe("shared draft submission ownership", () => {
         clearPendingSendScope(testQueryClient);
         testQueryClient.removeQueries({ queryKey: systemConfigQueryKey() });
         vi.unstubAllGlobals();
+        view.unmount();
+      }
+    },
+  );
+
+  it.each(["ordinary", "modifier"] as const)(
+    "%s submit of a handed-back draft that the server dedupes is a success: no failure, no draft restore",
+    async (action) => {
+      const threadId = `thr_dedup_${++nextId}`;
+      const draft = draftFor(threadId);
+      const original = {
+        text: "reached the server",
+        mentions: [],
+        attachments: [],
+      };
+      draft.setDraft(original);
+      const { sendThreadMessageMutationOptions } = await vi.importActual<
+        typeof import("@/hooks/mutations/thread-runtime-mutations")
+      >("@/hooks/mutations/thread-runtime-mutations");
+      mocks.sendMessageMutateAsync.mockImplementation(
+        (variables: SendThreadMessageMutationRequest) =>
+          new MutationObserver(
+            testQueryClient,
+            sendThreadMessageMutationOptions(testQueryClient),
+          ).mutate(variables),
+      );
+      const spies = [
+        vi.spyOn(sdk.threads, "timeline").mockRejectedValue(Error("offline")),
+        vi
+          .spyOn(sdk.threads.queuedMessages, "list")
+          .mockRejectedValue(Error("offline")),
+      ];
+      const send = vi
+        .spyOn(sdk.threads, "send")
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockRejectedValueOnce(
+          new BbHttpError({
+            status: 409,
+            code: "submission_already_admitted",
+            message: "Submission already admitted",
+            body: {
+              code: "submission_already_admitted",
+              details: {
+                requested: { requestId: "creq_abcdefghij", sequence: 3 },
+              },
+            },
+          } as never),
+        );
+      const view = openComposer(threadId);
+      try {
+        let first: unknown;
+        await act(async () => {
+          first = await Promise.resolve(view[action]()).catch(
+            (error: unknown) => error,
+          );
+        });
+        expect(first).toBeInstanceOf(Error);
+        expect(draft.getCurrent()).toEqual(original);
+        mocks.toastError.mockClear();
+        let second: unknown = "pending";
+        await act(async () => {
+          second = await Promise.resolve(view[action]()).catch(
+            (error: unknown) => error,
+          );
+        });
+        const ids = send.mock.calls.map(
+          ([request]) => request.clientSubmissionId,
+        );
+        expect({
+          second,
+          calls: ids.length,
+          distinctIds: new Set(ids).size,
+          toasts: mocks.toastError.mock.calls.length,
+          draft: draft.getCurrent().text,
+          outcome: pendingSendOwner(testQueryClient).outcome(threadId, ids[0]!),
+        }).toEqual({
+          second: undefined,
+          calls: 2,
+          distinctIds: 1,
+          toasts: 0,
+          draft: "",
+          outcome: "accepted",
+        });
+      } finally {
+        clearPendingSendScope(testQueryClient);
+        for (const spy of [send, ...spies]) spy.mockRestore();
         view.unmount();
       }
     },

@@ -11,7 +11,7 @@ import {
 import { z } from "zod";
 import { notifyManager, type QueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
-import { sdk } from "@/lib/sdk";
+import { BbHttpError, sdk } from "@/lib/sdk";
 import { getPromptDraftAccessor } from "../usePromptDraftStorage";
 import { getThreadEntity } from "./thread-entity-store";
 import {
@@ -552,6 +552,18 @@ export function composePendingSends(
         threadQueuedMessagesQueryKey(threadId),
       ) ??
       emptyQueue,
+  );
+}
+export function pendingSendAdmitted(
+  client: QueryClient,
+  threadId: string,
+  id: string,
+  error: unknown,
+): boolean {
+  return (
+    (error instanceof BbHttpError &&
+      error.code === "submission_already_admitted") ||
+    pendingSendOwner(client).outcome(threadId, id) === "accepted"
   );
 }
 export function settleFailedPendingSend(
