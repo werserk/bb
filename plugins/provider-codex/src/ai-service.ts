@@ -1,4 +1,5 @@
 import { codexGenerationContract } from "./ai/generation-contract.js";
+import { generateThroughPool } from "./ai/pool-generation.js";
 import { Buffer } from "node:buffer";
 import type { BbPluginApi, PluginAiServiceStatus } from "@get-bb/plugin-sdk";
 import {
@@ -68,22 +69,30 @@ export function registerCodexAiService(bb: BbPluginApi): void {
           },
         }));
       },
-      generate(request, { signal, model }) {
+      async generate(request, { signal, model }) {
         if (model.profile !== "default")
           throw new Error("Unsupported Codex profile");
-        return generationHost.call(
-          "codex.ai.generate",
-          {
-            model: request.model,
-            messages: [...request.messages],
-            maxOutputTokens: request.maxOutputTokens,
-            temperature: request.temperature,
-            reasoningEffort: request.reasoningEffort,
-            serviceTier: request.serviceTier,
-            timeoutMs: request.timeoutMs,
-          },
-          { hostId: model.hostId, signal, timeoutMs: request.timeoutMs + 1000 },
+        const input = {
+          model: request.model,
+          messages: [...request.messages],
+          maxOutputTokens: request.maxOutputTokens,
+          temperature: request.temperature,
+          reasoningEffort: request.reasoningEffort,
+          serviceTier: request.serviceTier,
+          timeoutMs: request.timeoutMs,
+        };
+        const pooled = await generateThroughPool(
+          bb,
+          input,
+          model,
+          AbortSignal.any([signal, AbortSignal.timeout(request.timeoutMs)]),
         );
+        if (pooled !== null) return pooled;
+        return generationHost.call("codex.ai.generate", input, {
+          hostId: model.hostId,
+          signal,
+          timeoutMs: request.timeoutMs + 1000,
+        });
       },
     },
     async complete(prompt, { signal }) {
