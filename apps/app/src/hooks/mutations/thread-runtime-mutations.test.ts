@@ -655,3 +655,33 @@ it.each([
     expect(pendingSendDraftId("thread-1", draft) === id).toBe(bound);
   },
 );
+
+it("a send whose onMutate throws never reaches the server and leaves the live entry with that id untouched", async () => {
+  const client = createTestQueryClient(),
+    id = crypto.randomUUID();
+  const response = createDeferredPromise<never>();
+  vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+  const send = (text: string) =>
+    new MutationObserver(client, sendThreadMessageMutationOptions(client))
+      .mutate({
+        id: "thread-1",
+        clientSubmissionId: id,
+        mode: "auto",
+        input: [{ type: "text", text, mentions: [] }],
+      })
+      .catch((error: unknown) => error);
+  const first = send("first");
+  await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+  expect(await send("different")).toEqual(
+    expect.objectContaining({ message: "Conflicting submission identity" }),
+  );
+  expect(sdk.threads.send).toHaveBeenCalledTimes(1);
+  const { pendingSendOwner } =
+    await import("../cache-owners/pending-send-owner");
+  expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+    { id, state: "sending" },
+  ]);
+  expect(pendingSendOwner(client).outcome("thread-1", id)).toBeUndefined();
+  response.reject(Error("network"));
+  await first;
+});
