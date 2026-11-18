@@ -29,6 +29,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// An ordinary row that still blocks a service turn and does not move during
+// the test: its booked retry is a day away. (A row whose retries ran out no
+// longer blocks; see turn-failed-retry.test.ts.)
+const RETRY_NOT_DUE_MS = 86_400_000;
+
 function fixture(h: TestAppHarness) {
   const { host } = seedHostSession(h.deps);
   const { project } = seedProjectWithSource(h.deps, { hostId: host.id });
@@ -126,7 +131,7 @@ it.each([
   },
 );
 
-it("does not repeatedly claim a service blocked by an exhausted ordinary row and wakes on its deletion", async () => {
+it("does not repeatedly claim a service blocked by an ordinary row awaiting its retry and wakes on its deletion", async () => {
   await withTestHarness(async (h) => {
     const { thread, service } = fixture(h);
     const ordinary = seedQueuedMessage(h.deps, {
@@ -136,9 +141,9 @@ it("does not repeatedly claim a service blocked by an exhausted ordinary row and
     setQueuedThreadMessageFailureReason(h.db, h.deps.hub, {
       id: ordinary.id,
       threadId: thread.id,
-      failureReason: "exhausted",
+      failureReason: "failed",
       now: Date.now(),
-      retryDelaysMs: [],
+      retryDelaysMs: [RETRY_NOT_DUE_MS],
     });
     const before = getQueuedThreadMessage(h.db, service.id);
     expect(
@@ -226,9 +231,9 @@ it.each(["plugin", "host-offline"] as const)(
       setQueuedThreadMessageFailureReason(h.db, h.deps.hub, {
         id: ordinary.id,
         threadId: thread.id,
-        failureReason: "exhausted",
+        failureReason: "failed",
         now: Date.now(),
-        retryDelaysMs: [],
+        retryDelaysMs: [RETRY_NOT_DUE_MS],
       });
       setQueuedThreadMessageWaitingOn(h.db, h.deps.hub, {
         id: service.id,

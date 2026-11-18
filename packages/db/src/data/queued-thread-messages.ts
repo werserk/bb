@@ -1404,6 +1404,23 @@ function notOrdinaryTurnEndQueuedThreadMessage() {
   );
 }
 
+/**
+ * werserk fork: the states of a row that leaves the queue without the user
+ * acting. A drain claims it, its booked retry re-sends it, or it is already
+ * in flight (a stale claim is released). A `failed_exhausted` row is never
+ * claimed automatically again: only the user resends or deletes it.
+ */
+const SELF_DISPATCHING_QUEUED_MESSAGE_STATES = [
+  ...QUEUED_MESSAGE_AUTOMATICALLY_DRAINABLE_STATES,
+  "failed_retrying",
+  "claimed",
+] as const satisfies readonly QueuedMessageState[];
+
+/**
+ * werserk fork: the ordinary rows a service turn yields to, defined by
+ * whether the row will dispatch by itself. Yielding to a row that only the
+ * user can move held the service turn until the user acted.
+ */
 function ordinaryQueuedMessagesForThread(
   db: DbQueryConnection,
   threadId: string | typeof threads.id,
@@ -1416,15 +1433,17 @@ function ordinaryQueuedMessagesForThread(
       and(
         eq(ordinary.threadId, threadId),
         isNull(ordinary.serviceTurn),
-        // werserk fork: a `provisioning` wait ends when this thread is
+        inArray(ordinary.state, [...SELF_DISPATCHING_QUEUED_MESSAGE_STATES]),
+        // A `superseded` retry rests in `waiting`, but its wait is never
+        // cleared automatically: the user sends or deletes it.
+        //
+        // A `provisioning` wait does end by itself, when this thread is
         // provisioned. On a thread with no environment only its first
         // dispatch does that; when the waiting service turn is that dispatch,
         // yielding would be a cycle that keeps the thread pending forever.
         // A thread already provisioning holds the service turn on the same
         // wait, and readiness clears every provisioning wait before either
-        // row is retried, so ordinary rows still go first. A `superseded`
-        // retry is never sent automatically, so yielding to it would hold
-        // the service turn until the user sends or deletes it.
+        // row is retried, so ordinary rows still go first.
         or(
           isNull(ordinary.waitingOn),
           notInArray(sql<string>`json_extract(${ordinary.waitingOn}, '$.kind')`, [

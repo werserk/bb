@@ -70,16 +70,20 @@ authority for exactly-once delivery, manual-stop pauses and plugin waits.
 Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
 signals. Idle service drains and idle discovery share the admission rule
-that any ordinary queued row takes priority, including an exhausted failure
-and a claimed row; these blocked service rows remain untouched. A row waiting
-on `provisioning` is not a blocker: on a thread with no environment only its
-first dispatch ends that wait, and on a pending plugin thread that dispatch is
-the queued service turn (yielding to it left a replaced WProjects coordinator
-pending forever). On a thread already provisioning the service turn waits on
-the same condition, and readiness clears every provisioning wait before rows
-are retried, so ordinary rows still go first. A Not sent (`superseded`) retry
-is not a blocker either: it is never sent automatically, so yielding to it held
-the service turn until the user sent or deleted it. By-id readiness
+that an ordinary queued row which will dispatch by itself takes priority:
+one that is queued, scheduled, waiting, has a retry booked
+(`failed_retrying`) or is claimed; these blocked service rows remain
+untouched. A row only the user can move is not a blocker, since yielding to
+it held the service turn until the user sent or deleted it: an exhausted
+failure (`failed_exhausted`) is never claimed automatically again, and a Not
+sent (`superseded`) retry rests in `waiting` on a wait nothing clears. A row
+waiting on `provisioning` is not a blocker either: on a thread with no
+environment only its first dispatch ends that wait, and on a pending plugin
+thread that dispatch is the queued service turn (yielding to it left a
+replaced WProjects coordinator pending forever). On a thread already
+provisioning the service turn waits on the same condition, and readiness
+clears every provisioning wait before rows are retried, so ordinary rows still
+go first. By-id readiness
 wakes still run admission and convert a cleared plugin or host wait into an
 idle-drainable thread-busy wait when ordinary work blocks delivery. This keeps
 one-shot readiness signals effective after the blocker leaves. Native queue
