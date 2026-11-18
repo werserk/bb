@@ -363,7 +363,7 @@ describe("shared draft submission ownership", () => {
       const view = openComposer(threadId);
       try {
         await act(async () => {
-          await view[action]().catch(() => undefined);
+          await Promise.resolve(view[action]()).catch(() => undefined);
         });
         const entries = pendingSendOwner(testQueryClient).list(threadId);
         if (definite) {

@@ -27,7 +27,7 @@ vi.mock("@/hooks/queries/system-queries", async (importOriginal) => ({
 }));
 
 const { mutateAsync } = vi.hoisted(() => ({
-  mutateAsync: vi.fn(() => Promise.resolve()),
+  mutateAsync: vi.fn((_request?: unknown) => Promise.resolve()),
 }));
 
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => {
