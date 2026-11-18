@@ -100,13 +100,6 @@ function recordTurnFailedAnnouncements(): string[] {
   return announced;
 }
 
-/**
- * A thread whose most recent turn is the user's original request.
- *
- * `seedThreadRuntimeState` writes that request itself, so this deliberately
- * does not add another: the retry tests are about how many `client/turn/
- * requested` events exist, and a second seeded one would hide a duplicate.
- */
 function seedFailableThread(
   harness: TestAppHarness,
   hostId: string,

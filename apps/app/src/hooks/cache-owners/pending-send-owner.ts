@@ -287,7 +287,7 @@ export function pendingSendOwner(client: QueryClient) {
 export function pendingSendJournal(client: QueryClient) {
   return context(client).journal;
 }
-export function usePendingSendSnapshot(client: QueryClient, threadId: string) {
+export function usePendingSendSnapshot(client: QueryClient) {
   const owner = pendingSendOwner(client);
   const read = useMemo(() => {
     let revision = -1;
@@ -312,11 +312,11 @@ export function usePendingSendSnapshot(client: QueryClient, threadId: string) {
       }
       return snapshot;
     };
-  }, [client, owner, threadId]);
+  }, [client, owner]);
   return useSyncExternalStore(owner.subscribe, read, read);
 }
-export function usePendingSendEntries(client: QueryClient, threadId: string) {
-  return usePendingSendSnapshot(client, threadId).entries;
+export function usePendingSendEntries(client: QueryClient) {
+  return usePendingSendSnapshot(client).entries;
 }
 export function usePendingSendOwner(client: QueryClient) {
   const owner = pendingSendOwner(client);
