@@ -63,7 +63,11 @@ export async function handleResponses(
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
       payload = parsed as Record<string, unknown>;
   } catch {}
-  if (payload === null || payload.stream === true)
+  const isResponsesRequest =
+    payload !== null &&
+    typeof payload.model === "string" &&
+    "input" in payload;
+  if (payload === null || !isResponsesRequest || payload.stream === true)
     return handle(new Request(request, { body: text }));
 
   const headers = new Headers(request.headers);
@@ -76,7 +80,12 @@ export async function handleResponses(
       signal: request.signal,
     }),
   );
-  if (!upstream.ok || upstream.body === null) return upstream;
+  if (
+    !upstream.ok ||
+    upstream.body === null ||
+    !(upstream.headers.get("content-type") ?? "").includes("text/event-stream")
+  )
+    return upstream;
   const result = await collectFinalResponse(upstream.body);
   if ("response" in result) return Response.json(result.response);
   return Response.json({ error: result.failure }, { status: 502 });

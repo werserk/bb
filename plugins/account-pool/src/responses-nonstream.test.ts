@@ -15,7 +15,7 @@ const post = (body: unknown) =>
 describe("handleResponses", () => {
   it("streams upstream for stream:false and returns the final response as JSON", async () => {
     let seen: Record<string, unknown> = {};
-    const res = await handleResponses(post({ model: "m", stream: false }), async (req) => {
+    const res = await handleResponses(post({ model: "m", input: [], stream: false }), async (req) => {
       seen = (await req.json()) as Record<string, unknown>;
       expect(req.headers.get("authorization")).toBe("Bearer t");
       return sse([
@@ -29,19 +29,40 @@ describe("handleResponses", () => {
 
   it("passes streaming requests through untouched", async () => {
     const upstream = sse([{ type: "response.completed", response: {} }]);
-    const res = await handleResponses(post({ model: "m", stream: true }), async () => upstream);
+    const res = await handleResponses(post({ model: "m", input: [], stream: true }), async () => upstream);
     expect(res).toBe(upstream);
   });
 
   it("returns 502 when the stream fails", async () => {
-    const res = await handleResponses(post({ stream: false }), async () =>
+    const res = await handleResponses(post({ model: "m", input: [], stream: false }), async () =>
       sse([{ type: "response.failed", response: { error: { code: "x" } } }]),
     );
     expect(res.status).toBe(502);
   });
 
   it("returns upstream errors unchanged", async () => {
-    const res = await handleResponses(post({ stream: false }), async () => new Response("no", { status: 429 }));
+    const res = await handleResponses(post({ model: "m", input: [], stream: false }), async () => new Response("no", { status: 429 }));
     expect(res.status).toBe(429);
+  });
+});
+
+describe("handleResponses request shapes", () => {
+  it("treats an absent stream field as non-streaming, as the OpenAI SDK sends it", async () => {
+    let seen: Record<string, unknown> = {};
+    const res = await handleResponses(post({ model: "m", input: [] }), async (req) => {
+      seen = (await req.json()) as Record<string, unknown>;
+      return sse([{ type: "response.completed", response: { id: "r2" } }]);
+    });
+    expect(seen.stream).toBe(true);
+    expect(await res.json()).toEqual({ id: "r2" });
+  });
+
+  it("leaves bodies that are not Responses requests untouched", async () => {
+    let seen = "";
+    await handleResponses(post({ prompt_cache_key: "k" }), async (req) => {
+      seen = await req.text();
+      return new Response("{}");
+    });
+    expect(JSON.parse(seen)).toEqual({ prompt_cache_key: "k" });
   });
 });
