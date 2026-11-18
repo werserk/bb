@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { latestServiceTurn } from "./service-turns.js";
 import {
   listQueuedThreadMessageCountsByThreadIds,
@@ -16,6 +16,8 @@ import type { AppDeps } from "../../types.js";
 import { toThreadEventWithMeta } from "./timeline.js";
 
 type PlanReadDeps = Pick<AppDeps, "db" | "pendingInteractions">;
+
+const processEpoch = randomUUID();
 
 export type ThreadPlanRead =
   | { plan: ThreadPlanView; unchanged?: undefined }
@@ -41,6 +43,7 @@ function readPlanInputs(deps: PlanReadDeps, thread: Thread) {
   const readRevision = createHash("sha256")
     .update(
       JSON.stringify({
+        processEpoch,
         revision,
         rewriteGeneration: getThreadEventRewriteGeneration(thread.id),
         status: thread.status,

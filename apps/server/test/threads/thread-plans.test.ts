@@ -620,6 +620,19 @@ describe("conditional plan reads", () => {
     });
   });
 
+  it("Core restarted", async () => {
+    await withTestHarness(async (h) => {
+      const thread = setup(h);
+      const token = await tokenOf(h, thread.id);
+      vi.resetModules();
+      const restarted =
+        await import("../../src/services/threads/thread-plans.js");
+      const result = restarted.readThreadPlanUnlessKnown(h.deps, thread, token);
+      expect(result.unchanged).toBeUndefined();
+      expect(result.plan?.readRevision).not.toBe(token);
+    });
+  });
+
   it("Attention interaction settled in memory", async () => {
     await withTestHarness(async (h) => {
       const { thread } = seedThreadFixture(h, {
