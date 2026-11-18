@@ -11,10 +11,12 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   claimQueuedThreadMessageGroup,
+  createQueuedThreadMessage,
   environments,
   getLatestThreadSequence,
   getThread,
   listEvents,
+  listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
   setThreadExecutionOverride,
 } from "@bb/db";
@@ -1251,6 +1253,73 @@ describe("a queued retry", () => {
         "Do the thing",
         "Do something else",
         "Then this",
+      ]);
+    });
+  });
+
+  it("does not hold back a service turn once it is Not sent", async () => {
+    await withTestHarness(async (harness) => {
+      const { requestId, thread } = seedFailableThread(
+        harness,
+        "host-not-blocking-service",
+      );
+      failThread(harness, thread.id);
+      await scheduleRetry(harness, { threadId: thread.id, requestId });
+      await sendNewMessage(harness, {
+        threadId: thread.id,
+        text: "Do something else",
+      });
+      const notSent = onlyQueuedRow(harness, thread.id);
+      expect(notSent.waitingOn).toEqual({ kind: "superseded" });
+      expect(
+        listQueuedThreadMessages(harness.db, thread.id).map(
+          (row) => row.serviceTurn,
+        ),
+      ).toEqual([null]);
+
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        event: { type: "run.succeeded" },
+        threadId: thread.id,
+      });
+      createQueuedThreadMessage(harness.db, harness.deps.hub, {
+        threadId: thread.id,
+        content: textInput("Check the background tasks"),
+        model: "gpt-5",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        serviceTier: "default",
+        waitingOn: { kind: "thread-busy" },
+        sendAt: null,
+        payload: { kind: "inline" },
+        systemNotice: null,
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: "coordinator-background",
+          origin: { pluginId: "wprojects", senderThreadId: null },
+        },
+      });
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual([
+        "Do the thing",
+        "Do something else",
+        "Check the background tasks",
+      ]);
+      expect(liveQueue(harness, thread.id)).toEqual([
+        expect.objectContaining({
+          id: notSent.id,
+          waitingOn: { kind: "superseded" },
+        }),
       ]);
     });
   });
