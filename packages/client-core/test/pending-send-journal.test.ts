@@ -380,6 +380,32 @@ it("a fresh tab's first save keeps a live predecessor's entries; its reload adop
   for (const release of h.releases) release();
 });
 
+it("the smaller fallback form also drops resend payloads from inherited entries", async () => {
+  const held = new Set(["bb-pending-send/account/predecessor"]);
+  const h = journalHarness(
+    {
+      version: 1,
+      journalId: "predecessor",
+      entries: [{ id: "theirs", request: "resend payload" }],
+    },
+    held,
+  );
+  const set = h.storage.set.bind(h.storage);
+  h.storage.set = (key, value) => {
+    if (value.includes("resend payload")) throw Error("quota");
+    return set(key, value);
+  };
+  const fresh = h.open(false);
+  await vi.waitFor(() => expect(fresh.status).toBe("owned"));
+  fresh.save([{ id: "own", request: "resend payload" }], () => [{ id: "own" }]);
+  expect(fresh.status).toBe("owned");
+  expect(JSON.parse(h.storage.get("account")!)).toMatchObject({
+    entries: [{ id: "own" }],
+    inherited: [{ journalId: "predecessor", entries: [{ id: "theirs" }] }],
+  });
+  for (const release of h.releases) release();
+});
+
 it("a fresh journal adopts a predecessor whose lock was released before its check", async () => {
   const held = new Set(["bb-pending-send/account/predecessor"]);
   const h = journalHarness(
