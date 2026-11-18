@@ -18,7 +18,7 @@ const bbPlanInputSchema = z
       z
         .object({
           step: z.string(),
-          status: z.enum(["pending", "in_progress", "completed"]),
+          status: z.enum(["pending", "in_progress", "completed", "failed"]),
         })
         .passthrough(),
     ),
@@ -50,7 +50,25 @@ export interface PlanTurnCheck {
   checkPlan: HookCallback;
 }
 
-export function buildPlanTurnCheck(): PlanTurnCheck {
+export interface PlanTurnCheckOptions {
+  hasOpenBackgroundTasks?: () => boolean;
+}
+
+function isPlanOpen(plan: readonly ThreadEventPlanStep[]): boolean {
+  let active = 0;
+  for (const step of plan) {
+    if (step.status === "active") {
+      active += 1;
+    } else if (step.status !== "completed" && step.status !== "failed") {
+      return true;
+    }
+  }
+  return active > 1;
+}
+
+export function buildPlanTurnCheck(
+  options: PlanTurnCheckOptions = {},
+): PlanTurnCheck {
   let latestPlan: ThreadEventPlanStep[] = [];
   let askedPromptId: string | undefined;
 
@@ -70,8 +88,11 @@ export function buildPlanTurnCheck(): PlanTurnCheck {
       return { continue: true };
     }
     const promptId = input.prompt_id;
-    const open = latestPlan.some((step) => step.status !== "completed");
-    if (!open || (promptId !== undefined && promptId === askedPromptId)) {
+    if (
+      !isPlanOpen(latestPlan) ||
+      (promptId !== undefined && promptId === askedPromptId) ||
+      options.hasOpenBackgroundTasks?.() === true
+    ) {
       return { continue: true };
     }
     askedPromptId = promptId;

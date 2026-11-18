@@ -10,7 +10,7 @@ import {
 
 const BB_PLAN_TOOL = "mcp__bb-bridge__bb_update_plan";
 
-type PlanStatus = "pending" | "in_progress" | "completed";
+type PlanStatus = "pending" | "in_progress" | "completed" | "failed";
 
 function base() {
   return {
@@ -75,8 +75,8 @@ async function run(
   return (await hook(input)) as SyncHookJSONOutput;
 }
 
-function makeCheck() {
-  const check = buildPlanTurnCheck();
+function makeCheck(options: Parameters<typeof buildPlanTurnCheck>[0] = {}) {
+  const check = buildPlanTurnCheck(options);
   const call = (input: HookInput) =>
     run(
       (value) =>
@@ -112,7 +112,7 @@ describe("plan turn check", () => {
 
   it("does not block again once the stop continues because of this hook", async () => {
     const { call } = makeCheck();
-    await call(bbPlanCall(["in_progress"]));
+    await call(bbPlanCall(["in_progress", "pending"]));
 
     expect((await call(stop({ promptId: "p1" }))).decision).toBe("block");
     expect(
@@ -122,7 +122,7 @@ describe("plan turn check", () => {
 
   it("asks at most once per prompt even when the active flag is missing", async () => {
     const { call } = makeCheck();
-    await call(bbPlanCall(["in_progress"]));
+    await call(bbPlanCall(["in_progress", "pending"]));
 
     expect((await call(stop({ promptId: "p1" }))).decision).toBe("block");
     expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
@@ -188,5 +188,67 @@ describe("plan turn check", () => {
 
     expect((await second.call(stop())).decision).toBeUndefined();
     expect((await first.call(stop())).decision).toBe("block");
+  });
+
+  it("Plan with a failed step", async () => {
+    const { call } = makeCheck();
+    await call(bbPlanCall(["completed", "pending"]));
+    await call(bbPlanCall(["completed", "failed", "completed"]));
+
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("Handed and waiting", async () => {
+    const { call } = makeCheck();
+    await call(
+      bbPlanCall(["completed", "completed", "completed", "in_progress"]),
+    );
+
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("allows a waiting step next to failed steps", async () => {
+    const { call } = makeCheck();
+    await call(bbPlanCall(["failed", "in_progress", "completed"]));
+
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("Waiting with steps still pending", async () => {
+    const { call } = makeCheck();
+    await call(bbPlanCall(["completed", "in_progress", "pending", "pending"]));
+
+    expect((await call(stop({ promptId: "p1" }))).decision).toBe("block");
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("Two steps in progress", async () => {
+    const { call } = makeCheck();
+    await call(bbPlanCall(["completed", "in_progress", "in_progress"]));
+
+    const first = await call(stop({ promptId: "p1" }));
+    expect(first.decision).toBe("block");
+    expect(first.reason).toBe(PLAN_TURN_CHECK_REASON);
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("Forgotten plan", async () => {
+    const { call } = makeCheck({ hasOpenBackgroundTasks: () => false });
+    await call(bbPlanCall(["completed", "pending", "pending"]));
+
+    const first = await call(stop({ promptId: "p1" }));
+    expect(first.decision).toBe("block");
+    expect(first.reason).toBe(PLAN_TURN_CHECK_REASON);
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+  });
+
+  it("allows the stop while background work is open and asks once it closed", async () => {
+    let open = true;
+    const { call } = makeCheck({ hasOpenBackgroundTasks: () => open });
+    await call(bbPlanCall(["completed", "pending"]));
+
+    expect((await call(stop({ promptId: "p1" }))).decision).toBeUndefined();
+    open = false;
+    expect((await call(stop({ promptId: "p1" }))).decision).toBe("block");
   });
 });

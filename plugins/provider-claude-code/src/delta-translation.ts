@@ -402,6 +402,7 @@ interface ClaudeThreadDialectState {
   startedTools: Map<string, ClaudeClassifiedTool>;
   heldSkillOpen: HeldSkillOpen | undefined;
   tasksById: ClaudeTaskMap;
+  openBackgroundTaskIds: Set<string>;
   taskPlan: ClaudeTaskPlanState;
 }
 
@@ -421,6 +422,7 @@ function createThreadState(): ClaudeThreadDialectState {
     startedTools: new Map(),
     heldSkillOpen: undefined,
     tasksById: new Map(),
+    openBackgroundTaskIds: new Set(),
     taskPlan: new Map(),
   };
 }
@@ -779,6 +781,7 @@ export function createClaudeDeltaTranslator(
     const taskDeltas = translateClaudeTaskMessage({
       event,
       tasks: state.tasksById,
+      openBackgroundTaskIds: state.openBackgroundTaskIds,
       turnStartSuppressed: isTurnStartSuppressed(state),
       hasForwardedToolUse: (toolUseId) => state.startedTools.has(toolUseId),
     });
@@ -1387,7 +1390,10 @@ export function createClaudeDeltaTranslator(
       deltas.push(...withMirror(state, [{ kind: "session.ended" }]));
     }
     deltas.push(
-      ...buildInterruptedClaudeTaskDeltas({ tasks: state.tasksById }),
+      ...buildInterruptedClaudeTaskDeltas({
+        tasks: state.tasksById,
+        openBackgroundTaskIds: state.openBackgroundTaskIds,
+      }),
     );
     return deltas;
   }
@@ -1398,7 +1404,16 @@ export function createClaudeDeltaTranslator(
     const state = statesByThreadId.get(threadId);
     return state === undefined
       ? []
-      : buildInterruptedClaudeTaskDeltas({ tasks: state.tasksById });
+      : buildInterruptedClaudeTaskDeltas({
+          tasks: state.tasksById,
+          openBackgroundTaskIds: state.openBackgroundTaskIds,
+        });
+  }
+
+  function hasOpenBackgroundTasks(threadId: string): boolean {
+    return (
+      (statesByThreadId.get(threadId)?.openBackgroundTaskIds.size ?? 0) > 0
+    );
   }
 
   function hasOpenTurn(threadId: string): boolean {
@@ -1439,6 +1454,7 @@ export function createClaudeDeltaTranslator(
     configureCommandDescriptions: (enabled: boolean) => {
       commandDescriptionsEnabled = enabled;
     },
+    hasOpenBackgroundTasks,
     hasOpenTurn,
     setClaudeModelContextWindowHint,
     setClaudeReportedContextWindow,
