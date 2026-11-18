@@ -3,6 +3,7 @@ import { PendingSendPresentationContext } from "./pending-send-presentation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@bb/shared-ui/button";
 import { useSendThreadMessage } from "@/hooks/mutations/thread-runtime-mutations";
+import { copyToClipboardWithToast } from "@/lib/clipboard";
 import {
   retryPendingSendRecovery,
   refreshPendingSends,
@@ -177,6 +178,23 @@ function PendingSendEntryControls({
             >
               Resend
             </Button>
+          ) : null}
+          {entry.state === "unconfirmed" &&
+          !entry.request &&
+          entry.queueIds.length === 0 ? (
+            <>
+              {" "}
+              <span>Resend not kept after reload</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void copyToClipboardWithToast(entry.row.text);
+                }}
+              >
+                Copy text
+              </Button>
+            </>
           ) : null}
           <Button
             variant="ghost"

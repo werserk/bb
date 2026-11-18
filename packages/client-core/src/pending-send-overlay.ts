@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { timelineUserConversationRowSchema } from "@bb/server-contract";
+import {
+  sendMessageRequestSchema,
+  timelineUserConversationRowSchema,
+} from "@bb/server-contract";
 import { threadQueuedMessageSchema } from "@bb/domain";
 import type { ThreadQueuedMessage } from "@bb/domain";
 import type {
@@ -33,6 +36,32 @@ export interface PendingSend {
   legacyQueueBaselineIds?: string[];
   error?: string;
   request?: import("@bb/server-contract").SendMessageRequest;
+}
+export const JOURNAL_REQUEST_LIMIT = 256 * 1024;
+export const JOURNAL_REQUESTS_TOTAL_LIMIT = 1024 * 1024;
+const recoveredRequestSchema = sendMessageRequestSchema.extend({
+  id: z.string(),
+});
+function journalRequest(entry: PendingSend) {
+  const request = entry.request;
+  if (
+    !request ||
+    (entry.state !== "sending" &&
+      entry.state !== "unconfirmed" &&
+      entry.state !== "failed") ||
+    entry.queueIds.length > 0 ||
+    entry.submissionIds.length !== 1 ||
+    entry.submissionIds[0] !== entry.id ||
+    request.clientSubmissionId !== entry.id ||
+    request.input.some(
+      (input) => input.type === "image" && input.url.startsWith("data:"),
+    )
+  )
+    return undefined;
+  const encoded = JSON.stringify(request);
+  return encoded.length > JOURNAL_REQUEST_LIMIT
+    ? undefined
+    : { request, bytes: encoded.length };
 }
 export interface PendingSendProjection {
   rows: TimelineRow[];
@@ -70,12 +99,16 @@ export class PendingSendOverlay {
   notify() {
     this.changed();
   }
-  clear() {
+  clear(options: { keep?: readonly PendingSend[] } = {}) {
     this.observedRows = new WeakMap();
-    this.entries.clear();
+    for (const [key, entry] of this.entries)
+      if (!options.keep?.includes(entry)) {
+        this.entries.delete(key);
+        this.freshness.delete(key);
+      }
+    if (!options.keep?.length) this.freshness.clear();
     this.settledQueues.clear();
     this.outcomes.clear();
-    this.freshness.clear();
     this.changed();
   }
   parseRecovered(value: unknown): PendingSend | null {
@@ -103,12 +136,28 @@ export class PendingSendOverlay {
         legacyTimelineAfterSequence: z.number().optional(),
         legacyQueueBaselineIds: z.array(z.string()).optional(),
         error: z.string().optional(),
+        request: z.unknown().optional(),
       })
       .safeParse(value);
     if (!result.success || result.data.row.threadId !== result.data.threadId)
       return null;
+    const { request: rawRequest, ...data } = result.data;
+    const request = recoveredRequestSchema.safeParse(rawRequest);
+    const resendable =
+      (data.state === "sending" ||
+        data.state === "unconfirmed" ||
+        data.state === "failed") &&
+      request.success &&
+      request.data.id === data.threadId &&
+      request.data.clientSubmissionId === data.id &&
+      (rawRequest as { clientSubmissionId?: unknown }).clientSubmissionId ===
+        data.id &&
+      data.queueIds.length === 0 &&
+      data.submissionIds.length === 1 &&
+      data.submissionIds[0] === data.id;
     return {
-      ...result.data,
+      ...data,
+      ...(resendable ? { request: rawRequest as PendingSend["request"] } : {}),
       state:
         result.data.state === "sending" || result.data.state === "failed"
           ? "unconfirmed"
@@ -126,29 +175,38 @@ export class PendingSendOverlay {
       (entry) => threadId === undefined || entry.threadId === threadId,
     );
   }
-  journalEntries() {
-    return this.list().map(({ request: _request, ...entry }) => ({
-      ...entry,
-      row: {
-        ...entry.row,
-        attachments: entry.row.attachments
-          ? {
-              ...entry.row.attachments,
-              imageUrls: entry.row.attachments.imageUrls.filter(
-                (url) => !url.startsWith("data:"),
-              ),
-            }
-          : null,
-      },
-      queueRows: entry.queueRows.map((row) => ({
-        ...row,
-        content: row.content.filter(
-          (input) =>
-            input.visibility !== "agent-only" &&
-            (input.type !== "image" || !input.url.startsWith("data:")),
-        ),
-      })),
-    }));
+  journalEntries(options: { requests?: boolean } = {}) {
+    let budget = JOURNAL_REQUESTS_TOTAL_LIMIT;
+    return this.list().map((entry) => {
+      const kept =
+        options.requests === false ? undefined : journalRequest(entry);
+      const request = kept && kept.bytes <= budget ? kept.request : undefined;
+      if (request) budget -= kept!.bytes;
+      const { request: _request, ...visible } = entry;
+      return {
+        ...visible,
+        ...(request ? { request } : {}),
+        row: {
+          ...visible.row,
+          attachments: visible.row.attachments
+            ? {
+                ...visible.row.attachments,
+                imageUrls: visible.row.attachments.imageUrls.filter(
+                  (url) => !url.startsWith("data:"),
+                ),
+              }
+            : null,
+        },
+        queueRows: visible.queueRows.map((row) => ({
+          ...row,
+          content: row.content.filter(
+            (input) =>
+              input.visibility !== "agent-only" &&
+              (input.type !== "image" || !input.url.startsWith("data:")),
+          ),
+        })),
+      };
+    });
   }
   admittedQueue(threadId: string, id: string, queueId: string) {
     const entry = this.entries.get(`${threadId}/${id}`);

@@ -1,4 +1,8 @@
-import { PendingSendOverlay } from "../src/pending-send-overlay.js";
+import {
+  JOURNAL_REQUEST_LIMIT,
+  JOURNAL_REQUESTS_TOTAL_LIMIT,
+  PendingSendOverlay,
+} from "../src/pending-send-overlay.js";
 import { expect, it } from "vitest";
 import type { TimelineUserConversationRow } from "@bb/server-contract";
 import {
@@ -1005,4 +1009,134 @@ it("records the outcome of a submission after its entry is gone", () => {
   expect(owner.outcome("thread-1", "refused")).toBe("rejected");
   owner.clear();
   expect(owner.outcome("thread-1", "lost")).toBeUndefined();
+});
+function directSend(
+  id: string,
+  input: import("@bb/server-contract").SendMessageRequest["input"],
+  state: import("../src/pending-send-overlay.js").PendingSendState = "unconfirmed",
+): import("../src/pending-send-overlay.js").PendingSend {
+  return {
+    id,
+    threadId: "thread-1",
+    row: userRow({ id: `pending-send-${id}`, sequence: 0 }),
+    submissionIds: [id],
+    queueIds: [],
+    queueRows: [],
+    state,
+    sequence: 0,
+    request: {
+      id: "thread-1",
+      clientSubmissionId: id,
+      mode: "auto",
+      input,
+    } as import("@bb/server-contract").SendMessageRequest,
+  };
+}
+const reload = (owner: PendingSendOverlay) =>
+  JSON.parse(JSON.stringify(owner.journalEntries())) as unknown[];
+it("journals the resend payload of an unconfirmed direct send and recovers it unchanged", () => {
+  const owner = new PendingSendOverlay(),
+    id = "00000000-0000-4000-8000-0000000000a1";
+  owner.begin(
+    directSend(id, [
+      { type: "text", text: "lost before server", mentions: [] },
+    ]),
+  );
+  const [stored] = reload(owner);
+  const recovered = new PendingSendOverlay().parseRecovered(stored);
+  expect(recovered?.state).toBe("unconfirmed");
+  expect(recovered?.request).toEqual(owner.list()[0]!.request);
+  expect(JSON.stringify(recovered?.request)).toBe(
+    JSON.stringify(owner.list()[0]!.request),
+  );
+  for (const state of ["sending", "failed"] as const) {
+    const other = new PendingSendOverlay();
+    other.begin(
+      directSend(id, [{ type: "text", text: "x", mentions: [] }], state),
+    );
+    expect(other.parseRecovered(reload(other)[0])?.request).toBeDefined();
+  }
+});
+it("never journals inline data, oversized or accepted resend payloads", () => {
+  const owner = new PendingSendOverlay();
+  const ids = [1, 2, 3, 4, 5].map(
+    (n) => `00000000-0000-4000-8000-00000000000${n}`,
+  );
+  owner.begin(
+    directSend(ids[0]!, [
+      { type: "text", text: "with image", mentions: [] },
+      { type: "image", url: "data:image/png;base64,raw-attachment" },
+    ]),
+  );
+  owner.begin(
+    directSend(ids[1]!, [
+      { type: "text", text: "x".repeat(JOURNAL_REQUEST_LIMIT), mentions: [] },
+    ]),
+  );
+  owner.begin(
+    directSend(
+      ids[2]!,
+      [{ type: "text", text: "accepted", mentions: [] }],
+      "sent",
+    ),
+  );
+  owner.begin(
+    directSend(ids[3]!, [{ type: "text", text: "kept", mentions: [] }]),
+  );
+  const stored = reload(owner);
+  expect(JSON.stringify(stored)).not.toContain("raw-attachment");
+  const recovered = stored.map((entry) =>
+    new PendingSendOverlay().parseRecovered(entry),
+  );
+  expect(recovered.map((entry) => entry?.request !== undefined)).toEqual([
+    false,
+    false,
+    false,
+    true,
+  ]);
+  expect(recovered.every((entry) => entry !== null)).toBe(true);
+  expect(
+    owner
+      .journalEntries({ requests: false })
+      .some((entry) => "request" in entry),
+  ).toBe(false);
+});
+it("bounds the total journaled resend payload", () => {
+  const owner = new PendingSendOverlay();
+  const text = "y".repeat(JOURNAL_REQUEST_LIMIT - 1000);
+  const count = Math.ceil(JOURNAL_REQUESTS_TOTAL_LIMIT / text.length) + 1;
+  for (let n = 0; n < count; n++)
+    owner.begin(
+      directSend(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`, [
+        { type: "text", text, mentions: [] },
+      ]),
+    );
+  const kept = owner.journalEntries().filter((entry) => "request" in entry);
+  expect(kept.length).toBeGreaterThan(0);
+  expect(kept.length).toBeLessThan(count);
+  const bytes = kept.reduce(
+    (sum, entry) => sum + JSON.stringify(entry.request).length,
+    0,
+  );
+  expect(bytes).toBeLessThanOrEqual(JOURNAL_REQUESTS_TOTAL_LIMIT);
+});
+it("drops a recovered resend payload that does not match its entry, and still parses old entries", () => {
+  const owner = new PendingSendOverlay(),
+    id = "00000000-0000-4000-8000-0000000000b1";
+  owner.begin(directSend(id, [{ type: "text", text: "a", mentions: [] }]));
+  const [stored] = reload(owner) as Record<string, unknown>[];
+  const parse = (value: unknown) =>
+    new PendingSendOverlay().parseRecovered(value);
+  const { request, ...old } = stored!;
+  expect(parse(old)).toMatchObject({ id, state: "unconfirmed" });
+  expect(parse(old)?.request).toBeUndefined();
+  const other = "00000000-0000-4000-8000-0000000000b2";
+  for (const broken of [
+    { ...(request as object), clientSubmissionId: other },
+    { ...(request as object), id: "thread-2" },
+    { ...(request as object), input: [] },
+    "not a request",
+  ])
+    expect(parse({ ...old, request: broken })?.request).toBeUndefined();
+  expect(parse({ ...stored, state: "sent" })?.request).toBeUndefined();
 });

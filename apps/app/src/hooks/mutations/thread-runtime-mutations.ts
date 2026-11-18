@@ -170,6 +170,16 @@ export function useCreateThread() {
   return useMutation(createThreadMutationOptions(queryClient));
 }
 
+function isDefiniteSendRejection(error: unknown): error is BbHttpError {
+  return (
+    error instanceof BbHttpError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.code !== "submission_already_admitted"
+  );
+}
+
 export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     retry: false,
@@ -212,13 +222,9 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
           pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
         return;
       }
-      if (
+      const stale =
         context.kind === "accepted-turn" &&
-        context.generation !== pendingSendGeneration(queryClient)
-      ) {
-        context.prediction?.fail();
-        return;
-      }
+        context.generation !== pendingSendGeneration(queryClient);
       variables = prepareSendRequest(variables);
       if (variables.clientSubmissionId && _error instanceof BbHttpError) {
         if (_error.code === "submission_already_admitted") {
@@ -247,6 +253,8 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
               },
             );
             void refreshPendingSends(queryClient, variables.id).catch(() => {});
+            if (stale && context.kind === "accepted-turn")
+              context.prediction?.fail();
             return;
           }
           if (parsed.success && parsed.data.details.queuedMessageId) {
@@ -260,18 +268,18 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
             return;
           }
         }
-        if (
-          _error.status >= 400 &&
-          _error.status < 500 &&
-          _error.status !== 408 &&
-          _error.code !== "submission_already_admitted"
-        )
+        if (isDefiniteSendRejection(_error)) {
+          pendingSendOwner(queryClient).markRejected(
+            variables.id,
+            variables.clientSubmissionId,
+          );
           pendingSendOwner(queryClient).fail(
             variables.id,
             variables.clientSubmissionId,
             true,
             getHttpErrorBodyMessage(_error) ?? "Not sent",
           );
+        }
       }
       rollbackSendThreadMessageTransaction({
         queryClient,

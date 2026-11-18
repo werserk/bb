@@ -9,6 +9,7 @@ import { threadScope, turnScope } from "@bb/domain";
 import { readQueueSnapshot } from "../../src/services/threads/queue-snapshot.js";
 import {
   assertSubmissionNotAdmitted,
+  findRequestedSubmission,
   guardSubmission,
   submissionAdmissionFloor,
 } from "../../src/services/threads/submission-admission.js";
@@ -196,8 +197,9 @@ it("measures bounded placements and fenced admission on aged histories", async (
             const heldAt = performance.now();
             const scanned = assertSubmissionNotAdmitted(tx, thread.id, id);
             expect(scanned).toEqual({
-              scannedRows: 1000,
-              scannedBytes: fullScans.at(-1)!.scannedBytes,
+              scannedRows: 0,
+              scannedBytes: 0,
+              parsedRows: 0,
             });
             fullLocked.push(performance.now() - heldAt);
           },
@@ -671,5 +673,122 @@ it("rechecks a competing admission after the pre-check sequence under the write 
       body: { code: "submission_already_admitted" },
     });
     expect(appended).toBe(1);
+  });
+});
+it("prefilters requested events by the raw submission id with the same admission answer", async () => {
+  const { sql } = await import("drizzle-orm");
+  const { createClientTurnRequestId } =
+    await import("../../src/services/threads/thread-events.js");
+  await withTestHarness(async (h) => {
+    const { host } = seedHostSession(h.deps, { id: "prefilter-host" });
+    const { project } = seedProjectWithSource(h.deps, {
+      hostId: host.id,
+      path: "/fixture",
+    });
+    const thread = seedThread(h.deps, {
+      projectId: project.id,
+      status: "idle",
+    });
+    const requested = (
+      text: string,
+      clientSubmissions?: { id: string; inputGroupIndex: number }[],
+    ): import("@bb/domain").TurnRequestEventData => ({
+      requestId: createClientTurnRequestId(),
+      ...(clientSubmissions ? { clientSubmissions } : {}),
+      direction: "outbound",
+      source: "tell",
+      initiator: "user",
+      senderThreadId: null,
+      input: [{ type: "text", text, mentions: [] }],
+      target: { kind: "new-turn" },
+      request: { method: "turn/start", params: {} },
+      execution: {
+        model: "test",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        source: "client/turn/requested",
+      },
+    });
+    const admitted = crypto.randomUUID(),
+      mentioned = crypto.randomUUID(),
+      escaped = crypto.randomUUID(),
+      absent = crypto.randomUUID();
+    h.db.transaction((tx) => {
+      for (let i = 0; i < 50; i++)
+        appendThreadEventInTransaction(tx, {
+          threadId: thread.id,
+          type: "client/turn/requested",
+          scope: threadScope(),
+          data: requested(`unrelated ${i}`, [
+            { id: crypto.randomUUID(), inputGroupIndex: 0 },
+          ]),
+        });
+      appendThreadEventInTransaction(tx, {
+        threadId: thread.id,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: requested("admitted", [{ id: admitted, inputGroupIndex: 0 }]),
+      });
+      appendThreadEventInTransaction(tx, {
+        threadId: thread.id,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: requested(`the text names ${mentioned} without admitting it`),
+      });
+    });
+    const sequence = getLatestThreadSequence(h.db, { threadId: thread.id }) + 1;
+    const raw = JSON.stringify(
+      requested("escaped", [{ id: escaped, inputGroupIndex: 0 }]),
+    ).replace(escaped, `${escaped.slice(0, 8)}\\u002d${escaped.slice(9)}`);
+    expect(raw).not.toContain(escaped);
+    h.db.run(
+      sql`INSERT INTO events(id,thread_id,scope_kind,sequence,type,data,created_at) VALUES (${`${thread.id}-escaped`},${thread.id},'thread',${sequence},'client/turn/requested',${raw},${sequence})`,
+    );
+    const rows = listStoredEventRows(h.db, {
+      threadId: thread.id,
+      types: ["client/turn/requested"],
+      limit: 1000,
+      order: "desc",
+    });
+    expect(rows.length).toBe(53);
+    const answer = (id: string) => {
+      try {
+        return assertSubmissionNotAdmitted(h.db, thread.id, id);
+      } catch (error) {
+        return (error as { body?: { code?: string } }).body?.code;
+      }
+    };
+    expect(answer(admitted)).toBe("submission_already_admitted");
+    expect(
+      rows.filter((row) => row.data.includes(admitted)).map((row) => row.id),
+    ).toHaveLength(1);
+    expect(answer(escaped)).toMatchObject({ scannedRows: 0 });
+    expect(answer(mentioned)).toMatchObject({ scannedRows: 1, parsedRows: 1 });
+    expect(answer(absent)).toMatchObject({ scannedRows: 0, parsedRows: 0 });
+    h.db.transaction((tx) => {
+      for (let i = 0; i < 997; i++)
+        appendThreadEventInTransaction(tx, {
+          threadId: thread.id,
+          type: "client/turn/requested",
+          scope: threadScope(),
+          data: requested(`newer ${i}`),
+        });
+    });
+    expect(
+      findRequestedSubmission(h.db, thread.id, admitted).requested,
+    ).toBeDefined();
+    h.db.transaction((tx) =>
+      appendThreadEventInTransaction(tx, {
+        threadId: thread.id,
+        type: "client/turn/requested",
+        scope: threadScope(),
+        data: requested("one more"),
+      }),
+    );
+    expect(
+      findRequestedSubmission(h.db, thread.id, admitted).requested,
+    ).toBeUndefined();
+    expect(answer(admitted)).toMatchObject({ scannedRows: 0 });
   });
 });

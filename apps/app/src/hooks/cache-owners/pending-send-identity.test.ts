@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createAppQueryClient } from "@/lib/query-client";
 import { sdk } from "@/lib/sdk";
 import { wsManager } from "@/lib/ws";
+import { seedPendingSendThread } from "@/test/fixtures/pending-send";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
 import { systemConfigQueryKey } from "../queries/query-keys";
 import { bindPendingSendIdentity } from "./pending-send-identity";
@@ -15,6 +16,7 @@ import {
   pendingSendJournal,
   composePendingSends,
   clearPendingSendScope,
+  pendingSendDraftId,
 } from "./pending-send-owner";
 import {
   beginSendThreadMessageTransaction,
@@ -23,6 +25,7 @@ import {
 
 it("clears custody across account payloads via mocked ws/sdk and fences old receipts and status reads", async () => {
   const client = createAppQueryClient();
+  const draft = seedPendingSendThread(client);
   let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
   const off = vi.fn();
   const listener = vi
@@ -79,6 +82,13 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
     await expect(oldSend).rejects.toThrow("scope changed");
     expect(send).not.toHaveBeenCalled();
     expect(pendingSendOwner(client).journalEntries()).toEqual([]);
+    expect(draft.getCurrent().text).toBe("private A");
+    expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
+      "private A",
+    );
+    expect(pendingSendDraftId("thread-1", draft.getCurrent())).toBe(
+      request.clientSubmissionId,
+    );
     emit(status("b", 3));
     applySendThreadMessageSuccess({
       queryClient: client,
@@ -103,6 +113,7 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
 
 it("erases the owned account journal and rejects a late old-account Web Lock grant", async () => {
   const client = createAppQueryClient();
+  seedPendingSendThread(client);
   window.sessionStorage.clear();
   const grants: {
     signal: AbortSignal | undefined;
@@ -183,6 +194,7 @@ it("erases the owned account journal and rejects a late old-account Web Lock gra
 
 function identityHarness() {
   const client = createAppQueryClient();
+  const draft = seedPendingSendThread(client);
   window.sessionStorage.clear();
   let signal!: Parameters<typeof wsManager.onPluginSignal>[0];
   let connect!: Parameters<typeof wsManager.onConnected>[0];
@@ -217,6 +229,7 @@ function identityHarness() {
   });
   return {
     client,
+    draft,
     reads,
     status,
     reconnect: () => connect({ reconnected: true, disconnectedAt: Date.now() }),
@@ -481,7 +494,10 @@ it("keeps an owned journal through profile uncertainty and saves memory sends wh
     expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
       "during uncertainty",
     );
-    expect(pendingSendOwner(h.client).list()).toEqual([]);
+    expect(h.draft.getCurrent().text).toBe("before uncertainty");
+    expect(pendingSendOwner(h.client).list()).toMatchObject([
+      { row: { text: "during uncertainty" } },
+    ]);
   } finally {
     h.close();
     vi.unstubAllGlobals();
@@ -510,7 +526,7 @@ it("does not undo an explicit recovery Hide on reconnect to the same account", a
   }
 });
 
-it("keeps stored journal entries when the navigation lock is held elsewhere and only replaces them on the first own entry", async () => {
+it("keeps stored journal entries when the navigation lock is held elsewhere, and still keeps them as inherited after the first own entry", async () => {
   const client = createAppQueryClient();
   window.sessionStorage.clear();
   const config = makeSystemConfig({ primaryHostId: "host-held" });
@@ -535,7 +551,7 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
         callback: (lock: object | null) => Promise<void>,
       ) => {
         names.push(name);
-        if (names.length === 1) await callback(null);
+        if (name.endsWith("/held-elsewhere")) await callback(null);
         else void callback({});
       },
     },
@@ -543,10 +559,10 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
   try {
     client.setQueryData(systemConfigQueryKey(), config);
     pendingSendOwner(client);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(names).toHaveLength(2);
-    expect(pendingSendJournal(client)?.status).toBe("owned");
+    await vi.waitFor(() =>
+      expect(pendingSendJournal(client)?.status).toBe("owned"),
+    );
+    expect(names).toHaveLength(3);
     expect(window.sessionStorage.getItem(key)).toBe(stored);
     await beginSendThreadMessageTransaction({
       queryClient: client,
@@ -561,6 +577,9 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
     expect(saved.journalId).not.toBe("held-elsewhere");
     expect(JSON.stringify(saved.entries)).toContain("own entry");
     expect(JSON.stringify(saved.entries)).not.toContain("stored-entry");
+    expect(saved.inherited).toEqual([
+      { journalId: "held-elsewhere", entries: [{ id: "stored-entry" }] },
+    ]);
   } finally {
     vi.unstubAllGlobals();
     clearPendingSendScope(client);

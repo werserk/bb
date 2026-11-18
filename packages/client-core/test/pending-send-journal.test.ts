@@ -274,7 +274,7 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
       request: async (name, options, callback) => {
         names.push(name);
         waits.push(options.ifAvailable !== true);
-        if (names.length === 1) await callback(null);
+        if (name.endsWith("/inherited")) await callback(null);
         else held = callback({});
       },
     },
@@ -284,9 +284,11 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
   });
   await Promise.resolve();
   await Promise.resolve();
-  expect(names).toHaveLength(2);
+  await vi.waitFor(() => expect(journal.status).toBe("owned"));
+  expect(names).toHaveLength(3);
   expect(names[0]).not.toBe(names[1]);
-  expect(waits).toEqual([false, false]);
+  expect(names[2]).toBe(names[0]);
+  expect(waits).toEqual([false, false, false]);
   expect(hydrated).toEqual([]);
   journal.save([]);
   expect(JSON.parse(storage.get("account")!)).toMatchObject({
@@ -297,8 +299,103 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
   const saved = JSON.parse(storage.get("account")!);
   expect(saved.journalId).not.toBe("inherited");
   expect(saved.entries).toEqual(["own"]);
+  expect(saved.inherited).toEqual([
+    { journalId: "inherited", entries: ["private pending"] },
+  ]);
   journal.dispose();
   await held;
+});
+
+function journalHarness(
+  stored: unknown,
+  heldNames: Set<string>,
+  onDenied: (name: string) => void = () => {},
+) {
+  const storage = new Map<string, string>([
+    ["account", JSON.stringify(stored)],
+  ]);
+  const releases: (() => void)[] = [];
+  const hydrated: unknown[][] = [];
+  const open = (reload: boolean) => {
+    const journal = new PendingSendJournal({
+      key: "account",
+      reload,
+      storage: {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => {
+          storage.set(key, value);
+        },
+        removeItem: (key) => {
+          storage.delete(key);
+        },
+      },
+      locks: {
+        request: async (name, _options, callback) => {
+          if (heldNames.has(name)) {
+            onDenied(name);
+            return callback(null);
+          }
+          heldNames.add(name);
+          try {
+            await callback({});
+          } finally {
+            heldNames.delete(name);
+          }
+        },
+      },
+    });
+    journal.start((entries) => hydrated.push(entries));
+    releases.push(() => journal.dispose());
+    return journal;
+  };
+  return { storage, hydrated, open, releases };
+}
+
+it("a fresh tab's first save keeps a live predecessor's entries; its reload adopts them once that lock is free", async () => {
+  const held = new Set(["bb-pending-send/account/predecessor"]);
+  const h = journalHarness(
+    { version: 1, journalId: "predecessor", entries: ["only copy"] },
+    held,
+  );
+  const fresh = h.open(false);
+  await vi.waitFor(() => expect(fresh.status).toBe("owned"));
+  expect(h.hydrated).toEqual([[]]);
+  fresh.save(["own"]);
+  const saved = JSON.parse(h.storage.get("account")!);
+  expect(saved).toMatchObject({
+    entries: ["own"],
+    inherited: [{ journalId: "predecessor", entries: ["only copy"] }],
+  });
+  held.delete("bb-pending-send/account/predecessor");
+  fresh.dispose();
+  await vi.waitFor(() => expect(held.size).toBe(0));
+  const reloaded = h.open(true);
+  await vi.waitFor(() => expect(reloaded.status).toBe("owned"));
+  expect(h.hydrated.at(-1)).toEqual(["own", "only copy"]);
+  reloaded.save(["own", "only copy"]);
+  const adopted = JSON.parse(h.storage.get("account")!);
+  expect(adopted.journalId).toBe(saved.journalId);
+  expect(adopted.entries).toEqual(["own", "only copy"]);
+  expect(adopted.inherited).toBeUndefined();
+  for (const release of h.releases) release();
+});
+
+it("a fresh journal adopts a predecessor whose lock was released before its check", async () => {
+  const held = new Set(["bb-pending-send/account/predecessor"]);
+  const h = journalHarness(
+    { version: 1, journalId: "predecessor", entries: ["unloading"] },
+    held,
+    (name) => held.delete(name),
+  );
+  const journal = h.open(false);
+  await vi.waitFor(() => expect(journal.status).toBe("owned"));
+  expect(h.hydrated).toEqual([["unloading"]]);
+  journal.save(["unloading"]);
+  const saved = JSON.parse(h.storage.get("account")!);
+  expect(saved.journalId).not.toBe("predecessor");
+  expect(saved.entries).toEqual(["unloading"]);
+  expect(saved.inherited).toBeUndefined();
+  for (const release of h.releases) release();
 });
 it("hydrates the journal at actual grant after its predecessor finishes writing", async () => {
   let grant!: (lock: object | null) => Promise<void>;
@@ -413,4 +510,72 @@ it("forget clears only an owned namespace, never a waiting predecessor's journal
   owned.forget();
   await held;
   expect(removes).toBe(1);
+});
+it("writes the smaller fallback form when storage refuses the full journal", async () => {
+  let grant!: (lock: object | null) => Promise<void>;
+  let value: string | null = null;
+  const journal = new PendingSendJournal({
+    key: "account",
+    reload: false,
+    storage: {
+      getItem: () => value,
+      setItem: (_key, next) => {
+        if (next.includes("resend payload")) throw Error("quota");
+        value = next;
+      },
+      removeItem: () => {},
+    },
+    locks: {
+      request: async (_name, _options, callback) => {
+        grant = callback;
+      },
+    },
+  });
+  journal.start(() => {});
+  const held = grant({});
+  await Promise.resolve();
+  journal.save([{ id: "a", request: "resend payload" }], () => [{ id: "a" }]);
+  expect(journal.status).toBe("owned");
+  expect(JSON.parse(value!).entries).toEqual([{ id: "a" }]);
+  journal.save([{ id: "a", request: "resend payload" }], () => [
+    { id: "a", request: "resend payload" },
+  ]);
+  expect(journal.status).toBe("unsaved");
+  journal.dispose();
+  await held;
+});
+it("forget on a scope change removes the stored key even before a fresh journal's first save", async () => {
+  const names: string[] = [];
+  let stored: string | null = JSON.stringify({
+    version: 1,
+    journalId: "predecessor",
+    entries: [{ id: "old scope message" }],
+  });
+  const journal = new PendingSendJournal({
+    key: "account",
+    reload: false,
+    storage: {
+      getItem: () => stored,
+      setItem: (_key, next) => {
+        stored = next;
+      },
+      removeItem: () => {
+        stored = null;
+      },
+    },
+    locks: {
+      request: async (name, _options, callback) => {
+        names.push(name);
+        if (name.endsWith("/predecessor")) await callback(null);
+        else void callback({});
+      },
+    },
+  });
+  journal.start(() => {});
+  await vi.waitFor(() => expect(journal.status).toBe("owned"));
+  expect(names).toHaveLength(3);
+  journal.save([]);
+  expect(stored).toContain("old scope message");
+  journal.forget();
+  expect(stored).toBeNull();
 });

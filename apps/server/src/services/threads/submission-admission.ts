@@ -2,6 +2,7 @@ import {
   getLatestThreadSequence,
   getQueuedThreadMessage,
   listStoredEventRows,
+  listStoredEventRowsContaining,
   type DbQueryConnection,
 } from "@bb/db";
 import { turnRequestEventDataSchema } from "@bb/domain";
@@ -27,36 +28,68 @@ export function assertSubmissionNotAdmitted(
       "Submission already admitted",
       { details: { queuedMessageId: queue.id, threadId: queue.threadId } },
     );
-  const rows = listStoredEventRows(db, {
-    threadId,
-    types: ["client/turn/requested"],
-    limit: 1000,
-    order: "desc",
-    ...(afterSequence === undefined ? {} : { afterSequence }),
-  });
+  const scan = findRequestedSubmission(db, threadId, id, afterSequence);
+  if (scan.requested)
+    throw new ApiError(
+      409,
+      "submission_already_admitted",
+      "Submission already admitted",
+      { details: { requested: scan.requested } },
+    );
+  return {
+    scannedRows: scan.scannedRows,
+    scannedBytes: scan.scannedBytes,
+    parsedRows: scan.parsedRows,
+  };
+}
+export function findRequestedSubmission(
+  db: DbQueryConnection,
+  threadId: string,
+  id: string,
+  afterSequence?: number,
+) {
+  const literal = /^[0-9A-Za-z-]+$/u.test(id);
+  const rows = literal
+    ? listStoredEventRowsContaining(db, {
+        threadId,
+        type: "client/turn/requested",
+        window: 1000,
+        needles: [id],
+        ...(afterSequence === undefined ? {} : { afterSequence }),
+      })
+    : listStoredEventRows(db, {
+        threadId,
+        types: ["client/turn/requested"],
+        limit: 1000,
+        order: "desc",
+        ...(afterSequence === undefined ? {} : { afterSequence }),
+      });
   let scannedBytes = 0;
+  let parsedRows = 0;
   for (const row of rows) {
     scannedBytes += Buffer.byteLength(row.data);
+    parsedRows++;
     const request = turnRequestEventDataSchema.safeParse(JSON.parse(row.data));
     if (
       request.success &&
       request.data.clientSubmissions?.some((entry) => entry.id === id)
     )
-      throw new ApiError(
-        409,
-        "submission_already_admitted",
-        "Submission already admitted",
-        {
-          details: {
-            requested: {
-              requestId: request.data.requestId,
-              sequence: row.sequence,
-            },
-          },
+      return {
+        requested: {
+          requestId: request.data.requestId,
+          sequence: row.sequence,
         },
-      );
+        scannedRows: rows.length,
+        scannedBytes,
+        parsedRows,
+      };
   }
-  return { scannedRows: rows.length, scannedBytes };
+  return {
+    requested: undefined,
+    scannedRows: rows.length,
+    scannedBytes,
+    parsedRows,
+  };
 }
 const floors = new WeakMap<object, Map<string, number>>();
 export function submissionAdmissionFloor(
@@ -81,7 +114,9 @@ export function guardSubmission(
   threadId: string,
   id: string,
   payload: unknown,
-  send: () => Promise<import("@bb/server-contract").SendMessageResponse>,
+  send: (
+    floor: number,
+  ) => Promise<import("@bb/server-contract").SendMessageResponse>,
 ) {
   let active = inflight.get(db);
   if (!active) {
@@ -109,7 +144,7 @@ export function guardSubmission(
   }
   checkpoints.set(key, sequence);
   const result = Promise.resolve()
-    .then(send)
+    .then(() => send(sequence))
     .finally(() => {
       active!.delete(key);
       checkpoints!.delete(key);

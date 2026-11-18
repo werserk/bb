@@ -2,7 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { sdk } from "@/lib/sdk";
 import { composerSuggestionContext } from "@/lib/composer-suggestion-host";
 import { useThreadTimeline } from "@/hooks/queries/thread-panel-queries";
-import { settleFailedPendingSend } from "@/hooks/cache-owners/pending-send-owner";
+import {
+  pendingSendDraftId,
+  settleFailedPendingSend,
+} from "@/hooks/cache-owners/pending-send-owner";
 import { useServerConnectionState } from "@/hooks/useServerConnectionState";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
 import { visibleQueuedMessages } from "@/lib/queued-system-notice";
@@ -1326,7 +1329,7 @@ export function ThreadDetailPromptArea({
       promptDraft.clearIfCurrentMatches(submittedDraft);
       setBottomAttachmentError(null);
 
-      const clientSubmissionId = crypto.randomUUID();
+      const clientSubmissionId = pendingSendDraftId(thread.id, submittedDraft);
       try {
         const request = buildAutoFollowUpRequest({
           compactFirst: compactFirst && sendAt === undefined,
@@ -1351,6 +1354,7 @@ export function ThreadDetailPromptArea({
           thread.id,
           clientSubmissionId,
           () => promptDraft.restoreIfEmpty(submittedDraft),
+          submittedDraft,
         );
         throw reportMutationError({
           error: nextError,
@@ -1408,7 +1412,10 @@ export function ThreadDetailPromptArea({
           await runWhileFollowUpShortcutSending(
             setIsFollowUpShortcutSending,
             async () => {
-              const clientSubmissionId = crypto.randomUUID();
+              const clientSubmissionId = pendingSendDraftId(
+                thread.id,
+                submittedDraft,
+              );
               try {
                 await sendMessage.mutateAsync({
                   ...shortcutRequest.request,
@@ -1424,6 +1431,7 @@ export function ThreadDetailPromptArea({
                   thread.id,
                   clientSubmissionId,
                   () => promptDraft.restoreIfEmpty(submittedDraft),
+                  submittedDraft,
                 );
                 throw reportMutationError({
                   error: nextError,

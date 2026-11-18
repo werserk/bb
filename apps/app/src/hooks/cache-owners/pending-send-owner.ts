@@ -1,12 +1,19 @@
 import {
   PendingSendOverlay,
   PendingSendJournal,
+  parsePromptDraftStorage,
+  promptInputToDraft,
+  serializePromptDraftStorage,
   type PendingSend,
   type JournalStatus,
+  type PromptDraftState,
 } from "@bb/client-core";
+import { z } from "zod";
 import { notifyManager, type QueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import { sdk } from "@/lib/sdk";
+import { getPromptDraftAccessor } from "../usePromptDraftStorage";
+import { getThreadEntity } from "./thread-entity-store";
 import {
   systemConfigQueryKey,
   threadTimelineQueryKey,
@@ -117,11 +124,16 @@ function context(
     });
     current.owner.subscribe(() => {
       if (current.journal && !current.identityPending && !current.resetting)
-        current.journal.save(current.owner.journalEntries());
+        saveJournal(current);
     });
   }
   ensureJournal(client, state);
   return state;
+}
+function saveJournal(state: OwnerContext) {
+  state.journal?.save(state.owner.journalEntries(), () =>
+    state.owner.journalEntries({ requests: false }),
+  );
 }
 function ensureJournal(client: QueryClient, state: OwnerContext) {
   if (typeof window === "undefined" || state.identityPending || state.resetting)
@@ -137,7 +149,7 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
     state.identity,
   ]);
   if (state.scope === scope) return;
-  if (state.scope !== undefined) resetScope(state);
+  if (state.scope !== undefined) resetScope(client, state);
   state.scope = scope;
   let storage: Storage | undefined;
   try {
@@ -162,7 +174,39 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
     }
   });
 }
-function resetScope(state: OwnerContext) {
+function handBackUnacknowledged(
+  client: QueryClient,
+  owner: PendingSendOverlay,
+) {
+  const kept: PendingSend[] = [];
+  for (const entry of owner.list()) {
+    if (
+      entry.queueIds.length > 0 ||
+      !(
+        entry.state === "sending" ||
+        entry.state === "unconfirmed" ||
+        entry.state === "failed"
+      )
+    )
+      continue;
+    const projectId = getThreadEntity(client, entry.threadId)?.thread.projectId;
+    const draft = entry.request
+      ? promptInputToDraft(entry.request.input)
+      : { text: entry.row.text, mentions: [], attachments: [] };
+    const restored =
+      projectId !== undefined &&
+      getPromptDraftAccessor({
+        kind: "thread",
+        projectId,
+        threadId: entry.threadId,
+      }).restoreIfEmpty(draft);
+    if (!restored) kept.push(entry);
+    else if (entry.state !== "failed")
+      bindDraft(entry.threadId, entry.id, draft);
+  }
+  return kept;
+}
+function resetScope(client: QueryClient, state: OwnerContext) {
   state.generation++;
   sends.delete(state.owner);
   state.active.clear();
@@ -176,7 +220,8 @@ function resetScope(state: OwnerContext) {
   state.scope = undefined;
   try {
     journal?.forget();
-    state.owner.clear();
+    const kept = handBackUnacknowledged(client, state.owner);
+    state.owner.clear({ keep: kept });
   } finally {
     state.resetting = false;
   }
@@ -204,7 +249,7 @@ export function setPendingSendIdentity(
   if (resumed) {
     if (state.resumeWaitingJournal && state.journal?.status === "hidden")
       state.journal.refresh();
-    else state.journal?.save(state.owner.journalEntries());
+    else saveJournal(state);
     state.resumeWaitingJournal = false;
   }
   state.owner.notify();
@@ -231,7 +276,7 @@ export function pendingSendGeneration(client: QueryClient) {
 }
 export function clearPendingSendScope(client: QueryClient) {
   const state = owners.get(client);
-  if (state) resetScope(state);
+  if (state) resetScope(client, state);
 }
 function custodyKey(owner: PendingSendOverlay, threadId: string) {
   return JSON.stringify(
@@ -514,12 +559,71 @@ export function settleFailedPendingSend(
   threadId: string,
   id: string,
   restoreDraft: () => boolean,
+  draft?: PromptDraftState,
 ): boolean {
   const owner = pendingSendOwner(client);
-  if (owner.outcome(threadId, id) !== "rejected") return false;
+  const outcome = owner.outcome(threadId, id);
+  if (
+    outcome === "accepted" ||
+    (outcome === undefined &&
+      pendingRecoveryStatus(client) === "owned" &&
+      owner.list(threadId).some((entry) => entry.id === id))
+  )
+    return false;
   const restored = restoreDraft();
-  if (restored) owner.hide(threadId, id);
-  return restored;
+  if (!restored) return false;
+  if (outcome === undefined && draft) bindDraft(threadId, id, draft);
+  owner.hide(threadId, id);
+  return true;
+}
+const draftBindingKey = (threadId: string) =>
+  `bb-pending-send-draft/${threadId}`;
+const draftBindings = new Map<string, { id: string; draft: string }>();
+function draftHash(draft: PromptDraftState) {
+  const text =
+    serializePromptDraftStorage(
+      parsePromptDraftStorage(serializePromptDraftStorage(draft)),
+    ) ?? "";
+  let h1 = 0xdeadbeef,
+    h2 = 0x41c6ce57;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+function bindDraft(threadId: string, id: string, draft: PromptDraftState) {
+  const binding = { id, draft: draftHash(draft) };
+  draftBindings.set(threadId, binding);
+  try {
+    window.sessionStorage.setItem(
+      draftBindingKey(threadId),
+      JSON.stringify(binding),
+    );
+  } catch {}
+}
+export function pendingSendDraftId(
+  threadId: string,
+  draft: PromptDraftState,
+): string {
+  let binding = draftBindings.get(threadId);
+  draftBindings.delete(threadId);
+  try {
+    const stored = window.sessionStorage.getItem(draftBindingKey(threadId));
+    window.sessionStorage.removeItem(draftBindingKey(threadId));
+    if (!binding && stored !== null) {
+      const parsed = z
+        .object({ id: z.uuid(), draft: z.string() })
+        .safeParse(JSON.parse(stored));
+      if (parsed.success) binding = parsed.data;
+    }
+  } catch {}
+  return binding?.draft === draftHash(draft) ? binding.id : crypto.randomUUID();
 }
 export function newPendingSend(
   entry: Omit<PendingSend, "sequence" | "state">,

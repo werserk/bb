@@ -1,4 +1,8 @@
-import { listStoredEventRows, listQueuedThreadMessages } from "@bb/db";
+import {
+  getLatestThreadSequence,
+  listQueuedThreadMessages,
+  listStoredEventRowsContaining,
+} from "@bb/db";
 import { turnRequestEventDataSchema } from "@bb/domain";
 import {
   queuedSubmissionMembership,
@@ -730,6 +734,7 @@ export async function sendQueuedMessageNow(
   const submissionIds = queuedSubmissionMembership(deps.db, selection).map(
     (entry) => entry.id,
   );
+  const floor = getLatestThreadSequence(deps.db, { threadId: args.threadId });
   await sendQueuedMessage(deps, {
     claimPolicy: { kind: "explicit-send" },
     mode: args.mode,
@@ -740,19 +745,19 @@ export async function sendQueuedMessageNow(
     deps.db,
     args.queuedMessageId,
   );
-  if (!remainingQueuedMessage) {
-    for (const row of listStoredEventRows(deps.db, {
+  if (!remainingQueuedMessage && sourceQueuedMessageIds.length) {
+    for (const row of listStoredEventRowsContaining(deps.db, {
       threadId: args.threadId,
-      types: ["client/turn/requested"],
-      limit: 1000,
-      order: "desc",
+      type: "client/turn/requested",
+      window: 1000,
+      afterSequence: floor,
+      needles: [sourceQueuedMessageIds[0]!],
     })) {
       const request = turnRequestEventDataSchema.safeParse(
         JSON.parse(row.data),
       );
       if (
         request.success &&
-        sourceQueuedMessageIds.length &&
         sourceQueuedMessageIds.every((id) =>
           request.data.sourceQueuedMessageIds?.includes(id),
         )

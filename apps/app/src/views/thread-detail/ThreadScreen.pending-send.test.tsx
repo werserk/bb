@@ -238,3 +238,88 @@ it("resends an unconfirmed send with the same submission id", async () => {
     vi.restoreAllMocks();
   }
 });
+
+it("after a reload offers Resend for a journaled request and Copy text otherwise", async () => {
+  mutateAsync.mockClear();
+  const { queryClient: client, wrapper: Wrapper } =
+    createQueryClientTestHarness();
+  const owner = pendingSendOwner(client);
+  const kept = "00000000-0000-4000-8000-000000000003";
+  const inline = "00000000-0000-4000-8000-000000000004";
+  const sends: [string, SendThreadMessageMutationRequest["input"]][] = [
+    [kept, [{ type: "text", text: "kept request", mentions: [] }]],
+    [
+      inline,
+      [
+        { type: "text", text: "inline image", mentions: [] },
+        { type: "image", url: "data:image/png;base64,aW5saW5l" },
+      ],
+    ],
+  ];
+  for (const [id, input] of sends)
+    await beginSendThreadMessageTransaction({
+      queryClient: client,
+      request: { id: THREAD.id, clientSubmissionId: id, input, mode: "auto" },
+    });
+  for (const entry of owner.list(THREAD.id))
+    owner.fail(THREAD.id, entry.id, false, "Delivery unconfirmed");
+  const journal = JSON.parse(JSON.stringify(owner.journalEntries()));
+  owner.clear();
+  for (const entry of journal) {
+    const recovered = owner.parseRecovered(entry);
+    if (recovered) owner.begin(recovered);
+  }
+  const view = render(
+    <MemoryRouter>
+      <Wrapper>
+        <ThreadScreen
+          composer={null}
+          environment={null}
+          presentation={SIDE_CHAT_PRESENTATION}
+          projectId={THREAD.projectId}
+          resolveMentionLink={() => null}
+          thread={THREAD}
+          timeline={{
+            ...TIMELINE,
+            timelineRows: composePendingSends(client, THREAD.id, [], []).rows,
+          }}
+          timelineHost={{
+            environmentHostName: null,
+            includePluginMessageActions: false,
+            unreadDividerAutoScroll: false,
+            unreadDividerPlacement: null,
+          }}
+        />
+      </Wrapper>
+    </MemoryRouter>,
+  );
+  try {
+    const pending = (id: string) =>
+      view.container.querySelector<HTMLElement>(
+        `[data-pending-send-id="${id}"]`,
+      )!;
+    expect(within(pending(kept)).getByRole("button", { name: "Resend" }));
+    expect(
+      within(pending(kept)).queryByRole("button", { name: "Copy text" }),
+    ).toBeNull();
+    expect(
+      within(pending(inline)).queryByRole("button", { name: "Resend" }),
+    ).toBeNull();
+    expect(pending(inline).textContent).toContain(
+      "Resend not kept after reload",
+    );
+    expect(within(pending(inline)).getByRole("button", { name: "Copy text" }));
+    await act(async () => {
+      fireEvent.click(
+        within(pending(kept)).getByRole("button", { name: "Resend" }),
+      );
+    });
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: THREAD.id, clientSubmissionId: kept }),
+    );
+  } finally {
+    view.unmount();
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});

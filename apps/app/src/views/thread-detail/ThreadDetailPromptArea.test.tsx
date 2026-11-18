@@ -60,8 +60,11 @@ import {
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
   clearPendingSendScope,
+  pendingRecoveryStatus,
   pendingSendOwner,
 } from "@/hooks/cache-owners/pending-send-owner";
+import { systemConfigQueryKey } from "@/hooks/queries/query-keys";
+import { makeSystemConfig } from "@/test/fixtures/system-config";
 import { beginSendThreadMessageTransaction } from "@/hooks/cache-owners/thread-runtime-cache-owner";
 import type { SendThreadMessageMutationRequest } from "@/hooks/mutations/mutation-request-types";
 
@@ -334,17 +337,39 @@ describe("shared draft submission ownership", () => {
   });
 
   it.each([
-    ["ordinary", false],
-    ["modifier", false],
-    ["ordinary", true],
-    ["modifier", true],
+    ["ordinary", "rejected"],
+    ["modifier", "rejected"],
+    ["ordinary", "unconfirmed, owned journal"],
+    ["modifier", "unconfirmed, owned journal"],
+    ["ordinary", "unconfirmed, no journal"],
+    ["modifier", "unconfirmed, no journal"],
   ] as const)(
-    "%s submit with a definite=%s failure keeps or restores the draft through the pending owner",
-    async (action, definite) => {
+    "%s submit, %s: the draft comes back unless an owned journal keeps the entry",
+    async (action, outcome) => {
       const threadId = `thr_fail_${++nextId}`;
       const draft = draftFor(threadId);
       const original = { text: "keep me", mentions: [], attachments: [] };
       draft.setDraft(original);
+      if (outcome === "unconfirmed, owned journal") {
+        vi.stubGlobal("navigator", {
+          ...navigator,
+          locks: {
+            request: async (
+              _name: string,
+              _options: unknown,
+              callback: (lock: object | null) => Promise<void>,
+            ) => callback({}),
+          },
+        });
+        testQueryClient.setQueryData(
+          systemConfigQueryKey(),
+          makeSystemConfig(),
+        );
+        pendingSendOwner(testQueryClient);
+        await vi.waitFor(() =>
+          expect(pendingRecoveryStatus(testQueryClient)).toBe("owned"),
+        );
+      }
       mocks.sendMessageMutateAsync.mockImplementationOnce(
         async (request: SendThreadMessageMutationRequest) => {
           await beginSendThreadMessageTransaction({
@@ -354,8 +379,8 @@ describe("shared draft submission ownership", () => {
           pendingSendOwner(testQueryClient).fail(
             threadId,
             request.clientSubmissionId!,
-            definite,
-            definite ? "Not sent" : "Delivery unconfirmed",
+            outcome === "rejected",
+            outcome === "rejected" ? "Not sent" : "Delivery unconfirmed",
           );
           throw new Error("send failed");
         },
@@ -366,18 +391,31 @@ describe("shared draft submission ownership", () => {
           await Promise.resolve(view[action]()).catch(() => undefined);
         });
         const entries = pendingSendOwner(testQueryClient).list(threadId);
-        if (definite) {
-          expect(draft.getCurrent()).toEqual(original);
-          expect(entries).toHaveLength(0);
-        } else {
+        const firstId = mocks.sendMessageMutateAsync.mock.calls.at(-1)![0]
+          .clientSubmissionId as string;
+        if (outcome === "unconfirmed, owned journal") {
           expect(draft.getCurrent()).toEqual(
             expect.objectContaining({ text: "" }),
           );
-          expect(entries).toMatchObject([{ state: "unconfirmed" }]);
+          expect(entries).toMatchObject([
+            { id: firstId, state: "unconfirmed" },
+          ]);
           expect(entries[0]?.request?.clientSubmissionId).toBe(entries[0]?.id);
+          return;
         }
+        expect(draft.getCurrent()).toEqual(original);
+        expect(entries).toHaveLength(0);
+        mocks.sendMessageMutateAsync.mockResolvedValueOnce(undefined);
+        await act(async () => {
+          await Promise.resolve(view[action]()).catch(() => undefined);
+        });
+        const nextId = mocks.sendMessageMutateAsync.mock.calls.at(-1)![0]
+          .clientSubmissionId as string;
+        expect(nextId === firstId).toBe(outcome !== "rejected");
       } finally {
         clearPendingSendScope(testQueryClient);
+        testQueryClient.removeQueries({ queryKey: systemConfigQueryKey() });
+        vi.unstubAllGlobals();
         view.unmount();
       }
     },
