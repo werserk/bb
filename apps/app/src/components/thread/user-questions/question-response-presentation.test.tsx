@@ -531,7 +531,14 @@ it.each(["answer", "withdraw"] as const)(
     );
     expect(document.body.textContent).toContain(resolution.reason);
     expect(screen.queryByText("You answered")).toBeNull();
-    if (action === "withdraw")
+    const section = document.querySelector("[data-question-response]")!;
+    if (action === "withdraw") {
       expect(screen.queryByText("First label")).toBeNull();
+      // A withdrawal is quiet grey and left-aligned, never the owner bubble.
+      expect(section.className).not.toContain("ml-auto");
+      expect(section.className).not.toContain("timeline-accent/14");
+    } else {
+      expect(section.className).toContain("ml-auto");
+    }
   },
 );

@@ -97,6 +97,9 @@ Persistent ordinary questions:
   bb thread questions withdraw <question-id> [id] --revision <number>
     --self is available on target-taking subcommands; resolve takes threadId
     from its file. Output is JSON; --json is available on every subcommand.
+    To withdraw your own question from an agent turn, use the bb_resolve_question
+    tool: it is recorded quietly. The CLI withdraw is an unverified local
+    withdrawal and is delivered back to the asking thread as a notice.
 
   `list --open` returns `{questions,total,nextCursor,readRevision}`. Continue
   sequentially until nextCursor is null. Invalid/cross-thread cursors return 400;

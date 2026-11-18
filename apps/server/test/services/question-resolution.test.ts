@@ -351,22 +351,28 @@ describe("native question resolution", () => {
           }).resolutionHistory,
         ).toHaveLength(1);
         const queue = listQueuedThreadMessages(h.db, thread.id);
-        expect(queue).toHaveLength(1);
-        expect(queue[0]!.senderThreadId).toBe(thread.id);
-        expect(
-          parseQuestionResolutionNotice(JSON.parse(queue[0]!.content)[0].text),
-        ).toMatchObject({
-          version: 1,
-          resolution: { actor: { kind: "agent", threadId: thread.id } },
-        });
-        expect(queue[0]!.content).toContain(
-          action === "answer" ? "Answered by" : "Withdrawn by",
-        );
         expect(accepted.status).toBe(
           action === "answer" ? "answered" : "withdrawn",
         );
-        if (action === "withdraw") expect(accepted.response).toBeNull();
-        expect(queue[0]!.content).toContain(input.reason);
+        if (action === "withdraw") {
+          // The asker withdrew its own question: nothing is delivered back.
+          expect(accepted.response).toBeNull();
+          expect(accepted.resolutionAttribution?.deliveryId).toBeNull();
+          expect(queue).toHaveLength(0);
+        } else {
+          expect(queue).toHaveLength(1);
+          expect(queue[0]!.senderThreadId).toBe(thread.id);
+          expect(
+            parseQuestionResolutionNotice(
+              JSON.parse(queue[0]!.content)[0].text,
+            ),
+          ).toMatchObject({
+            version: 1,
+            resolution: { actor: { kind: "agent", threadId: thread.id } },
+          });
+          expect(queue[0]!.content).toContain("Answered by");
+          expect(queue[0]!.content).toContain(input.reason);
+        }
         expect(
           (await call({ ...input, actor: { kind: "owner" } })).success,
         ).toBe(false);
