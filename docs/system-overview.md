@@ -72,9 +72,12 @@ existing periodic idle recovery remains a fallback for missed process-local
 signals. Idle service drains and idle discovery share the admission rule
 that any ordinary queued row takes priority, including an exhausted failure
 and a claimed row; these blocked service rows remain untouched. A row waiting
-on `provisioning` is not a blocker: only the thread's first dispatch ends that
-wait, and on a pending plugin thread that dispatch is the queued service turn
-(yielding to it left a replaced WProjects coordinator pending forever). By-id readiness
+on `provisioning` is not a blocker: on a thread with no environment only its
+first dispatch ends that wait, and on a pending plugin thread that dispatch is
+the queued service turn (yielding to it left a replaced WProjects coordinator
+pending forever). On a thread already provisioning the service turn waits on
+the same condition, and readiness clears every provisioning wait before rows
+are retried, so ordinary rows still go first. By-id readiness
 wakes still run admission and convert a cleared plugin or host wait into an
 idle-drainable thread-busy wait when ordinary work blocks delivery. This keeps
 one-shot readiness signals effective after the blocker leaves. Native queue

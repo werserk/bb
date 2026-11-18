@@ -1416,10 +1416,13 @@ function ordinaryQueuedMessagesForThread(
       and(
         eq(ordinary.threadId, threadId),
         isNull(ordinary.serviceTurn),
-        // werserk fork: a `provisioning` wait ends only when this thread's
-        // first dispatch provisions it. When the waiting service turn is that
-        // first dispatch, yielding to the row would be a cycle that keeps the
-        // thread pending forever; the row is released once the turn starts.
+        // werserk fork: a `provisioning` wait ends when this thread is
+        // provisioned. On a thread with no environment only its first
+        // dispatch does that; when the waiting service turn is that dispatch,
+        // yielding would be a cycle that keeps the thread pending forever.
+        // A thread already provisioning holds the service turn on the same
+        // wait, and readiness clears every provisioning wait before either
+        // row is retried, so ordinary rows still go first.
         or(
           isNull(ordinary.waitingOn),
           sql`json_extract(${ordinary.waitingOn}, '$.kind') != 'provisioning'`,
