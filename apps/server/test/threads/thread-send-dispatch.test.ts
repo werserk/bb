@@ -2607,7 +2607,7 @@ describe("pending send admission provenance", () => {
       });
     },
   );
-  it("preserves all selected queue aliases through the idle provider fast path", async () => {
+  it("preserves all selected queue aliases when an idle provider sends a grouped queue immediately", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedProviderThreadFixture({ harness, value: 9873 });
       const ids = [crypto.randomUUID(), crypto.randomUUID()];
