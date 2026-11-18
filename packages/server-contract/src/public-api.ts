@@ -1659,7 +1659,10 @@ export const publicApiRoutes = {
     plans: defineRoute({
       path: "/threads/plans",
       method: "post",
-      request: jsonRequest<{}, { threadIds: string[] }>(
+      request: jsonRequest<
+        {},
+        { threadIds: string[]; known?: Record<string, string> }
+      >(
         planZ
           .object({
             threadIds: planZ
@@ -1669,6 +1672,17 @@ export const publicApiRoutes = {
                   .regex(/^thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/),
               )
               .max(40),
+            known: planZ
+              .record(
+                planZ
+                  .string()
+                  .regex(/^thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/),
+                planZ.string().min(1).max(128),
+              )
+              .refine((known) => Object.keys(known).length <= 40, {
+                message: "At most 40 known plan revisions",
+              })
+              .optional(),
           })
           .strict(),
       ),

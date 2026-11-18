@@ -1436,6 +1436,36 @@ describe("@bb/sdk", () => {
     });
   });
 
+  it("forwards known plan revisions only when given", async () => {
+    const queue = createFetchQueue([
+      { body: { plans: {}, errors: {} } },
+      { body: { plans: {}, errors: {}, unchanged: {} } },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await sdk.threads.plans({ threadIds: ["thr_aaaaaaaaaa"] });
+    await sdk.threads.plans({
+      threadIds: ["thr_aaaaaaaaaa"],
+      known: { thr_aaaaaaaaaa: "token" },
+    });
+
+    expect(queue.requests[0]).toMatchObject({
+      method: "POST",
+      url: "http://bb.test/api/v1/threads/plans",
+      bodyText: JSON.stringify({ threadIds: ["thr_aaaaaaaaaa"] }),
+    });
+    expect(JSON.parse(queue.requests[1]?.bodyText ?? "{}")).toEqual({
+      threadIds: ["thr_aaaaaaaaaa"],
+      known: { thr_aaaaaaaaaa: "token" },
+    });
+  });
+
   it("forwards every public permission mode through thread surfaces", async () => {
     const queue = createFetchQueue([
       { body: { id: "thr_auto" }, status: 201 },

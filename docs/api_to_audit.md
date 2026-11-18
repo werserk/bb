@@ -4641,6 +4641,11 @@ up to 200 records and readRevision-bound cursors; SDK `threads.questions.open`
 and CLI `bb thread questions list --open` expose the same read. Invalid cursors
 refuse 400; changed open identity/revision or archive state refuses 409. Schema
 and question rows are unchanged; installed consumer verification remains pending.
+`threads.plans` accepts optional `known` (at most 40 thread id → `readRevision`
+entries, valid only for the server process that returned them) and lists each
+thread whose opaque `readRevision` (over its events including rewrites, status,
+open-question summary, failed queued sends and attention interactions) still
+matches under `unchanged` as `{revision, readRevision}` instead of `plans`.
 
 Core callers: ThreadScreen → ThreadPlanCard → ThreadPlanSteps → useThreadPlans; public SDK `threads.plans` and `bb thread plan` use the same server `readThreadPlan` projection. Questions use UserQuestionAnswerForm, the native draft key and resolveThreadPendingInteractionMutationOptions. One presentation owner per interaction is selected across foreground overlay/panel/native fallback. Unsupported inputs retain native controls. Skip preserves the pending interaction and its draft; Stop remains native chat control. Failure and needs_input come from authoritative own facts, with no historical/descendant failure roll-up.
 

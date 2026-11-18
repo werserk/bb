@@ -10,8 +10,8 @@ import {
   answerConversationQuestion,
   closeConversationQuestion,
 } from "../../services/threads/conversation-questions.js";
-import { readThreadPlan } from "../../services/threads/thread-plans.js";
-import type { ThreadPlansReadResponse } from "@bb/domain";
+import { readThreadPlanUnlessKnown } from "../../services/threads/thread-plans.js";
+import type { ThreadPlansReadResponse, ThreadPlanUnchanged } from "@bb/domain";
 import { PLUGIN_INTERACTION_MAX_PAYLOAD_BYTES } from "@bb/domain";
 import {
   publicApiRoutes,
@@ -154,18 +154,24 @@ export function registerThreadInteractionRoutes(
   );
   post(routes.plans, (context, payload) => {
     const result: ThreadPlansReadResponse = { plans: {}, errors: {} };
+    const unchanged: Record<string, ThreadPlanUnchanged> = {};
     for (const id of new Set(payload.threadIds)) {
       try {
-        result.plans[id] = readThreadPlan(
+        const read = readThreadPlanUnlessKnown(
           deps,
           requirePublicThread(deps.db, id),
+          payload.known?.[id],
         );
+        if (read.unchanged) unchanged[id] = read.unchanged;
+        else result.plans[id] = read.plan;
       } catch (error) {
         result.errors[id] =
           error instanceof Error ? error.message : "Plan unavailable";
       }
     }
-    return context.json(result);
+    return context.json(
+      payload.known === undefined ? result : { ...result, unchanged },
+    );
   });
 
   get(routes.interactions, (context) => {

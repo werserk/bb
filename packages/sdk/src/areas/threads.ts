@@ -664,6 +664,7 @@ export interface ThreadQueueArea {
 export interface ThreadsArea {
   plans(args: {
     threadIds: readonly string[];
+    known?: Readonly<Record<string, string>>;
     signal?: AbortSignal;
   }): Promise<ThreadPlansReadResponse>;
   archive(args: ThreadActionArgs): Promise<ThreadArchiveResult>;
@@ -1429,7 +1430,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     async plans(input) {
       return transport.readJson(
         transport.api.v1.threads.plans.$post(
-          { json: { threadIds: [...input.threadIds] } },
+          {
+            json: {
+              threadIds: [...input.threadIds],
+              ...(input.known === undefined
+                ? {}
+                : { known: { ...input.known } }),
+            },
+          },
           ...signalRequestArgs(input.signal),
         ),
       );
