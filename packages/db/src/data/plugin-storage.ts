@@ -1,7 +1,7 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import type { DbConnection } from "../connection.js";
 import { pluginKv, pluginSettings } from "../schema.js";
-import { likePrefixPattern } from "./sql-like.js";
+import { codePointPrefixRange } from "./prefix-range.js";
 
 export interface PluginKvRow {
   pluginId: string;
@@ -73,9 +73,11 @@ export function listPluginKvKeys(
 ): string[] {
   const conditions = [eq(pluginKv.pluginId, pluginId)];
   if (prefix !== undefined && prefix.length > 0) {
-    conditions.push(
-      sql`${pluginKv.key} LIKE ${likePrefixPattern(prefix)} ESCAPE '\\'`,
-    );
+    const range = codePointPrefixRange(prefix);
+    conditions.push(gte(pluginKv.key, range.lower));
+    if (range.upper !== null) {
+      conditions.push(lt(pluginKv.key, range.upper));
+    }
   }
   return db
     .select({ key: pluginKv.key })

@@ -308,6 +308,45 @@ describe("storage", () => {
     ).rejects.toThrow(/limit is 262144 \(256KB\)/);
   });
 
+  it("Code-point order", async () => {
+    const { bb } = createFakePluginHost();
+    for (const key of ["p/\u{1f600}", "p/\u{e000}", "p/\u{ffff}", "p/z"]) {
+      await bb.storage.kv.set(key, 1);
+    }
+
+    expect(await bb.storage.kv.list("p/")).toEqual([
+      "p/z",
+      "p/\u{e000}",
+      "p/\u{ffff}",
+      "p/\u{1f600}",
+    ]);
+  });
+
+  it("lists by a case-sensitive prefix", async () => {
+    const { bb } = createFakePluginHost();
+    await bb.storage.kv.set("Abc/1", 1);
+    await bb.storage.kv.set("abc/2", 2);
+
+    expect(await bb.storage.kv.list("abc")).toEqual(["abc/2"]);
+  });
+
+  it("Lone surrogate in a key", async () => {
+    const { bb } = createFakePluginHost();
+    for (const key of [
+      "x\ud800/1",
+      "x\u{fffd}/2",
+      "x\ud83d/3",
+      "x\u{1f600}/4",
+    ]) {
+      await bb.storage.kv.set(key, key);
+    }
+    const replaced = "x\u{fffd}\u{fffd}\u{fffd}";
+
+    expect(await bb.storage.kv.list("x\ud800")).toEqual([`${replaced}/1`]);
+    expect(await bb.storage.kv.list("x\ud83d")).toEqual([`${replaced}/3`]);
+    expect(await bb.storage.kv.get("x\ud800/1")).toBe("x\ud800/1");
+  });
+
   it("database() returns one shared WAL database and migrate() is append-only by index", () => {
     const { bb } = createFakePluginHost();
     const db = bb.storage.database();
