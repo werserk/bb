@@ -614,6 +614,37 @@ it("does not restore the draft while delivery is unconfirmed and lets the same i
   }
 });
 
+it("does not restore the draft once the owner has accepted the send", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "draft", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a14",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const owner = pendingSendOwner(client);
+    const id = request.clientSubmissionId!;
+    owner.receipt(request.id, id, {
+      ok: true,
+      delivery: "sent",
+      submissionIds: [id],
+      requested: { requestId: "request-1", sequence: 1 },
+    });
+    expect(owner.list(request.id)[0]?.state).toBe("sent");
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, request.id, id, restore)).toBe(
+      false,
+    );
+    expect(restore).not.toHaveBeenCalled();
+    expect(owner.list(request.id)).toHaveLength(1);
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
 it("restores the draft when no pending entry exists for the send", () => {
   const client = createAppQueryClient();
   try {

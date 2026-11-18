@@ -13,7 +13,7 @@ import {
 
 export function PendingSendControls({ threadId }: { threadId: string }) {
   const client = useQueryClient();
-  const snapshot = usePendingSendSnapshot(client, threadId);
+  const snapshot = usePendingSendSnapshot(client);
   const status = snapshot.recoveryStatus,
     journal = snapshot.journal;
   const entries = snapshot.entries.filter(
@@ -70,7 +70,7 @@ export function PendingSendPresentation({
   children: ReactNode;
 }) {
   const client = useQueryClient();
-  const snapshot = usePendingSendEntries(client, threadId);
+  const snapshot = usePendingSendEntries(client);
   const value = useMemo(() => {
     const entries = new Map(
       snapshot

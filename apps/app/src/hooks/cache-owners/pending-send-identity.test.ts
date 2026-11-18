@@ -14,6 +14,7 @@ import {
   pendingSendOwner,
   pendingSendJournal,
   composePendingSends,
+  clearPendingSendScope,
 } from "./pending-send-owner";
 import {
   beginSendThreadMessageTransaction,
@@ -506,5 +507,63 @@ it("does not undo an explicit recovery Hide on reconnect to the same account", a
   } finally {
     h.close();
     vi.unstubAllGlobals();
+  }
+});
+
+it("keeps stored journal entries when the navigation lock is held elsewhere and only replaces them on the first own entry", async () => {
+  const client = createAppQueryClient();
+  window.sessionStorage.clear();
+  const config = makeSystemConfig({ primaryHostId: "host-held" });
+  const key = `bb-pending-send/${JSON.stringify([
+    window.location.origin,
+    config.primaryHostId,
+    config.dataDir,
+    undefined,
+  ])}`;
+  const stored = JSON.stringify({
+    version: 1,
+    journalId: "held-elsewhere",
+    entries: [{ id: "stored-entry" }],
+  });
+  window.sessionStorage.setItem(key, stored);
+  const names: string[] = [];
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: async (
+        name: string,
+        _options: unknown,
+        callback: (lock: object | null) => Promise<void>,
+      ) => {
+        names.push(name);
+        if (names.length === 1) await callback(null);
+        else void callback({});
+      },
+    },
+  });
+  try {
+    client.setQueryData(systemConfigQueryKey(), config);
+    pendingSendOwner(client);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(names).toHaveLength(2);
+    expect(pendingSendJournal(client)?.status).toBe("owned");
+    expect(window.sessionStorage.getItem(key)).toBe(stored);
+    await beginSendThreadMessageTransaction({
+      queryClient: client,
+      request: {
+        id: "thread-1",
+        clientSubmissionId: crypto.randomUUID(),
+        mode: "auto",
+        input: [{ type: "text", text: "own entry", mentions: [] }],
+      },
+    });
+    const saved = JSON.parse(window.sessionStorage.getItem(key)!);
+    expect(saved.journalId).not.toBe("held-elsewhere");
+    expect(JSON.stringify(saved.entries)).toContain("own entry");
+    expect(JSON.stringify(saved.entries)).not.toContain("stored-entry");
+  } finally {
+    vi.unstubAllGlobals();
+    clearPendingSendScope(client);
+    client.clear();
   }
 });

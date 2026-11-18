@@ -287,7 +287,7 @@ export function pendingSendOwner(client: QueryClient) {
 export function pendingSendJournal(client: QueryClient) {
   return context(client).journal;
 }
-export function usePendingSendSnapshot(client: QueryClient, threadId: string) {
+export function usePendingSendSnapshot(client: QueryClient) {
   const owner = pendingSendOwner(client);
   const read = useMemo(() => {
     let revision = -1;
@@ -312,11 +312,11 @@ export function usePendingSendSnapshot(client: QueryClient, threadId: string) {
       }
       return snapshot;
     };
-  }, [client, owner, threadId]);
+  }, [client, owner]);
   return useSyncExternalStore(owner.subscribe, read, read);
 }
-export function usePendingSendEntries(client: QueryClient, threadId: string) {
-  return usePendingSendSnapshot(client, threadId).entries;
+export function usePendingSendEntries(client: QueryClient) {
+  return usePendingSendSnapshot(client).entries;
 }
 export function usePendingSendOwner(client: QueryClient) {
   const owner = pendingSendOwner(client);
@@ -517,9 +517,9 @@ export function settleFailedPendingSend(
 ): boolean {
   const owner = pendingSendOwner(client);
   const entry = owner.list(threadId).find((candidate) => candidate.id === id);
-  if (entry?.state === "unconfirmed") return false;
+  if (entry && entry.state !== "failed") return false;
   const restored = restoreDraft();
-  if (restored && entry?.state === "failed") owner.hide(threadId, id);
+  if (restored && entry) owner.hide(threadId, id);
   return restored;
 }
 export function newPendingSend(

@@ -64,6 +64,7 @@ import {
   invalidateProjectPromptHistoryQueries,
   invalidateThreadQueueQueries,
   invalidateThreadQueuedMessageSendQueries,
+  invalidateThreadQueuedMessageStayedQueuedQueries,
   invalidateThreadListQueries,
   refetchThreadListsAfterComposerThreadCreate,
 } from "./mutation-cache-effects";
@@ -867,6 +868,15 @@ export async function beginSendQueuedMessageTransaction({
     previousQueuedMessages,
     request.queuedMessageId,
   );
+  if (group.length === 0) {
+    return {
+      optimisticCreatedAt: null,
+      optimisticQueueDataUpdateCount: 0,
+      optimisticRowId: null,
+      prediction: null,
+      previousQueuedMessages,
+    };
+  }
   const row = buildOptimisticUserMessageRow({
     createdAt: Date.now(),
     input: group.flatMap((item) => item.content),
@@ -965,8 +975,19 @@ export function applyQueuedMessageSendResult({
           ?.map((row) => row.id),
       },
     );
-  if (result.delivery === "queued") transaction?.prediction?.fail();
-  else {
+  if (result.delivery === "queued") {
+    transaction?.prediction?.fail();
+    const authoritative = result.queuedMessage;
+    queryClient.setQueryData<ThreadQueuedMessageListResponse>(
+      threadQueuedMessagesQueryKey(request.id),
+      (rows) =>
+        rows?.map((row) => (row.id === authoritative.id ? authoritative : row)),
+    );
+    invalidateThreadQueuedMessageStayedQueuedQueries({
+      queryClient,
+      threadId: request.id,
+    });
+  } else {
     transaction?.prediction?.confirm([], readThreadBack(queryClient));
     invalidateThreadQueuedMessageSendQueries({
       queryClient,

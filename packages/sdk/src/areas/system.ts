@@ -451,10 +451,9 @@ export function createSystemArea(args: CreateSdkAreaArgs): SystemArea {
       );
     },
     async pendingSendOverlay() {
+      const baseUrl = transport.baseUrl.replace(/\/$/u, "");
       return transport.readJson(
-        transport.fetch(
-          `${transport.baseUrl}/capabilities/pending-send-overlay`,
-        ),
+        transport.fetch(`${baseUrl}/api/v1/capabilities/pending-send-overlay`),
       );
     },
     async version(input) {

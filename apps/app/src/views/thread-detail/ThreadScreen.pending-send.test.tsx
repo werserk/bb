@@ -7,6 +7,7 @@ import {
   clearPendingSendScope,
 } from "@/hooks/cache-owners/pending-send-owner";
 import { beginSendThreadMessageTransaction } from "@/hooks/cache-owners/thread-runtime-cache-owner";
+import type { SendThreadMessageMutationRequest } from "@/hooks/mutations/mutation-request-types";
 import { MemoryRouter } from "react-router-dom";
 import { expect, it, vi } from "vitest";
 import type { UseThreadTimelineControllerResult } from "@/components/thread/timeline";
@@ -26,7 +27,7 @@ vi.mock("@/hooks/queries/system-queries", async (importOriginal) => ({
 }));
 
 const { mutateAsync } = vi.hoisted(() => ({
-  mutateAsync: vi.fn(() => Promise.resolve()),
+  mutateAsync: vi.fn((_request?: unknown) => Promise.resolve()),
 }));
 
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => {
@@ -209,11 +210,19 @@ it("resends an unconfirmed send with the same submission id", async () => {
         `[data-pending-send-id="${submissionId}"]`,
       );
     expect(pending()?.textContent).toContain("Delivery unconfirmed");
+    mutateAsync.mockImplementationOnce(async (request: unknown) => {
+      await beginSendThreadMessageTransaction({
+        queryClient: client,
+        request: request as SendThreadMessageMutationRequest,
+      });
+    });
     await act(async () => {
       fireEvent.click(
         within(pending()!).getByRole("button", { name: "Resend" }),
       );
     });
+    expect(owner.list(THREAD.id)).toHaveLength(1);
+    expect(owner.list(THREAD.id)[0]?.id).toBe(submissionId);
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
