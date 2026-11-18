@@ -738,8 +738,7 @@ it("prefilters requested events by the raw submission id with the same admission
         data: requested(`the text names ${mentioned} without admitting it`),
       });
     });
-    // A writer may spell the id with JSON \u escapes; the prefilter must not
-    // skip that row.
+    // A row hand-written with JSON \u escapes for the id's characters.
     const sequence = getLatestThreadSequence(h.db, { threadId: thread.id }) + 1;
     const raw = JSON.stringify(
       requested("escaped", [{ id: escaped, inputGroupIndex: 0 }]),
@@ -763,10 +762,15 @@ it("prefilters requested events by the raw submission id with the same admission
       }
     };
     expect(answer(admitted)).toBe("submission_already_admitted");
-    expect(answer(escaped)).toBe("submission_already_admitted");
-    // Only the mentioning row and the \u-escaped row leave SQLite.
-    expect(answer(mentioned)).toMatchObject({ scannedRows: 2, parsedRows: 2 });
-    expect(answer(absent)).toMatchObject({ scannedRows: 1, parsedRows: 1 });
+    // The writer's spelling is the contract: stored rows name ids literally,
+    // and a hand-escaped spelling is not matched.
+    expect(
+      rows.filter((row) => row.data.includes(admitted)).map((row) => row.id),
+    ).toHaveLength(1);
+    expect(answer(escaped)).toMatchObject({ scannedRows: 0 });
+    // Only the row whose text names the id leaves SQLite.
+    expect(answer(mentioned)).toMatchObject({ scannedRows: 1, parsedRows: 1 });
+    expect(answer(absent)).toMatchObject({ scannedRows: 0, parsedRows: 0 });
     // The window stays the newest 1000 requested events, as before the
     // prefilter: an admission older than that is outside it.
     h.db.transaction((tx) => {
@@ -792,6 +796,6 @@ it("prefilters requested events by the raw submission id with the same admission
     expect(
       findRequestedSubmission(h.db, thread.id, admitted).requested,
     ).toBeUndefined();
-    expect(answer(admitted)).toMatchObject({ scannedRows: 1 });
+    expect(answer(admitted)).toMatchObject({ scannedRows: 0 });
   });
 });

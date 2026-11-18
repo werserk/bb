@@ -44,9 +44,10 @@ export function assertSubmissionNotAdmitted(
 }
 /**
  * The newest `client/turn/requested` event (of the last 1000) that admitted
- * submission `id`. A row whose JSON names `id` contains it literally, unless
- * the text uses a \u escape (the only other JSON spelling of [0-9A-Za-z-]),
- * so SQLite returns only rows containing either; only those are parsed.
+ * submission `id`. Event data is written by `JSON.stringify`, which spells
+ * [0-9A-Za-z-] literally, so SQLite returns only the rows whose text
+ * contains `id`; only those are parsed. A row hand-written with \u escapes
+ * for those characters is outside this check.
  */
 export function findRequestedSubmission(
   db: DbQueryConnection,
@@ -60,7 +61,7 @@ export function findRequestedSubmission(
         threadId,
         type: "client/turn/requested",
         window: 1000,
-        needles: [id, "\\u"],
+        needles: [id],
         ...(afterSequence === undefined ? {} : { afterSequence }),
       })
     : listStoredEventRows(db, {

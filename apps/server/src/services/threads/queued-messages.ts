@@ -752,7 +752,7 @@ export async function sendQueuedMessageNow(
       type: "client/turn/requested",
       window: 1000,
       afterSequence: floor,
-      needles: [sourceQueuedMessageIds[0]!, "\\u"],
+      needles: [sourceQueuedMessageIds[0]!],
     })) {
       const request = turnRequestEventDataSchema.safeParse(
         JSON.parse(row.data),
