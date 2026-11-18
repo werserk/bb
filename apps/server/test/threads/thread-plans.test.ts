@@ -16,7 +16,7 @@ import {
   setQueuedThreadMessageFailureReason,
   threads,
 } from "@bb/db";
-import { withTestHarness } from "../helpers/test-app.js";
+import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 import {
   closeConversationQuestion,
   publishConversationQuestion,
@@ -353,7 +353,7 @@ it("keeps oversized-turn native input available without guessing a plan step or 
 });
 
 describe("conditional plan reads", () => {
-  type Harness = Parameters<Parameters<typeof withTestHarness>[0]>[0];
+  type Harness = TestAppHarness;
   type Plans = {
     plans: Record<string, { readRevision: string } & Record<string, unknown>>;
     errors: Record<string, string>;
@@ -561,7 +561,7 @@ describe("conditional plan reads", () => {
       const thread = setup(h);
       const queued = seedQueuedMessage(h.deps, {
         threadId: thread.id,
-        content: [{ type: "text", text: "later" }],
+        content: [{ type: "text", text: "later", mentions: [] }],
       });
       const token = await tokenOf(h, thread.id);
       setQueuedThreadMessageFailureReason(h.db, h.hub, {
