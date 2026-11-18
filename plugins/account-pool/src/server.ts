@@ -1,3 +1,4 @@
+import { handleResponses } from "./responses-nonstream.js";
 import {
   retryAvailabilityContract,
   retryAvailabilityMethod,
@@ -460,7 +461,12 @@ export function createAccountPoolPlugin(
       bb.http.route(
         "POST",
         route,
-        (context) => hub.handle(context.req.raw, "codex", route),
+        (context) =>
+          route === "/v1/responses"
+            ? handleResponses(context.req.raw, (request) =>
+                hub.handle(request, "codex", route),
+              )
+            : hub.handle(context.req.raw, "codex", route),
         { auth: "none" },
       );
     }
