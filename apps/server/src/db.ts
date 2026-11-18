@@ -9,6 +9,7 @@ import {
   exportLegacyAutomationsForPluginImport,
   hasLegacyAutomationsToExport,
 } from "./legacy-automations-export.js";
+import { currentEventLoopWorkLabel } from "./services/system/event-loop-work.js";
 
 type InitDbLogger = MigrationWarningLogger &
   SlowDbQueryLogger &
@@ -29,6 +30,7 @@ export function initDb(
     slowQueryLogger: options.logger,
     slowQueryThresholdMs: options.slowQueryThresholdMs,
     slowQueryDiagnosticsEnabled: options.slowQueryDiagnosticsEnabled,
+    slowQueryWorkLabel: currentEventLoopWorkLabel,
   });
   try {
     if (options.dataDir !== undefined && options.logger !== undefined) {

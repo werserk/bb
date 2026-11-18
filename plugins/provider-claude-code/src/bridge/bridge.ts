@@ -1380,7 +1380,14 @@ function trackSdkAssistantPermissionEscalation(
 export function buildSessionTrackingHooks(
   threadIdRef: ThreadIdRef,
 ): NonNullable<SdkSessionOptions["hooks"]> {
-  const planTurnCheck = buildPlanTurnCheck();
+  const planTurnCheck = buildPlanTurnCheck({
+    hasOpenBackgroundTasks: () =>
+      threadAttachments
+        .get(threadIdRef.current)
+        ?.residentSession?.translator.hasOpenBackgroundTasks(
+          threadIdRef.current,
+        ) === true,
+  });
   const trackPermissionRequest: HookCallback = async (input, toolUseId) => {
     if (
       input.hook_event_name !== "PermissionRequest" ||

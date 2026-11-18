@@ -51,9 +51,16 @@ export type ClaudeTaskMap = Map<string, ClaudeTrackedTask>;
 interface TranslateClaudeTaskMessageArgs {
   event: unknown;
   tasks: ClaudeTaskMap;
+  openBackgroundTaskIds: Set<string>;
   turnStartSuppressed: boolean;
   hasForwardedToolUse: (toolUseId: string) => boolean;
 }
+
+const TERMINAL_TASK_UPDATE_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "killed",
+]);
 
 export function hasCompletionBlockingClaudeTasks(
   tasks: ClaudeTaskMap,
@@ -278,6 +285,9 @@ export function translateClaudeTaskMessage(
   const started = claudeTaskStartedMessageSchema.safeParse(args.event);
   if (started.success) {
     const message = started.data;
+    if (message.is_backgrounded !== false) {
+      args.openBackgroundTaskIds.add(message.task_id);
+    }
     const taskType = message.task_type ?? "unknown";
     if (!isMaterializedTaskType(taskType)) {
       return [];
@@ -339,6 +349,15 @@ export function translateClaudeTaskMessage(
   const updated = claudeTaskUpdatedMessageSchema.safeParse(args.event);
   if (updated.success) {
     const message = updated.data;
+    if (message.patch.is_backgrounded === true) {
+      args.openBackgroundTaskIds.add(message.task_id);
+    }
+    if (
+      message.patch.status !== undefined &&
+      TERMINAL_TASK_UPDATE_STATUSES.has(message.patch.status)
+    ) {
+      args.openBackgroundTaskIds.delete(message.task_id);
+    }
     const task = args.tasks.get(message.task_id);
     if (!task || task.terminal) {
       return [];
@@ -377,6 +396,7 @@ export function translateClaudeTaskMessage(
   );
   if (notification.success) {
     const message = notification.data;
+    args.openBackgroundTaskIds.delete(message.task_id);
     const task = args.tasks.get(message.task_id);
     if (!task || task.terminal) {
       return [];
@@ -398,7 +418,9 @@ export function translateClaudeTaskMessage(
 
 export function buildInterruptedClaudeTaskDeltas(args: {
   tasks: ClaudeTaskMap;
+  openBackgroundTaskIds: Set<string>;
 }): ThreadDelta[] {
+  args.openBackgroundTaskIds.clear();
   const deltas: ThreadDelta[] = [];
   for (const task of args.tasks.values()) {
     if (task.terminal) {

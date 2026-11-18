@@ -272,6 +272,84 @@ describe("createConnection", () => {
     db.$client.close();
   });
 
+  describe("Slow transaction names its caller", () => {
+    it("for a statement", () => {
+      const logger = new CapturingSlowQueryLogger();
+      let label: string | null = "GET /api/threads";
+      const db = createConnection(":memory:", {
+        slowQueryLogger: logger,
+        slowQueryThresholdMs: 0,
+        slowQueryWorkLabel: () => label,
+      });
+
+      db.$client.prepare("SELECT 1").get();
+      label = null;
+      db.$client.prepare("SELECT 2").get();
+
+      expect(logger.infoLogs.map((log) => log.fields.workLabel)).toEqual([
+        "GET /api/threads",
+        null,
+      ]);
+      db.$client.close();
+    });
+
+    it("for a transaction", () => {
+      const logger = new CapturingSlowQueryLogger();
+      const db = createConnection(":memory:", {
+        slowQueryLogger: logger,
+        slowQueryThresholdMs: 0,
+        slowQueryWorkLabel: () => "plugin:wprojects rpc projectState",
+      });
+      migrate(db);
+      logger.clear();
+
+      db.transaction((tx) => tx.select().from(hosts).all(), {
+        behavior: "deferred",
+      });
+
+      const transaction = logger.infoLogs.find(
+        (log) => log.fields.operation === "transaction",
+      );
+      expect(transaction?.fields).toMatchObject({
+        sql: "TRANSACTION DEFERRED",
+        workLabel: "plugin:wprojects rpc projectState",
+      });
+      db.$client.close();
+    });
+
+    it("asks for the label only for a slow line", () => {
+      const logger = new CapturingSlowQueryLogger();
+      let asked = 0;
+      const db = createConnection(":memory:", {
+        slowQueryLogger: logger,
+        slowQueryThresholdMs: 60_000,
+        slowQueryWorkLabel: () => {
+          asked += 1;
+          return "never";
+        },
+      });
+
+      db.$client.prepare("SELECT 1").get();
+
+      expect(logger.infoLogs).toEqual([]);
+      expect(asked).toBe(0);
+      db.$client.close();
+    });
+
+    it("logs a null label without a label source", () => {
+      const logger = new CapturingSlowQueryLogger();
+      const db = createConnection(":memory:", {
+        slowQueryLogger: logger,
+        slowQueryThresholdMs: 0,
+      });
+
+      db.$client.prepare("SELECT 1").get();
+
+      expect(getOnlyInfoLog(logger).fields.workLabel).toBeNull();
+      db.$client.close();
+    });
+  });
+
   it("redacts SQL string literals in slow query logs", () => {
     const logger = new CapturingSlowQueryLogger();
     const db = createConnection(":memory:", {

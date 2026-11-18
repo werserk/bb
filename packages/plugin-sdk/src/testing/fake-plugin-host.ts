@@ -609,6 +609,24 @@ export interface FakePluginHost {
   harness: FakePluginHarness;
 }
 
+const LONE_SURROGATE = /[\ud800-\udfff]/gu;
+const LONE_SURROGATE_AS_READ = "\ufffd\ufffd\ufffd";
+
+function codePointsOf(value: string): number[] {
+  return Array.from(value, (character) => character.codePointAt(0)!);
+}
+
+function compareCodePoints(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) return left[index]! - right[index]!;
+  }
+  return left.length - right.length;
+}
+
 /** Effective typed values: stored value when valid, else the default, else undefined. */
 function readSettingsValues(
   descriptors: PluginSettingDescriptors,
@@ -762,9 +780,18 @@ function createFakePluginHostInternal(
     },
     async list(prefix) {
       assertLive();
+      const prefixCodePoints = codePointsOf(prefix ?? "");
       return [...kvRows.keys()]
-        .filter((key) => prefix === undefined || key.startsWith(prefix))
-        .sort();
+        .map((key) => ({ key, codePoints: codePointsOf(key) }))
+        .filter((row) =>
+          prefixCodePoints.every(
+            (codePoint, index) => row.codePoints[index] === codePoint,
+          ),
+        )
+        .sort((left, right) =>
+          compareCodePoints(left.codePoints, right.codePoints),
+        )
+        .map((row) => row.key.replace(LONE_SURROGATE, LONE_SURROGATE_AS_READ));
     },
   };
 
