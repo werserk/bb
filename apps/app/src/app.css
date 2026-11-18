@@ -167,6 +167,13 @@
     outline-offset: 1px;
   }
 
+  /* Native <select> popups: a transparent select gets a light OS list even
+   * under color-scheme: dark (Electron on Linux), so options carry the theme. */
+  :where(option, optgroup) {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+
   /* Keep the drag cursor stable while crossing rows whose normal pointer
    * cursor would otherwise override the cursor inherited from the body.
    * Only the sidebar panel's rows carry their own cursor rules, so the
