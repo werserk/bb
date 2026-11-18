@@ -107,8 +107,6 @@ it("does not apply a recovery read after its server scope has been cleared", asy
     client.clear();
     resolve(makeThreadTimelineResponse({ rows: [] }));
     await refresh;
-    // No draft could take the unacknowledged text, so the entry stays, and
-    // the old scope's read changed neither it nor the caches.
     expect(pendingSendOwner(client).list()).toMatchObject([
       { state: "sending", row: { text: "owner" } },
     ]);
@@ -611,8 +609,6 @@ it("without an owned journal hands an unconfirmed send back to the draft, bound 
     ).toBe(true);
     expect(restore).toHaveBeenCalledOnce();
     expect(owner.list(request.id)).toEqual([]);
-    // Sending the restored draft unchanged reuses the id once, so the server
-    // dedupes it; an edited draft gets a new id.
     expect(pendingSendDraftId(request.id, { ...draft })).toBe(id);
     expect(pendingSendDraftId(request.id, draft)).not.toBe(id);
     owner.fail(request.id, id, false, "Delivery unconfirmed");
@@ -802,8 +798,6 @@ it("returns the server receipt when the account scope changes while the send is 
     clearPendingSendScope(client);
     accept({ ok: true, delivery: "sent" });
     await expect(result).resolves.toEqual({ ok: true, delivery: "sent" });
-    // No draft could take the text, so the entry stayed; its own receipt
-    // settles it without touching the new scope's caches.
     expect(pendingSendOwner(client).list(request.id)).toMatchObject([
       { state: "sending" },
     ]);

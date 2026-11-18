@@ -13,7 +13,6 @@ export interface JournalLocks {
     callback: (lock: object | null) => Promise<void>,
   ): Promise<unknown>;
 }
-/** A predecessor journal's entries, kept until its document is gone. */
 interface InheritedJournal {
   journalId: string;
   entries: unknown[];
@@ -85,10 +84,6 @@ export class PendingSendJournal {
     this.inherited = [];
     if (fresh) {
       this.journalId = crypto.randomUUID();
-      // This tab's storage may hold a journal whose document still owns its
-      // lock (an unloading predecessor, or the tab this one duplicated).
-      // Its entries can be the only copy of their text, so they ride along
-      // in `inherited` instead of being overwritten by the first save.
       try {
         const raw = storage.getItem(key);
         const stored: unknown = raw === null ? null : JSON.parse(raw);
@@ -206,11 +201,6 @@ export class PendingSendJournal {
           this.setStatus("unavailable");
       });
   }
-  /**
-   * Entries of inherited journals whose lock is free (their document is
-   * gone) become this journal's own; the rest stay inherited. `undefined`
-   * when a newer acquire or Hide superseded this one meanwhile.
-   */
   private async adoptInherited(generation: number) {
     const adopted: unknown[] = [];
     const kept: InheritedJournal[] = [];
@@ -234,11 +224,6 @@ export class PendingSendJournal {
     if (adopted.length > 0) this.pristine = false;
     return adopted;
   }
-  /**
-   * `fallback` is a smaller form of the same entries (without resend
-   * payloads); it is written when storage refuses `entries`, so a quota
-   * failure never drops the visible entries from the journal.
-   */
   save(entries: unknown[], fallback?: () => unknown[]) {
     if (this.status !== "owned" && this.status !== "unsaved") return;
     if (this.pristine) {
@@ -271,14 +256,6 @@ export class PendingSendJournal {
   refresh() {
     this.acquire(this.options.reload);
   }
-  /**
-   * Scope change (sign-out, identity switch): remove this scope's stored
-   * entries. A pristine journal owns its fresh lock while the stored key
-   * still holds a previous document's entries (an unloading predecessor, or
-   * the copy a duplicated tab inherited). Session storage is per tab, so
-   * removing that key cannot touch another live document's journal. A
-   * waiting journal owns nothing and never touches storage.
-   */
   forget() {
     if (this.status === "owned" || this.status === "unsaved") {
       try {

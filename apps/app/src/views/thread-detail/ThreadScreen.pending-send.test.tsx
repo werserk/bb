@@ -264,7 +264,6 @@ it("after a reload offers Resend for a journaled request and Copy text otherwise
   for (const entry of owner.list(THREAD.id))
     owner.fail(THREAD.id, entry.id, false, "Delivery unconfirmed");
   const journal = JSON.parse(JSON.stringify(owner.journalEntries()));
-  // The reloaded document starts with an empty owner.
   owner.clear();
   for (const entry of journal) {
     const recovered = owner.parseRecovered(entry);

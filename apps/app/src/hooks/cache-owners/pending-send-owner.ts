@@ -174,12 +174,6 @@ function ensureJournal(client: QueryClient, state: OwnerContext) {
     }
   });
 }
-/**
- * The draft was cleared before the request, so an unacknowledged direct send
- * can be the only copy of its text: hand it back to its thread's draft (never
- * over a non-empty draft), bound to its id so an unchanged resend is deduped.
- * Returns the entries that could not be handed back; they stay visible.
- */
 function handBackUnacknowledged(
   client: QueryClient,
   owner: PendingSendOverlay,
@@ -560,13 +554,6 @@ export function composePendingSends(
       emptyQueue,
   );
 }
-/**
- * After a failed send, hand the text back to the composer unless the server
- * accepted it or a live entry in an owned journal keeps it across a reload:
- * the draft was cleared before the request, so otherwise the text would have
- * no copy. A draft restored after an unknown outcome is bound to the
- * submission id, so sending it unchanged is deduped by the server.
- */
 export function settleFailedPendingSend(
   client: QueryClient,
   threadId: string,
@@ -592,7 +579,6 @@ export function settleFailedPendingSend(
 const draftBindingKey = (threadId: string) =>
   `bb-pending-send-draft/${threadId}`;
 const draftBindings = new Map<string, { id: string; draft: string }>();
-/** A 53-bit hash of the normalized draft; the binding never holds its text. */
 function draftHash(draft: PromptDraftState) {
   const text =
     serializePromptDraftStorage(
@@ -621,11 +607,6 @@ function bindDraft(threadId: string, id: string, draft: PromptDraftState) {
     );
   } catch {}
 }
-/**
- * The submission id for sending `draft` in `threadId`: the id of the
- * unconfirmed send the draft was restored from while it is unchanged,
- * otherwise a new one. Each call consumes the binding.
- */
 export function pendingSendDraftId(
   threadId: string,
   draft: PromptDraftState,

@@ -42,13 +42,6 @@ export function assertSubmissionNotAdmitted(
     parsedRows: scan.parsedRows,
   };
 }
-/**
- * The newest `client/turn/requested` event (of the last 1000) that admitted
- * submission `id`. Event data is written by `JSON.stringify`, which spells
- * [0-9A-Za-z-] literally, so SQLite returns only the rows whose text
- * contains `id`; only those are parsed. A row hand-written with \u escapes
- * for those characters is outside this check.
- */
 export function findRequestedSubmission(
   db: DbQueryConnection,
   threadId: string,
@@ -121,7 +114,6 @@ export function guardSubmission(
   threadId: string,
   id: string,
   payload: unknown,
-  /** `floor`: the thread's last sequence before this submission's checks. */
   send: (
     floor: number,
   ) => Promise<import("@bb/server-contract").SendMessageResponse>,

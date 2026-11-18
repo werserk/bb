@@ -1490,19 +1490,12 @@ export function listEvents(db: DbConnection, options: ListEventsOptions) {
 
 export interface ListStoredEventRowsContainingArgs {
   afterSequence?: number;
-  /** Rows whose stored JSON text contains any of these strings. */
   needles: readonly string[];
   threadId: string;
   type: ThreadEventType;
-  /** Only the newest `window` rows of `type` (after `afterSequence`) count. */
   window: number;
 }
 
-/**
- * Newest first: the rows among the newest `window` rows of one type whose
- * stored data contains a needle. The window is chosen on the type index and
- * `instr` runs inside SQLite, so only matching rows reach the caller.
- */
 export function listStoredEventRowsContaining(
   db: DbQueryConnection,
   args: ListStoredEventRowsContainingArgs,

@@ -637,8 +637,6 @@ it.each([
       settleFailedPendingSend,
     } = await import("../cache-owners/pending-send-owner");
     clearPendingSendScope(client);
-    // No draft could take the text (no window here), so the entry stayed
-    // and the real onError settles it.
     expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
       { id, state: "sending" },
     ]);

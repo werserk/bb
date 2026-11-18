@@ -82,7 +82,6 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
     await expect(oldSend).rejects.toThrow("scope changed");
     expect(send).not.toHaveBeenCalled();
     expect(pendingSendOwner(client).journalEntries()).toEqual([]);
-    // The unacknowledged text went back to its draft, not to the journal.
     expect(draft.getCurrent().text).toBe("private A");
     expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
       "private A",
@@ -495,8 +494,6 @@ it("keeps an owned journal through profile uncertainty and saves memory sends wh
     expect(Object.values(window.sessionStorage).join(" ")).not.toContain(
       "during uncertainty",
     );
-    // The first unacknowledged text fills the empty draft; the second cannot
-    // overwrite it and stays visible under its own id.
     expect(h.draft.getCurrent().text).toBe("before uncertainty");
     expect(pendingSendOwner(h.client).list()).toMatchObject([
       { row: { text: "during uncertainty" } },

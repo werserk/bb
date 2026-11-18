@@ -880,8 +880,6 @@ it("restores a competing deferred request written without submission membership 
       .toBe(1);
     const source = requests(harness, thread.id).at(-1)!;
     expect(source.clientSubmissions).toEqual([{ id, inputGroupIndex: 0 }]);
-    // 0.49 dispatched the deferred steer and dropped the membership it
-    // does not know; the refusal is reported after upgrading back.
     const { clientSubmissions: _dropped, ...withoutMembership } = source;
     const deferred = turnRequestEventDataSchema.parse({
       ...withoutMembership,

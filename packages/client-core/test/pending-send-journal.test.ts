@@ -285,7 +285,6 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
   await Promise.resolve();
   await Promise.resolve();
   await vi.waitFor(() => expect(journal.status).toBe("owned"));
-  // Own fresh lock, then a non-waiting check whether the predecessor is gone.
   expect(names).toHaveLength(3);
   expect(names[0]).not.toBe(names[1]);
   expect(names[2]).toBe(names[0]);
@@ -300,7 +299,6 @@ it("a duplicated navigation starts a fresh namespace instead of waiting", async 
   const saved = JSON.parse(storage.get("account")!);
   expect(saved.journalId).not.toBe("inherited");
   expect(saved.entries).toEqual(["own"]);
-  // The predecessor still owns its lock; its entries are not overwritten.
   expect(saved.inherited).toEqual([
     { journalId: "inherited", entries: ["private pending"] },
   ]);
@@ -368,7 +366,6 @@ it("a fresh tab's first save keeps a live predecessor's entries; its reload adop
     entries: ["own"],
     inherited: [{ journalId: "predecessor", entries: ["only copy"] }],
   });
-  // The predecessor's document goes away, then this tab reloads.
   held.delete("bb-pending-send/account/predecessor");
   fresh.dispose();
   await vi.waitFor(() => expect(held.size).toBe(0));
@@ -384,8 +381,6 @@ it("a fresh tab's first save keeps a live predecessor's entries; its reload adop
 });
 
 it("a fresh journal adopts a predecessor whose lock was released before its check", async () => {
-  // The predecessor still holds its lock at the first, non-waiting request
-  // and releases it before the fresh journal checks it again.
   const held = new Set(["bb-pending-send/account/predecessor"]);
   const h = journalHarness(
     { version: 1, journalId: "predecessor", entries: ["unloading"] },

@@ -72,7 +72,6 @@ async function openTab() {
   return client;
 }
 
-/** The previous document unloads: its lock is released, storage stays. */
 async function unload(client: QueryClient) {
   pendingSendJournal(client)?.dispose();
   clients = clients.filter((current) => current !== client);

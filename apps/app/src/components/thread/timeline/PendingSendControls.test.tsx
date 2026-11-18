@@ -142,7 +142,6 @@ it("hands custody back to the draft on an actual server scope change and explici
       systemConfigQueryKey(),
       makeSystemConfig({ primaryHostId: "host-b", dataDir: "/fixture-b" }),
     );
-    // The unacknowledged text leaves custody for its (empty) draft.
     expect(owner.list()).toEqual([]);
     expect(draft.getCurrent().text).toBe("owner");
     draft.clear();
@@ -150,7 +149,6 @@ it("hands custody back to the draft on an actual server scope change and explici
     clearPendingSendScope(client);
     expect(owner.list()).toEqual([]);
     expect(draft.getCurrent().text).toBe("owner");
-    // With the draft occupied, the only copy stays visible instead.
     await send();
     clearPendingSendScope(client);
     expect(owner.list()).toMatchObject([{ row: { text: "owner" } }]);

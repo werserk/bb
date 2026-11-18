@@ -405,8 +405,6 @@ describe("shared draft submission ownership", () => {
         }
         expect(draft.getCurrent()).toEqual(original);
         expect(entries).toHaveLength(0);
-        // Resubmitting the restored draft reuses the id only when the first
-        // outcome is unknown, so the server dedupes a delivered original.
         mocks.sendMessageMutateAsync.mockResolvedValueOnce(undefined);
         await act(async () => {
           await Promise.resolve(view[action]()).catch(() => undefined);

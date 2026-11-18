@@ -3,10 +3,6 @@ import { makeThreadWithRuntime } from "@bb/test-helpers/domain-fixtures";
 import { threadQueryKey } from "@/hooks/queries/query-keys";
 import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 
-/**
- * Caches the thread a pending send belongs to, so a scope reset can hand
- * unacknowledged text back to its draft; returns that (cleared) draft.
- */
 export function seedPendingSendThread(
   client: QueryClient,
   threadId = "thread-1",

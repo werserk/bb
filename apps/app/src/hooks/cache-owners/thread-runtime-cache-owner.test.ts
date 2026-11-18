@@ -731,7 +731,6 @@ describe("thread runtime cache owner", () => {
       queryClient,
       request,
     });
-    // A queue read taken while the server held the row claimed omits it.
     queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), []);
     const authoritative = makeQueuedMessage({ id: "qmsg-1", updatedAt: 2 });
     applyQueuedMessageSendResult({
@@ -747,7 +746,6 @@ describe("thread runtime cache owner", () => {
       authoritative,
     ]);
     expect(composedTimeline(queryClient)?.rows).toEqual([]);
-    // The next authoritative read carries the row; still one row.
     queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
       authoritative,
     ]);

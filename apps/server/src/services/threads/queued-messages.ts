@@ -746,7 +746,6 @@ export async function sendQueuedMessageNow(
     args.queuedMessageId,
   );
   if (!remainingQueuedMessage && sourceQueuedMessageIds.length) {
-    // The receipt is a row this send appended that names the selection.
     for (const row of listStoredEventRowsContaining(deps.db, {
       threadId: args.threadId,
       type: "client/turn/requested",

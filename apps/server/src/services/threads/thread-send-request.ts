@@ -111,7 +111,6 @@ export async function acceptThreadSendRequest(
     if (result.delivery === "queued") return { ...result, submissionIds: [id] };
     if (isStandaloneBuiltinClearCommand(args.payload.input))
       return { ...result, submissionIds: [id], command: true as const };
-    // Only rows appended since the submission's checks can be its receipt.
     const { requested } = findRequestedSubmission(
       deps.db,
       args.thread.id,

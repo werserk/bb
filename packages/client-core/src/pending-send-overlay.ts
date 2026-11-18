@@ -37,18 +37,11 @@ export interface PendingSend {
   error?: string;
   request?: import("@bb/server-contract").SendMessageRequest;
 }
-/** Upper bound for one journaled resend payload (JSON characters). */
 export const JOURNAL_REQUEST_LIMIT = 256 * 1024;
-/** Upper bound for all journaled resend payloads of one journal. */
 export const JOURNAL_REQUESTS_TOTAL_LIMIT = 1024 * 1024;
 const recoveredRequestSchema = sendMessageRequestSchema.extend({
   id: z.string(),
 });
-/**
- * The resend payload of a direct send kept for reload. Only states that can
- * still offer Resend keep it; inline `data:` images and oversized payloads are
- * never journaled, so after a reload such an entry has no request.
- */
 function journalRequest(entry: PendingSend) {
   const request = entry.request;
   if (
@@ -106,7 +99,6 @@ export class PendingSendOverlay {
   notify() {
     this.changed();
   }
-  /** `keep` lists entries that stay (the only copy of their text). */
   clear(options: { keep?: readonly PendingSend[] } = {}) {
     this.observedRows = new WeakMap();
     for (const [key, entry] of this.entries)
@@ -151,8 +143,6 @@ export class PendingSendOverlay {
       return null;
     const { request: rawRequest, ...data } = result.data;
     const request = recoveredRequestSchema.safeParse(rawRequest);
-    // Keep the stored object itself, not the parsed copy: Resend must send the
-    // identical payload (same key order and same clientSubmissionId).
     const resendable =
       (data.state === "sending" ||
         data.state === "unconfirmed" ||
@@ -185,12 +175,6 @@ export class PendingSendOverlay {
       (entry) => threadId === undefined || entry.threadId === threadId,
     );
   }
-  /**
-   * Entries for the session journal. Direct sends that can still be resent
-   * keep their request (bounded per entry and in total) so that a reload can
-   * offer Resend with the same clientSubmissionId; `requests: false` drops
-   * every request (fallback when storage refuses the full journal).
-   */
   journalEntries(options: { requests?: boolean } = {}) {
     let budget = JOURNAL_REQUESTS_TOTAL_LIMIT;
     return this.list().map((entry) => {

@@ -702,8 +702,6 @@ export function applySendThreadMessageSuccess({
   transaction,
   realtimeConnected,
 }: ApplySendThreadMessageSuccessArgs): void {
-  // After a scope reset an unacknowledged entry was kept: the receipt still
-  // settles it, but the old scope's caches are left alone.
   const stale =
     transaction?.kind === "accepted-turn" &&
     transaction.generation !== pendingSendGeneration(queryClient);

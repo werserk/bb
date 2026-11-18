@@ -170,7 +170,6 @@ export function useCreateThread() {
   return useMutation(createThreadMutationOptions(queryClient));
 }
 
-/** A 4xx answer that proves the server did not admit the submission. */
 function isDefiniteSendRejection(error: unknown): error is BbHttpError {
   return (
     error instanceof BbHttpError &&
@@ -223,8 +222,6 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
           pendingSendOwner(queryClient).markRejected(id, clientSubmissionId);
         return;
       }
-      // After a scope reset the entry, if unacknowledged, was kept: settle
-      // it as usual; only the old scope's caches are left alone.
       const stale =
         context.kind === "accepted-turn" &&
         context.generation !== pendingSendGeneration(queryClient);
@@ -272,8 +269,6 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
           }
         }
         if (isDefiniteSendRejection(_error)) {
-          // Recorded even when the entry is gone, so the composer restores
-          // the draft.
           pendingSendOwner(queryClient).markRejected(
             variables.id,
             variables.clientSubmissionId,
