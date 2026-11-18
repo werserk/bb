@@ -529,7 +529,7 @@ it("does not undo an explicit recovery Hide on reconnect to the same account", a
   }
 });
 
-it("keeps stored journal entries when the navigation lock is held elsewhere and only replaces them on the first own entry", async () => {
+it("keeps stored journal entries when the navigation lock is held elsewhere, and still keeps them as inherited after the first own entry", async () => {
   const client = createAppQueryClient();
   window.sessionStorage.clear();
   const config = makeSystemConfig({ primaryHostId: "host-held" });
@@ -554,7 +554,7 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
         callback: (lock: object | null) => Promise<void>,
       ) => {
         names.push(name);
-        if (names.length === 1) await callback(null);
+        if (name.endsWith("/held-elsewhere")) await callback(null);
         else void callback({});
       },
     },
@@ -562,10 +562,10 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
   try {
     client.setQueryData(systemConfigQueryKey(), config);
     pendingSendOwner(client);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(names).toHaveLength(2);
-    expect(pendingSendJournal(client)?.status).toBe("owned");
+    await vi.waitFor(() =>
+      expect(pendingSendJournal(client)?.status).toBe("owned"),
+    );
+    expect(names).toHaveLength(3);
     expect(window.sessionStorage.getItem(key)).toBe(stored);
     await beginSendThreadMessageTransaction({
       queryClient: client,
@@ -580,6 +580,9 @@ it("keeps stored journal entries when the navigation lock is held elsewhere and 
     expect(saved.journalId).not.toBe("held-elsewhere");
     expect(JSON.stringify(saved.entries)).toContain("own entry");
     expect(JSON.stringify(saved.entries)).not.toContain("stored-entry");
+    expect(saved.inherited).toEqual([
+      { journalId: "held-elsewhere", entries: [{ id: "stored-entry" }] },
+    ]);
   } finally {
     vi.unstubAllGlobals();
     clearPendingSendScope(client);

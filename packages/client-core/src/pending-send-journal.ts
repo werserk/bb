@@ -13,6 +13,30 @@ export interface JournalLocks {
     callback: (lock: object | null) => Promise<void>,
   ): Promise<unknown>;
 }
+/** A predecessor journal's entries, kept until its document is gone. */
+interface InheritedJournal {
+  journalId: string;
+  entries: unknown[];
+}
+const MAX_INHERITED = 8;
+function inheritedOf(stored: unknown): InheritedJournal[] {
+  if (
+    !stored ||
+    typeof stored !== "object" ||
+    !("inherited" in stored) ||
+    !Array.isArray(stored.inherited)
+  )
+    return [];
+  return stored.inherited.filter(
+    (item: unknown): item is InheritedJournal =>
+      !!item &&
+      typeof item === "object" &&
+      "journalId" in item &&
+      typeof item.journalId === "string" &&
+      "entries" in item &&
+      Array.isArray(item.entries),
+  );
+}
 export type JournalStatus =
   | "waiting"
   | "owned"
@@ -26,6 +50,7 @@ export class PendingSendJournal {
   private generation = 0;
   private journalId = "";
   private pristine = false;
+  private inherited: InheritedJournal[] = [];
   private hydrate: (entries: unknown[]) => void = () => {};
   constructor(
     private options: {
@@ -57,8 +82,32 @@ export class PendingSendJournal {
       this.setStatus("unavailable");
       return;
     }
-    if (fresh) this.journalId = crypto.randomUUID();
-    else {
+    this.inherited = [];
+    if (fresh) {
+      this.journalId = crypto.randomUUID();
+      // This tab's storage may hold a journal whose document still owns its
+      // lock (an unloading predecessor, or the tab this one duplicated).
+      // Its entries can be the only copy of their text, so they ride along
+      // in `inherited` instead of being overwritten by the first save.
+      try {
+        const raw = storage.getItem(key);
+        const stored: unknown = raw === null ? null : JSON.parse(raw);
+        if (
+          stored &&
+          typeof stored === "object" &&
+          "version" in stored &&
+          stored.version === 1 &&
+          "journalId" in stored &&
+          typeof stored.journalId === "string" &&
+          "entries" in stored &&
+          Array.isArray(stored.entries)
+        )
+          this.inherited = [
+            ...inheritedOf(stored),
+            { journalId: stored.journalId, entries: stored.entries },
+          ];
+      } catch {}
+    } else {
       try {
         const raw = storage.getItem(key);
         const parsed: unknown = raw === null ? null : JSON.parse(raw);
@@ -99,7 +148,9 @@ export class PendingSendJournal {
             return;
           }
           if (fresh) {
-            this.hydrate([]);
+            const adopted = await this.adoptInherited(generation);
+            if (adopted === undefined) return;
+            this.hydrate(adopted);
             this.setStatus("owned");
             await new Promise<void>((resolve) => {
               this.release = resolve;
@@ -125,14 +176,18 @@ export class PendingSendJournal {
               this.setStatus("unavailable");
               return;
             }
-            this.hydrate(
-              current &&
-                typeof current === "object" &&
-                "entries" in current &&
-                Array.isArray(current.entries)
+            this.inherited = inheritedOf(current);
+            const adopted = await this.adoptInherited(generation);
+            if (adopted === undefined) return;
+            this.hydrate([
+              ...(current &&
+              typeof current === "object" &&
+              "entries" in current &&
+              Array.isArray(current.entries)
                 ? current.entries
-                : [],
-            );
+                : []),
+              ...adopted,
+            ]);
           } catch {
             this.setStatus("unavailable");
             return;
@@ -150,6 +205,34 @@ export class PendingSendJournal {
         if (generation === this.generation && !controller.signal.aborted)
           this.setStatus("unavailable");
       });
+  }
+  /**
+   * Entries of inherited journals whose lock is free (their document is
+   * gone) become this journal's own; the rest stay inherited. `undefined`
+   * when a newer acquire or Hide superseded this one meanwhile.
+   */
+  private async adoptInherited(generation: number) {
+    const adopted: unknown[] = [];
+    const kept: InheritedJournal[] = [];
+    for (const journal of this.inherited) {
+      if (journal.journalId === this.journalId) continue;
+      let free = false;
+      try {
+        await this.options.locks?.request(
+          `bb-pending-send/${this.options.key}/${journal.journalId}`,
+          { mode: "exclusive", ifAvailable: true },
+          async (lock) => {
+            free = lock !== null;
+          },
+        );
+      } catch {}
+      if (free) adopted.push(...journal.entries);
+      else if (journal.entries.length > 0) kept.push(journal);
+    }
+    if (generation !== this.generation) return undefined;
+    this.inherited = kept.slice(-MAX_INHERITED);
+    if (adopted.length > 0) this.pristine = false;
+    return adopted;
   }
   /**
    * `fallback` is a smaller form of the same entries (without resend
@@ -170,6 +253,7 @@ export class PendingSendJournal {
             version: 1,
             journalId: this.journalId,
             entries: typeof candidate === "function" ? candidate() : candidate,
+            ...(this.inherited.length > 0 ? { inherited: this.inherited } : {}),
           }),
         );
         this.setStatus("owned");
@@ -201,6 +285,7 @@ export class PendingSendJournal {
         this.options.storage?.removeItem(this.options.key);
       } catch {}
     }
+    this.inherited = [];
     this.hide();
   }
   dispose() {
