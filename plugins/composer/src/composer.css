@@ -294,3 +294,10 @@
   margin-left: auto;
   color: var(--primary);
 }
+
+/* Plugin actions at the start of the draft line (Prompt Suggestion's ✦) push
+   the text and the ghost suggestion right. Unlayered so it wins over px-3. */
+[data-promptbox-input-region]:has(> [data-promptbox-leading-actions] button)
+  [data-promptbox-editor-scroll] {
+  padding-left: 2rem;
+}

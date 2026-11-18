@@ -112,6 +112,7 @@ import {
   ComposerContributionsContext,
   ComposerMenuEntry,
   ComposerPluginActions,
+  ComposerPluginEditorActions,
   ComposerRootHostContext,
   NoComposerPluginActions,
   type ComposerRootHost,
@@ -723,6 +724,9 @@ function useComposerRendererHostApi({
     experimental_InlinePanels: suppress
       ? NoComposerPluginActions
       : ComposerInlinePanels,
+    experimental_EditorActions: suppress
+      ? NoComposerPluginActions
+      : ComposerPluginEditorActions,
     Popup: PluginComposerPopup,
     MenuEntry: ComposerMenuEntry,
   };

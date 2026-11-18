@@ -62,6 +62,19 @@ export function useResolvedComposerActions(scopeKind: ComposerScopeKind) {
   return useResolvedComposerSlot(scopeKind, resolveComposerActions, emptyList);
 }
 
+const resolveComposerEditorActions = (
+  registrations: ComposerRegistrations,
+  kind: PluginComposerScope["kind"],
+) => resolveComposerActions(registrations, kind, "editor");
+
+export function useResolvedComposerEditorActions(scopeKind: ComposerScopeKind) {
+  return useResolvedComposerSlot(
+    scopeKind,
+    resolveComposerEditorActions,
+    emptyList,
+  );
+}
+
 export function useResolvedComposerBanners(scopeKind: ComposerScopeKind) {
   return useResolvedComposerSlot(scopeKind, resolveComposerBanners, emptyList);
 }

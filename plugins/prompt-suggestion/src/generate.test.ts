@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
-import { generate } from "./generate.js";
+import { generate, resetPrimaryCooldown } from "./generate.js";
 import { installGenerator } from "./generator-fixture.js";
 
 const config = {
@@ -11,6 +11,93 @@ const config = {
   outputTokenLimit: 256,
 };
 describe("native generation boundary", () => {
+  it("retries once on the fallback model with provider defaults", async () => {
+    resetPrimaryCooldown();
+    const host = createFakePluginHost({ pluginId: "prompt-suggestion" });
+    let primaryCalls = 0;
+    const model = await installGenerator(host.bb, async () => {
+      primaryCalls++;
+      throw new Error("quota exhausted");
+    });
+    const seen: unknown[] = [];
+    host.bb.experimental_aiServices.register({
+      id: "backup",
+      displayName: "Backup",
+      experimental_text: {
+        models: async () => [
+          {
+            id: "backup-model",
+            displayName: "Backup model",
+            provider: "Backup",
+            hostId: "fixture-host",
+            profile: "default",
+            capabilities: {
+              maxOutputTokens: true,
+              temperature: false,
+              reasoningEfforts: [],
+              serviceTiers: [],
+            },
+          },
+        ],
+        generate: async (request) => {
+          seen.push(request);
+          return {
+            text: JSON.stringify({ kind: "suggestion", text: "From backup." }),
+            model: request.model,
+            actualModel: null,
+            finishReason: "stop",
+            usage: null,
+          };
+        },
+      },
+    });
+    const backup = (
+      await host.bb.experimental_aiServices.experimental_models()
+    ).find((entry) => entry.displayName === "Backup model")!.id;
+    try {
+      expect(
+        await generate(
+          host.bb.experimental_aiServices,
+          {
+            ...config,
+            model,
+            fallbackModel: backup,
+            reasoningEffort: "low",
+            serviceTier: "fast",
+          },
+          "context",
+          new AbortController().signal,
+        ),
+      ).toEqual({ kind: "suggestion", text: "From backup." });
+      expect(seen).toEqual([
+        expect.objectContaining({
+          reasoningEffort: null,
+          serviceTier: null,
+          experimental_sessionAffinity: null,
+        }),
+      ]);
+      // While the primary cools down, the fallback is asked directly.
+      await generate(
+        host.bb.experimental_aiServices,
+        { ...config, model, fallbackModel: backup },
+        "context",
+        new AbortController().signal,
+      );
+      expect(primaryCalls).toBe(1);
+      expect(seen).toHaveLength(2);
+      resetPrimaryCooldown();
+      await expect(
+        generate(
+          host.bb.experimental_aiServices,
+          { ...config, model },
+          "context",
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await host.harness.lifecycle.dispose();
+    }
+  });
   it("passes ordered context and the exact selected model without tools", async () => {
     const host = createFakePluginHost({ pluginId: "prompt-suggestion" });
     let calls = 0;

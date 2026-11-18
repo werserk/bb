@@ -73,6 +73,19 @@ tiers are unsupported. Actual model, finish reason and usage come from the
 response; unknown usage and actual tier remain null. Requests have bounded
 credential export, catalog and response reads and share cancellation/deadlines.
 
+## OpenCode Go text generation
+
+The shared text service `opencode-go` appears as **OpenCode Go subscription**. The
+host reads the OpenCode Console sign-in with `opencode auth export opencode`
+(exactly one active OAuth credential; an expired one is reported as unavailable,
+and opening opencode refreshes it) and calls `https://opencode.ai/inference/go/v1`.
+Models come from its `/models` list, cached for one minute. Each non-streaming
+Chat Completions request carries `x-opencode-session`, the caller's session
+affinity or a fresh UUID, because Go rejects requests without one, and a client
+user agent, because the endpoint's edge rejects requests without one. Service
+tiers are unsupported; reasoning efforts are not advertised. HTTP 401, 403 and 429
+map to `unavailable`. Tokens stay on the host and response bodies are not logged.
+
 Use `bb ai-gateway models` or `bb prompt-suggestion models` to discover the
 qualified service/host/profile/model IDs. Select that exact ID in either plugin's
 settings, or invoke `bb ai-gateway generate --model <exact-id> --prompt-stdin`.

@@ -275,7 +275,7 @@ it("accepts with Tab and dismisses with Escape without submitting", async () => 
   expect(screen.queryByText(response.text)).toBeNull();
 });
 
-it("accepts an existing empty-draft ghost from the star without another generation", async () => {
+it("asks for a new proposal from the star even while a ghost is shown", async () => {
   function Ghost() {
     const composer = useComposer();
     useEffect(() => {
@@ -308,6 +308,6 @@ it("accepts an existing empty-draft ghost from the star without another generati
     },
   );
   fireEvent.click(screen.getByRole("button", { name: "Prompt helper" }));
-  await waitFor(() => expect(slot.composer.text).toBe("Existing next step"));
-  expect(slot.rpcCalls).toEqual([]);
+  await waitFor(() => expect(slot.rpcCalls).toHaveLength(1));
+  expect(slot.composer.text).toBe("");
 });

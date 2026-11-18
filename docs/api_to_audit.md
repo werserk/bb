@@ -4798,3 +4798,7 @@ question preservation, unknown-host coverage and SDK/CLI contract parity.
 ## Composer context preview visibility
 
 `ExperimentalComposerRootProps.experimental_onContextPreview` asks a renderer to expose the native strip whenever it contains an active plugin preview. Core `ComposerRoot` observes the same context store used by native counters and `experimental_ComposerContextStrip`; the bundled Composer collapses its expanded editor through this callback. Preview generation and draft acceptance stay plugin-owned. Stabilization requires multiple-renderer coverage, preview lifecycle and expanded-editor focus/selection checks. The bundled Composer is the current renderer caller; Prompt Suggestion exercises it through the public strip.
+
+## Composer editor actions
+
+`ComposerCustomization.actions[].experimental_placement: "editor"` places a plugin action at the start of the draft line instead of the action row; `ExperimentalComposerContributions.experimental_EditorActions` is the host renderer the bundled Composer mounts there on expanded layouts, and the editor text indents only while that slot holds a button. The host applies the same plugin ownership, crash boundary, scope filtering and suppression as toolbar actions. Prompt Suggestion's ✦ is the first caller: a click asks for a new proposal and Tab accepts it. Audit focus order, touch sizes and multiple editor actions before stabilization.

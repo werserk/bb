@@ -77,9 +77,10 @@ import {
 } from "@/components/ui/tooltip";
 import { ComposerPopupHost } from "./ComposerPopupHost";
 import {
-  COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
-  COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
-} from "@/components/ui/coarse-pointer-sizing";
+  COMPOSER_BUTTON_CLASS,
+  COMPOSER_ICON_BUTTON_CLASS,
+} from "./composer-sizing";
+import { COARSE_POINTER_TEXT_BASE_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@/components/ui/chrome-style-tokens";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { usePointerCoarse } from "@/components/ui/hooks/use-pointer-coarse";
@@ -143,7 +144,7 @@ import { composerSubmittingBlockedReason } from "./composer-submit-gate";
 
 import { ComposerSendMenu } from "./ComposerSendMenu";
 
-const PROMPTBOX_MIN_HEIGHT = 68;
+const PROMPTBOX_MIN_HEIGHT = 60;
 const DEFAULT_MENTION_TRIGGER = "@";
 const PROMPTBOX_SELECTION_REVEAL_MARGIN = 12;
 const COMPACT_PROMPT_ACTION_BUTTON_CLASS =
@@ -3597,7 +3598,7 @@ export function PromptBoxInternal({
                       aria-label="Collapse prompt box"
                       className={cn(
                         CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
-                        COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+                        COMPOSER_ICON_BUTTON_CLASS,
                         PROMPT_STACK_EDGE_CARET_BUTTON_WIDTH_CLASS,
                       )}
                     >
@@ -3620,20 +3621,36 @@ export function PromptBoxInternal({
               </span>
             )}
             {suggestionState.request?.phase === "error" && (
-              <details className="px-3 text-xs text-muted-foreground">
+              // Sits where the pending spinner was, so it never shifts the draft line.
+              <details className="absolute right-10 top-3 z-20 text-xs text-muted-foreground">
                 <summary
                   aria-label="Suggestion error details"
                   className="cursor-pointer list-none w-fit"
                 >
                   <SdkIcon name="AlertCircle" className="size-4" />
                 </summary>
-                <p role="status">
+                <p
+                  role="status"
+                  className="absolute right-0 top-full mt-1 w-max max-w-64 rounded-md border border-border bg-popover px-2 py-1 text-popover-foreground shadow-sm"
+                >
                   {suggestionState.request.error === "timeout"
                     ? "Suggestion timed out. You can continue typing."
                     : "Could not prepare a suggestion. You can continue typing."}
                 </p>
               </details>
             )}
+            {!showCompactLayout && contributions.experimental_EditorActions ? (
+              <div
+                data-promptbox-leading-actions=""
+                inert={showVoiceActionGroup ? true : undefined}
+                className={cn(
+                  "absolute left-2 top-2.5 z-10 flex h-[1.7em] items-center",
+                  COARSE_POINTER_TEXT_BASE_CLASS,
+                )}
+              >
+                <contributions.experimental_EditorActions />
+              </div>
+            ) : null}
             <ComposerEditorSlot
               editor={editor}
               expanded={editorExpanded}
@@ -3720,7 +3737,7 @@ export function PromptBoxInternal({
             <div
               data-promptbox-action-row=""
               className={cn(
-                "relative flex shrink-0 select-none flex-row flex-wrap items-center gap-3 pb-2 pl-3.5 pr-[13px] pt-1.5",
+                "relative flex shrink-0 select-none flex-row flex-wrap items-center gap-2 pb-1.5 pl-2 pr-2 pt-1",
                 showCompactLayout && "flex-nowrap gap-0 p-0 pr-2",
                 showCompactLayout && showVoiceActionGroup && "absolute inset-0",
               )}
@@ -3813,7 +3830,7 @@ export function PromptBoxInternal({
                           className={
                             showCompactLayout
                               ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
-                              : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS
+                              : COMPOSER_ICON_BUTTON_CLASS
                           }
                         >
                           <Icon name="Mic" className="size-4" />
@@ -3836,7 +3853,7 @@ export function PromptBoxInternal({
                         className={
                           showCompactLayout
                             ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
-                            : COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS
+                            : COMPOSER_ICON_BUTTON_CLASS
                         }
                       >
                         <Icon
@@ -3858,8 +3875,8 @@ export function PromptBoxInternal({
                           showCompactLayout
                             ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
                             : [
-                                "ml-1",
-                                COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
+                                "ml-0.5",
+                                COMPOSER_BUTTON_CLASS,
                               ],
                           "transition-colors",
                         )}
@@ -3886,8 +3903,8 @@ export function PromptBoxInternal({
                             showCompactLayout
                               ? COMPACT_PROMPT_ACTION_BUTTON_CLASS
                               : [
-                                  "ml-1",
-                                  COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
+                                  "ml-0.5",
+                                  COMPOSER_BUTTON_CLASS,
                                 ],
                             "transition-colors",
                           )}

@@ -5,6 +5,10 @@ export const settingsSchema = z.object({
   enabled: z.boolean().default(false),
   backgroundPreparation: z.boolean().default(false),
   model: z.string().max(experimental_AI_MODEL_ID_MAX_LENGTH).default(""),
+  fallbackModel: z
+    .string()
+    .max(experimental_AI_MODEL_ID_MAX_LENGTH)
+    .default(""),
   reasoningEffort: z
     .enum(["default", "none", "low", "medium", "high", "xhigh", "max", "ultra"])
     .default("default"),
@@ -35,6 +39,14 @@ export const settingDescriptors = {
     experimental_schema: settingsSchema.shape.model.unwrap(),
     type: "string",
     label: "Generator model",
+    default: "",
+  },
+  fallbackModel: {
+    experimental_schema: settingsSchema.shape.fallbackModel.unwrap(),
+    type: "string",
+    label: "Fallback model",
+    description:
+      "Used once when the generator model fails, for example on an exhausted quota. Runs with the provider's default effort and speed. Empty turns it off.",
     default: "",
   },
   reasoningEffort: {

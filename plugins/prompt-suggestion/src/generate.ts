@@ -22,6 +22,8 @@ export const resultSchema = z.discriminatedUnion("kind", [
 export type GenerationResult = z.infer<typeof resultSchema>;
 export type GeneratorConfig = {
   model: string;
+  /** Tried once, with provider defaults, when the model's request fails. */
+  fallbackModel?: string;
   instructions: string;
   timeoutMs: number;
   outputTokenLimit: number;
@@ -43,6 +45,11 @@ export class IncompleteGenerationError extends Error {
   }
 }
 
+// A failing primary (an exhausted quota answers slowly) is skipped for a while
+// so the fallback gets the whole deadline instead of what the primary left.
+const PRIMARY_COOLDOWN_MS = 5 * 60_000;
+const primaryFailedAt = new Map<string, number>();
+
 async function generateValue(
   ai: BbPluginApi["experimental_aiServices"],
   config: GeneratorConfig,
@@ -50,24 +57,53 @@ async function generateValue(
   signal: AbortSignal,
   measured?: (measurement: GenerationMeasurement) => void,
 ): Promise<unknown> {
-  const result = await ai.experimental_generate(
-    {
-      model: config.model,
-      messages: [
-        { role: "system", content: config.instructions },
-        { role: "user", content: context },
-      ],
-      maxOutputTokens:
-        config.outputTokenLimit === 0 ? null : config.outputTokenLimit,
-      temperature: null,
-      reasoningEffort:
-        config.reasoningEffort === "default" ? null : config.reasoningEffort,
-      serviceTier: config.serviceTier === "default" ? null : config.serviceTier,
-      timeoutMs: config.timeoutMs,
-      experimental_sessionAffinity: config.sessionAffinity ?? null,
-    },
-    { signal },
-  );
+  const request = (model: string, primary: boolean) =>
+    ai.experimental_generate(
+      {
+        model,
+        messages: [
+          { role: "system", content: config.instructions },
+          { role: "user", content: context },
+        ],
+        maxOutputTokens:
+          config.outputTokenLimit === 0 ? null : config.outputTokenLimit,
+        temperature: null,
+        reasoningEffort:
+          !primary || config.reasoningEffort === "default"
+            ? null
+            : config.reasoningEffort,
+        serviceTier:
+          !primary || config.serviceTier === "default"
+            ? null
+            : config.serviceTier,
+        timeoutMs: config.timeoutMs,
+        // Affinity was derived for the primary model; another model may not accept it.
+        experimental_sessionAffinity: primary
+          ? (config.sessionAffinity ?? null)
+          : null,
+      },
+      { signal },
+    );
+  const fallback = config.fallbackModel?.trim();
+  const usable = !!fallback && fallback !== config.model;
+  const failedAt = primaryFailedAt.get(config.model);
+  const cooling =
+    failedAt !== undefined && Date.now() - failedAt < PRIMARY_COOLDOWN_MS;
+  const result =
+    usable && cooling
+      ? await request(fallback, false)
+      : await request(config.model, true).then(
+          (value) => {
+            primaryFailedAt.delete(config.model);
+            return value;
+          },
+          (error: unknown) => {
+            if (signal.aborted) throw error;
+            primaryFailedAt.set(config.model, Date.now());
+            if (!usable) throw error;
+            return request(fallback, false);
+          },
+        );
   measured?.({
     usage: result.usage,
     actualModel: result.actualModel,
@@ -83,6 +119,11 @@ async function generateValue(
   )
     throw new Error("Suggestion response too large");
   return JSON.parse(result.text);
+}
+
+/** Test seam: forget remembered primary failures. */
+export function resetPrimaryCooldown() {
+  primaryFailedAt.clear();
 }
 
 export async function generate(

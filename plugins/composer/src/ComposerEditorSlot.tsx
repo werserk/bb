@@ -75,7 +75,7 @@ export function ComposerEditorSlot({
         data-editor-layout={layout}
         aria-busy={inputLocked || undefined}
         className={cn(
-          "w-full overflow-y-auto bg-transparent px-4 pb-1 pr-14 pt-3 outline-none",
+          "w-full overflow-y-auto bg-transparent px-3 pb-1 pr-10 pt-2.5 outline-none",
           COARSE_POINTER_TEXT_BASE_CLASS,
           "leading-relaxed",
           isCompactLayout && "h-12 overflow-hidden pb-0 pr-2 pt-0",
@@ -110,7 +110,8 @@ export function ComposerEditorSlot({
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none",
               suggestionVisible
                 ? // A suggestion shows at most two lines; Tab still accepts the full text.
-                  "[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child::before]:absolute [&_.ProseMirror_p.is-editor-empty:first-child::before]:inset-x-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:top-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::before]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]"
+                  // The hidden ::after reserves its height and overlaps the caret line.
+                  "[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child::before]:absolute [&_.ProseMirror_p.is-editor-empty:first-child::before]:inset-x-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:top-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::before]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:[margin-top:-1lh] [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]"
                 : "[&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:text-subtle-foreground",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:font-light",

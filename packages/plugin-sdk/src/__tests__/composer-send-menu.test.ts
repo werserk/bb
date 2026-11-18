@@ -73,3 +73,34 @@ describe("composer popup registration", () => {
     ]);
   });
 });
+
+describe("composer action placement", () => {
+  it("keeps a valid placement and rejects an unknown one", () => {
+    const component = () => null;
+    const rejected = vi.fn();
+    const collected = collectPluginAppRegistrations(
+      {
+        __bbPluginApp: true,
+        setup(app) {
+          app.composer.customize({
+            id: "helper",
+            actions: [
+              { id: "star", component, experimental_placement: "editor" },
+              { id: "plain", component },
+              // @ts-expect-error Invalid runtime registration
+              { id: "odd", component, experimental_placement: "sidebar" },
+            ],
+          });
+        },
+      },
+      rejected,
+    );
+    expect(collected.composerCustomizations[0]?.actions).toEqual([
+      { id: "star", component, experimental_placement: "editor" },
+      { id: "plain", component },
+    ]);
+    expect(rejected.mock.calls.flat()).toEqual([
+      expect.stringContaining('"experimental_placement" must be "toolbar" or "editor"'),
+    ]);
+  });
+});

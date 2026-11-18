@@ -88,11 +88,13 @@ function composerCustomizationApplies(
 export function resolveComposerActions(
   customizations: readonly PluginComposerCustomizationSlot[],
   scopeKind: PluginComposerScope["kind"],
+  placement: "toolbar" | "editor" = "toolbar",
 ): readonly ResolvedComposerAction[] {
   const resolved: ResolvedComposerAction[] = [];
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
     for (const action of customization.actions ?? []) {
+      if ((action.experimental_placement ?? "toolbar") !== placement) continue;
       resolved.push({
         ...resolvedComposerContribution(customization, action.id),
         action,

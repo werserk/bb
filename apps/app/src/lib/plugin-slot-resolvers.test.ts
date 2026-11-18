@@ -113,6 +113,25 @@ describe("Composer slot resolvers", () => {
         ?.key,
     ).toBe("composer-plugin/2/all/action");
   });
+
+  it("keeps editor-placed actions out of the action row", () => {
+    const helper = composerCustomization({
+      id: "helper",
+      actions: [
+        { id: "row", component: Component },
+        { id: "star", component: Component, experimental_placement: "editor" },
+      ],
+    });
+
+    expect(
+      resolveComposerActions([helper], "thread").map(({ action }) => action.id),
+    ).toEqual(["row"]);
+    expect(
+      resolveComposerActions([helper], "thread", "editor").map(
+        ({ action }) => action.id,
+      ),
+    ).toEqual(["star"]);
+  });
 });
 
 describe("keyed renderer resolvers", () => {

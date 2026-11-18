@@ -45,3 +45,16 @@ export const openRouterAiContract = defineRpcContract({
     }).strict(),
   },
 });
+
+export const openCodeGoGenerationSchema = openRouterGenerationSchema.omit({ routing: true });
+export type OpenCodeGoGenerationRequest = z.infer<typeof openCodeGoGenerationSchema>;
+export const openCodeGoAiContract = defineRpcContract({
+  "opencodego.ai.models": {
+    input: z.object({}).strict(),
+    output: z.array(openRouterModelSchema),
+  },
+  "opencodego.ai.generate": {
+    input: openCodeGoGenerationSchema,
+    output: openRouterAiContract["openrouter.ai.generate"].output,
+  },
+});
