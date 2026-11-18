@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render, within } from "@testing-library/react";
+import { act, fireEvent, render, within } from "@testing-library/react";
 import {
   pendingSendOwner,
   composePendingSends,
@@ -25,8 +25,12 @@ vi.mock("@/hooks/queries/system-queries", async (importOriginal) => ({
   useSystemConfig: () => ({ data: undefined }),
 }));
 
+const { mutateAsync } = vi.hoisted(() => ({
+  mutateAsync: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => {
-  const mutation = () => ({ isPending: false, mutateAsync: vi.fn() });
+  const mutation = () => ({ isPending: false, mutateAsync });
   return {
     useEditThreadMessage: mutation,
     useSendThreadMessage: mutation,
@@ -135,6 +139,89 @@ it("keeps pending send controls on the full ThreadScreen while a send is unresol
     expect(
       within(pending()!).getByRole("button", { name: "Retry" }),
     ).toBeTruthy();
+    fireEvent.click(within(pending()!).getByRole("button", { name: "Hide" }));
+    expect(pending()).toBeNull();
+  } finally {
+    view.unmount();
+    clearPendingSendScope(client);
+    client.clear();
+    vi.restoreAllMocks();
+  }
+});
+
+it("resends an unconfirmed send with the same submission id", async () => {
+  mutateAsync.mockClear();
+  const { queryClient: client, wrapper: Wrapper } =
+    createQueryClientTestHarness();
+  const owner = pendingSendOwner(client);
+  const submissionId = "00000000-0000-4000-8000-000000000002";
+  function Screen({
+    timelineRows,
+  }: {
+    timelineRows: UseThreadTimelineControllerResult["timelineRows"];
+  }) {
+    return (
+      <ThreadScreen
+        composer={null}
+        environment={null}
+        presentation={SIDE_CHAT_PRESENTATION}
+        projectId={THREAD.projectId}
+        resolveMentionLink={() => null}
+        thread={THREAD}
+        timeline={{ ...TIMELINE, timelineRows }}
+        timelineHost={{
+          environmentHostName: null,
+          includePluginMessageActions: false,
+          unreadDividerAutoScroll: false,
+          unreadDividerPlacement: null,
+        }}
+      />
+    );
+  }
+  const screenTree = () => (
+    <MemoryRouter>
+      <Wrapper>
+        <Screen
+          timelineRows={composePendingSends(client, THREAD.id, [], []).rows}
+        />
+      </Wrapper>
+    </MemoryRouter>
+  );
+  const view = render(screenTree());
+  try {
+    await act(async () => {
+      await beginSendThreadMessageTransaction({
+        queryClient: client,
+        request: {
+          id: THREAD.id,
+          clientSubmissionId: submissionId,
+          input: [{ type: "text", text: "unsure send", mentions: [] }],
+          mode: "auto",
+        },
+      });
+    });
+    view.rerender(screenTree());
+    await act(async () => {
+      owner.fail(THREAD.id, submissionId, false, "Delivery unconfirmed");
+    });
+    const pending = () =>
+      view.container.querySelector<HTMLElement>(
+        `[data-pending-send-id="${submissionId}"]`,
+      );
+    expect(pending()?.textContent).toContain("Delivery unconfirmed");
+    await act(async () => {
+      fireEvent.click(
+        within(pending()!).getByRole("button", { name: "Resend" }),
+      );
+    });
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: THREAD.id,
+        clientSubmissionId: submissionId,
+      }),
+    );
+    expect(pending()?.textContent).toContain("Sending…");
   } finally {
     view.unmount();
     clearPendingSendScope(client);

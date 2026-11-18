@@ -509,6 +509,19 @@ export function composePendingSends(
       emptyQueue,
   );
 }
+export function settleFailedPendingSend(
+  client: QueryClient,
+  threadId: string,
+  id: string,
+  restoreDraft: () => boolean,
+): boolean {
+  const owner = pendingSendOwner(client);
+  const entry = owner.list(threadId).find((candidate) => candidate.id === id);
+  if (entry?.state === "unconfirmed") return false;
+  const restored = restoreDraft();
+  if (restored && entry?.state === "failed") owner.hide(threadId, id);
+  return restored;
+}
 export function newPendingSend(
   entry: Omit<PendingSend, "sequence" | "state">,
 ): PendingSend {

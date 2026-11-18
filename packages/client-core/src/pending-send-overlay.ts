@@ -196,6 +196,14 @@ export class PendingSendOverlay {
     this.begin(replacement);
     return true;
   }
+  resend(threadId: string, id: string) {
+    const entry = this.entries.get(`${threadId}/${id}`);
+    if (!entry || entry.state !== "unconfirmed" || !entry.request) return false;
+    entry.state = "sending";
+    entry.error = undefined;
+    this.changed();
+    return true;
+  }
   hide(threadId: string, id: string) {
     if (this.entries.delete(`${threadId}/${id}`)) this.changed();
   }

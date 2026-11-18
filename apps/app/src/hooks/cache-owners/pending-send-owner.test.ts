@@ -12,6 +12,7 @@ import {
   composePendingSends,
   refreshPendingSends,
   clearPendingSendScope,
+  settleFailedPendingSend,
 } from "./pending-send-owner";
 import {
   threadTimelineQueryKey,
@@ -534,4 +535,93 @@ it("keeps projection identity stable without a loaded queue", async () => {
     pendingSendOwner(client).list()[0]?.legacyQueueBaselineIds,
   ).toBeUndefined();
   client.clear();
+});
+
+it("restores the draft and hides the failed entry only after a definite rejection", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "draft", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a10",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const owner = pendingSendOwner(client);
+    const id = request.clientSubmissionId!;
+    owner.fail(request.id, id, true, "rejected");
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, request.id, id, restore)).toBe(true);
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(owner.list(request.id)).toHaveLength(0);
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("keeps a failed entry when the draft was not restored", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "draft", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a11",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const owner = pendingSendOwner(client);
+    const id = request.clientSubmissionId!;
+    owner.fail(request.id, id, true, "rejected");
+    expect(settleFailedPendingSend(client, request.id, id, () => false)).toBe(
+      false,
+    );
+    expect(owner.list(request.id)).toHaveLength(1);
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("does not restore the draft while delivery is unconfirmed and lets the same id be resent", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "draft", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a12",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const owner = pendingSendOwner(client);
+    const id = request.clientSubmissionId!;
+    owner.fail(request.id, id, false, "Delivery unconfirmed");
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, request.id, id, restore)).toBe(
+      false,
+    );
+    expect(restore).not.toHaveBeenCalled();
+    expect(owner.list(request.id)[0]?.state).toBe("unconfirmed");
+    expect(owner.resend(request.id, id)).toBe(true);
+    const resent = owner.list(request.id)[0];
+    expect(resent?.state).toBe("sending");
+    expect(resent?.id).toBe(id);
+    expect(owner.resend(request.id, id)).toBe(false);
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("restores the draft when no pending entry exists for the send", () => {
+  const client = createAppQueryClient();
+  try {
+    const restore = vi.fn(() => true);
+    expect(
+      settleFailedPendingSend(client, "thread-1", "missing", restore),
+    ).toBe(true);
+    expect(restore).toHaveBeenCalledTimes(1);
+  } finally {
+    client.clear();
+  }
 });

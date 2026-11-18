@@ -152,8 +152,32 @@ function PendingSendEntryControls({
           Retry
         </Button>
       ) : null}
+      {entry.state === "failed" ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => owner.hide(threadId, entry.id)}
+        >
+          Hide
+        </Button>
+      ) : null}
       {entry.state === "unconfirmed" || entry.state === "unresolved" ? (
         <>
+          {entry.state === "unconfirmed" && entry.request ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const request = entry.request;
+                if (!request || !owner.resend(threadId, entry.id)) return;
+                void mutation
+                  .mutateAsync({ ...request, id: threadId })
+                  .catch(() => {});
+              }}
+            >
+              Resend
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
