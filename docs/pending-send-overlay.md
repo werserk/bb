@@ -90,7 +90,10 @@ covers the actual signal/RPC boundary; live account-switch proof remains separat
 Existing-thread composers keep upstream's shared draft submission ownership:
 a pending submission serializes further submissions of the same draft scope, and a
 rejected send restores its draft. Pending owners therefore retain a failed or
-unconfirmed send in addition to that restored draft. The earlier behaviour that
+unconfirmed send in addition to that restored draft. Open UX risk for review: after
+a failed send the same content is visible both in the composer draft and as a
+retained pending entry, and resending from both would be a duplicate send (the
+server coalesces only identical `clientSubmissionId` values). The earlier behaviour that
 released the captured draft before awaiting the send RPC, so a distinct next draft
 could submit while earlier RPCs stayed pending, is not part of this port because it
 changes that upstream contract. Queue action pending state belongs to the action's
