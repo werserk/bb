@@ -18,6 +18,7 @@ export interface SlowDbQueryLogFields {
   operation: SlowDbQueryOperation;
   sql: string;
   thresholdMs: number;
+  workLabel: string | null;
   diagnostics?: QueryDiagnosticsLogFields;
 }
 
@@ -29,6 +30,7 @@ export interface CreateConnectionOptions {
   slowQueryLogger?: SlowDbQueryLogger;
   slowQueryThresholdMs?: number | (() => number);
   slowQueryDiagnosticsEnabled?: () => boolean;
+  slowQueryWorkLabel?: () => string | null;
 }
 
 export type DbConnection = ReturnType<typeof createConnection>;
@@ -103,6 +105,7 @@ interface SlowDbQueryConfig {
   thresholdMs: number | (() => number);
   sampleWal: () => QueryDiagnosticsLogFields["wal"];
   diagnosticsEnabled: () => boolean;
+  workLabel: () => string | null;
 }
 
 interface TimedStatementOperationArgs<TValue> {
@@ -165,6 +168,7 @@ function runTimedStatementOperation<TValue>(
           operation: args.operation,
           sql: formatSqlForLog(args.source),
           thresholdMs,
+          workLabel: args.config.workLabel(),
           ...(startedUsage && finishedUsage
             ? {
                 diagnostics: finishQueryDiagnostics(
@@ -234,6 +238,7 @@ function instrumentSqliteClient(
       sqlite.memory ? null : `${resolve(sqlite.name)}-wal`,
     ),
     diagnosticsEnabled: options.slowQueryDiagnosticsEnabled ?? (() => false),
+    workLabel: options.slowQueryWorkLabel ?? (() => null),
   };
   const originalExec = sqlite.exec.bind(sqlite);
   sqlite.exec = (source) =>
