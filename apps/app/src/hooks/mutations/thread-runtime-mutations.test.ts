@@ -557,3 +557,38 @@ it("rejects conflicting identity without changing the active send", async () => 
     await original;
   }
 });
+it("resolves the accepted-turn prediction when an error arrives after the account scope changed", async () => {
+  const client = createTestQueryClient();
+  client.setQueryData(
+    threadQueryKey("thread-1"),
+    makeThreadResponseFixture({
+      id: "thread-1",
+      status: "idle",
+      runtime: { displayStatus: "idle" },
+    }),
+  );
+  const response = createDeferredPromise<never>();
+  vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+  const settled = new MutationObserver(
+    client,
+    sendThreadMessageMutationOptions(client),
+  )
+    .mutate({
+      id: "thread-1",
+      clientSubmissionId: crypto.randomUUID(),
+      mode: "auto",
+      input: [{ type: "text", text: "scope change", mentions: [] }],
+    })
+    .catch(() => undefined);
+  await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+  const displayStatus = () =>
+    client.getQueryData<ThreadResponse>(threadQueryKey("thread-1"))?.runtime
+      ?.displayStatus;
+  expect(displayStatus()).not.toBe("idle");
+  const { clearPendingSendScope } =
+    await import("../cache-owners/pending-send-owner");
+  clearPendingSendScope(client);
+  response.reject(new Error("network down"));
+  await settled;
+  expect(displayStatus()).toBe("idle");
+});

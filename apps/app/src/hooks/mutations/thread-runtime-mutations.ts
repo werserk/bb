@@ -206,12 +206,14 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
         request: variables,
       }),
     onError: (_error, variables, context) => {
+      if (!context) return;
       if (
-        !context ||
-        (context.kind === "accepted-turn" &&
-          context.generation !== pendingSendGeneration(queryClient))
-      )
+        context.kind === "accepted-turn" &&
+        context.generation !== pendingSendGeneration(queryClient)
+      ) {
+        context.prediction?.fail();
         return;
+      }
       variables = prepareSendRequest(variables);
       if (variables.clientSubmissionId && _error instanceof BbHttpError) {
         if (_error.code === "submission_already_admitted") {
