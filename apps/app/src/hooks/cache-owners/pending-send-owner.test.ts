@@ -6,6 +6,7 @@ import { makeThreadQueuedMessage } from "@bb/test-helpers/domain-fixtures";
 import {
   beginSendThreadMessageTransaction,
   applySendThreadMessageSuccess,
+  rollbackSendThreadMessageTransaction,
 } from "./thread-runtime-cache-owner";
 import {
   pendingSendOwner,
@@ -645,15 +646,118 @@ it("does not restore the draft once the owner has accepted the send", async () =
   }
 });
 
-it("restores the draft when no pending entry exists for the send", () => {
+it("does not restore the draft when the send is unknown to the owner", () => {
   const client = createAppQueryClient();
   try {
     const restore = vi.fn(() => true);
     expect(
       settleFailedPendingSend(client, "thread-1", "missing", restore),
+    ).toBe(false);
+    expect(restore).not.toHaveBeenCalled();
+  } finally {
+    client.clear();
+  }
+});
+
+it("does not restore the draft when the server accepted the send and then the response was lost", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "lost response", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a15",
+  };
+  client.setQueryData(
+    threadTimelineQueryKey(request.id),
+    makeThreadTimelineResponse({ rows: [], maxSeq: 1 }),
+  );
+  client.setQueryData(threadQueuedMessagesQueryKey(request.id), []);
+  try {
+    const transaction = await beginSendThreadMessageTransaction({
+      queryClient: client,
+      request,
+    });
+    const owner = pendingSendOwner(client);
+    const entry = owner.list(request.id)[0]!;
+    client.setQueryData(
+      threadTimelineQueryKey(request.id),
+      makeThreadTimelineResponse({
+        rows: [
+          {
+            ...entry.row,
+            id: "canonical",
+            sourceSeqEnd: 20,
+            clientSubmissionIds: [entry.id],
+          },
+        ],
+        maxSeq: 20,
+      }),
+    );
+    expect(owner.list(request.id)).toHaveLength(0);
+    rollbackSendThreadMessageTransaction({
+      queryClient: client,
+      request,
+      transaction,
+    });
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, request.id, entry.id, restore)).toBe(
+      false,
+    );
+    expect(restore).not.toHaveBeenCalled();
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("does not restore the draft when a queued send was accepted and its entry removed", async () => {
+  const client = createAppQueryClient();
+  const request: SendThreadMessageMutationRequest = {
+    id: "thread-1",
+    input: [{ type: "text", text: "queued", mentions: [] }],
+    mode: "auto",
+    clientSubmissionId: "9d6b6a52-7c1f-4c43-8d57-0f5d5a1f6a16",
+  };
+  try {
+    await beginSendThreadMessageTransaction({ queryClient: client, request });
+    const owner = pendingSendOwner(client);
+    const id = request.clientSubmissionId!;
+    owner.admittedQueue(request.id, id, "queued-1");
+    owner.removed(request.id, "queued-1");
+    expect(owner.list(request.id)).toHaveLength(0);
+    const restore = vi.fn(() => true);
+    expect(settleFailedPendingSend(client, request.id, id, restore)).toBe(
+      false,
+    );
+    expect(restore).not.toHaveBeenCalled();
+  } finally {
+    clearPendingSendScope(client);
+    client.clear();
+  }
+});
+
+it("restores the draft when the send was refused before it left the client", async () => {
+  const client = createAppQueryClient();
+  try {
+    const send = vi.fn();
+    const result = dispatchPendingSend(
+      client,
+      "thread-1",
+      "never-sent",
+      {},
+      [],
+      send,
+    );
+    clearPendingSendScope(client);
+    await expect(result).rejects.toThrow("Pending send scope changed");
+    expect(send).not.toHaveBeenCalled();
+    const restore = vi.fn(() => true);
+    expect(
+      settleFailedPendingSend(client, "thread-1", "never-sent", restore),
     ).toBe(true);
     expect(restore).toHaveBeenCalledTimes(1);
   } finally {
+    clearPendingSendScope(client);
     client.clear();
   }
 });

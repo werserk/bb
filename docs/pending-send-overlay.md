@@ -98,7 +98,7 @@ hidden, so the content is shown once; while the entry is unconfirmed (indetermin
 error) the draft is not restored and the entry offers Resend, which reuses the same
 `clientSubmissionId` (the server coalesces only identical ids and answers
 `submission_already_admitted`), and Hide. A failed entry also offers Hide next to
-Retry; Retry uses a new id. The draft is also left alone once the owner already holds an accepted (`sent`/`queued`) entry for the send. Resend is available only for entries of the current tab
+Retry; Retry uses a new id. The draft is restored only when the owner holds a recorded rejection of this very submission (a `failed` entry, or a client-side refusal before the request left the client). The overlay keeps a small in-memory `accepted`/`rejected` record per submission id; the owner writes `accepted` when it learns of the acceptance (receipt, timeline or queue observation, queue-row removal, legacy joint read), so an entry that disappeared because the server accepted the send can never be mistaken for a rejection. A missing entry or record is never read as rejected: an indeterminate error such as a lost response never restores the draft, even when the message is already in the timeline. Resend is available only for entries of the current tab
 that still hold their request: a reloaded entry has no request and offers Refresh
 and Hide only. Residual risk: a failed entry whose draft could not be restored (the
 composer already holds new text) stays visible until Retry or Hide. The earlier behaviour that
