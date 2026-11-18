@@ -34,7 +34,7 @@ nudge is one actual group and retains every source member at index zero.
 Common serializers retain these optional fields. Parent-system callers omit them;
 fork history copies retain JSON without sharing source-thread overlay ownership.
 
-`GET /capabilities/pending-send-overlay` is a direct local v1 capability; Send
+`GET /api/v1/capabilities/pending-send-overlay` is a direct local v1 capability; Send
 does not wait for it. The SDK exposes it under `system.pendingSendOverlay()`.
 `threads.queueSnapshot()` reads queue presence, bounded event placements and the
 watermark in one SQLite read transaction. Existing queue-list arrays remain
@@ -63,7 +63,10 @@ handoff reads expose unresolved custody with Refresh/Hide. No text matching or
 timeout acknowledges sends.
 
 The optional versioned session journal uses exclusive Web Locks. A normal
-navigation uses nonwaiting acquisition; a duplicate starts a fresh journal.
+navigation uses nonwaiting acquisition; a duplicate (or a navigation whose predecessor
+still holds the lock) starts a fresh journal with a new id in memory and writes nothing
+until its first own non-empty entry list is saved, so stored entries of the predecessor
+are never replaced by an empty list.
 Nonwaiting requests use `ifAvailable` without `signal`, as required by Web Locks;
 reload requests use `signal` without `ifAvailable` and wait for actual grant.
 While waiting, new sends remain in memory.
@@ -95,7 +98,7 @@ hidden, so the content is shown once; while the entry is unconfirmed (indetermin
 error) the draft is not restored and the entry offers Resend, which reuses the same
 `clientSubmissionId` (the server coalesces only identical ids and answers
 `submission_already_admitted`), and Hide. A failed entry also offers Hide next to
-Retry; Retry uses a new id. Resend is available only for entries of the current tab
+Retry; Retry uses a new id. The draft is also left alone once the owner already holds an accepted (`sent`/`queued`) entry for the send. Resend is available only for entries of the current tab
 that still hold their request: a reloaded entry has no request and offers Refresh
 and Hide only. Residual risk: a failed entry whose draft could not be restored (the
 composer already holds new text) stays visible until Retry or Hide. The earlier behaviour that
