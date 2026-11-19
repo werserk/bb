@@ -65,6 +65,7 @@ interface ScriptedClaudeQueryCall {
     canUseTool?: CanUseTool;
     resume?: string;
     sessionId?: string;
+    persistSession?: boolean;
     mcpServers?: ReturnType<typeof buildSessionOptions>["mcpServers"];
   };
 }
@@ -503,9 +504,38 @@ async function replay(args: { workspaceDir: string }): Promise<ReplayResult> {
     await bridge.waitForResponse(4);
     await settle(bridge, collect);
 
+    const rolloverResult = client.callTool({
+      name: "context_probe",
+      arguments: {},
+    });
+    await vi.waitFor(() =>
+      expect(
+        bridge.messages.filter((m) => m.method === "item/tool/call"),
+      ).toHaveLength(2),
+    );
+    const rolloverCall = bridge.messages.filter(
+      (m) => m.method === "item/tool/call",
+    )[1];
+    if (!rolloverCall || !isRecord(rolloverCall.params))
+      throw new Error("Missing rollover tool call");
+    expect(rolloverCall.params.turnId).not.toBe(call.params.turnId);
     expect(
-      (await client.callTool({ name: "context_probe", arguments: {} })).isError,
-    ).toBe(true);
+      collector.assembler.getBbTurnId(
+        THREAD_ID,
+        String(rolloverCall.params.turnId),
+      ),
+    ).toBe(lastTurnId(events));
+    handleLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: rolloverCall.id,
+        result: { success: true, contentItems: [] },
+      }),
+    );
+    expect((await rolloverResult).isError).toBeFalsy();
+    expect(
+      calls.filter((c) => c.options.persistSession !== false),
+    ).toHaveLength(1);
     expect(turnState.getActiveTurnId(THREAD_ID)).toBeNull();
     expect(events.filter((e) => e.type === "turn/started")).toHaveLength(2);
     bridge.sendRequest(5, "thread/resume", {
@@ -614,7 +644,6 @@ const GOLDEN_EVENT_STREAM: string[] = [
   "thread/contextWindowUsage/updated",
   "thread/tokenUsage/updated",
   "turn/completed",
-  "thread/contextWindowUsage/updated",
   "turn/started",
   "turn/input/accepted",
   "item/started:agentMessage",
@@ -624,7 +653,6 @@ const GOLDEN_EVENT_STREAM: string[] = [
   "thread/contextWindowUsage/updated",
   "thread/tokenUsage/updated",
   "turn/completed",
-  "thread/contextWindowUsage/updated",
   "turn/started",
   "turn/input/accepted",
   "item/started:agentMessage",

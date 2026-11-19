@@ -4335,6 +4335,7 @@ describe("bridge", () => {
             threadId,
             providerThreadId: threadId,
             input: [{ type: "text", text: "next" }],
+            providerOptions: { providerSubagentsEnabled: false },
           }),
         );
         await bridge.flushWork();
@@ -6603,6 +6604,38 @@ describe("bridge", () => {
             input: [{ type: "text", text: "new turn" }],
           }),
         );
+        if (!stopped) {
+          await readNextPrompt(getLatestQueryCall());
+          await bridge.waitForResponse(30);
+          expect(queryMock).toHaveBeenCalledTimes(1);
+          const current = client.callTool({
+            name: "context_probe",
+            arguments: {},
+          });
+          await vi.waitFor(() =>
+            expect(
+              bridge.messages.filter((m) => m.method === "item/tool/call"),
+            ).toHaveLength(3),
+          );
+          const toolCalls = bridge.messages.filter(
+            (m) => m.method === "item/tool/call",
+          );
+          const origin = (call: (typeof toolCalls)[number]) =>
+            z.object({ turnId: z.string() }).parse(call.params).turnId;
+          expect(origin(toolCalls[2])).toMatch(/^tool-origin-\d+-c1$/);
+          expect(origin(toolCalls[2])).not.toBe(origin(toolCalls[0]));
+          handleLine(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: toolCalls[2].id,
+              result: { success: true, contentItems: [] },
+            }),
+          );
+          expect((await current).isError).toBeFalsy();
+          live.finish();
+          next.finish();
+          return;
+        }
         await vi.waitFor(() => expect(queryMock).toHaveBeenCalledTimes(2));
         await readNextPrompt(getLatestQueryCall());
         await bridge.waitForResponse(30);

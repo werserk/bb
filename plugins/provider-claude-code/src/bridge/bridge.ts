@@ -257,7 +257,7 @@ interface ThreadSession {
   commandListGeneration: number;
   toolOrigin: { turnId?: string; retired?: boolean };
   toolOriginTurnEnded: boolean;
-  resumedTurnCount: number;
+  toolOriginRotations: number;
   contextUsageCollector: ClaudeContextUsageCollector;
   session: SdkSession;
   attachment: ThreadAttachment;
@@ -971,11 +971,19 @@ function stampResumedTurnOrigin(
     ) {
       return delta;
     }
-    threadSession.toolOriginTurnEnded = false;
-    threadSession.resumedTurnCount += 1;
-    threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}-r${threadSession.resumedTurnCount}`;
-    return { ...delta, providerTurnId: threadSession.toolOrigin.turnId };
+    return { ...delta, providerTurnId: rotateToolOrigin(threadSession, "r") };
   });
+}
+
+function rotateToolOrigin(
+  threadSession: ThreadSession,
+  kind: "r" | "c",
+): string {
+  threadSession.toolOriginTurnEnded = false;
+  threadSession.toolOriginRotations += 1;
+  const turnId = `tool-origin-${threadSession.sessionSerial}-${kind}${threadSession.toolOriginRotations}`;
+  threadSession.toolOrigin.turnId = turnId;
+  return turnId;
 }
 
 function emitTerminalAccountErrorHint(
@@ -1257,7 +1265,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
     commandListGeneration: 0,
     toolOrigin,
     toolOriginTurnEnded: false,
-    resumedTurnCount: 0,
+    toolOriginRotations: 0,
     contextUsageCollector: new ClaudeContextUsageCollector(),
     session,
     attachment,
@@ -1624,9 +1632,11 @@ async function getWritableThreadSession(
       }
     : intent === "new-turn"
       ? (threadSession.restartBeforeNextTurn ??
-        (threadSession.toolOrigin.turnId !== undefined
+        (threadSession.toolOrigin.turnId !== undefined &&
+        !threadSession.toolOriginTurnEnded
           ? {
-              reason: "Claude tool query replaced at the turn boundary",
+              reason:
+                "Claude tool query replaced: a new turn arrived before its run ended",
               showRuntimeNote: false,
             }
           : null))
@@ -2742,6 +2752,12 @@ async function runTurnInput(
         ?.length ?? 0) > 0
     ) {
       threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}`;
+    } else if (
+      intent === "new-turn" &&
+      threadSession.toolOrigin.turnId !== undefined &&
+      threadSession.toolOriginTurnEnded
+    ) {
+      rotateToolOrigin(threadSession, "c");
     }
     if (threadSession.toolOrigin.turnId !== undefined) {
       sendThreadDeltas(params.threadId, [
