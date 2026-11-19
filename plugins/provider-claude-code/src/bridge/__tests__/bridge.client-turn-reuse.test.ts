@@ -153,6 +153,7 @@ interface Fixture {
   openTurnIds(): string[];
   turn(text: string): Promise<void>;
   callTool(): Promise<string>;
+  callToolResult(queryIndex: number): Promise<{ isError?: boolean }>;
   bbTurnId(origin: string): string | undefined;
 }
 
@@ -208,6 +209,21 @@ async function withToolSession(run: (fixture: Fixture) => Promise<void>) {
         : [],
     );
 
+  const clientFor = async (queryIndex: number): Promise<Client> => {
+    const server = calls[queryIndex]?.options.mcpServers?.["bb-bridge"];
+    expect(server).toBeDefined();
+    let client = clients.get(server!);
+    if (!client) {
+      client = new Client({ name: "client-turn-reuse", version: "1" });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      await server!.instance.connect(serverTransport);
+      await client.connect(clientTransport);
+      clients.set(server!, client);
+    }
+    return client;
+  };
+
   try {
     bridge.sendRequest(requestId, "thread/start", {
       threadId: THREAD_ID,
@@ -243,17 +259,7 @@ async function withToolSession(run: (fixture: Fixture) => Promise<void>) {
         await settle();
       },
       callTool: async () => {
-        const server = calls.at(-1)?.options.mcpServers?.["bb-bridge"];
-        expect(server).toBeDefined();
-        let client = clients.get(server!);
-        if (!client) {
-          client = new Client({ name: "client-turn-reuse", version: "1" });
-          const [clientTransport, serverTransport] =
-            InMemoryTransport.createLinkedPair();
-          await server!.instance.connect(serverTransport);
-          await client.connect(clientTransport);
-          clients.set(server!, client);
-        }
+        const client = await clientFor(calls.length - 1);
         const before = toolCallOrigins().length;
         void client
           .callTool({ name: "wprojects_outcome", arguments: {} })
@@ -263,6 +269,12 @@ async function withToolSession(run: (fixture: Fixture) => Promise<void>) {
         );
         return toolCallOrigins()[before]!;
       },
+      callToolResult: async (queryIndex) =>
+        (await (
+          await clientFor(queryIndex)
+        ).callTool({ name: "wprojects_outcome", arguments: {} })) as {
+          isError?: boolean;
+        },
       bbTurnId: (origin) => collector.assembler.getBbTurnId(THREAD_ID, origin),
     });
   } finally {
@@ -307,13 +319,16 @@ it("keeps the live Claude query, and with it its background tasks, for a new cli
 }, 60_000);
 
 it("still replaces the query when a new client turn arrives before the previous run ended", async () => {
-  await withToolSession(async ({ queries, startedTurnIds, turn }) => {
-    await turn("steer: a run that has not ended yet");
-    expect(startedTurnIds()).toHaveLength(1);
+  await withToolSession(
+    async ({ queries, startedTurnIds, turn, callToolResult }) => {
+      await turn("steer: a run that has not ended yet");
+      expect(startedTurnIds()).toHaveLength(1);
 
-    await turn("a new message from the parent");
+      await turn("a new message from the parent");
 
-    expect(queries).toHaveLength(2);
-    expect(queries[0]!.query.close).toHaveBeenCalled();
-  });
+      expect(queries).toHaveLength(2);
+      expect(queries[0]!.query.close).toHaveBeenCalled();
+      expect((await callToolResult(0)).isError).toBe(true);
+    },
+  );
 }, 60_000);
