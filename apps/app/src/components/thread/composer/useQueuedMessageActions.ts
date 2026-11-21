@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PromptInput, ThreadQueuedMessage } from "@bb/domain";
 import type {
   SendQueuedMessageMode,
@@ -114,12 +114,12 @@ export function useQueuedMessageActions({
     threadId,
     editSessionId: inlineEditingQueuedMessage?.editSessionId,
   });
-  currentUi.current = {
-    threadId,
-    editSessionId: inlineEditingQueuedMessage?.editSessionId,
-  };
   const queuedMessagesRef = useRef<readonly ThreadQueuedMessage[]>([]);
-  queuedMessagesRef.current = queuedMessages;
+  const editSessionId = inlineEditingQueuedMessage?.editSessionId;
+  useLayoutEffect(() => {
+    currentUi.current = { threadId, editSessionId };
+    queuedMessagesRef.current = queuedMessages;
+  });
 
   const displayedProcessingQueuedMessage = useMemo(
     () =>

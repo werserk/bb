@@ -10,7 +10,7 @@ import {
 } from "@bb/client-core";
 import { z } from "zod";
 import { notifyManager, type QueryClient } from "@tanstack/react-query";
-import { useMemo, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { BbHttpError, sdk } from "@/lib/sdk";
 import { getPromptDraftAccessor } from "../usePromptDraftStorage";
 import { getThreadEntity } from "./thread-entity-store";
@@ -332,19 +332,20 @@ export function pendingSendOwner(client: QueryClient) {
 export function pendingSendJournal(client: QueryClient) {
   return context(client).journal;
 }
-export function usePendingSendSnapshot(client: QueryClient) {
-  const owner = pendingSendOwner(client);
-  const read = useMemo(() => {
+interface PendingSendSnapshot {
+  entries: readonly PendingSend[];
+  recoveryStatus: JournalStatus;
+  journal: PendingSendJournal | undefined;
+  identityUnavailable: boolean;
+}
+const snapshotReaders = new WeakMap<QueryClient, () => PendingSendSnapshot>();
+function snapshotReader(client: QueryClient) {
+  let read = snapshotReaders.get(client);
+  if (!read) {
+    const owner = pendingSendOwner(client);
     let revision = -1;
-    let snapshot:
-      | {
-          entries: readonly PendingSend[];
-          recoveryStatus: JournalStatus;
-          journal: PendingSendJournal | undefined;
-          identityUnavailable: boolean;
-        }
-      | undefined;
-    return () => {
+    let snapshot: PendingSendSnapshot | undefined;
+    read = () => {
       const current = owner.getSnapshot();
       if (!snapshot || revision !== current) {
         snapshot = {
@@ -357,7 +358,13 @@ export function usePendingSendSnapshot(client: QueryClient) {
       }
       return snapshot;
     };
-  }, [client, owner]);
+    snapshotReaders.set(client, read);
+  }
+  return read;
+}
+export function usePendingSendSnapshot(client: QueryClient) {
+  const owner = pendingSendOwner(client);
+  const read = snapshotReader(client);
   return useSyncExternalStore(owner.subscribe, read, read);
 }
 export function usePendingSendEntries(client: QueryClient) {
