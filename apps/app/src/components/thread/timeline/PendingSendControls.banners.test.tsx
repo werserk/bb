@@ -50,8 +50,9 @@ it("updates recovery, identity and retained-send banners without a parent render
       </QueryClientProvider>,
     );
     expect(screen.getByText(/Restoring pending sends/)).toBeTruthy();
-    act(() => {
+    await act(async () => {
       void acquire!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(screen.queryByText(/Restoring pending sends/)).toBeNull();
     expect(screen.queryByText(/Kept in this tab/)).toBeNull();
@@ -88,8 +89,13 @@ it("updates recovery, identity and retained-send banners without a parent render
     expect(screen.queryByText(/Kept in this tab/)).toBeNull();
     act(() => {
       pendingSendJournal(client)?.refresh();
-      void acquire!();
     });
+    expect(screen.getByText(/Restoring pending sends/)).toBeTruthy();
+    await act(async () => {
+      void acquire!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/Restoring pending sends/)).toBeNull();
     expect(screen.getByText(/Kept in this tab/)).toBeTruthy();
     act(() => {
       setPendingSendIdentity(client, null);
