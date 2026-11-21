@@ -489,7 +489,11 @@ function appendReprovisionTurnRequest(
   const requestId = createClientTurnRequestId();
   const request = deps.db.transaction(
     (tx) => {
-      if (!args.sourceQueuedMessageIds?.length && !args.deferredFromRequestId)
+      if (
+        !args.sourceQueuedMessageIds?.length &&
+        !args.deferredFromRequestId &&
+        args.retryOf === undefined
+      )
         for (const entry of args.clientSubmissions ?? [])
           assertSubmissionNotAdmitted(
             tx,

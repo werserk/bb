@@ -1116,6 +1116,68 @@ describe("retrying a failed turn", () => {
       ).toMatchObject(resent);
     });
   });
+
+  it("retries a failed direct send with submission membership through a reprovision without re-checking admission", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-reprovision-member",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: WORKSPACE_PATH,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: WORKSPACE_PATH,
+        environmentProviderId: "personal-workspace",
+        environmentProviderPluginId: "bb-plugin-environment-personal-workspace",
+        isGitRepo: false,
+      });
+      const thread = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "active",
+      });
+      seedThreadRuntimeState(harness.deps, {
+        environmentId: environment.id,
+        inputText: "Do the thing",
+        providerThreadId: "provider-reprovision-member",
+        threadId: thread.id,
+      });
+      const id = crypto.randomUUID();
+      const original = turnRequests(harness, thread.id)[0]!;
+      harness.db.run(
+        sql`UPDATE events SET data=${JSON.stringify({ ...JSON.parse(original.data), clientSubmissions: [{ id, inputGroupIndex: 0 }] })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+      );
+      harness.db
+        .update(environments)
+        .set({ status: "error" })
+        .where(eq(environments.id, environment.id))
+        .run();
+      failThread(harness, thread.id);
+
+      await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: null, sendAt: null, reason: "Retry" },
+      });
+
+      const requests = turnRequests(harness, thread.id).map(
+        (event) =>
+          JSON.parse(event.data) as {
+            clientSubmissions?: { id: string; inputGroupIndex: number }[];
+            retryAttempt?: number;
+          },
+      );
+      expect(requireThread(harness, thread.id).status).toBe("starting");
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({
+        retryAttempt: 2,
+        clientSubmissions: [{ id, inputGroupIndex: 0 }],
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    });
+  });
 });
 
 function liveQueue(harness: TestAppHarness, threadId: string) {
