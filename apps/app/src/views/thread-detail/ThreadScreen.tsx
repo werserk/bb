@@ -3,6 +3,10 @@ import {
   ComposerContextProvider,
   ComposerContextSources,
 } from "@/components/promptbox/context/composer-context";
+import {
+  PendingSendControls,
+  PendingSendPresentation,
+} from "@/components/thread/timeline/PendingSendControls";
 import { threadNeedsOwnerAttention } from "@bb/client-core";
 import { QuestionNavigationProvider } from "@/components/thread/user-questions/question-navigation";
 import { QuestionFallback } from "@/components/thread/user-questions/QuestionFallback";
@@ -486,54 +490,61 @@ export function ThreadScreen({
     ) : null;
   const surface = (
     <SelectionAddToChatContext.Provider value={selectionAddToChat}>
-      <ThreadTimelineSurface
-        activeThinking={timeline.activeThinking}
-        canSpawnChild={thread.canSpawnChild}
-        contextBoundarySeq={timeline.contextBoundarySeq}
-        hasOlderTimelineRows={timeline.hasOlderTimelineRows}
-        hostConnectionNotice={buildHostConnectionNotice(
-          thread,
-          timelineHost.environmentHostName,
-        )}
-        isCatchingUpTimeline={timeline.isCatchingUpTimeline}
-        isLoadingOlderTimelineRows={timeline.isLoadingOlderTimelineRows}
-        isThreadTimelinePending={isThreadTimelinePending}
-        timelineError={Boolean(timeline.timelineError)}
-        loadingContent={
-          isPanelPresentation ? (
-            <ThreadTimelinePanelLoadingSkeleton />
-          ) : undefined
-        }
-        timelineErrorClassName={
-          isPanelPresentation ? "mx-2 mt-4 text-destructive" : undefined
-        }
-        leadingContent={timelineHost.leadingContent}
-        consumerMessageActions={timelineHost.consumerMessageActions}
-        includePluginMessageActions={timelineHost.includePluginMessageActions}
-        onForkMessage={timelineHost.onForkMessage}
-        onEditMessage={handleEditSentMessage}
-        inlineMessageEditor={inlineMessageEditor}
-        onMessageAddToChat={selectionAddToChat}
-        onSelectionAddToChat={selectionAddToChat}
-        onLoadOlderRows={timeline.loadOlderTimelineRows}
-        onTitleAction={timelineHost.onTitleAction}
-        projectId={projectId}
-        resolveMentionLink={resolveMentionLink}
-        showOngoingIndicator={
-          thread.status !== "stopping" &&
-          !hasPendingInteraction &&
-          isRunningThreadRuntimeDisplayStatus(thread.runtime.displayStatus) &&
-          !isThreadTimelinePending
-        }
-        timelineRows={timelineRows}
-        timelineNavigationTargetRowId={timelineNavigationTargetRowId}
-        isStopping={thread.status === "stopping"}
-        stoppingAnchorAt={thread.updatedAt}
-        threadId={thread.id}
-        threadRuntimeDisplayStatus={thread.runtime.displayStatus}
-        unreadDividerAutoScroll={timelineHost.unreadDividerAutoScroll}
-        unreadDividerPlacement={timelineHost.unreadDividerPlacement}
-      />
+      <PendingSendPresentation threadId={thread.id}>
+        <ThreadTimelineSurface
+          activeThinking={timeline.activeThinking}
+          canSpawnChild={thread.canSpawnChild}
+          contextBoundarySeq={timeline.contextBoundarySeq}
+          hasOlderTimelineRows={timeline.hasOlderTimelineRows}
+          hostConnectionNotice={buildHostConnectionNotice(
+            thread,
+            timelineHost.environmentHostName,
+          )}
+          isCatchingUpTimeline={timeline.isCatchingUpTimeline}
+          isLoadingOlderTimelineRows={timeline.isLoadingOlderTimelineRows}
+          isThreadTimelinePending={isThreadTimelinePending}
+          timelineError={Boolean(timeline.timelineError)}
+          loadingContent={
+            isPanelPresentation ? (
+              <ThreadTimelinePanelLoadingSkeleton />
+            ) : undefined
+          }
+          timelineErrorClassName={
+            isPanelPresentation ? "mx-2 mt-4 text-destructive" : undefined
+          }
+          leadingContent={
+            <>
+              {timelineHost.leadingContent}
+              <PendingSendControls threadId={thread.id} />
+            </>
+          }
+          consumerMessageActions={timelineHost.consumerMessageActions}
+          includePluginMessageActions={timelineHost.includePluginMessageActions}
+          onForkMessage={timelineHost.onForkMessage}
+          onEditMessage={handleEditSentMessage}
+          inlineMessageEditor={inlineMessageEditor}
+          onMessageAddToChat={selectionAddToChat}
+          onSelectionAddToChat={selectionAddToChat}
+          onLoadOlderRows={timeline.loadOlderTimelineRows}
+          onTitleAction={timelineHost.onTitleAction}
+          projectId={projectId}
+          resolveMentionLink={resolveMentionLink}
+          showOngoingIndicator={
+            thread.status !== "stopping" &&
+            !hasPendingInteraction &&
+            isRunningThreadRuntimeDisplayStatus(thread.runtime.displayStatus) &&
+            !isThreadTimelinePending
+          }
+          timelineRows={timelineRows}
+          timelineNavigationTargetRowId={timelineNavigationTargetRowId}
+          isStopping={thread.status === "stopping"}
+          stoppingAnchorAt={thread.updatedAt}
+          threadId={thread.id}
+          threadRuntimeDisplayStatus={thread.runtime.displayStatus}
+          unreadDividerAutoScroll={timelineHost.unreadDividerAutoScroll}
+          unreadDividerPlacement={timelineHost.unreadDividerPlacement}
+        />
+      </PendingSendPresentation>
     </SelectionAddToChatContext.Provider>
   );
 

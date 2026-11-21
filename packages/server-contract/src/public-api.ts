@@ -1,5 +1,10 @@
 import type { ThreadReleaseIdleResult } from "./api/threads.js";
 import {
+  queueSnapshotRequestSchema,
+  type QueueSnapshotRequest,
+  type QueueSnapshotResponse,
+} from "./api/threads.js";
+import {
   conversationQuestionPublicationInputSchema,
   conversationQuestionAnswerSchema,
   conversationQuestionVersionSchema,
@@ -1466,6 +1471,14 @@ export const publicApiRoutes = {
       method: "post",
       request: jsonRequest<PathId, RetryTurnRequest>(retryTurnRequestSchema),
       response: jsonResponse<RetryTurnResponse>(),
+    }),
+    queueSnapshot: defineRoute({
+      path: "/threads/:id/queue-snapshot",
+      method: "post",
+      request: jsonRequest<PathId, QueueSnapshotRequest>(
+        queueSnapshotRequestSchema,
+      ),
+      response: jsonResponse<QueueSnapshotResponse>(),
     }),
     queuedMessages: defineRoute({
       path: "/threads/:id/queued-messages",

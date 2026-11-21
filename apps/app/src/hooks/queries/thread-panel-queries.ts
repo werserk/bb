@@ -1,3 +1,7 @@
+import {
+  usePendingSendOwner,
+  composePendingSends,
+} from "../cache-owners/pending-send-owner";
 import { prependOlderTimelineRows } from "@bb/client-core";
 import {
   infiniteQueryOptions,
@@ -107,7 +111,14 @@ export function useThreadQueuedMessages(
 ) {
   const enabled = (options?.enabled ?? true) && Boolean(id);
   useThreadDetailRealtimeSubscription(id, { enabled });
-  return useQuery(threadQueuedMessagesQueryOptions(id, options));
+  const client = useQueryClient();
+  usePendingSendOwner(client);
+  const result = useQuery(threadQueuedMessagesQueryOptions(id, options));
+  const queue = composePendingSends(client, id, undefined, result.data).queue;
+  return {
+    ...result,
+    data: result.data === undefined && queue.length === 0 ? undefined : queue,
+  };
 }
 
 export function useThreadPromptHistory(

@@ -10,3 +10,19 @@ export interface SendThreadMessageMutationRequest extends SendMessageRequest {
 export interface EditMessageMutationRequest extends EditMessageRequest {
   id: string;
 }
+
+const preparedSends = new WeakMap<
+  SendThreadMessageMutationRequest,
+  SendThreadMessageMutationRequest & { clientSubmissionId: string }
+>();
+export function prepareSendRequest(request: SendThreadMessageMutationRequest) {
+  let prepared = preparedSends.get(request);
+  if (!prepared) {
+    prepared = {
+      ...request,
+      clientSubmissionId: request.clientSubmissionId ?? crypto.randomUUID(),
+    };
+    preparedSends.set(request, prepared);
+  }
+  return prepared;
+}

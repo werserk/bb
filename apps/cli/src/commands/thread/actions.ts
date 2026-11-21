@@ -89,6 +89,7 @@ interface ThreadDeleteCommandOptions {
 }
 
 interface ThreadTellCommandOptions {
+  clientSubmissionId?: string;
   json?: boolean;
   messageFile?: string;
   model?: string;
@@ -127,6 +128,7 @@ interface ThreadEditMessageCommandOptions {
 type ThreadTellDeliveryMode = "auto" | "queue" | "steer";
 
 interface PostThreadMessageArgs {
+  clientSubmissionId?: string;
   getUrl: () => string;
   threadId: string;
   message: string;
@@ -542,6 +544,10 @@ export function registerActionsCommands(
       "--message-file <path>",
       `Read the message from a file instead of [message]; ${TEXT_FILE_HELP_SUFFIX}`,
     )
+    .option(
+      "--client-submission-id <uuid>",
+      "Stable identity for one send action; repeated admission is rejected",
+    )
     .option("--json", "Print machine-readable JSON output")
     .option("--model <model>", "Model ID for this message")
     .option("--service-tier <tier>", SERVICE_TIER_HELP)
@@ -588,6 +594,7 @@ export function registerActionsCommands(
           const response = await postThreadMessage({
             getUrl,
             threadId: id,
+            clientSubmissionId: opts.clientSubmissionId,
             message,
             mode: resolveThreadMessageMode(opts.mode),
             model: opts.model,
@@ -730,6 +737,9 @@ async function postThreadMessage(
   try {
     response = await sdk.threads.send({
       threadId: args.threadId,
+      ...(args.clientSubmissionId === undefined
+        ? {}
+        : { clientSubmissionId: args.clientSubmissionId }),
       input,
       mode:
         args.mode === "steer"

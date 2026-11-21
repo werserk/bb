@@ -9,7 +9,10 @@ import {
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { getThreadProvisionContext } from "../../src/services/threads/thread-startup-store.js";
-import { requestThreadProvision } from "../../src/services/threads/thread-provisioning.js";
+import {
+  requestThreadProvision,
+  requestThreadTargetReprovision,
+} from "../../src/services/threads/thread-provisioning.js";
 import { NotificationHub } from "../../src/ws/hub.js";
 import { assertPromptHistoryForTurnRequest } from "../helpers/prompt-history.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -45,12 +48,17 @@ describe("thread provisioning state", () => {
     (initiator) => {
       const { db, host, hub, thread } = setup();
       const input = textInput("start this workspace");
+      const membership =
+        initiator === "user"
+          ? [{ id: crypto.randomUUID(), inputGroupIndex: 0 }]
+          : undefined;
 
       const context = requestThreadProvision(
         { db, hub },
         {
           originPluginId: null,
           thread,
+          clientSubmissions: membership,
           author: {
             initiator,
             senderThreadId: initiator === "agent" ? thread.id : null,
@@ -89,6 +97,8 @@ describe("thread provisioning state", () => {
           ? { retryOfRequestId: "creq_abcdefghij", retryAttempt: 2 }
           : {}),
       });
+      expect(JSON.parse(event.data).clientSubmissions).toEqual(membership);
+      expect(context.request.clientSubmissions).toEqual(membership);
       expect(context.state.provisioningId).toMatch(/^tpv_/);
       expect(context.state.environmentId).toBeNull();
       expect(context.state.environmentId).toBeNull();
@@ -104,4 +114,56 @@ describe("thread provisioning state", () => {
         });
     },
   );
+});
+
+it("keeps grouped queue provenance in reprovision and its restored startup context", () => {
+  const { db, hub, thread, environment } = setup();
+  const groups = [textInput("first"), textInput("legacy"), textInput("last")];
+  const clientSubmissions = [
+    { id: crypto.randomUUID(), inputGroupIndex: 0 },
+    { id: crypto.randomUUID(), inputGroupIndex: 2 },
+  ];
+  const aliases = ["deferred-a", "legacy-b"];
+  const context = requestThreadTargetReprovision(
+    { db, hub },
+    {
+      thread,
+      environment,
+      provider: {
+        environmentProviderId: "project-checkout",
+        selection: {
+          machine: { type: "existing", hostId: environment.hostId },
+          inputs: {},
+        },
+      },
+      input: groups.flat(),
+      inputGroups: groups,
+      clientSubmissions,
+      sourceQueuedMessageIds: aliases,
+      initiator: "user",
+      originPluginId: null,
+      senderThreadId: null,
+      execution: {
+        model: "test",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        source: "client/turn/requested",
+      },
+    },
+  );
+  const requested = listEvents(db, { threadId: thread.id }).find(
+    (event) => event.type === "client/turn/requested",
+  )!;
+  expect(JSON.parse(requested.data)).toMatchObject({
+    inputGroups: groups,
+    clientSubmissions,
+    sourceQueuedMessageIds: aliases,
+  });
+  expect(context.request).toMatchObject({
+    inputGroups: groups,
+    clientSubmissions,
+    sourceQueuedMessageIds: aliases,
+  });
+  expect(getThreadProvisionContext(db, thread.id)).toEqual(context);
 });

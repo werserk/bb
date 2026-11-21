@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   waitForQueuedCommand,
   reportQueuedCommandError,
@@ -102,7 +103,11 @@ function recordTurnFailedAnnouncements(): string[] {
   return announced;
 }
 
-function seedFailableThread(harness: TestAppHarness, hostId: string) {
+function seedFailableThread(
+  harness: TestAppHarness,
+  hostId: string,
+  clientSubmissionId?: string,
+) {
   const { host } = seedHostSession(harness.deps, { id: hostId });
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
@@ -124,6 +129,12 @@ function seedFailableThread(harness: TestAppHarness, hostId: string) {
     providerThreadId: `provider-${hostId}`,
     threadId: thread.id,
   });
+  if (clientSubmissionId) {
+    const event = turnRequests(harness, thread.id)[0]!;
+    harness.db.run(
+      sql`UPDATE events SET data=${JSON.stringify({ ...JSON.parse(event.data), clientSubmissions: [{ id: clientSubmissionId, inputGroupIndex: 0 }] })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+    );
+  }
   return {
     environment,
     host,
@@ -1608,3 +1619,52 @@ describe("pooled provider retry integration", () => {
     });
   });
 });
+
+it.each([true, false])(
+  "preserves identified original membership in immediate retry (accepted %s)",
+  async (accepted) => {
+    await withTestHarness(async (harness) => {
+      const id = crypto.randomUUID();
+      const { environment, requestId, thread } = seedFailableThread(
+        harness,
+        `identified-retry-${accepted}`,
+        id,
+      );
+      const secondId = crypto.randomUUID();
+      const event = turnRequests(harness, thread.id)[0]!;
+      harness.db.run(
+        sql`UPDATE events SET data=${JSON.stringify({
+          ...JSON.parse(event.data),
+          clientSubmissions: [
+            { id, inputGroupIndex: 0 },
+            { id: secondId, inputGroupIndex: 1 },
+          ],
+          sourceQueuedMessageIds: ["q-first", "q-second"],
+        })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+      );
+      if (accepted)
+        seedInputAccepted(harness, {
+          environmentId: environment.id,
+          threadId: thread.id,
+          requestId,
+        });
+      failThread(harness, thread.id);
+      const result = await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: null, reason: "Retry" },
+      });
+      expect(result.delivery).toBe("sent");
+      const retry = JSON.parse(turnRequests(harness, thread.id).at(-1)!.data);
+      expect(retry.clientSubmissions).toEqual([
+        { id, inputGroupIndex: 0 },
+        { id: secondId, inputGroupIndex: 0 },
+      ]);
+      expect(retry.sourceQueuedMessageIds).toEqual(["q-first", "q-second"]);
+      expect(
+        retry.input.every(
+          (input: { visibility?: string }) => input.visibility === "agent-only",
+        ),
+      ).toBe(true);
+    });
+  },
+);

@@ -247,6 +247,7 @@ export function resolveDeferredSteerQueuedMessage(
         request.execution.permissionMode,
       ),
     },
+    clientSubmissions: request.clientSubmissions,
     inputGroups: request.inputGroups ?? [request.input],
     dispatchProvenance: request.dispatchProvenance,
     sourceRequestId: message.payload.sourceRequestId,

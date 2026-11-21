@@ -314,6 +314,11 @@ async function dispatchRetry(
   retriesInFlight.add(inFlightKey);
   try {
     const attempt = chain.attemptNumber + 1;
+    const prompt = retryInput(deps, {
+      continuation,
+      threadId: thread.id,
+      failed,
+    });
     const outcome = await attemptDispatch(deps, {
       thread,
       payload: {
@@ -321,7 +326,12 @@ async function dispatchRetry(
         // again is something to wait behind rather than to interrupt.
         mode: "queue-if-active",
         serviceTurn: failed.request.serviceTurn,
-        ...retryInput(deps, { continuation, threadId: thread.id, failed }),
+        ...prompt,
+        clientSubmissions: failed.request.clientSubmissions?.map((member) => ({
+          ...member,
+          inputGroupIndex: prompt.inputGroups ? member.inputGroupIndex : 0,
+        })),
+        sourceQueuedMessageIds: failed.request.sourceQueuedMessageIds,
         ...retryExecution(failed),
         ...(request.sendAt === null ? {} : { sendAt: request.sendAt }),
       },

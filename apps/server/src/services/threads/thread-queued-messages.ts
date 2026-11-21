@@ -1,3 +1,8 @@
+import {
+  getStoredTurnRequestEventByRequestId,
+  type DbQueryConnection,
+} from "@bb/db";
+import { turnRequestEventDataSchema } from "@bb/domain";
 import { parseStoredQueuedMessagePayload as toQueuedMessagePayload } from "@bb/db";
 import {
   promptInputSchema,
@@ -165,6 +170,9 @@ export function toThreadQueuedMessage(
   return threadQueuedMessageSchema.parse({
     ...(row.serviceTurn ? { serviceTurn: row.serviceTurn } : {}),
     id: row.id,
+    ...(row.id.startsWith("qsub_")
+      ? { clientSubmissionIds: [row.id.slice(5)] }
+      : {}),
     origin: row.origin,
     originPluginId: row.originPluginId,
     initiator: author.initiator,
@@ -191,4 +199,32 @@ export function toThreadQueuedMessage(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   });
+}
+
+export function toThreadQueuedMessageWithMembership(
+  db: DbQueryConnection,
+  row: StoredQueuedThreadMessageRow,
+): ThreadQueuedMessage {
+  const result = toThreadQueuedMessage(row);
+  const source =
+    result.payload.kind === "deferredSteer"
+      ? result.payload.sourceRequestId
+      : result.payload.kind === "retry"
+        ? result.payload.retryOfTurnRequestId
+        : null;
+  if (source) {
+    const stored = getStoredTurnRequestEventByRequestId(db, {
+      threadId: row.threadId,
+      requestId: source,
+    });
+    const request =
+      stored === null
+        ? null
+        : turnRequestEventDataSchema.safeParse(JSON.parse(stored.data));
+    if (request?.success)
+      result.clientSubmissionIds = request.data.clientSubmissions?.map(
+        (entry) => entry.id,
+      );
+  }
+  return result;
 }

@@ -12,6 +12,7 @@ import { initializeFavicon } from "./lib/favicon-color-preference";
 import { installForeignDomMutationGuard } from "./lib/foreign-dom-mutation-guard";
 import { installAppQueryClientBrowserEvents } from "./lib/query-client";
 import { appQueryClient } from "./lib/app-query-client";
+import { bindPendingSendIdentity } from "./hooks/cache-owners/pending-send-identity";
 import { applyAppFrameGeometry, getBbDesktopInfo } from "./lib/bb-desktop";
 import { applyCachedAppThemeCss } from "./lib/themes";
 import { installStaleChunkRecovery } from "./lib/stale-chunk-recovery";
@@ -29,6 +30,7 @@ Error.stackTraceLimit = 50;
 
 installAppQueryClientBrowserEvents(appQueryClient);
 registerProviderCliInstallQueryClient(appQueryClient);
+bindPendingSendIdentity(appQueryClient);
 registerCoreModal("core/local-file-viewer", LazyLocalFileViewerModal);
 
 initializePreferredTheme();

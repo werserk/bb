@@ -1,10 +1,7 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Environment, Host } from "@bb/domain";
-import {
-  makeEnvironment,
-  makeHost,
-} from "@bb/test-helpers/domain-fixtures";
+import { makeEnvironment, makeHost } from "@bb/test-helpers/domain-fixtures";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { sdk } from "@/lib/sdk";
 import { environmentQueryOptions } from "../queries/environment-queries";
@@ -79,9 +76,9 @@ describe("thread detail bootstrap ingestion", () => {
       ingest(queryClient, { environment: ready });
       staleFetch.resolve(provisioning);
       await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0));
-      expect(
-        queryClient.getQueryData(environmentQueryKey("env_1")),
-      ).toEqual(ready);
+      expect(queryClient.getQueryData(environmentQueryKey("env_1"))).toEqual(
+        ready,
+      );
     } finally {
       unsubscribe();
       queryClient.clear();
@@ -139,9 +136,7 @@ describe("thread detail bootstrap ingestion", () => {
     expect(queryClient.getQueryData(environmentQueryKey("env_1"))).toEqual(
       ready,
     );
-    expect(queryClient.getQueryData(hostQueryKey("host_1"))).toEqual(
-      connected,
-    );
+    expect(queryClient.getQueryData(hostQueryKey("host_1"))).toEqual(connected);
     expect(queryClient.getQueryData(hostsQueryKey())).toEqual([connected]);
   });
 });

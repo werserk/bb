@@ -375,3 +375,53 @@ it("does not expose service prose containing a question marker", () => {
   ]);
   expect(result.rows).toEqual([]);
 });
+it.each(["pending", "rejected", "accepted"] as const)(
+  "preserves per-group owner memberships on %s steer projections",
+  (status) => {
+    const e = createTimelineEventFactory({ threadId: "thread-1" });
+    const ids = [crypto.randomUUID(), crypto.randomUUID()];
+    const request = e.clientTurnRequested({
+      text: "same",
+      target: { kind: "auto", expectedTurnId: "turn-1" },
+      inputGroups: [
+        [{ type: "text", text: "same", mentions: [] }],
+        [{ type: "text", text: "same", mentions: [] }],
+      ],
+    });
+    request.data.clientSubmissions = ids.map((id, inputGroupIndex) => ({
+      id,
+      inputGroupIndex,
+    }));
+    request.data.sourceQueuedMessageIds = ["legacy-a", "legacy-b"];
+    const events: ThreadEventRow[] = [e.turnStarted(), request];
+    if (status === "accepted")
+      events.push(e.inputAccepted({ clientRequestId: request.data.requestId }));
+    if (status === "rejected")
+      events.push(e.clientTurnRejected({ requestId: request.data.requestId }));
+    const result = timeline(events, false, "active");
+    const flatten = (
+      rows: import("@bb/server-contract").TimelineRow[],
+    ): import("@bb/server-contract").TimelineRow[] =>
+      rows.flatMap((row) =>
+        row.kind === "turn" && row.children
+          ? [row, ...flatten(row.children)]
+          : [row],
+      );
+    const users = flatten(result.rows).filter(
+      (row) => row.kind === "conversation" && row.role === "user",
+    );
+    expect(users).toHaveLength(2);
+    expect(
+      users.map((row) =>
+        row.kind === "conversation" && row.role === "user"
+          ? row.clientSubmissionIds
+          : [],
+      ),
+    ).toEqual(ids.map((id) => [id]));
+    for (const row of users)
+      expect(row).toMatchObject({
+        submissionRequestId: request.data.requestId,
+        sourceQueuedMessageIds: ["legacy-a", "legacy-b"],
+      });
+  },
+);

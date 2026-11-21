@@ -136,6 +136,29 @@ describe("@bb/sdk", () => {
     });
   }
 
+  for (const baseUrl of ["http://bb.test", "http://bb.test/"]) {
+    it(`reads the pending send overlay capability from the api route for ${baseUrl}`, async () => {
+      const queue = createFetchQueue([
+        { body: { pendingSendOverlay: { version: 1 } } },
+      ]);
+      const sdk = createBbSdk({
+        transport: createHttpTransport({
+          baseUrl,
+          fetch: queue.fetch,
+          runtime: "node",
+        }),
+      });
+      expect(await sdk.system.pendingSendOverlay()).toEqual({
+        pendingSendOverlay: { version: 1 },
+      });
+      expect(queue.requests).toHaveLength(1);
+      expect(queue.requests[0]).toMatchObject({
+        method: "GET",
+        url: "http://bb.test/api/v1/capabilities/pending-send-overlay",
+      });
+    });
+  }
+
   it("pages prompt history with an opaque cursor", async () => {
     const response = {
       entries: [

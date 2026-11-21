@@ -1,4 +1,8 @@
 import type {
+  QueueSnapshotRequest,
+  QueueSnapshotResponse,
+} from "@bb/server-contract";
+import type {
   ConversationQuestion,
   ConversationQuestionsOpenPage,
   ConversationQuestionPublication,
@@ -758,6 +762,9 @@ export interface ThreadsArea {
   promptHistory(
     args: ThreadPromptHistoryArgs,
   ): Promise<ThreadPromptHistoryResult>;
+  queueSnapshot(
+    input: QueueSnapshotRequest & { threadId: string },
+  ): Promise<QueueSnapshotResponse>;
   queuedMessages: ThreadQueuedMessagesArea;
   reorderPinned(args: ThreadPinOrderArgs): Promise<ThreadPinOrderResult>;
   resolveMentions(
@@ -870,6 +877,7 @@ function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
 
 function sendJson(args: ThreadSendArgs): SendMessageRequest {
   return {
+    clientSubmissionId: args.clientSubmissionId,
     input: args.input,
     serviceTurn: args.serviceTurn,
     mode: args.mode,
@@ -1720,6 +1728,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           { query: searchQuery(input) },
           ...signalRequestArgs(input.signal),
         ),
+      );
+    },
+    async queueSnapshot(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["queue-snapshot"].$post({
+          param: { id: input.threadId },
+          json: { knownAdmittedQueueIds: input.knownAdmittedQueueIds },
+        }),
       );
     },
     async send(input) {

@@ -37,6 +37,29 @@ describe("bb thread tell command output", () => {
     });
   });
 
+  it("forwards the explicit submission identity unchanged", async () => {
+    const clientSubmissionId = crypto.randomUUID();
+    const post = vi.fn(async () => ({ ok: true, delivery: "sent" }));
+    stubServerApi({ "v1.threads.:id.send.$post": post });
+    await runCommand(
+      [
+        "thread",
+        "tell",
+        "thread-id",
+        "hello",
+        "--client-submission-id",
+        clientSubmissionId,
+        "--json",
+      ],
+      register,
+    );
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        json: expect.objectContaining({ clientSubmissionId }),
+      }),
+    );
+  });
+
   it("bb thread tell --message-file sends shell-active text untouched", async () => {
     const dir = await mkdtemp(join(tmpdir(), "bb-tell-file-"));
     const path = join(dir, "message.md");

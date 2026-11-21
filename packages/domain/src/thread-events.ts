@@ -64,6 +64,15 @@ export type ClientTurnLifecycleEventData = z.infer<
 >;
 
 export const turnRequestEventDataSchema = z.object({
+  clientSubmissions: z
+    .array(
+      z.object({
+        id: z.uuid(),
+        inputGroupIndex: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
+  sourceQueuedMessageIds: z.array(z.string().min(1)).optional(),
   serviceTurn: serviceTurnDescriptorSchema.optional(),
   direction: z.literal("outbound"),
   requestId: clientTurnRequestIdSchema,

@@ -217,6 +217,7 @@ export interface SystemArea {
     args?: SystemProviderStatesArgs,
   ): Promise<SystemProviderStatesResult>;
   usageLimits(args?: SystemUsageLimitsArgs): Promise<SystemUsageLimitsResult>;
+  pendingSendOverlay(): Promise<{ pendingSendOverlay: { version: 1 } }>;
   version(args?: SystemVersionArgs): Promise<SystemVersionResult>;
   appUpdate(args?: SystemAppUpdateArgs): Promise<SystemAppUpdateStatusResult>;
   applyAppUpdate(
@@ -447,6 +448,12 @@ export function createSystemArea(args: CreateSdkAreaArgs): SystemArea {
           },
           ...signalRequestArgs(input.signal),
         ),
+      );
+    },
+    async pendingSendOverlay() {
+      const baseUrl = transport.baseUrl.replace(/\/$/u, "");
+      return transport.readJson(
+        transport.fetch(`${baseUrl}/api/v1/capabilities/pending-send-overlay`),
       );
     },
     async version(input) {
