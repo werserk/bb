@@ -23,6 +23,7 @@ export const journalSchema = `
   CREATE TABLE effect (id TEXT PRIMARY KEY NOT NULL, digest TEXT NOT NULL, session TEXT NOT NULL,
     request TEXT NOT NULL, owner TEXT NOT NULL, fence INTEGER NOT NULL, revision INTEGER NOT NULL,
     thread TEXT NOT NULL, kind TEXT NOT NULL, disposition TEXT NOT NULL, claimed INTEGER NOT NULL CHECK(claimed IN (0,1)));
+  CREATE TABLE created_session(command_id TEXT PRIMARY KEY REFERENCES effect(id), provider_thread TEXT NOT NULL UNIQUE);
   CREATE UNIQUE INDEX admitted_input ON effect(request) WHERE claimed=1 AND kind != 'managed.thread.stop';
 `;
 
@@ -40,6 +41,11 @@ export interface SyntheticResident {
   observe(): SyntheticResidentObservation | null;
   countInput(): void;
   interrupt(): void;
+}
+// Local supervisor owns the slot. It can create a synthetic session but cannot launch a provider.
+export interface SyntheticColdSlot {
+  inspectEmpty(): { physicalFence: number } | null;
+  createSyntheticSession(): SyntheticResidentObservation;
 }
 type EffectReceipt = {
   claimed: number;
@@ -79,7 +85,7 @@ export async function openPinnedGuest(
   dataDir: string,
   pin: LocalEnrollmentPin,
   connection: GuestConnection,
-  resident: SyntheticResident,
+  resident: SyntheticResident | SyntheticColdSlot,
 ) {
   const enrollment = await classifyPinnedEnrollment(dataDir, pin);
   if (connection.hostId !== pin.hostId || !connection.sessionId)
@@ -121,6 +127,10 @@ export async function openPinnedGuest(
     db.prepare(
       "SELECT id,digest,session,request,owner,fence,revision,thread,kind,disposition,claimed FROM effect LIMIT 0",
     ).all();
+    if ("inspectEmpty" in resident)
+      db.prepare(
+        "SELECT command_id,provider_thread FROM created_session LIMIT 0",
+      ).all();
     const journal = new GuestJournal(
       db,
       enrollment,
@@ -142,7 +152,7 @@ class GuestJournal {
     private readonly enrollment: ManagedGuestEnrollment,
     private readonly checkFile: () => void,
     private readonly ingress: GuestConnection,
-    private readonly resident: SyntheticResident,
+    private readonly resident: SyntheticResident | SyntheticColdSlot,
   ) {}
   close() {
     this.db.close();
@@ -170,6 +180,17 @@ class GuestJournal {
       const current = row.current_command
         ? this.receipt(row.current_command)
         : null;
+      if (
+        row.phase === "creating" &&
+        row.revision === 1 &&
+        row.provider_thread === null &&
+        row.holder === null &&
+        current?.kind === "managed.thread.start" &&
+        current.claimed === 1 &&
+        current.revision === 1 &&
+        current.disposition === "unknown"
+      )
+        return;
       if (
         !current ||
         !row.holder ||
@@ -222,6 +243,10 @@ class GuestJournal {
     this.check();
     const prior = this.receipt(command.commandId);
     if (prior) return this.replay(prior, digest);
+    if ("inspectEmpty" in resident) {
+      if (command.type !== "managed.thread.start") return "unavailable";
+      return this.createFirst(command, digest, resident);
+    }
     // Preflight can suspend. All eligibility and holder comparisons follow it under the writer lock.
     try {
       await resident.inspect();
@@ -256,6 +281,98 @@ class GuestJournal {
         .prepare("UPDATE guest SET phase=? WHERE id=1")
         .run(stop ? "stopping" : "resident");
       return disposition;
+    });
+  }
+  createdSession(commandId: string): string | null {
+    const row = this.db
+      .prepare("SELECT provider_thread FROM created_session WHERE command_id=?")
+      .get(commandId);
+    return typeof row?.provider_thread === "string"
+      ? row.provider_thread
+      : null;
+  }
+  private createFirst(
+    command: Extract<ManagedGuestCommand, { type: "managed.thread.start" }>,
+    digest: string,
+    slot: SyntheticColdSlot,
+  ): Disposition {
+    const decision = this.transaction(() => {
+      const current = this.check();
+      const old = this.receipt(command.commandId);
+      if (old) return this.replay(old, digest);
+      if (
+        current.phase !== "empty" ||
+        current.revision !== 0 ||
+        current.current_command !== null ||
+        command.epoch.transferRevision !== 1 ||
+        slot.inspectEmpty()?.physicalFence !== command.epoch.fence
+      )
+        return "stale";
+      if (
+        this.db
+          .prepare(
+            "SELECT id FROM effect WHERE claimed=1 AND (request=? OR fence >= ?) LIMIT 1",
+          )
+          .get(command.requestId, command.epoch.fence)
+      )
+        return "conflict";
+      this.db
+        .prepare(
+          "INSERT INTO effect(id,digest,session,request,owner,fence,revision,thread,kind,disposition,claimed) VALUES(?,?,?,?,?,?,1,?,?,'unknown',1)",
+        )
+        .run(
+          command.commandId,
+          digest,
+          this.ingress.sessionId,
+          command.requestId,
+          command.epoch.executionOwnerOperationId,
+          command.epoch.fence,
+          command.threadId,
+          command.type,
+        );
+      this.db
+        .prepare(
+          "UPDATE guest SET current_command=?,revision=1,phase='creating' WHERE id=1",
+        )
+        .run(command.commandId);
+      return "won";
+    });
+    if (decision !== "won") return decision;
+    // The durable creating phase holds custody across either crash window.
+    const created = slot.createSyntheticSession();
+    if (
+      !created.providerThreadId ||
+      !created.bootId ||
+      !created.processStart ||
+      !Number.isSafeInteger(created.pid) ||
+      created.pid < 1 ||
+      created.physicalFence !== command.epoch.fence
+    )
+      return "unknown";
+    return this.transaction(() => {
+      const current = this.check();
+      if (
+        current.current_command !== command.commandId ||
+        current.phase !== "creating"
+      )
+        return "unknown";
+      this.db
+        .prepare("INSERT INTO created_session VALUES(?,?)")
+        .run(command.commandId, created.providerThreadId);
+      const holder = canonicalJsonBytes({
+        bootId: created.bootId,
+        pid: created.pid,
+        processStart: created.processStart,
+      });
+      this.db
+        .prepare(
+          "UPDATE guest SET phase='resident',provider_thread=?,holder=? WHERE id=1",
+        )
+        .run(created.providerThreadId, holder);
+      this.db
+        .prepare("UPDATE effect SET disposition='applied' WHERE id=?")
+        .run(command.commandId);
+      return "applied";
     });
   }
   private claim(
