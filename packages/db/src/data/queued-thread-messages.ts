@@ -1017,7 +1017,9 @@ function rescheduleTransition(
     : null;
 }
 
-function hasTimeWait(row: QueuedThreadMessageRow): boolean {
+export function hasTimeWait(
+  row: Pick<QueuedThreadMessageRow, "waitingOn">,
+): boolean {
   if (row.waitingOn === null) return false;
   try {
     const parsed = JSON.parse(row.waitingOn) as { kind?: unknown };

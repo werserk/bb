@@ -94,3 +94,7 @@ export {
   clientSubmissionIdSchema,
   clientSubmissionQueueId,
 } from "./client-submission.js";
+
+export * from "./workspace-binding.js";
+export * from "./placement.js";
+export * from "./placement-canonical.js";

@@ -549,3 +549,50 @@ network loss preserves pending sends. Unknown identity disables journal restorat
 The pending owner fences old reads and mutation receipts by scope generation and
 keeps account identity in the journal key. See [pending send overlay](pending-send-overlay.md)
 for causal legacy handoff, lock ownership and review dispositions.
+
+### Placement custody contracts and storage
+
+The domain owns the closed Workspace v1 descriptor, normalized capability set,
+canonical digest, Agent binding, worker evidence, and placement operation
+projection. Server-contract composes the existing create/send/fork schemas into
+the versioned placement envelope; retries accept only a failed operation and
+one consent reference. Full original input is separate from the public operation
+projection and its explicit draft recovery contract.
+
+The placement tables retain acceptance sequence, immutable accepted bytes,
+prepared snapshots, Workspace descriptors, worker fences, thread affinity,
+retry consent, and queue receipts. The queue remains `queued_thread_messages`;
+consuming its row cannot remove the operation's receipt. IMMEDIATE transactions
+serialize acceptance, reservation, cancellation and custody changes. Thread
+attachment and queue receipt helpers use their caller's transaction and defer
+notifications until commit. Reclaim requires a proved idle resident and the
+oldest compatible target; release requires process closure and a newer
+independent observation of the same fixed inode free. Unknown custody never
+expires into availability. Managed workers must be excluded from old central
+routing before admission.
+
+A reservation commits the oldest compatible runnable operation's grant. An older
+request that becomes ready later keeps its sequence for the next grant. An idle
+resident can transfer to its bound continuation while retaining the physical
+fence. The logical owner changes in the same transaction. Runtime observations,
+reclaim requests and closure acknowledgements identify the operation that owns
+the resident. Ambiguous closure evidence retains custody. A release must match
+the lock device and inode pinned at reservation. Native queue state, waits, due
+time and edit holds are rechecked before dispatch admission.
+
+Preparation records the Workspace environment path, actual project and source
+path alongside its canonical descriptor. Resolving a path alias requires a
+host resolution tied to that environment and alias. Attach and admission check
+the location again. Forks inherit the source Workspace by default. An explicit
+reuse target or unmanaged host/path can identify an alternate Workspace.
+Registration requires fresh worker publication. Route watermarks survive route
+withdrawal and quota, custody and exclusion revisions are checked independently
+of the enclosing observation. An attributed retry action has one budget per
+principal across grant retransmissions.
+
+Fork migration 0006 adds nullable ownership references without rebuilding legacy
+queue/environment tables, preserving fork-only columns and existing Codex and
+Claude rows. Owner registration defaults to disabled admission. These are local
+contract/storage foundations: placement service orchestration, normal-entrypoint
+guards, provider transport, SDK/CLI/UI integration, activation and live
+qualification remain pending.

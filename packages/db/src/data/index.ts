@@ -574,3 +574,7 @@ export { parseStoredQueuedMessagePayload } from "./queued-message-payload.js";
 export { getStoredTurnRequestEventByRequestId } from "./events.js";
 export * from "./conversation-questions.js";
 export * from "./question-resolution-events.js";
+export * from "./placement-operations.js";
+export * from "./placement-workers.js";
+export * from "./placement-bindings.js";
+export * from "./placement-admission.js";
