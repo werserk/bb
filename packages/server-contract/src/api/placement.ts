@@ -52,6 +52,10 @@ export const placementAcceptanceSchema = z.discriminatedUnion("kind", [
     operation: placementOperationSchema,
     outcome: z.literal("not-created"),
   }),
+  z.strictObject({
+    kind: z.literal("cancelled"),
+    operation: placementOperationSchema,
+  }),
 ]);
 export const placementDraftRecoverySchema = z.strictObject({
   operation: placementOperationSchema,

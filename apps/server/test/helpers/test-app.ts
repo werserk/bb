@@ -393,8 +393,9 @@ export async function createTestAppHarness(
     watchInterests,
     sharedPorts,
   };
+  if (placementPurpose) deps.placementWorkspacePurpose = placementPurpose;
   const { app, pluginCatalogService, pluginService, placement, serverMove } =
-    createApp(deps, placementPurpose ? { placementPurpose } : undefined);
+    createApp(deps);
   installDefaultEnvironmentProviders();
 
   return {
@@ -459,6 +460,7 @@ export async function startTestServer(
     app,
     closeWebSockets,
     injectWebSocket,
+    placement,
     pluginService,
     serverMove,
     tunnelIngress,
@@ -489,6 +491,7 @@ export async function startTestServer(
   return {
     ...harness,
     app,
+    placement,
     pluginService,
     serverMove,
     baseUrl: `http://${TEST_SERVER_HOST}:${resolvedAddress.port}`,

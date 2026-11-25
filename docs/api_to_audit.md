@@ -4113,10 +4113,14 @@ Before stabilization, audit whether `limit` should be a number, whether the curs
 instead of starting a thread directly. `accept(request)` takes a
 `placementRequestV1Schema` body (`schemaVersion`, caller-chosen
 `submissionKey`, and an `independent`, `continuation`, `fork` or `retry`
-intent) and returns `pending`, `placed` (with the thread) or `refused`
-(`not-created`). The submission is durable before any side effect: the same
-principal, key and bytes return the same operation, while changed bytes
-return `409 placement_submission_conflict` without the stored payload.
+intent) and returns `pending`, `placed` (with the thread), `refused`
+(`not-created`) or `cancelled`. The submission is durable before any side
+effect: the same principal, key and bytes return the same operation with its
+retained permission, even after defaults or owner mode change, while changed
+bytes return `409 placement_submission_conflict` without the stored payload.
+Acceptance runs the native create or send checks first: project, source and
+sender relationships, and for service input the plugin-managed target and
+sender scope.
 `get({ operationId })` returns the operation projection, `recoverDraft`
 returns the original request, and `cancel` requests cancellation. The server
 derives the principal: a call without a caller token is `local`

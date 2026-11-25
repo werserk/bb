@@ -7,7 +7,6 @@ import {
   getEnvironment,
   getQueuedThreadMessage,
   getThread,
-  getThreadPluginMetadata,
   listActiveVisiblePinnedThreadRootsWithPendingInteractionState,
   pinThread,
   reorderPinnedThread,
@@ -65,6 +64,7 @@ import {
   ensureThreadQueueIsWritable,
 } from "../../services/threads/thread-send.js";
 import { acceptThreadSendRequest } from "../../services/threads/thread-send-request.js";
+import { assertServiceTurnScope } from "../../services/threads/service-turn-scope.js";
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
 import {
@@ -229,41 +229,15 @@ export function registerThreadActionRoutes(
       const resolution = plugins?.resolveRpcCaller(
         context.req.header(PLUGIN_RPC_CALLER_HEADER),
       );
-      if (
-        !resolution?.ok ||
-        resolution.caller.kind !== "plugin" ||
-        resolution.caller.pluginId !== payload.serviceTurn.origin.pluginId
-      ) {
-        throw new ApiError(
-          403,
-          "invalid_request",
-          "Service input requires an authenticated plugin",
-        );
-      }
-      const pluginId = resolution.caller.pluginId;
-      const managed = getThreadPluginMetadata(deps.db, thread.id, pluginId);
-      const senderId = payload.serviceTurn.origin.senderThreadId;
-      const sender = senderId === null ? null : getThread(deps.db, senderId);
-      const senderManaged = sender
-        ? getThreadPluginMetadata(deps.db, sender.id, pluginId)
-        : null;
-      if (
-        managed.corrupt ||
-        Object.keys(managed.metadata).length === 0 ||
-        senderId !== (payload.senderThreadId ?? null) ||
-        (senderId !== null &&
-          (!sender ||
-            sender.projectId !== thread.projectId ||
-            !senderManaged ||
-            senderManaged.corrupt ||
-            Object.keys(senderManaged.metadata).length === 0))
-      ) {
-        throw new ApiError(
-          403,
-          "invalid_request",
-          "Service input is outside the plugin managed scope",
-        );
-      }
+      assertServiceTurnScope(deps, {
+        callerPluginId:
+          resolution?.ok && resolution.caller.kind === "plugin"
+            ? resolution.caller.pluginId
+            : null,
+        serviceTurn: payload.serviceTurn,
+        senderThreadId: payload.senderThreadId ?? null,
+        thread,
+      });
       payload = { ...payload, mode: "queue-if-active" };
     }
     return context.json(
