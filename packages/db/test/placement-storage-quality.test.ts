@@ -349,6 +349,129 @@ it.each(["held", "unknown"] as const)(
     expect(reserve(target.id, "b").kind).toBe("reserved");
   },
 );
+it.each([
+  "managed_execution_unsupported",
+  "managed_admission_unavailable",
+  "host_unavailable",
+])(
+  "preserves original pre-send refusal %s across rejection-only native suffix replacement",
+  (reason) => {
+    const { cmd, guard, receipt } = resident();
+    const append = (
+      tx: S.DbTransaction,
+      code: string,
+      requestId = guard.requestId,
+    ) =>
+      appendStoredThreadEventInTransaction(tx, {
+        threadId: guard.threadId,
+        scope: threadScope(),
+        type: "client/turn/rejected",
+        data: {
+          requestId,
+          reason: code,
+          message: "managed_admission_unavailable",
+        },
+      });
+    const read = () => S.readPlacementDispatchReceipt(db, guard)!;
+    const seq = receipt.requestSequence + 1;
+    const cut = (tx: S.DbTransaction, cutoffSequence = seq) =>
+      S.deleteThreadEventSuffixInTransaction(tx, {
+        threadId: guard.threadId,
+        cutoffSequence,
+        oldMaxSequence: seq,
+      });
+    const record = (tx: S.DbTransaction) =>
+      S.refusePlacementBeforeHandoff(tx, guard, (write) =>
+        append(write, reason),
+      );
+    db.transaction((tx) => {
+      expect(() =>
+        S.refusePlacementBeforeHandoff(tx, guard, (write) =>
+          append(write, reason, "creq_9999999999"),
+        ),
+      ).toThrow(S.PlacementDispatchConflictError);
+      expect(tx.select().from(events).all()).toHaveLength(1);
+      expect(read().state).toBe("prepared");
+    });
+    expect(() =>
+      db.transaction((tx) => {
+        expect(record(tx)).toBe(true);
+        throw Error("undo refusal");
+      }),
+    ).toThrow("undo refusal");
+    reopen();
+    expect(read()).toMatchObject({
+      state: "prepared",
+      rejectionEventId: null,
+      liveRejectionEventId: null,
+      rejectionReason: null,
+    });
+    expect(db.transaction(record)).toBe(true);
+    const before = read();
+    expect(before).toMatchObject({
+      state: "refused_unsent",
+      rejectionReason: reason === "host_unavailable" ? null : reason,
+      liveEventId: receipt.eventId,
+    });
+    expect(before.rejectionEventId).toBeTruthy();
+    expect(before.liveRejectionEventId).toBe(before.rejectionEventId);
+    const replace = (tx: S.DbTransaction) => {
+      expect(cut(tx).deletedEventCount).toBe(1);
+      expect(
+        append(
+          tx,
+          reason === "managed_admission_unavailable"
+            ? "managed_execution_unsupported"
+            : "managed_admission_unavailable",
+        ),
+      ).toBe(seq);
+    };
+    expect(() =>
+      db.transaction((tx) => {
+        replace(tx);
+        throw Error("undo edit");
+      }),
+    ).toThrow("undo edit");
+    reopen();
+    expect(read()).toEqual(before);
+    db.transaction(replace);
+    reopen();
+    const replacement = db
+      .select()
+      .from(events)
+      .all()
+      .find((row) => row.sequence === seq)!;
+    expect(replacement.id).not.toBe(before.rejectionEventId);
+    expect(read()).toEqual({ ...before, liveRejectionEventId: null });
+    expect(() =>
+      db.$client
+        .prepare(
+          "update placement_effect set rejection_event_id=?, live_rejection_event_id=? where request=?",
+        )
+        .run(replacement.id, replacement.id, guard.requestId),
+    ).toThrow();
+    const calls = vi.fn(() => 0);
+    expect(
+      db.transaction((tx) => S.refusePlacementBeforeHandoff(tx, guard, calls)),
+    ).toBe(false);
+    expect(
+      db.transaction((tx) => cut(tx, receipt.requestSequence))
+        .deletedEventCount,
+    ).toBe(2);
+    reopen();
+    expect(read()).toEqual({
+      ...before,
+      liveEventId: null,
+      liveRejectionEventId: null,
+    });
+    expect(
+      db.transaction((tx) => S.refusePlacementBeforeHandoff(tx, guard, calls)),
+    ).toBe(false);
+    expect(calls).not.toHaveBeenCalled();
+    expect(S.claimPlacementExecutionCommand(db, cmd).kind).toBe("refused");
+    expect(db.select().from(events).all()).toHaveLength(0);
+  },
+);
 it.each(["prepared", "possibly_sent", "succeeded", "failed_accepted"] as const)(
   "detaches a %s receipt on native suffix edit, with rollback and sequence reuse",
   (mode) => {

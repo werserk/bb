@@ -1823,6 +1823,10 @@ export const placementSteps = sqliteTable(
 export function unresolvedPlacementEffect(state: AnySQLiteColumn) {
   return sql`${state} IN ('possibly_sent','prepared')`;
 }
+export const placementRejectionReasons = [
+  "managed_execution_unsupported",
+  "managed_admission_unavailable",
+] as const;
 export const placementEffects = sqliteTable(
   "placement_effect",
   {
@@ -1832,6 +1836,11 @@ export const placementEffects = sqliteTable(
     liveEventId: text("live_event_id")
       .unique()
       .references(() => events.id, { onDelete: "set null" }),
+    rejectionEventId: text("rejection_event_id").unique(),
+    liveRejectionEventId: text("live_rejection_event_id")
+      .unique()
+      .references(() => events.id, { onDelete: "set null" }),
+    rejectionReason: text("rejection_reason", { enum: placementRejectionReasons }),
     thread: text("thread")
       .notNull()
       .references(() => threads.id),
@@ -1853,6 +1862,10 @@ export const placementEffects = sqliteTable(
     check(
       "placement_effect_live_identity",
       sql`${t.liveEventId} IS NULL OR ${t.liveEventId}=${t.eventId}`,
+    ),
+    check(
+      "placement_effect_rejection",
+      sql`(${t.rejectionEventId} IS NULL AND ${t.liveRejectionEventId} IS NULL AND ${t.rejectionReason} IS NULL) OR (${t.state}='refused_unsent' AND ${t.rejectionEventId} IS NOT NULL AND (${t.liveRejectionEventId} IS NULL OR ${t.liveRejectionEventId} IS ${t.rejectionEventId}) AND (${t.rejectionReason} IS NULL OR ${t.rejectionReason} IN ('managed_execution_unsupported','managed_admission_unavailable')))`,
     ),
     index("placement_active_effect_owner_fence")
       .on(t.executionOwnerOperationId, t.fence)

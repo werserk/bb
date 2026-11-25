@@ -10,6 +10,8 @@ import {
 import { classifyLocalQuestionAnswer } from "./conversation-questions.js";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
+  clientTurnRequestIdSchema,
+  turnRequestRejectedEventDataSchema,
   flattenPromptInputGroups,
   canonicalJsonBytes,
   placementBindingSchema,
@@ -29,6 +31,7 @@ import type {
 } from "../connection.js";
 import {
   events,
+  placementRejectionReasons,
   placementEffects as effects,
   placementActionIdentities as identities,
   placementOperations as operations,
@@ -51,7 +54,11 @@ import {
   readPlacementQueueAttempts,
   queueMemberDigest,
 } from "./placement-action-receipts.js";
-import { getLatestTurnRequestEventRow } from "./events.js";
+import {
+  getLatestThreadSequence,
+  getLatestTurnRequestEventRow,
+  hasStoredTerminalClientTurnRequestEvent,
+} from "./events.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 
 export {
@@ -718,32 +725,75 @@ export function refusePlacementBeforeHandoff(
     executionOwnerOperationId: string;
     fence: number;
   },
+  appendRejection: (tx: DbTransaction) => number,
 ) {
-  const r = readPlacementDispatchReceipt(tx, args);
-  if (
-    !r ||
-    r.executionOwnerOperationId !== args.executionOwnerOperationId ||
-    r.fence !== args.fence ||
-    r.state !== "prepared"
-  )
-    return false;
-  const native = tx
-    .select({ seq: events.sequence })
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, r.thread),
-        eq(events.type, "client/turn/rejected"),
-        sql`json_extract(${events.data},'$.requestId') = ${r.request}`,
-      ),
+  return tx.transaction((write) => {
+    const receipt = readPlacementDispatchReceipt(write, args);
+    if (
+      !receipt ||
+      receipt.liveEventId === null ||
+      receipt.state !== "prepared" ||
+      receipt.executionOwnerOperationId !== args.executionOwnerOperationId ||
+      receipt.fence !== args.fence ||
+      getLatestTurnRequestEventRow(write, args.threadId)?.id !==
+        receipt.eventId ||
+      hasStoredTerminalClientTurnRequestEvent(write, {
+        threadId: args.threadId,
+        requestId: clientTurnRequestIdSchema.parse(args.requestId),
+      })
     )
-    .get();
-  if (!native || native.seq <= r.requestSequence) return false;
-  return (
-    tx
+      return false;
+    const next = getLatestThreadSequence(write, args) + 1;
+    const sequence = appendRejection(write);
+    const native = write
+      .select({ id: events.id, data: events.data })
+      .from(events)
+      .where(
+        and(
+          eq(events.threadId, args.threadId),
+          eq(events.sequence, sequence),
+          eq(events.scopeKind, "thread"),
+          eq(events.type, "client/turn/rejected"),
+        ),
+      )
+      .get();
+    if (
+      sequence !== next ||
+      !native ||
+      getLatestThreadSequence(write, args) !== sequence
+    )
+      throw new PlacementDispatchConflictError(
+        "missing freshly appended rejection",
+      );
+    const rejection = turnRequestRejectedEventDataSchema.parse(
+      JSON.parse(native.data),
+    );
+    if (
+      rejection.requestId !== args.requestId ||
+      rejection.deferredToQueuedMessageId !== undefined
+    )
+      throw new PlacementDispatchConflictError("rejection request mismatch");
+    const reason =
+      placementRejectionReasons.find((value) => value === rejection.reason) ??
+      null;
+    const changed = write
       .update(effects)
-      .set({ state: "refused_unsent" })
-      .where(and(eq(effects.request, r.request), eq(effects.state, "prepared")))
-      .run().changes === 1
-  );
+      .set({
+        state: "refused_unsent",
+        rejectionEventId: native.id,
+        liveRejectionEventId: native.id,
+        rejectionReason: reason,
+      })
+      .where(
+        and(
+          eq(effects.request, receipt.request),
+          eq(effects.liveEventId, receipt.eventId),
+          eq(effects.state, "prepared"),
+        ),
+      )
+      .run();
+    if (changed.changes !== 1)
+      throw new PlacementDispatchConflictError("prepared effect changed");
+    return true;
+  });
 }

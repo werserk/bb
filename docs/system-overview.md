@@ -638,6 +638,12 @@ observation discharge only reports for that incarnation in the release transacti
 An identical source revision stays discharged across restart. A newer held or
 unknown report blocks reservation again.
 
+A definite pre-handoff refusal appends the native rejection and captures its event
+ID and allowlisted response code in the same transaction. Deleting that rejection
+clears its live link. Historical readback keeps the original evidence independently
+of the requested event's live link. An unknown or unverified reason gives generic
+historical status. A suffix replacement cannot supply the original reason.
+
 The send claim, reservation and reclaim-start writers own their outer SQLite
 transaction. A call on a connection already inside a transaction refuses
 before mutation. Only a committed winning send claim permits the first RPC.
