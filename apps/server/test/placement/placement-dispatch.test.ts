@@ -1,5 +1,19 @@
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import {
+  acceptPlacementOperation,
+  createConnection,
+  createQueuedThreadMessageInTransaction,
+  deleteThreadEventSuffixInTransaction,
+  getLatestThreadSequence,
+  getQueuedThreadMessage,
+  listEvents,
+  placementEffects,
+  placementOperations,
+  preparePlacementOperation,
+  readPlacementDispatchReceipt,
+  recordPlacementQueueReceipt,
+  setQueuedThreadMessageGroupBoundary,
   environments,
   hosts,
   placementBindings,
@@ -17,15 +31,23 @@ import {
   normalizeWorkspaceBinding,
   workspaceBindingRef,
   workspaceCapabilities,
+  resolvedThreadExecutionOptionsSchema,
+  turnRequestEventDataSchema,
   type WorkerObservation,
 } from "@bb/domain";
 import type { PlacementRequestV1 } from "@bb/server-contract";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   PlacementOwnerPolicy,
   PlacementPolicyDecision,
 } from "../../src/services/placement/placement-service.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+
+import { createApp } from "../../src/server.js";
+import * as managedRuntime from "../../src/services/threads/managed-execution.js";
+import { advanceThreadProvisioning } from "../../src/services/threads/thread-provisioning.js";
+import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
+import { listQueuedThreadCommands } from "../helpers/commands.js";
 
 const PROVIDER = "claude-code";
 const OWNER = "account-workers";
@@ -229,8 +251,81 @@ function placed(harness: TestAppHarness, operationId: string) {
   return { record, receipt, threadRows, queueRows };
 }
 
+// A2 creates the independent head. Continuation transfer is still storage-owned.
+function addFollower(
+  h: TestAppHarness,
+  headId: string,
+  principal = "local",
+  sendAt: number | null = null,
+) {
+  const { record, receipt } = placed(h, headId);
+  const threadId = record.threadId!;
+  const input = [{ type: "text" as const, text: "second", mentions: [] }];
+  const clientSubmissionId = crypto.randomUUID();
+  const request = {
+    input,
+    clientSubmissionId,
+    ...(sendAt === null ? {} : { sendAt }),
+  };
+  const accepted = acceptPlacementOperation(h.db, {
+    providerId: PROVIDER,
+    ownerPluginId: OWNER,
+    principalScope: principal,
+    authority: { ...receipt.authority, principal },
+    submissionKey: clientSubmissionId,
+    request: {
+      schemaVersion: 1,
+      intent: { kind: "continuation", threadId, request },
+    },
+  });
+  expect(accepted.kind).toBe("accepted");
+  if (accepted.kind !== "accepted") throw new Error("Missing continuation");
+  const execution = resolvedThreadExecutionOptionsSchema.parse(
+    JSON.parse(record.preparedExecution!),
+  );
+  expect(
+    preparePlacementOperation(h.db, {
+      operationId: accepted.operation.id,
+      expectedRevision: accepted.operation.revision,
+      workspace,
+      preparedRequest: request,
+      preparedExecution: execution,
+      attachmentReceipts: [],
+    }).kind,
+  ).toBe("prepared");
+  const id = clientSubmissionQueueId(clientSubmissionId);
+  expect(
+    h.db.transaction((tx) =>
+      recordPlacementQueueReceipt(tx, {
+        operationId: accepted.operation.id,
+        fence: record.fence!,
+        queuedMessageId: id,
+        onCommitted: () => {},
+        insertQueue: (t, placement) => {
+          createQueuedThreadMessageInTransaction(t, {
+            placement,
+            threadId,
+            clientSubmissionId,
+            ...execution,
+            origin: receipt.authority.origin,
+            originPluginId: receipt.authority.plugin,
+            requestedBy: receipt.authority.requestedBy,
+            senderThreadId: receipt.authority.sender,
+            content: input,
+            sendAt,
+            waitingOn: sendAt === null ? null : { kind: "time" },
+            payload: { kind: "inline" },
+            systemNotice: null,
+          });
+        },
+      }),
+    ).kind,
+  ).toBe("recorded");
+  return { id, op: accepted.operation.id, clientSubmissionId };
+}
+
 describe("placement dispatch", () => {
-  it("queues the first input on a new pending bound thread once; Send now refuses the unsupported managed first dispatch and releases the row", async () => {
+  it("queues the first input on a new pending bound thread once; Send now commits one native first request before the protocol refusal", async () => {
     await withDispatch(async (harness, send) => {
       await registerManaged(harness, freeWorkers());
       const id = await accept(harness, "seq1", "dispatch me");
@@ -291,17 +386,282 @@ describe("placement dispatch", () => {
       expect(unscoped.body.code).toBe("invalid_request");
       const foreign = await send(thread.id, queueId, "plugin:other");
       expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
-      expect(placed(harness, id).queueRows[0]).toMatchObject({ id: queueId, claimToken: null });
+      expect(placed(harness, id).queueRows[0]).toMatchObject({
+        id: queueId,
+        claimToken: null,
+      });
 
-      const refused = await send(thread.id, queueId, "local");
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+      await advanceThreadProvisioning(harness.deps, { threadId: thread.id });
+      expect(listEvents(harness.db, { threadId: thread.id })).toEqual([]);
+      const [first, second] = await Promise.all([
+        send(thread.id, queueId, "local"),
+        send(thread.id, queueId, "local"),
+        runQueuedMessageDispatch(harness.deps, {
+          kind: "thread-ready",
+          threadId: thread.id,
+        }),
+      ]);
+      const refused =
+        first.body.code === "managed_execution_unsupported" ? first : second;
       expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-      expect(refused.body.code).toBe("placement_dispatch_unavailable");
+      expect(refused.body.code).toBe("managed_execution_unsupported");
       const after = placed(harness, id);
-      expect(after.record.phase).toBe("queued");
+      expect(after.record.phase).toBe("admitted");
       expect(after.threadRows).toHaveLength(1);
       expect(after.threadRows[0]!.status).toBe("pending");
-      expect(after.queueRows).toHaveLength(1);
-      expect(after.queueRows[0]).toMatchObject({ id: queueId, claimToken: null });
+      expect(after.queueRows).toHaveLength(0);
+      expect(after.threadRows[0]!.startupContext).toBe(thread.startupContext);
+      await advanceThreadProvisioning(harness.deps, { threadId: thread.id });
+      const timeline = listEvents(harness.db, { threadId: thread.id });
+      expect(timeline.map((e) => e.type)).toEqual([
+        "client/turn/requested",
+        "client/turn/rejected",
+      ]);
+      const body = turnRequestEventDataSchema.parse(
+        JSON.parse(timeline[0]!.data),
+      );
+      expect(body).toMatchObject({
+        target: { kind: "thread-start" },
+        source: "spawn",
+        request: { method: "thread/start" },
+        sourceQueuedMessageIds: [queueId],
+        clientSubmissions: [{ id: receipt.submissionUuid, inputGroupIndex: 0 }],
+        initiator: receipt.authority.initiator,
+        execution: JSON.parse(record.preparedExecution!),
+      });
+      expect(
+        readPlacementDispatchReceipt(harness.db, {
+          threadId: thread.id,
+          requestId: body.requestId,
+        }),
+      ).toMatchObject({
+        eventId: timeline[0]!.id,
+        requestSequence: timeline[0]!.sequence,
+        rejectionEventId: timeline[1]!.id,
+        rejectionReason: "managed_execution_unsupported",
+        state: "refused_unsent",
+        members: [{ op: id, queueId }],
+      });
+      expect(await send(thread.id, queueId, "local")).toEqual(refused);
+      expect(
+        listQueuedThreadCommands(harness, "thread.start", thread.id),
+      ).toHaveLength(0);
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", thread.id),
+      ).toHaveLength(0);
+    });
+  });
+
+  it.each(["local", "foreign"] as const)(
+    "only the original head can admit the authorized group (%s follower)",
+    async (principal) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const id = await accept(h, "first", "start");
+        await h.placement.wake(PROVIDER);
+        const { record, receipt } = placed(h, id);
+        const threadId = record.threadId!,
+          head = record.queuedMessageId!;
+        const follower = addFollower(h, id, principal);
+        expect(
+          setQueuedThreadMessageGroupBoundary({
+            db: h.db,
+            notifier: h.hub,
+            threadId,
+            expectedGroupedPrefixQueuedMessageIds: [head, follower.id],
+            groupBoundaryQueuedMessageId: follower.id,
+          }).kind,
+        ).toBe("updated");
+        const changes = () =>
+          h.db.$client.prepare("select total_changes()").pluck().get();
+        const before = changes();
+        expect((await send(threadId, follower.id, "local")).status).toBe(
+          principal === "local" ? 409 : 404,
+        );
+        expect(changes()).toBe(before);
+        const res = await send(threadId, head, "local");
+        if (principal === "foreign") {
+          expect(res.status).toBe(404);
+          expect(changes()).toBe(before);
+          return;
+        }
+        expect(res.body).toMatchObject({
+          code: "managed_execution_unsupported",
+          details: {
+            state: "refused_unsent",
+            sourceQueuedMessageIds: [head, follower.id],
+            submissionIds: [
+              receipt.submissionUuid,
+              follower.clientSubmissionId,
+            ],
+          },
+        });
+        expect(await send(threadId, follower.id, "local")).toEqual(res);
+      });
+    },
+  );
+
+  it.each(["prepared", "refused_unsent"] as const)(
+    "recovers the same first request offline after %s",
+    async (state) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const id = await accept(h, "start", "hello");
+        await h.placement.wake(PROVIDER);
+        const { record } = placed(h, id);
+        const threadId = record.threadId!,
+          queueId = record.queuedMessageId!;
+        const handoff = vi.spyOn(managedRuntime, "dispatchManagedOrdinaryTurn");
+        if (state === "prepared")
+          handoff.mockRejectedValueOnce(new Error("fixture loss after commit"));
+        try {
+          const first = await send(threadId, queueId, "local");
+          expect(first.status).toBe(state === "prepared" ? 500 : 409);
+          const [effect] = h.db.select().from(placementEffects).all();
+          expect(effect!.state).toBe(state);
+          const path = join(h.config.dataDir, "first-reopen.sqlite");
+          await h.db.$client.backup(path);
+          const db = createConnection(path);
+          try {
+            const deps = {
+              ...h.deps,
+              db,
+              resolvePlacementSendScope: () => ({
+                principal: "local",
+                identity: "local-unverified" as const,
+                authority: "local-input-parity" as const,
+              }),
+            };
+            const { app } = createApp(deps);
+            expect(readPlacementOwner(db, PROVIDER)?.available).toBe(false);
+            const changes = () =>
+              db.$client.prepare("select total_changes()").pluck().get();
+            const before = changes();
+            const resp = await app.request(
+              "/api/v1/threads/" +
+                threadId +
+                "/queued-messages/" +
+                queueId +
+                "/send",
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ mode: "auto" }),
+              },
+            );
+            const body = await resp.json();
+            expect(resp.status).toBe(409);
+            expect(body).toMatchObject({
+              details: {
+                state,
+                requested: {
+                  requestId: effect!.request,
+                  sequence: effect!.requestSequence,
+                },
+              },
+            });
+            if (state === "refused_unsent") expect(body).toEqual(first.body);
+            await runQueuedMessageDispatch(deps, {
+              kind: "thread-ready",
+              threadId,
+            });
+            await advanceThreadProvisioning(deps, { threadId });
+            expect(changes()).toBe(before);
+            expect(handoff).toHaveBeenCalledTimes(1);
+            expect(listEvents(db, { threadId }).map((e) => e.type)).toEqual(
+              state === "prepared"
+                ? ["client/turn/requested"]
+                : ["client/turn/requested", "client/turn/rejected"],
+            );
+            expect(
+              listQueuedThreadCommands(h, "thread.start", threadId),
+            ).toHaveLength(0);
+          } finally {
+            db.$client.close();
+          }
+        } finally {
+          handoff.mockRestore();
+        }
+      });
+    },
+  );
+
+  it.each(["cancelled", "changed context", "claim lost"] as const)(
+    "preserves the first qsub after %s",
+    async (fault) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const id = await accept(h, "start", "hello");
+        await h.placement.wake(PROVIDER);
+        const { record } = placed(h, id);
+        const threadId = record.threadId!,
+          queueId = record.queuedMessageId!;
+        if (fault === "cancelled")
+          h.db
+            .update(placementOperations)
+            .set({ cancelRequested: true })
+            .where(eq(placementOperations.id, id))
+            .run();
+        if (fault === "changed context")
+          h.db
+            .update(threads)
+            .set({ startupContext: null })
+            .where(eq(threads.id, threadId))
+            .run();
+        if (fault === "claim lost")
+          h.db.$client.exec(
+            "CREATE TRIGGER lose_first_claim AFTER INSERT ON events WHEN NEW.type='client/turn/requested' BEGIN UPDATE queued_thread_messages SET claim_token='other' WHERE thread_id=NEW.thread_id; END",
+          );
+        const res = await send(threadId, queueId, "local");
+        expect(res.status).toBe(409);
+        expect(listEvents(h.db, { threadId })).toEqual([]);
+        expect(getQueuedThreadMessage(h.db, queueId)?.claimToken).toBeNull();
+        expect(h.db.select().from(placementEffects).all()).toEqual([]);
+        expect(
+          listQueuedThreadCommands(h, "thread.start", threadId),
+        ).toHaveLength(0);
+      });
+    },
+  );
+
+  it("detached first admission cannot start again or consume a later qsub", async () => {
+    await withDispatch(async (h, send) => {
+      await registerManaged(h, freeWorkers());
+      const id = await accept(h, "start", "hello");
+      await h.placement.wake(PROVIDER);
+      const { record } = placed(h, id);
+      const threadId = record.threadId!,
+        head = record.queuedMessageId!;
+      const later = addFollower(h, id);
+      expect((await send(threadId, head, "local")).body.code).toBe(
+        "managed_execution_unsupported",
+      );
+      const [requested] = listEvents(h.db, { threadId });
+      h.db.transaction((tx) =>
+        deleteThreadEventSuffixInTransaction(tx, {
+          threadId,
+          cutoffSequence: requested!.sequence,
+          oldMaxSequence: getLatestThreadSequence(tx, { threadId }),
+        }),
+      );
+      const before = h.db.$client
+        .prepare("select total_changes()")
+        .pluck()
+        .get();
+      for (const qid of [head, later.id])
+        expect((await send(threadId, qid, "local")).body.code).toBe(
+          "placement_dispatch_unavailable",
+        );
+      expect(h.db.$client.prepare("select total_changes()").pluck().get()).toBe(
+        before,
+      );
+      expect(h.db.select().from(placementEffects).all()).toMatchObject([
+        { liveEventId: null },
+      ]);
     });
   });
 
