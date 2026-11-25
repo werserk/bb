@@ -610,10 +610,37 @@ authority for post-handoff tools.
 A retry grant pins an exact failed event and member plus a digest of the
 ordered group. Transport aliases identify one attributed grant. Partial
 unique indexes serialize successors for the failed request and root.
-ProviderRetry schedules an unfenced native row, and due dispatch checks its
+ProviderRetry schedules an unfenced native row. When a due retry borrows the
+resident, older compatible work takes precedence at dispatch. After a proven
+resident release the same scheduled retry can reserve its original worker and
+Workspace. Reservation pins the operation fence. The native row receives the
+fence when dispatch spends the entitlement. Due dispatch checks its
 derived agent-only input, system execution authority, current entitlement and binding before spending it. The grant actor and original presentation membership stay on their own receipts. An identical scheduler replay returns the retained queue ID after spending.
 A newer native requested event supersedes outstanding targets in the same
 transaction when the native writer calls the reconciliation hook.
+
+A worker reservation pins a unique physical resource across all worker and
+account aliases using the Agent host, device and inode. The free observation
+has no boot ID. An epoch or boot change alone cannot discharge a pinned lock.
+Held or unknown reports on an identified lock also block other reporting
+sources until that source observes it free. The logical operation/fence and
+holder boot/process evidence remain necessary for a confirmed close.
+
+The send claim, reservation and reclaim-start writers own their outer SQLite
+transaction. A call on a connection already inside a transaction refuses
+before mutation. Only a committed winning send claim permits the first RPC.
+After reopening a queued, already reserved retry, read the current resident
+guard to recover its owner and fence. Repeating reserve with a refreshed
+revision returns a reconciliation wait.
+
+A receipt keeps the original event ID, sequence and ordered membership across
+history edits. Deleting the native event clears its live link in the edit
+transaction. An unsent prepared effect becomes cancelled, a possibly-sent
+effect retains uncertainty, and a settled receipt retains its outcome.
+Replacing the same sequence cannot reinstate the original event's authority.
+The native suffix transaction supersedes outstanding retries of removed
+requests. Current custody lookup uses a partial index on unresolved effects
+by execution owner and fence.
 
 Fork migration 0006 adds nullable ownership references without rebuilding legacy
 queue/environment tables, preserving fork-only columns and existing Codex and

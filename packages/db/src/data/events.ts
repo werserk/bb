@@ -1,3 +1,4 @@
+import { reconcileSupersededPlacementRetries } from "./placement-retry.js";
 import { markThreadPruningWork } from "./thread-pruning-work.js";
 import { isBeforeLatestThreadEvent } from "./event-pruning-guards.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
@@ -353,6 +354,7 @@ export function deleteThreadEventSuffixInTransaction(
     )
     .run();
   if (result.changes > 0) {
+    reconcileSupersededPlacementRetries(db, args.threadId);
     db.delete(threadConversationOutlines)
       .where(eq(threadConversationOutlines.threadId, args.threadId))
       .run();

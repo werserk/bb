@@ -1684,6 +1684,7 @@ export const placementWorkers = sqliteTable(
     lastAssignedSeq: integer("last_assigned_seq"),
     reclaimOperationId: text("reclaim_operation_id"),
     reclaimSourceFence: integer("reclaim_source_fence"),
+    physicalLock: text("physical_lock").unique(),
     fenceLock: text("fence_lock", { mode: "json" }).$type<
       NonNullable<WorkerCustody["lock"]>
     >(),
@@ -1701,6 +1702,10 @@ export const placementWorkers = sqliteTable(
     check(
       "placement_worker_owner",
       sql`(${t.slotState} != 'free' OR (${t.ownerOperationId} IS NULL AND ${t.threadId} IS NULL AND ${t.reclaimOperationId} IS NULL)) AND (${t.slotState} NOT IN ('reserved','resident','active','reclaiming') OR ${t.ownerOperationId} IS NOT NULL) AND (${t.slotState} != 'reclaiming' OR (${t.reclaimOperationId} IS NOT NULL AND ${t.reclaimSourceFence} IS NOT NULL))`,
+    ),
+    check(
+      "placement_worker_lock_pin",
+      sql`(${t.ownerOperationId} IS NULL AND ${t.physicalLock} IS NULL AND ${t.fenceLock} IS NULL) OR (${t.ownerOperationId} IS NOT NULL AND ${t.physicalLock} IS NOT NULL AND json_type(${t.physicalLock},'$[0]') IS 'text' AND json_type(${t.fenceLock},'$.device') IS 'text' AND json_type(${t.fenceLock},'$.inode') IS 'text' AND NOT(json_extract(${t.fenceLock},'$.device') GLOB '0[0-9]*' AND json_extract(${t.fenceLock},'$.device') NOT GLOB '*[^0-9]*') AND NOT(json_extract(${t.fenceLock},'$.inode') GLOB '0[0-9]*' AND json_extract(${t.fenceLock},'$.inode') NOT GLOB '*[^0-9]*') AND ${t.physicalLock}=json_array(json_extract(${t.physicalLock},'$[0]'),json_extract(${t.fenceLock},'$.device'),json_extract(${t.fenceLock},'$.inode')))`,
     ),
     check("placement_worker_fence", sql`${t.fence} >= 0`),
   ],
@@ -1812,14 +1817,18 @@ export const placementSteps = sqliteTable(
     ),
   ],
 );
+export function unresolvedPlacementEffect(state: AnySQLiteColumn) {
+  return sql`${state} IN ('possibly_sent','prepared')`;
+}
 export const placementEffects = sqliteTable(
   "placement_effect",
   {
     request: text("request").notNull().primaryKey(),
-    eventId: text("event_id")
-      .notNull()
+    eventId: text("event_id").notNull().unique(),
+    requestSequence: integer("request_sequence").notNull(),
+    liveEventId: text("live_event_id")
       .unique()
-      .references(() => events.id),
+      .references(() => events.id, { onDelete: "set null" }),
     thread: text("thread")
       .notNull()
       .references(() => threads.id),
@@ -1838,6 +1847,13 @@ export const placementEffects = sqliteTable(
     state: text("state", { enum: placementEffectStates }).notNull(),
   },
   (t) => [
+    check(
+      "placement_effect_live_identity",
+      sql`${t.liveEventId} IS NULL OR ${t.liveEventId}=${t.eventId}`,
+    ),
+    index("placement_active_effect_owner_fence")
+      .on(t.executionOwnerOperationId, t.fence)
+      .where(unresolvedPlacementEffect(t.state)),
     check(
       "placement_effect_command_tuple",
       sql`(${t.commandId} IS NULL)=(${t.nativeExecutionId} IS NULL) AND (${t.commandId} IS NULL)=(${t.agentSessionId} IS NULL) AND (${t.commandId} IS NOT NULL OR ${t.state} IN ('prepared','refused_unsent','cancelled'))`,
@@ -1921,8 +1937,17 @@ export const placementGrantKeys = sqliteTable(
   (t) => [primaryKey({ columns: [t.principal, t.transportKey] })],
 );
 
-export const placementSourceFacts = sqliteTable("placement_source_fact", {
-  source: text("source").primaryKey().notNull(),
-  revision: integer("revision").notNull(),
-  bytes: text("bytes").notNull(),
-});
+export const placementSourceFacts = sqliteTable(
+  "placement_source_fact",
+  {
+    source: text("source").primaryKey().notNull(),
+    revision: integer("revision").notNull(),
+    bytes: text("bytes").notNull(),
+    blockedLock: text("blocked_lock"),
+  },
+  (t) => [
+    index("placement_source_blocked_lock")
+      .on(t.blockedLock)
+      .where(sql`${t.blockedLock} IS NOT NULL`),
+  ],
+);

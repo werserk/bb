@@ -89,9 +89,8 @@ export function readPlacementDispatchReceipt(
 }
 function dispatchReceipt(db: DbQueryConnection, key: PlacementDispatchKey) {
   const row = db
-    .select({ effect: effects, requestSequence: events.sequence })
+    .select()
     .from(effects)
-    .innerJoin(events, eq(events.id, effects.eventId))
     .where(
       and(eq(effects.request, key.requestId), eq(effects.thread, key.threadId)),
     )
@@ -105,14 +104,13 @@ function dispatchReceipt(db: DbQueryConnection, key: PlacementDispatchKey) {
     .orderBy(asc(attempts.ordinal))
     .all()
     .map(({ attempt, submissionUuid }) => ({ ...attempt, submissionUuid }));
-  const { binding, execution, ...effect } = row.effect;
+  const { binding, execution, ...effect } = row;
   return {
     ...effect,
     binding: placementBindingSchema.parse(JSON.parse(binding)),
     execution: turnRequestEventDataSchema.shape.execution.parse(
       JSON.parse(execution),
     ),
-    requestSequence: row.requestSequence,
     members,
   };
 }
@@ -184,6 +182,7 @@ function currentExecution(
   const receipt = readPlacementDispatchReceipt(db, args);
   if (
     !receipt ||
+    !receipt.liveEventId ||
     receipt.state !== "prepared" ||
     getLatestTurnRequestEventRow(db, args.threadId)?.id !== receipt.eventId
   )
@@ -261,7 +260,8 @@ function requestedEvent(
 }
 function assignEffect(
   tx: DbTransaction,
-  args: PlacementDispatchKey & PlacementExecutionGuard,
+  args: PlacementDispatchKey &
+    PlacementExecutionGuard & { requestSequence: number },
   eventId: string,
   body: TurnRequestEventData,
   binding: PlacementBinding,
@@ -275,6 +275,8 @@ function assignEffect(
     .values({
       request: args.requestId,
       eventId,
+      liveEventId: eventId,
+      requestSequence: args.requestSequence,
       thread: args.threadId,
       root,
       executionOwnerOperationId: args.executionOwnerOperationId,
@@ -413,28 +415,6 @@ export function commitPlacementOrdinaryDispatch(
           links.length === 1 && op.kind !== "retry" && !receipt.protocol,
           "ordinary membership changed",
         );
-        if (op.id !== args.executionOwnerOperationId) {
-          const earlier = olderCompatible(
-            tx,
-            op,
-            owner.w,
-            args.purpose,
-            args.threadId,
-          );
-          if (earlier) {
-            const head = rows[0]!;
-            const maySeparate =
-              rows.length > 1 &&
-              head.placementOperationId === args.executionOwnerOperationId &&
-              head.payloadKind === "inline" &&
-              readPlacementQueueAttempts(tx, head.id).length === 1;
-            throw new PlacementGroupFairnessError(
-              maySeparate ? { id: head.id, claimToken: token } : null,
-              op.id,
-              earlier.id,
-            );
-          }
-        }
         const prepared = placementPreparedGroups(op.preparedRequest, op.kind);
         requireReceipt(
           equal(flattenPromptInputGroups(prepared), input),
@@ -455,7 +435,48 @@ export function commitPlacementOrdinaryDispatch(
           rows.length === 1 && links.length === 1 && op.consentId,
           "mixed retry",
         );
-        const retry = spendPlacementRetry(tx, op, row, body, args.fence);
+        requireReceipt(
+          op.fence === null ||
+            (op.id === args.executionOwnerOperationId &&
+              op.fence === args.fence),
+          "retry reservation changed",
+        );
+      }
+      if (
+        (row.payloadKind === "inline" || row.payloadKind === "retry") &&
+        op.id !== args.executionOwnerOperationId
+      ) {
+        const earlier = olderCompatible(
+          tx,
+          op,
+          owner.w,
+          args.purpose,
+          row.payloadKind === "inline" ? args.threadId : undefined,
+        );
+        if (earlier) {
+          const head = rows[0]!;
+          const maySeparate =
+            row.payloadKind === "inline" &&
+            rows.length > 1 &&
+            head.placementOperationId === args.executionOwnerOperationId &&
+            head.payloadKind === "inline" &&
+            readPlacementQueueAttempts(tx, head.id).length === 1;
+          throw new PlacementGroupFairnessError(
+            maySeparate ? { id: head.id, claimToken: token } : null,
+            op.id,
+            earlier.id,
+          );
+        }
+      }
+      if (row.payloadKind === "retry") {
+        const retry = spendPlacementRetry(
+          tx,
+          op,
+          row,
+          body,
+          args.fence,
+          event.sequence,
+        );
         retryInput = retry.input;
         groups.push(...retry.groups);
         timeline.push(...retry.membership);
@@ -476,7 +497,8 @@ export function commitPlacementOrdinaryDispatch(
             requestId: row.retryOfTurnRequestId!,
           });
           requireReceipt(
-            prior && ["refused", "refused_unsent"].includes(prior.state),
+            prior?.liveEventId &&
+              ["refused", "refused_unsent"].includes(prior.state),
             "unproven deferred source",
           );
           const saved = tx
@@ -623,6 +645,7 @@ export function claimPlacementExecutionCommand(
   db: DbConnection,
   args: CommandArgs & { currentAgentSessionId: string },
 ) {
+  if (db.$client?.inTransaction !== false) return { kind: "refused" } as const;
   return db.transaction(
     (tx) => {
       const r = readPlacementDispatchReceipt(tx, args);

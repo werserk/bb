@@ -33,7 +33,10 @@ export function recordPlacementSteerRedelivery(
   args: PlacementDispatchKey & { rejectionSequence: number },
 ) {
   const source = readPlacementDispatchReceipt(tx, args);
-  if (!source || !["refused", "refused_unsent"].includes(source.state))
+  if (
+    !source?.liveEventId ||
+    !["refused", "refused_unsent"].includes(source.state)
+  )
     throw new PlacementDispatchConflictError("no definitive refusal");
   const rejected = tx
     .select()
