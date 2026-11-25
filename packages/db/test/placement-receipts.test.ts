@@ -1,5 +1,6 @@
 import { placementPreparedGroups } from "../src/data/placement-prepared-input.js";
 import {
+  deleteThreadEventSuffixInTransaction,
   beginPlacementReclaim,
   finishPlacementReclaim,
   reservePlacementWorker,
@@ -22,7 +23,12 @@ import {
   type PlacementAuthority,
   type TurnRequestEventData,
 } from "@bb/domain";
-import { createConnection, migrate, type DbConnection } from "../src/index.js";
+import {
+  createConnection,
+  migrate,
+  type DbConnection,
+  type DbTransaction,
+} from "../src/index.js";
 import {
   events,
   threads,
@@ -645,6 +651,33 @@ it("holds the prompt behind an independent compact request across reopen until c
         .request,
     ).toBe(first);
   }));
+function nativeRefusal(
+  tx: DbTransaction,
+  cmd: Parameters<typeof settlePlacementExecutionCommand>[1],
+  reason: string,
+  replacement?: string,
+) {
+  let seq = 0;
+  expect(
+    settlePlacementExecutionCommand(
+      tx,
+      cmd,
+      (write) =>
+        (seq = appendStoredThreadEventInTransaction(write, {
+          threadId: cmd.threadId,
+          scope: threadScope(),
+          type: "client/turn/rejected",
+          data: {
+            requestId: cmd.requestId,
+            reason,
+            message: "fixture",
+            deferredToQueuedMessageId: replacement,
+          },
+        })),
+    ),
+  ).toBe(true);
+  return seq;
+}
 it("links a shared native replacement to every refused steer attempt and preserves historical membership", () =>
   scratch((db, open) => {
     const { op, claimed } = group(db);
@@ -657,10 +690,8 @@ it("links a shared native replacement to every refused steer attempt and preserv
       ...cmd,
       currentAgentSessionId: cmd.agentSessionId,
     });
+    const observer = open();
     const { qid, seq } = db.transaction((tx) => {
-      expect(
-        settlePlacementExecutionCommand(tx, { ...cmd, outcome: "refused" }),
-      ).toBe(true);
       const row = createQueuedThreadMessageInTransaction(tx, {
         threadId: guard.threadId,
         content: body.input,
@@ -670,25 +701,43 @@ it("links a shared native replacement to every refused steer attempt and preserv
         systemNotice: null,
         payload: { kind: "deferredSteer", sourceRequestId: first },
       });
-      const seq = appendStoredThreadEventInTransaction(tx, {
-        threadId: guard.threadId,
-        scope: threadScope(),
-        type: "client/turn/rejected",
-        data: {
-          requestId: first,
-          reason: "turn_not_steerable",
-          message: "fixture",
-          deferredToQueuedMessageId: row.id,
-        },
-      });
-      return {
-        qid: recordPlacementSteerRedelivery(tx, {
+      const seq = nativeRefusal(
+        tx,
+        { ...cmd, outcome: "refused" },
+        "turn_not_steerable",
+        row.id,
+      );
+      db.$client.exec(
+        "CREATE TEMP TRIGGER fail_second_member BEFORE INSERT ON placement_attempt WHEN NEW.attempt=1 AND NEW.queue_ordinal=1 BEGIN SELECT RAISE(ABORT,'fixture write fault'); END",
+      );
+      expect(() =>
+        recordPlacementSteerRedelivery(tx, {
           ...guard,
           rejectionSequence: seq,
-        })!,
-        seq,
-      };
+        }),
+      ).toThrow("fixture write fault");
+      expect(readPlacementQueueAttempts(tx, row.id)).toHaveLength(0);
+      expect(
+        tx.select().from(queue).where(eq(queue.id, row.id)).get()
+          ?.placementOperationId,
+      ).toBeNull();
+      db.$client.exec("DROP TRIGGER fail_second_member");
+      const qid = recordPlacementSteerRedelivery(tx, {
+        ...guard,
+        rejectionSequence: seq,
+      })!;
+      expect(readPlacementQueueAttempts(tx, qid)).toHaveLength(2);
+      expect(readPlacementQueueAttempts(observer, qid)).toHaveLength(0);
+      expect(readPlacementDispatchReceipt(observer, guard)).toMatchObject({
+        state: "possibly_sent",
+        liveRejectionEventId: null,
+      });
+      return { qid, seq };
     });
+    expect(readPlacementQueueAttempts(observer, qid)).toHaveLength(2);
+    expect(readPlacementDispatchReceipt(observer, guard)?.state).toBe(
+      "refused",
+    );
     db.$client.close();
     const next = open();
     expect(
@@ -699,6 +748,57 @@ it("links a shared native replacement to every refused steer attempt and preserv
         }),
       ),
     ).toBe(qid);
+    const source = readPlacementDispatchReceipt(next, guard)!;
+    expect(source.rejectionEventId).toBeTruthy();
+    expect(source.liveRejectionEventId).toBe(source.rejectionEventId);
+    expect(() =>
+      next.transaction((tx) => {
+        deleteThreadEventSuffixInTransaction(tx, {
+          threadId: guard.threadId,
+          cutoffSequence: seq,
+          oldMaxSequence: seq,
+        });
+        expect(
+          appendStoredThreadEventInTransaction(tx, {
+            threadId: guard.threadId,
+            scope: threadScope(),
+            type: "client/turn/rejected",
+            data: {
+              requestId: first,
+              reason: "turn_not_steerable",
+              message: "replacement",
+              deferredToQueuedMessageId: qid,
+            },
+          }),
+        ).toBe(seq);
+        expect(readPlacementDispatchReceipt(tx, guard)).toEqual({
+          ...source,
+          liveRejectionEventId: null,
+        });
+        expect(() =>
+          recordPlacementSteerRedelivery(tx, {
+            ...guard,
+            rejectionSequence: seq,
+          }),
+        ).toThrow(PlacementDispatchConflictError);
+        const c = claimFixture(next, qid);
+        expect(() =>
+          tx.transaction((t) =>
+            appendFixture(t, op.id, c, second, {
+              deferredFromRequestId: first,
+              input: body.input,
+              inputGroups: body.inputGroups,
+              clientSubmissions: body.clientSubmissions,
+            }),
+          ),
+        ).toThrow(PlacementDispatchConflictError);
+        expect(
+          readPlacementDispatchReceipt(tx, { ...guard, requestId: second }),
+        ).toBeNull();
+        throw Error("undo edit");
+      }),
+    ).toThrow("undo edit");
+    expect(readPlacementDispatchReceipt(next, guard)).toEqual(source);
     const redelivery = claimFixture(next, qid);
     const receipt = next.transaction((tx) =>
       appendFixture(tx, op.id, redelivery, second, {
@@ -712,10 +812,183 @@ it("links a shared native replacement to every refused steer attempt and preserv
       [0, 1, qid],
       [0, 1, qid],
     ]);
+    const delivered = {
+      ...cmd,
+      requestId: second,
+      nativeExecutionId: "second-execution",
+      commandId: "second-command",
+      currentAgentSessionId: cmd.agentSessionId,
+    };
+    expect(preparePlacementExecutionCommand(next, delivered).kind).toBe(
+      "prepared",
+    );
+    const other = open();
+    expect(claimPlacementExecutionCommand(other, delivered).kind).toBe("won");
+    expect(claimPlacementExecutionCommand(next, delivered).kind).toBe("held");
     expect(
       readPlacementDispatchReceipt(next, guard)?.members.map((m) => m.attempt),
     ).toEqual([0, 0]);
   }));
+it.each(["legacy", "pre-handoff", "post-handoff", "already-linked"] as const)(
+  "requires the original rejection for redelivery and new retry authority after reopen (%s)",
+  (mode) =>
+    scratch((db, open) => {
+      const op = resident(db);
+      const claimed = claimFixture(db, op.queueReceipt!.queuedMessageId);
+      const { guard, body } = db.transaction((tx) =>
+        appendFixture(tx, op.id, claimed, first),
+      );
+      const cmd = { ...guard, ...fixtureCommand };
+      const native = (tx: DbTransaction, reason: string, qid?: string) =>
+        appendStoredThreadEventInTransaction(tx, {
+          threadId: guard.threadId,
+          scope: threadScope(),
+          type: "client/turn/rejected",
+          data: {
+            requestId: first,
+            reason,
+            message: "fixture",
+            deferredToQueuedMessageId: qid,
+          },
+        });
+      if (mode !== "pre-handoff") {
+        expect(preparePlacementExecutionCommand(db, cmd).kind).toBe("prepared");
+        expect(
+          claimPlacementExecutionCommand(db, {
+            ...cmd,
+            currentAgentSessionId: cmd.agentSessionId,
+          }).kind,
+        ).toBe("won");
+      }
+      const { seq, qid } = db.transaction((tx) => {
+        const row = createQueuedThreadMessageInTransaction(tx, {
+          threadId: guard.threadId,
+          content: body.input,
+          ...fixtureExecution,
+          sendAt: null,
+          waitingOn: null,
+          systemNotice: null,
+          payload: { kind: "deferredSteer", sourceRequestId: first },
+        });
+        let seq = 0;
+        if (mode === "pre-handoff") {
+          expect(
+            refusePlacementBeforeHandoff(
+              tx,
+              guard,
+              (t) => (seq = native(t, "managed_execution_unsupported")),
+            ),
+          ).toBe(true);
+        } else if (mode === "legacy") {
+          expect(
+            settlePlacementExecutionCommand(tx, { ...cmd, outcome: "refused" }),
+          ).toBe(true);
+          seq = native(tx, "turn_not_steerable", row.id);
+        } else {
+          seq = nativeRefusal(
+            tx,
+            { ...cmd, outcome: "refused" },
+            mode === "already-linked"
+              ? "turn_not_steerable"
+              : "host_unavailable",
+            mode === "already-linked" ? row.id : undefined,
+          );
+        }
+        if (mode === "already-linked")
+          expect(
+            recordPlacementSteerRedelivery(tx, {
+              ...guard,
+              rejectionSequence: seq,
+            }),
+          ).toBe(row.id);
+        if (mode === "legacy")
+          expect(() =>
+            recordPlacementSteerRedelivery(tx, {
+              ...guard,
+              rejectionSequence: seq,
+            }),
+          ).toThrow(PlacementDispatchConflictError);
+        tx.update(threads)
+          .set({ status: "error" })
+          .where(eq(threads.id, guard.threadId))
+          .run();
+        return { seq, qid: row.id };
+      });
+      const historical = readPlacementDispatchReceipt(db, guard)!;
+      const grant = (conn: DbConnection, key: string) =>
+        grantPlacementRetryConsent(conn, {
+          failedRequestId: first,
+          failedOperationId: op.id,
+          principalScope: "owner",
+          submissionKey: key,
+          permissionProvenance: {
+            identity: "local-unverified",
+            authority: "local-input-parity",
+            actionId: key,
+          },
+        });
+      const priorGrant = grant(db, "original");
+      expect(priorGrant.kind).toBe(
+        mode === "post-handoff" || mode === "pre-handoff"
+          ? "granted"
+          : "refused",
+      );
+      db.transaction((tx) =>
+        deleteThreadEventSuffixInTransaction(tx, {
+          threadId: guard.threadId,
+          cutoffSequence: seq,
+          oldMaxSequence: seq,
+        }),
+      );
+      db.$client.close();
+      const next = open();
+      expect(grant(next, "after-deletion").kind).toBe("refused");
+      if (priorGrant.kind === "granted")
+        expect(
+          next
+            .select()
+            .from(placementRetryTargets)
+            .where(eq(placementRetryTargets.consent, priorGrant.consent.id))
+            .get()?.state,
+        ).toBe("superseded");
+      expect(
+        next.transaction((tx) => native(tx, "turn_not_steerable", qid)),
+      ).toBe(seq);
+      next.$client.close();
+      const peer = open();
+      expect(readPlacementDispatchReceipt(peer, guard)).toEqual({
+        ...historical,
+        liveRejectionEventId: null,
+      });
+      expect(() =>
+        peer.transaction((tx) =>
+          recordPlacementSteerRedelivery(tx, {
+            ...guard,
+            rejectionSequence: seq,
+          }),
+        ),
+      ).toThrow(PlacementDispatchConflictError);
+      const originalMembers = readPlacementQueueAttempts(peer, qid);
+      expect(originalMembers.length).toBe(mode === "already-linked" ? 1 : 0);
+      if (mode === "already-linked") {
+        const c = claimFixture(peer, qid);
+        expect(() =>
+          peer.transaction((tx) =>
+            appendFixture(tx, op.id, c, second, {
+              deferredFromRequestId: first,
+              input: body.input,
+              inputGroups: body.inputGroups,
+              clientSubmissions: body.clientSubmissions,
+            }),
+          ),
+        ).toThrow(PlacementDispatchConflictError);
+        expect(readPlacementQueueAttempts(peer, qid)).toEqual(originalMembers);
+      }
+      expect(
+        readPlacementDispatchReceipt(peer, { ...guard, requestId: second }),
+      ).toBeNull();
+    }),
+);
 it.each(["failed_accepted", "refused"] as const)(
   "enforces one exact successor, due clock and grouped retry derivation for %s",
   (outcome) =>
@@ -731,7 +1004,9 @@ it.each(["failed_accepted", "refused"] as const)(
         currentAgentSessionId: cmd.agentSessionId,
       });
       db.transaction((tx) => {
-        settlePlacementExecutionCommand(tx, { ...cmd, outcome });
+        if (outcome === "refused")
+          nativeRefusal(tx, { ...cmd, outcome }, "host_unavailable");
+        else settlePlacementExecutionCommand(tx, { ...cmd, outcome });
         tx.update(threads)
           .set({ status: "error" })
           .where(eq(threads.id, guard.threadId))
@@ -1088,9 +1363,6 @@ it.each([false, true])(
       db.$client.close();
       const next = open();
       next.transaction((tx) => {
-        expect(
-          settlePlacementExecutionCommand(tx, { ...cmd, outcome: "refused" }),
-        ).toBe(true);
         let replacement: string | undefined;
         if (withdraw) {
           withdrawConversationQuestion(tx, {
@@ -1118,17 +1390,12 @@ it.each([false, true])(
             }),
           ).toBe(true);
         }
-        const seq = appendStoredThreadEventInTransaction(tx, {
-          threadId,
-          scope: threadScope(),
-          type: "client/turn/rejected",
-          data: {
-            requestId: first,
-            reason: "stale_turn",
-            message: "fixture",
-            deferredToQueuedMessageId: replacement,
-          },
-        });
+        const seq = nativeRefusal(
+          tx,
+          { ...cmd, outcome: "refused" },
+          "stale_turn",
+          replacement,
+        );
         expect(
           recordPlacementSteerRedelivery(tx, {
             ...guard,

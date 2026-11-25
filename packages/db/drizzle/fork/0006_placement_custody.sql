@@ -82,7 +82,7 @@ CREATE TABLE `placement_effect` (
 	FOREIGN KEY (`root`) REFERENCES `placement_effect`(`request`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`execution_owner_operation_id`) REFERENCES `placement_operation`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "placement_effect_live_identity" CHECK("placement_effect"."live_event_id" IS NULL OR "placement_effect"."live_event_id"="placement_effect"."event_id"),
-	CONSTRAINT "placement_effect_rejection" CHECK(("placement_effect"."rejection_event_id" IS NULL AND "placement_effect"."live_rejection_event_id" IS NULL AND "placement_effect"."rejection_reason" IS NULL) OR ("placement_effect"."state"='refused_unsent' AND "placement_effect"."rejection_event_id" IS NOT NULL AND ("placement_effect"."live_rejection_event_id" IS NULL OR "placement_effect"."live_rejection_event_id" IS "placement_effect"."rejection_event_id") AND ("placement_effect"."rejection_reason" IS NULL OR "placement_effect"."rejection_reason" IN ('managed_execution_unsupported','managed_admission_unavailable')))),
+	CONSTRAINT "placement_effect_rejection" CHECK(("placement_effect"."rejection_event_id" IS NULL AND "placement_effect"."live_rejection_event_id" IS NULL AND "placement_effect"."rejection_reason" IS NULL) OR ("placement_effect"."state" IN ('refused','refused_unsent') AND "placement_effect"."rejection_event_id" IS NOT NULL AND ("placement_effect"."live_rejection_event_id" IS NULL OR "placement_effect"."live_rejection_event_id" IS "placement_effect"."rejection_event_id") AND ("placement_effect"."rejection_reason" IS NULL OR "placement_effect"."rejection_reason" IN ('managed_execution_unsupported','managed_admission_unavailable')))),
 	CONSTRAINT "placement_effect_command_tuple" CHECK(("placement_effect"."command_id" IS NULL)=("placement_effect"."native_execution_id" IS NULL) AND ("placement_effect"."command_id" IS NULL)=("placement_effect"."agent_session_id" IS NULL) AND ("placement_effect"."command_id" IS NOT NULL OR "placement_effect"."state" IN ('prepared','refused_unsent','cancelled'))),
 	CONSTRAINT "placement_effect_fence" CHECK("placement_effect"."fence">0),
 	CONSTRAINT "placement_effect_state" CHECK("placement_effect"."state" IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled'))
@@ -285,7 +285,9 @@ SELECT CASE WHEN NEW.attempt <> COALESCE((SELECT max(attempt)+1 FROM placement_a
 WHERE op=NEW.op AND step=NEW.step),0) THEN RAISE(ABORT,'attempt gap') END;
 SELECT CASE WHEN NEW.attempt>0 AND NOT EXISTS(
 SELECT 1 FROM placement_attempt a JOIN placement_effect e ON a.request=e.request
-WHERE a.op=NEW.op AND a.step=NEW.step AND a.attempt=NEW.attempt-1 AND e.state IN ('refused','refused_unsent')
+JOIN events rejection ON rejection.id=e.live_rejection_event_id AND rejection.id=e.rejection_event_id
+WHERE a.op=NEW.op AND a.step=NEW.step AND a.attempt=NEW.attempt-1 AND e.state='refused'
+AND e.live_event_id IS NOT NULL AND json_extract(rejection.data,'$.deferredToQueuedMessageId')=NEW.queue_id
 ) THEN RAISE(ABORT,'redelivery needs proven refusal') END;
 END;
 --> statement-breakpoint
@@ -368,17 +370,17 @@ WHEN NEW.live_event_id IS NULL AND OLD.state='prepared'
 BEGIN UPDATE placement_effect SET state='cancelled' WHERE request=OLD.request; END;
 --> statement-breakpoint
 CREATE TRIGGER placement_effect_require_rejection BEFORE UPDATE OF state ON placement_effect
-WHEN NEW.state='refused_unsent' AND (OLD.live_event_id IS NULL OR NEW.live_rejection_event_id IS NULL
+WHEN (NEW.state='refused_unsent' OR (NEW.state='refused' AND NEW.rejection_event_id IS NOT NULL)) AND (OLD.live_event_id IS NULL OR NEW.live_rejection_event_id IS NULL
  OR NEW.live_rejection_event_id IS NOT NEW.rejection_event_id OR NOT EXISTS (
  SELECT 1 FROM events e WHERE e.id=NEW.rejection_event_id AND e.thread_id=OLD.thread
  AND e.sequence>OLD.request_sequence AND e.type='client/turn/rejected' AND e.scope_kind='thread'
- AND json_extract(e.data,'$.requestId')=OLD.request AND json_extract(e.data,'$.deferredToQueuedMessageId') IS NULL
- AND NEW.rejection_reason IS (CASE WHEN json_extract(e.data,'$.reason') IN ('managed_execution_unsupported','managed_admission_unavailable')
+ AND json_extract(e.data,'$.requestId')=OLD.request AND (NEW.state='refused' OR json_extract(e.data,'$.deferredToQueuedMessageId') IS NULL)
+ AND NEW.rejection_reason IS (CASE WHEN NEW.state='refused_unsent' AND json_extract(e.data,'$.reason') IN ('managed_execution_unsupported','managed_admission_unavailable')
  THEN json_extract(e.data,'$.reason') END)))
 BEGIN SELECT RAISE(ABORT,'missing native rejection evidence'); END;
 --> statement-breakpoint
 CREATE TRIGGER placement_effect_rejection_immutable BEFORE UPDATE OF rejection_event_id,rejection_reason,live_rejection_event_id ON placement_effect
-WHEN NOT (OLD.state='prepared' AND NEW.state='refused_unsent') AND NOT (
+WHEN NOT ((OLD.state='prepared' AND NEW.state='refused_unsent') OR (OLD.state='possibly_sent' AND NEW.state='refused')) AND NOT (
  OLD.rejection_event_id IS NEW.rejection_event_id AND OLD.rejection_reason IS NEW.rejection_reason
  AND OLD.live_rejection_event_id IS NOT NULL AND NEW.live_rejection_event_id IS NULL
  AND NOT EXISTS(SELECT 1 FROM events WHERE id=OLD.live_rejection_event_id))

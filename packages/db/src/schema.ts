@@ -1865,7 +1865,7 @@ export const placementEffects = sqliteTable(
     ),
     check(
       "placement_effect_rejection",
-      sql`(${t.rejectionEventId} IS NULL AND ${t.liveRejectionEventId} IS NULL AND ${t.rejectionReason} IS NULL) OR (${t.state}='refused_unsent' AND ${t.rejectionEventId} IS NOT NULL AND (${t.liveRejectionEventId} IS NULL OR ${t.liveRejectionEventId} IS ${t.rejectionEventId}) AND (${t.rejectionReason} IS NULL OR ${t.rejectionReason} IN ('managed_execution_unsupported','managed_admission_unavailable')))`,
+      sql`(${t.rejectionEventId} IS NULL AND ${t.liveRejectionEventId} IS NULL AND ${t.rejectionReason} IS NULL) OR (${t.state} IN ('refused','refused_unsent') AND ${t.rejectionEventId} IS NOT NULL AND (${t.liveRejectionEventId} IS NULL OR ${t.liveRejectionEventId} IS ${t.rejectionEventId}) AND (${t.rejectionReason} IS NULL OR ${t.rejectionReason} IN ('managed_execution_unsupported','managed_admission_unavailable')))`,
     ),
     index("placement_active_effect_owner_fence")
       .on(t.executionOwnerOperationId, t.fence)

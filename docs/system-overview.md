@@ -644,6 +644,14 @@ clears its live link. Historical readback keeps the original evidence independen
 of the requested event's live link. An unknown or unverified reason gives generic
 historical status. A suffix replacement cannot supply the original reason.
 
+A native post-handoff refusal can bind its rejection event in the guarded command
+settlement transaction. Steer and answer redelivery require this live event,
+its eligible reason, the exact deferred queue ID and the preceding member attempt.
+Admission and command claim check that link again. A refused outcome without a
+captured rejection remains available for historical readback. Refusal-based
+retry requires the original live non-deferred rejection plus one authorized grant.
+Removing that rejection supersedes outstanding retry targets.
+
 The send claim, reservation and reclaim-start writers own their outer SQLite
 transaction. A call on a connection already inside a transaction refuses
 before mutation. Only a committed winning send claim permits the first RPC.

@@ -2961,7 +2961,7 @@
         },
         "placement_effect_rejection": {
           "name": "placement_effect_rejection",
-          "value": "(\"placement_effect\".\"rejection_event_id\" IS NULL AND \"placement_effect\".\"live_rejection_event_id\" IS NULL AND \"placement_effect\".\"rejection_reason\" IS NULL) OR (\"placement_effect\".\"state\"='refused_unsent' AND \"placement_effect\".\"rejection_event_id\" IS NOT NULL AND (\"placement_effect\".\"live_rejection_event_id\" IS NULL OR \"placement_effect\".\"live_rejection_event_id\" IS \"placement_effect\".\"rejection_event_id\") AND (\"placement_effect\".\"rejection_reason\" IS NULL OR \"placement_effect\".\"rejection_reason\" IN ('managed_execution_unsupported','managed_admission_unavailable')))"
+          "value": "(\"placement_effect\".\"rejection_event_id\" IS NULL AND \"placement_effect\".\"live_rejection_event_id\" IS NULL AND \"placement_effect\".\"rejection_reason\" IS NULL) OR (\"placement_effect\".\"state\" IN ('refused','refused_unsent') AND \"placement_effect\".\"rejection_event_id\" IS NOT NULL AND (\"placement_effect\".\"live_rejection_event_id\" IS NULL OR \"placement_effect\".\"live_rejection_event_id\" IS \"placement_effect\".\"rejection_event_id\") AND (\"placement_effect\".\"rejection_reason\" IS NULL OR \"placement_effect\".\"rejection_reason\" IN ('managed_execution_unsupported','managed_admission_unavailable')))"
         },
         "placement_effect_command_tuple": {
           "name": "placement_effect_command_tuple",

@@ -1,3 +1,4 @@
+import { readLinkedPlacementRejection } from "./placement-rejection.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import {
@@ -68,6 +69,10 @@ function failure(
     .limit(1)
     .get();
   if (thread?.status !== "error" || latest?.id !== e.eventId) return null;
+  if (e.state === "refused" || e.state === "refused_unsent") {
+    const rejected = readLinkedPlacementRejection(db, e);
+    if (!rejected || rejected.data.deferredToQueuedMessageId) return null;
+  }
   const deferred = db.get(
     sql`SELECT 1 FROM events WHERE thread_id=${e.thread} AND type='client/turn/rejected' AND json_extract(data,'$.requestId')=${request} AND json_extract(data,'$.deferredToQueuedMessageId') IS NOT NULL`,
   );
@@ -146,7 +151,7 @@ export function reconcileSupersededPlacementRetries(
     .where(
       and(
         eq(effects.thread, threadId),
-        sql`(${effects.liveEventId} IS NULL OR ${effects.requestSequence} < ${latest?.seq ?? null})`,
+        sql`(${effects.liveEventId} IS NULL OR (${effects.state} IN ('refused','refused_unsent') AND ${effects.liveRejectionEventId} IS NULL) OR ${effects.requestSequence} < ${latest?.seq ?? null})`,
         inArray(targets.state, ["held", "scheduled"]),
       ),
     )

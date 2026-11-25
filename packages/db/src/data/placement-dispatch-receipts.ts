@@ -1,3 +1,7 @@
+import {
+  capturePlacementRejection,
+  placementAttemptHasSource,
+} from "./placement-rejection.js";
 import { placementPreparedGroups } from "./placement-prepared-input.js";
 import {
   PlacementDispatchConflictError,
@@ -10,8 +14,6 @@ import {
 import { classifyLocalQuestionAnswer } from "./conversation-questions.js";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
-  clientTurnRequestIdSchema,
-  turnRequestRejectedEventDataSchema,
   flattenPromptInputGroups,
   canonicalJsonBytes,
   placementBindingSchema,
@@ -31,7 +33,6 @@ import type {
 } from "../connection.js";
 import {
   events,
-  placementRejectionReasons,
   placementEffects as effects,
   placementActionIdentities as identities,
   placementOperations as operations,
@@ -54,11 +55,7 @@ import {
   readPlacementQueueAttempts,
   queueMemberDigest,
 } from "./placement-action-receipts.js";
-import {
-  getLatestThreadSequence,
-  getLatestTurnRequestEventRow,
-  hasStoredTerminalClientTurnRequestEvent,
-} from "./events.js";
+import { getLatestTurnRequestEventRow } from "./events.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 
 export {
@@ -207,6 +204,7 @@ function currentExecution(
   for (const member of receipt.members) {
     const op = readPlacementOperationRecord(db, member.op);
     if (
+      !placementAttemptHasSource(db, member) ||
       !op?.binding ||
       !equal(op.binding, receipt.binding) ||
       op.cancelRequested ||
@@ -387,6 +385,10 @@ export function commitPlacementOrdinaryDispatch(
     const offset = groups.length;
     if (row.payloadKind === "questionResponse") groups.push(input);
     for (const m of links) {
+      requireReceipt(
+        placementAttemptHasSource(tx, m),
+        "redelivery rejection detached",
+      );
       const op = readPlacementOperationRecord(tx, m.op);
       const receipt = readPlacementActionReceipt(tx, m.op);
       requireReceipt(
@@ -490,8 +492,8 @@ export function commitPlacementOrdinaryDispatch(
         root = retry.root;
       } else if (row.payloadKind === "deferredSteer") {
         requireReceipt(
-          row.placementFence === args.fence,
-          "replacement fence changed",
+          m.attempt > 0 && row.placementFence === args.fence,
+          "replacement identity changed",
         );
         requireReceipt(
           rows.length === 1 &&
@@ -504,8 +506,7 @@ export function commitPlacementOrdinaryDispatch(
             requestId: row.retryOfTurnRequestId!,
           });
           requireReceipt(
-            prior?.liveEventId &&
-              ["refused", "refused_unsent"].includes(prior.state),
+            prior?.liveEventId && prior.state === "refused",
             "unproven deferred source",
           );
           const saved = tx
@@ -686,38 +687,49 @@ export function settlePlacementExecutionCommand(
       fence: number;
       outcome: "succeeded" | "failed_accepted" | "refused";
     },
+  appendRejection?: (tx: DbTransaction) => number,
 ) {
-  const r = readPlacementDispatchReceipt(tx, args);
-  if (
-    !r ||
-    r.commandId !== args.commandId ||
-    r.nativeExecutionId !== args.nativeExecutionId ||
-    r.agentSessionId !== args.agentSessionId ||
-    r.binding.agentHostId !== args.agentHostId ||
-    r.fence !== args.fence ||
-    r.executionOwnerOperationId !== args.executionOwnerOperationId
-  )
-    return false;
-  if (r.state === args.outcome) return true;
-  if (r.state !== "possibly_sent") return false;
-  tx.update(effects)
-    .set({ state: args.outcome })
-    .where(eq(effects.request, r.request))
-    .run();
-  for (const m of r.members)
-    tx.update(operations)
-      .set({
-        phase: args.outcome === "succeeded" ? "active" : "failed",
-        revision: sql`${operations.revision}+1`,
-      })
-      .where(
-        and(
-          eq(operations.id, m.op),
-          eq(operations.clientTurnRequestId, r.request),
-        ),
-      )
+  return tx.transaction((write) => {
+    const r = readPlacementDispatchReceipt(write, args);
+    if (
+      !r ||
+      r.commandId !== args.commandId ||
+      r.nativeExecutionId !== args.nativeExecutionId ||
+      r.agentSessionId !== args.agentSessionId ||
+      r.binding.agentHostId !== args.agentHostId ||
+      r.fence !== args.fence ||
+      r.executionOwnerOperationId !== args.executionOwnerOperationId
+    )
+      return false;
+    if (appendRejection && args.outcome !== "refused") return false;
+    if (r.state === args.outcome)
+      return !appendRejection || !!r.liveRejectionEventId;
+    if (r.state !== "possibly_sent") return false;
+    const anchor = appendRejection
+      ? capturePlacementRejection(write, r, "refused", appendRejection)
+      : null;
+    if (appendRejection && !anchor) return false;
+    write
+      .update(effects)
+      .set({ state: args.outcome, ...anchor })
+      .where(eq(effects.request, r.request))
       .run();
-  return true;
+    for (const m of r.members)
+      write
+        .update(operations)
+        .set({
+          phase: args.outcome === "succeeded" ? "active" : "failed",
+          revision: sql`${operations.revision}+1`,
+        })
+        .where(
+          and(
+            eq(operations.id, m.op),
+            eq(operations.clientTurnRequestId, r.request),
+          ),
+        )
+        .run();
+    return true;
+  });
 }
 export function refusePlacementBeforeHandoff(
   tx: DbTransaction,
@@ -734,55 +746,21 @@ export function refusePlacementBeforeHandoff(
       receipt.liveEventId === null ||
       receipt.state !== "prepared" ||
       receipt.executionOwnerOperationId !== args.executionOwnerOperationId ||
-      receipt.fence !== args.fence ||
-      getLatestTurnRequestEventRow(write, args.threadId)?.id !==
-        receipt.eventId ||
-      hasStoredTerminalClientTurnRequestEvent(write, {
-        threadId: args.threadId,
-        requestId: clientTurnRequestIdSchema.parse(args.requestId),
-      })
+      receipt.fence !== args.fence
     )
       return false;
-    const next = getLatestThreadSequence(write, args) + 1;
-    const sequence = appendRejection(write);
-    const native = write
-      .select({ id: events.id, data: events.data })
-      .from(events)
-      .where(
-        and(
-          eq(events.threadId, args.threadId),
-          eq(events.sequence, sequence),
-          eq(events.scopeKind, "thread"),
-          eq(events.type, "client/turn/rejected"),
-        ),
-      )
-      .get();
-    if (
-      sequence !== next ||
-      !native ||
-      getLatestThreadSequence(write, args) !== sequence
-    )
-      throw new PlacementDispatchConflictError(
-        "missing freshly appended rejection",
-      );
-    const rejection = turnRequestRejectedEventDataSchema.parse(
-      JSON.parse(native.data),
+    const anchor = capturePlacementRejection(
+      write,
+      receipt,
+      "refused_unsent",
+      appendRejection,
     );
-    if (
-      rejection.requestId !== args.requestId ||
-      rejection.deferredToQueuedMessageId !== undefined
-    )
-      throw new PlacementDispatchConflictError("rejection request mismatch");
-    const reason =
-      placementRejectionReasons.find((value) => value === rejection.reason) ??
-      null;
+    if (!anchor) return false;
     const changed = write
       .update(effects)
       .set({
         state: "refused_unsent",
-        rejectionEventId: native.id,
-        liveRejectionEventId: native.id,
-        rejectionReason: reason,
+        ...anchor,
       })
       .where(
         and(

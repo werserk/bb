@@ -1,16 +1,12 @@
+import { readPlacementRedeliveryEvidence } from "./placement-rejection.js";
 import {
   classifyLocalQuestionAnswer,
   getConversationQuestion,
 } from "./conversation-questions.js";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import {
-  canonicalJsonBytes,
-  turnRequestEventDataSchema,
-  turnRequestRejectedEventDataSchema,
-} from "@bb/domain";
+import { canonicalJsonBytes } from "@bb/domain";
 import type { DbTransaction } from "../connection.js";
 import {
-  events,
   queuedThreadMessages as queue,
   placementOperations as operations,
   placementAttempts as attempts,
@@ -32,42 +28,21 @@ export function recordPlacementSteerRedelivery(
   tx: DbTransaction,
   args: PlacementDispatchKey & { rejectionSequence: number },
 ) {
+  return tx.transaction((write) => linkRedelivery(write, args));
+}
+function linkRedelivery(
+  tx: DbTransaction,
+  args: PlacementDispatchKey & { rejectionSequence: number },
+) {
   const source = readPlacementDispatchReceipt(tx, args);
-  if (
-    !source?.liveEventId ||
-    !["refused", "refused_unsent"].includes(source.state)
-  )
-    throw new PlacementDispatchConflictError("no definitive refusal");
-  const rejected = tx
-    .select()
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, args.threadId),
-        eq(events.sequence, args.rejectionSequence),
-        eq(events.type, "client/turn/rejected"),
-      ),
-    )
-    .get();
-  if (!rejected)
-    throw new PlacementDispatchConflictError("native rejection missing");
-  const rejection = turnRequestRejectedEventDataSchema.parse(
-    JSON.parse(rejected.data),
-  );
-  if (
-    rejection.requestId !== source.request ||
-    rejected.sequence <= source.requestSequence
-  )
-    throw new PlacementDispatchConflictError("wrong native rejection");
+  if (source?.state !== "refused")
+    throw new PlacementDispatchConflictError("no post-handoff refusal");
+  const native = readPlacementRedeliveryEvidence(tx, source);
+  if (!native || native.sequence !== args.rejectionSequence)
+    throw new PlacementDispatchConflictError("authoritative rejection missing");
+  const { body, data: rejection } = native;
   if (!rejection.deferredToQueuedMessageId) {
-    const saved = tx
-      .select()
-      .from(events)
-      .where(eq(events.id, source.eventId))
-      .get()!;
-    const response = turnRequestEventDataSchema.parse(
-      JSON.parse(saved.data),
-    ).questionResponse;
+    const response = body.questionResponse;
     if (response) {
       const q = getConversationQuestion(tx, {
         threadId: args.threadId,
@@ -85,29 +60,8 @@ export function recordPlacementSteerRedelivery(
   }
   const qid = rejection.deferredToQueuedMessageId;
   const prior = readPlacementQueueAttempts(tx, qid);
-  const saved = tx
-    .select()
-    .from(events)
-    .where(eq(events.id, source.eventId))
-    .get()!;
-  const body = turnRequestEventDataSchema.parse(JSON.parse(saved.data));
-  if (
-    !source.members.length ||
-    body.source !== "tell" ||
-    body.initiator !== "user" ||
-    body.senderThreadId !== null ||
-    body.serviceTurn ||
-    !body.dispatchProvenance ||
-    Object.values(body.dispatchProvenance).some((v) => v !== null) ||
-    !(body.target.kind === "auto" || body.target.kind === "steer") ||
-    !(
-      rejection.reason === "turn_not_steerable" ||
-      (rejection.reason === "competing_turn" &&
-        (body.deferredFromRequestId || body.questionResponse)) ||
-      (rejection.reason === "stale_turn" && body.questionResponse)
-    )
-  )
-    throw new PlacementDispatchConflictError("ineligible recovery");
+  if (!source.members.length)
+    throw new PlacementDispatchConflictError("no source membership");
   if (prior.length) {
     if (
       prior.length !== source.members.length ||
