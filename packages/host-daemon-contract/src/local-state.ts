@@ -1,3 +1,4 @@
+import { placementBindingSchema } from "@bb/domain";
 import { z } from "zod";
 
 export const HOST_AUTH_FILE_NAME = "auth.json";
@@ -20,6 +21,24 @@ const currentHostAuthStateSchema = z
   })
   .strict();
 
+// Only an independently pinned local test supervisor may run this profile.
+export const managedGuestEnrollmentSchema = z.strictObject({
+  profile: z.literal("synthetic-only-v1"),
+  binding: placementBindingSchema,
+  uid: z.number().int().nonnegative(),
+  runtimeRootKey: nonEmptyTrimmedStringSchema,
+  launchProfileId: nonEmptyTrimmedStringSchema,
+  journalId: z.uuid(),
+  device: z.string().regex(/^\d+$/),
+  inode: z.string().regex(/^\d+$/),
+});
+export type ManagedGuestEnrollment = z.infer<
+  typeof managedGuestEnrollmentSchema
+>;
+const protectedHostAuthStateSchema = currentHostAuthStateSchema
+  .extend({ managedGuest: managedGuestEnrollmentSchema })
+  .strict();
+
 const legacyHostAuthStateSchema = z
   .object({
     hostId: z.string().min(1),
@@ -31,6 +50,7 @@ const legacyHostAuthStateSchema = z
   .transform(({ hostId, hostKey }) => ({ hostId, hostKey }));
 
 export const hostAuthStateSchema = z.union([
+  protectedHostAuthStateSchema,
   currentHostAuthStateSchema,
   legacyHostAuthStateSchema,
 ]);

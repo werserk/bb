@@ -1,4 +1,4 @@
-// Pre-activation codec. Deliberately outside the package's runtime exports.
+// Isolated receiver only. This schema is outside the negotiated daemon RPC union.
 import { clientTurnRequestIdSchema, placementBindingSchema } from "@bb/domain";
 import { z } from "zod";
 
@@ -79,3 +79,5 @@ export function decodeForProtectedGuest(
   // Decoding is not admission. Enrollment, journal, custody and permission checks still precede execution.
   return parsed;
 }
+
+export type ManagedGuestCommand = z.infer<typeof managedCommand>;
