@@ -330,3 +330,7 @@ BEGIN SELECT RAISE(ABORT,'immutable retry envelope'); END;
 CREATE TRIGGER placement_command_immutable BEFORE UPDATE OF command_id,native_execution_id,agent_session_id ON placement_effect
 WHEN OLD.command_id IS NOT NULL OR OLD.state!='prepared' OR NEW.command_id IS NULL OR NEW.native_execution_id IS NULL OR NEW.agent_session_id IS NULL
 BEGIN SELECT RAISE(ABORT,'immutable placement command'); END;
+--> statement-breakpoint
+CREATE TRIGGER placement_prepared_request_immutable BEFORE UPDATE OF prepared_request ON placement_operation
+WHEN OLD.prepared_request IS NOT NULL AND NEW.prepared_request IS NOT OLD.prepared_request
+BEGIN SELECT RAISE(ABORT,'immutable prepared placement input'); END;
