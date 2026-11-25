@@ -57,7 +57,10 @@ import type { DispatchAttemptArgs } from "./dispatch-attempt.js";
 export type ReadPlacementScope = () => PlacementSendScope | null;
 
 export interface ManagedQueuePlacement {
-  startExecution?: ResolvedThreadExecutionOptions;
+  firstStart?: {
+    selectedQueueId: string;
+    execution: ResolvedThreadExecutionOptions;
+  };
   guard: PlacementExecutionGuard;
   groupsByQueueId: ReadonlyMap<string, PromptInput[][]>;
   readScope: ReadPlacementScope;
@@ -166,7 +169,7 @@ export function requireManagedPendingStart(
   db: DbQueryConnection,
   head: Pick<
     QueuedThreadMessageRow,
-    "id" | "threadId" | "placementOperationId"
+    "id" | "threadId" | "placementOperationId" | "sendAt"
   >,
   selectedId: string,
 ): ResolvedThreadExecutionOptions {
@@ -208,6 +211,7 @@ export function requireManagedPendingStart(
     JSON.parse(op.preparedExecution),
   );
   if (
+    head.sendAt !== (request.sendAt ?? null) ||
     request.environment.type !== "reuse" ||
     request.environment.environmentId !== thread.environmentId ||
     request.projectId !== thread.projectId ||
@@ -271,9 +275,12 @@ export function prepareManagedQueueGroup(
   const guard = readPlacementResidentGuard(db, threadId, purpose);
   if (!guard || rows.some((row) => row.placementFence !== guard.fence))
     placementDispatchUnavailable();
-  const startExecution =
+  const firstStart =
     getThread(db, threadId)?.status === "pending"
-      ? requireManagedPendingStart(db, rows[0]!, selectedId!)
+      ? {
+          selectedQueueId: selectedId!,
+          execution: requireManagedPendingStart(db, rows[0]!, selectedId!),
+        }
       : undefined;
   const groupsByQueueId = new Map<string, PromptInput[][]>();
   for (const row of rows) {
@@ -295,7 +302,7 @@ export function prepareManagedQueueGroup(
       throw error;
     }
   }
-  return { guard, readScope, groupsByQueueId, startExecution };
+  return { guard, readScope, groupsByQueueId, firstStart };
 }
 
 export function managedOrdinaryPresentation(
@@ -459,7 +466,7 @@ export function managedOrdinaryClaim(
     args.retryOf ||
     args.systemNotice ||
     !args.thread.environmentId ||
-    (placement.startExecution
+    (placement.firstStart
       ? args.thread.status !== "pending" ||
         args.source.kind !== "drain" ||
         !args.source.sendNow
@@ -476,6 +483,7 @@ export function managedOrdinaryRequest(
   args: PlacementOrdinaryDispatchInput,
   escalation: PermissionEscalation,
   readScope?: ReadPlacementScope,
+  selectedFirstQueueId?: string,
 ) {
   const scope = readScope?.() ?? null;
   for (const claim of args.claimed)
@@ -497,7 +505,23 @@ export function managedOrdinaryRequest(
         placementDispatchUnavailable();
     }
   }
-  return commitPlacementOrdinaryDispatch(tx, args);
+  if (
+    selectedFirstQueueId &&
+    (!scope || args.claimed[0]?.id !== selectedFirstQueueId)
+  )
+    placementDispatchUnavailable();
+  return commitPlacementOrdinaryDispatch(tx, {
+    ...args,
+    ...(selectedFirstQueueId && scope
+      ? {
+          explicitFirstSend: {
+            queueId: selectedFirstQueueId,
+            principal: scope.principal,
+            actor: scope.identity,
+          },
+        }
+      : {}),
+  });
 }
 
 export function retainedManagedSend(

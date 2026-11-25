@@ -470,7 +470,7 @@ async function runDispatchAttempt(
   );
 
   const execution =
-    managedClaim?.startExecution ??
+    managedClaim?.firstStart?.execution ??
     (await buildExecutionOptions(
       deps,
       payload,
@@ -502,6 +502,7 @@ async function runDispatchAttempt(
     waitingOn: QueuedMessageWaitingOn,
     sendAt: number | null,
   ): DispatchAttemptOutcome => {
+    if (managedClaim?.firstStart) placementDispatchUnavailable();
     const entry = recordQueuedMessageWait(deps, {
       thread,
       message: queuedMessage,
@@ -601,7 +602,7 @@ async function runDispatchAttempt(
     const { environment: dispatchEnvironment, host: dispatchHost } =
       dispatchEnvironmentAndHost(deps, thread.environmentId);
     if (
-      !managedClaim?.startExecution &&
+      !managedClaim?.firstStart &&
       dispatchHost !== null &&
       isMachineWaitingForExecution(deps, dispatchHost.id)
     ) {
@@ -625,7 +626,7 @@ async function runDispatchAttempt(
     }
 
     if (
-      !managedClaim?.startExecution &&
+      !managedClaim?.firstStart &&
       dispatchEnvironment !== null &&
       goneThreadEnvironmentDetails(dispatchEnvironment) === null &&
       dispatchHost !== null &&
@@ -673,7 +674,7 @@ async function runDispatchAttempt(
       return;
     }
 
-    if (firstDispatch && !managedClaim?.startExecution) {
+    if (firstDispatch && !managedClaim?.firstStart) {
       admitted.value = await admitPendingThread(deps, {
         author,
         claimed,
@@ -772,7 +773,7 @@ async function runDispatchAttempt(
 
   // --- 2. dispatch --------------------------------------------------------
 
-  if (managedClaim?.startExecution) {
+  if (managedClaim?.firstStart) {
     await dispatchManagedQueueRequest(
       deps,
       {

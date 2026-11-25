@@ -592,10 +592,11 @@ export async function dispatchManagedQueueRequest(
         if (target.kind === "thread-start") {
           if (!authorizeManagedQueueMembers(tx, claim.rows, claim.readScope))
             placementDispatchUnavailable();
+          if (!claim.firstStart) placementDispatchUnavailable();
           const current = requireManagedPendingStart(
             tx,
             claim.rows[0]!,
-            claim.rows[0]!.id,
+            claim.firstStart.selectedQueueId,
           );
           if (
             canonicalJsonBytes(current) !== canonicalJsonBytes(event.execution)
@@ -624,6 +625,7 @@ export async function dispatchManagedQueueRequest(
           },
           resolvePermissionEscalation({ initiator: event.initiator }),
           claim.readScope,
+          claim.firstStart?.selectedQueueId,
         );
         claim.consume({ tx });
         return { activeThread: null };
