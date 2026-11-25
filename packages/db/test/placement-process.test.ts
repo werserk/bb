@@ -112,7 +112,7 @@ it("serializes alias reservations in separate processes on the same physical hos
       observePlacementWorkers(db, {
         ownerPluginId: "workers",
         providerId: "claude",
-        expectedOwnerRevision: 1,
+        expectedOwnerRevision: 2,
         workers: [observation({ revision: 2 }), sibling],
       }).kind,
     ).toBe("observed");
@@ -133,6 +133,43 @@ it("serializes alias reservations in separate processes on the same physical hos
         .pluck()
         .get(),
     ).toBe(1);
+  } finally {
+    db.$client.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("serializes native mode disable and new acceptance across competing processes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mode-race-")),
+    file = join(dir, "race.db");
+  const db = createConnection(file);
+  try {
+    migrate(db);
+    setupPlacement(db);
+    const [disable, accept] = await race(file, "mode-race", [
+      "disable",
+      "accept",
+    ]);
+    expect(disable).toMatchObject({
+      kind: "updated",
+      owner: { mode: "disabled", revision: 3 },
+    });
+    const count = db.$client
+      .prepare("select count(*) from placement_operation")
+      .pluck()
+      .get();
+    expect([0, 1]).toContain(count);
+    expect(accept).toMatchObject({
+      kind: count === 1 ? "accepted" : "refused",
+    });
+    const replays = await race(file, "accept", ["", ""]);
+    expect(replays).toEqual([accept, accept]);
+    expect(
+      db.$client
+        .prepare("select coalesce(max(accepted_seq),0) from placement_counter")
+        .pluck()
+        .get(),
+    ).toBe(count);
   } finally {
     db.$client.close();
     rmSync(dir, { recursive: true, force: true });

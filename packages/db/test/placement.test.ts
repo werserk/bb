@@ -12,15 +12,6 @@ const connections: ReturnType<typeof createMigratedConnection>[] = [];
 afterEach(() => {
   for (const db of connections.splice(0)) db.$client.close();
 });
-function fixture() {
-  const db = createMigratedConnection();
-  connections.push(db);
-  registerPlacementOwner(db, {
-    providerId: "claude",
-    ownerPluginId: "workers",
-  });
-  return db;
-}
 const request = {
   schemaVersion: 1 as const,
   intent: {
@@ -31,7 +22,7 @@ const request = {
 };
 describe("durable placement acceptance", () => {
   it("replays one stable receipt and conflicting input writes nothing", async () => {
-    const db = fixture();
+    const db = managed();
     const args = {
       authority: fixtureAuthority,
       principalScope: "owner",
@@ -136,7 +127,7 @@ it("rejects stale route evidence and Agent host drift without changing an immuta
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: 2,
     workers: [changed],
   });
   expect(
@@ -229,7 +220,7 @@ it("preserves managed mode when its owner disappears", () => {
   markPlacementOwnerUnavailable(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedRevision: 1,
+    expectedRevision: 2,
   });
   expect(readPlacementOwner(db, "claude")).toMatchObject({
     mode: "managed",
@@ -325,7 +316,7 @@ it("unknown custody stays held and older compatible work wins while another Work
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: 2,
     workers: [changed],
   });
   expect(readPlacementWorker(db, "workers", "worker")?.slotState).toBe(
@@ -334,7 +325,7 @@ it("unknown custody stays held and older compatible work wins while another Work
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: 2,
     workers: [observation({ revision: 3 })],
   });
   expect(readPlacementWorker(db, "workers", "worker")?.slotState).toBe(
@@ -404,7 +395,7 @@ it("excludes central-routable workers and respects the model and generation scop
     observePlacementWorkers(db, {
       providerId: "claude",
       ownerPluginId: "workers",
-      expectedOwnerRevision: 1,
+      expectedOwnerRevision: 2,
       workers: [w],
     });
   publish(
@@ -570,7 +561,7 @@ it("rechecks unknown custody immediately before queue admission", () => {
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: 2,
     workers: [
       observation({
         revision: 2,
@@ -669,7 +660,7 @@ it("fork pins source Agent while a newly prepared Workspace leaves the source bi
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: 2,
     workers: [
       observation({
         revision: 2,

@@ -145,7 +145,7 @@ it("reopens a single admitted Agent and physical Workspace with its original rec
     const worker = observation();
     observePlacementWorkers(db, {
       ...scope,
-      expectedOwnerRevision: 1,
+      expectedOwnerRevision: 2,
       workers: [
         {
           ...worker,

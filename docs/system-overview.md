@@ -592,6 +592,14 @@ path alongside its canonical descriptor. Resolving a path alias requires a
 host resolution tied to that environment and alias. Attach and admission check
 the location again. Forks inherit the source Workspace by default. An explicit
 reuse target or unmanaged host/path can identify an alternate Workspace.
+Registration starts with managed admission disabled. The internal owner-mode writer
+checks the current revision. Activation requires a server-owned verifier reading
+qualified empty-inventory evidence or a committed legacy handoff and quiescence
+receipt under the same transaction. The default has no verifier. Policy wait and
+refusal writes check the evaluated owner revision and the unreserved operation
+revision. A new managed accept checks the persisted mode under its writer lock.
+An exact authenticated replay uses its original submission context even after
+mode or execution defaults change.
 Registration requires fresh worker publication. Route watermarks survive route
 withdrawal and quota, custody and exclusion revisions are checked independently
 of the enclosing observation. An attributed retry action has one budget per

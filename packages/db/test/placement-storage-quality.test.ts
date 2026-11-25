@@ -59,7 +59,7 @@ function publish(rows: ReturnType<typeof observation>[]) {
     S.observePlacementWorkers(db, {
       ownerPluginId: "workers",
       providerId: "claude",
-      expectedOwnerRevision: 1,
+      expectedOwnerRevision: 2,
       workers: rows,
     }).kind,
   ).toBe("observed");

@@ -582,4 +582,5 @@ export {readPlacementActionReceipt,readPlacementQueueAttempts} from "./placement
 export * from "./placement-dispatch-receipts.js";
 export { placementPreparedGroups } from "./placement-prepared-input.js";
 export * from "./placement-redelivery.js";
+export * from "./placement-wait.js";
 export {reconcileSupersededPlacementRetries,closePlacementRetry} from "./placement-retry.js";

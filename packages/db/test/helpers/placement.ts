@@ -1,6 +1,6 @@
 import { readPlacementActionReceipt } from "../../src/data/placement-action-receipts.js";
 import { clientSubmissionQueueId } from "@bb/domain";
-import { eq } from "drizzle-orm";
+import { setOwnerMode } from "../../src/internal-placement-owner.js";
 import {
   workspaceBindingRef,
   type WorkspaceBinding,
@@ -8,7 +8,6 @@ import {
 } from "@bb/domain";
 import type { DbConnection } from "../../src/connection.js";
 import {
-  placementOwners,
   projects,
   environments,
   hosts,
@@ -118,18 +117,30 @@ export function observation(
   };
 }
 export function setupPlacement(db: DbConnection) {
-  registerPlacementOwner(db, {
-    providerId: "claude",
-    ownerPluginId: "workers",
-  });
-  db.update(placementOwners)
-    .set({ mode: "managed" })
-    .where(eq(placementOwners.providerId, "claude"))
-    .run();
+  const scope = { providerId: "claude", ownerPluginId: "workers" };
+  const registration = registerPlacementOwner(db, scope);
+  if (registration.kind !== "registered")
+    throw new Error("fixture owner registration failed");
+  const activation = setOwnerMode(
+    db,
+    {
+      ...scope,
+      expectedRevision: registration.owner.revision,
+      mode: "managed",
+      handoffReceiptId: null,
+    },
+    () => ({
+      ...scope,
+      kind: "verified_empty",
+      ownerRevision: registration.owner.revision,
+    }),
+  );
+  if (activation.kind !== "updated")
+    throw new Error("fixture activation failed");
   observePlacementWorkers(db, {
     providerId: "claude",
     ownerPluginId: "workers",
-    expectedOwnerRevision: 1,
+    expectedOwnerRevision: activation.owner.revision,
     workers: [observation()],
   });
   db.insert(projects)
@@ -204,7 +215,7 @@ export function candidate(db: DbConnection, id: string): PlacementCandidate {
   return {
     operationId: id,
     expectedRevision: op.revision,
-    ownerRevision: 1,
+    ownerRevision: 2,
     workerId: "worker",
     workerRevision: 1,
     routeEvidenceRevision: 1,
