@@ -6,6 +6,7 @@ import {
   getThread,
   listEvents,
   readPlacementDispatchReceipt,
+  readPlacementOwner,
   setQueuedThreadMessageGroupBoundary,
   type DbConnection,
 } from "@bb/db";
@@ -79,7 +80,12 @@ it("reads the authorized consumed group during a later question and gates new in
           ...h.deps,
           db,
         });
-        const app = createApp({ ...h.deps, db, pendingInteractions }).app;
+        const { app, placement } = createApp({
+          ...h.deps,
+          db,
+          pendingInteractions,
+        });
+        expect(readPlacementOwner(db, "claude-code")?.available).toBe(false);
         const turn = {
           threadId: f.threadId,
           turnId: "later-turn",
@@ -131,12 +137,23 @@ it("reads the authorized consumed group during a later question and gates new in
           );
           expect(inaccessible.status).toBe(404);
           expect((await inaccessible.json()).code).toBe("thread_not_found");
-          const fresh = await f.send(app, pending);
-          expect(fresh.status).toBe(409);
-          expect((await fresh.json()).code).toBe("awaiting_user_interaction");
+          const offline = await f.send(app, pending);
+          expect(offline.status).toBe(409);
+          expect((await offline.json()).code).toBe(
+            "placement_dispatch_unavailable",
+          );
           expect(changes(db)).toEqual(before);
           expect(notify).not.toHaveBeenCalled();
           expect(getQueuedThreadMessage(db, pending)?.claimToken).toBeNull();
+          expect(entry).toHaveBeenCalledTimes(1);
+          expect(wake).not.toHaveBeenCalled();
+
+          await f.registerReopenedOwner(placement).observeWorkers();
+          const onlineChanges = changes(db);
+          const fresh = await f.send(app, pending);
+          expect(fresh.status).toBe(409);
+          expect((await fresh.json()).code).toBe("awaiting_user_interaction");
+          expect(changes(db)).toBe(onlineChanges);
           const [held] = claimQueuedThreadMessageGroup(db, h.hub, pending, {
             kind: "explicit-send",
           })!;

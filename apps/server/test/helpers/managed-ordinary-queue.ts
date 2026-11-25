@@ -17,6 +17,7 @@ import {
   flattenPromptInputGroups,
   workspaceBindingRef,
   type WorkspaceBinding,
+  type WorkerObservation,
 } from "@bb/domain";
 import { expect } from "vitest";
 import { textInput } from "./prompt-input.js";
@@ -114,18 +115,18 @@ export function seedManagedGroup(
     .set({ mode: "managed" })
     .where(eq(placementOwners.providerId, providerId))
     .run();
-  observePlacementWorkers(db, {
-    providerId,
-    ownerPluginId,
-    expectedOwnerRevision: 1,
-    workers: observations.map(({ id: workerId, agent }) => ({
+  function workerReports(
+    revision: number,
+    custodyRevision = revision,
+  ): WorkerObservation[] {
+    return observations.map(({ id: workerId, agent }) => ({
       workerId,
       providerId,
       accountId: "account-" + workerId,
       agentHostId: agent.host.id,
       generation: "g1",
       providerVersion: "fixture",
-      revision: 1,
+      revision,
       admission: "enabled",
       connected: true,
       auth: "authenticated",
@@ -135,7 +136,7 @@ export function seedManagedGroup(
         fixtureRunId: purpose.fixtureRunId,
       },
       custody: {
-        revision: 1,
+        revision: custodyRevision,
         status: "free",
         workerId,
         agentHostId: agent.host.id,
@@ -145,13 +146,13 @@ export function seedManagedGroup(
       },
       exclusion: {
         authorityPluginId: "exclusion",
-        revision: 1,
+        revision,
         status: "excluded",
       },
-      quota: { revision: 1, freshness: "fresh", block: null },
+      quota: { revision, freshness: "fresh", block: null },
       routes: [
         {
-          revision: 1,
+          revision,
           workspace: workspaceBindingRef(workspace),
           agent: {
             hostId: agent.host.id,
@@ -167,7 +168,41 @@ export function seedManagedGroup(
         },
       ],
       launchProfileId: "fixture",
-    })),
+    }));
+  }
+  // Re-register only when a reopened app needs new work. Simulate the fresh
+  // report from the fixture Agent and Workspace rather than replaying DB bytes.
+  function registerReopenedOwner(placement: TestAppHarness["placement"]) {
+    const registration = placement.registerOwner({
+      providerId,
+      ownerPluginId,
+      policy: {
+        evaluate: async () => ({ kind: "wait", reason: "native_queue_wait" }),
+      },
+    });
+    return {
+      async observeWorkers(custodyRevision = 2) {
+        const workers = workerReports(2, custodyRevision);
+        expect(
+          await placement.observeWorkers({
+            providerId,
+            ownerPluginId,
+            workers,
+          }),
+        ).toBe("observed");
+        return {
+          ownerRevision: registration.ownerRevision,
+          workerRevision: workers[0]!.revision,
+          routeEvidenceRevision: workers[0]!.routes[0]!.revision,
+        };
+      },
+    };
+  }
+  observePlacementWorkers(db, {
+    providerId,
+    ownerPluginId,
+    expectedOwnerRevision: 1,
+    workers: workerReports(1),
   });
   function prepare(key: string, threadId?: string) {
     const clientSubmissionId = crypto.randomUUID();
@@ -343,6 +378,7 @@ export function seedManagedGroup(
     queueIds,
     members,
     resident,
+    registerReopenedOwner,
     middle,
     workerId2: secondWorker,
     fence,

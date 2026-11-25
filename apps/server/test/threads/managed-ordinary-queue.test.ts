@@ -344,11 +344,12 @@ describe("ordinary placement Send now", () => {
           ).toHaveLength(0);
           if (fault !== "scope-changed")
             db.run(sql.raw("DROP TRIGGER follower_fault"));
-          const { app } = createApp({
+          const { app, placement } = createApp({
             ...h.deps,
             db,
             resolvePlacementSendScope: originalScope,
           });
+          await f.registerReopenedOwner(placement).observeWorkers();
           const resent = await f.send(app, b);
           const body = await resent.json();
           expect(resent.status, JSON.stringify(body)).toBe(409);
@@ -418,8 +419,9 @@ describe("ordinary placement Send now", () => {
       const writer = createConnection(path);
       const competitor = createConnection(path);
       try {
-        const first = createApp({ ...h.deps, db: writer }).app;
+        const { app: first, placement } = createApp({ ...h.deps, db: writer });
         const second = createApp({ ...h.deps, db: competitor }).app;
+        await f.registerReopenedOwner(placement).observeWorkers();
         const paused = createDeferredPromise<void>();
         const resume = createDeferredPromise<void>();
         const build = threadCommands.buildExecutionOptions;
@@ -430,9 +432,18 @@ describe("ordinary placement Send now", () => {
             await resume.promise;
             return build(...args);
           });
-        const flight = f.send(first, b);
+        const flight = Promise.resolve(f.send(first, b));
         try {
-          await paused.promise;
+          await Promise.race([
+            paused.promise,
+            flight.then((response) => {
+              throw new Error(
+                "Send now returned HTTP " +
+                  response.status +
+                  " before reaching preparation",
+              );
+            }),
+          ]);
           expect(getQueuedThreadMessage(competitor, b)?.state).toBe("claimed");
           expect((await f.send(second, a)).status).toBe(409);
           expect(
@@ -572,9 +583,10 @@ describe("ordinary placement Send now", () => {
             protectedClaimTokens: [],
           }),
         ).toBe(1);
-        const app = createApp({ ...h.deps, db: reopened }).app;
-        const replay = await f.send(app, head);
-        expect(await replay.json()).toMatchObject({
+        const { app, placement } = createApp({ ...h.deps, db: reopened });
+        await f.registerReopenedOwner(placement).observeWorkers();
+        const retried = await f.send(app, head);
+        expect(await retried.json()).toMatchObject({
           code: "managed_execution_unsupported",
           details: { sourceQueuedMessageIds: [head] },
         });
@@ -637,14 +649,17 @@ describe("ordinary placement Send now", () => {
             ),
           ).toBe(true);
         });
+      let revisions = {
+        ownerRevision: 1,
+        workerRevision: 1,
+        routeEvidenceRevision: 1,
+      };
       const candidate = (db: DbConnection, operationId: string) => ({
         operationId,
         expectedRevision: readPlacementOperationRecord(db, operationId)!
           .revision,
-        ownerRevision: 1,
+        ...revisions,
         workerId: f.workerId,
-        workerRevision: 1,
-        routeEvidenceRevision: 1,
         purpose,
       });
       function releaseTo(
@@ -722,7 +737,11 @@ describe("ordinary placement Send now", () => {
         await h.db.$client.backup(path);
         const restored = createConnection(path);
         try {
-          const app = createApp({ ...h.deps, db: restored }).app;
+          const { app, placement } = createApp({ ...h.deps, db: restored });
+          // The first reclaim supplied free custody revision 3 on this worker.
+          revisions = await f
+            .registerReopenedOwner(placement)
+            .observeWorkers(4);
           const stale = await f.send(app, tail);
           expect(stale.status).toBe(409);
           expect(await stale.json()).toMatchObject({
@@ -732,7 +751,7 @@ describe("ordinary placement Send now", () => {
             readPlacementQueueAttempts(restored, tail)[0]?.request,
           ).toBeNull();
           const last = f.members[1]!;
-          releaseTo(restored, other.id, second.threadId, 2, last.id, 4);
+          releaseTo(restored, other.id, second.threadId, 2, last.id, 5);
           expect(
             reservePlacementWorker(restored, candidate(restored, last.id)),
           ).toMatchObject({ kind: "reserved", fence: 3 });
