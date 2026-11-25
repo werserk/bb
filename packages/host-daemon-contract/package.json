@@ -9,6 +9,11 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./managed-guest-lab": {
+      "source": "./src/managed-guest-lab.ts",
+      "types": "./src/managed-guest-lab.ts",
+      "default": "./src/managed-guest-lab.ts"
+    },
     "./local": {
       "source": "./src/local.ts",
       "types": "./src/local.ts",
