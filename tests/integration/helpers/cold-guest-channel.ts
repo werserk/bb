@@ -140,6 +140,10 @@ export class ColdGuestChannel {
     )
       return "held";
     const request = parsed.command;
+    // The winning SQLite transaction can run commit hooks that retire a manifest.
+    // Recheck the captured registration at the write boundary. Its claim stays spent.
+    if (!this.readCurrentQualifiedManifest(request.binding, ref))
+      return "unknown";
     const reply = await this.hub
       .requestHostOnlineRpc({
         hostId: ref.hostId,
