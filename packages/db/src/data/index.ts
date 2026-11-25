@@ -578,6 +578,10 @@ export * from "./conversation-questions.js";
 export * from "./question-resolution-events.js";
 export * from "./placement-operations.js";
 export * from "./placement-workers.js";
+export {
+  refuseReservedPlacement,
+  type UnusedPlacementReservationGuard,
+} from "./placement-unused-reservation.js";
 export * from "./placement-bindings.js";
 export * from "./placement-admission.js";
 export {readPlacementActionReceipt,readPlacementQueueAttempts} from "./placement-action-receipts.js";

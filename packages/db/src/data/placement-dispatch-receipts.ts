@@ -772,6 +772,32 @@ export function refusePlacementBeforeHandoff(
       .run();
     if (changed.changes !== 1)
       throw new PlacementDispatchConflictError("prepared effect changed");
+    const member = receipt.members[0];
+    if (
+      receipt.members.length === 1 &&
+      member?.op === args.executionOwnerOperationId &&
+      member.step === 0
+    ) {
+      const action = readPlacementActionReceipt(write, member.op);
+      if (action?.steps.length === 1 && action.steps[0]?.kind === "input")
+        write
+          .update(operations)
+          .set({
+            phase: "refused",
+            revision: sql`${operations.revision}+1`,
+            updatedAt: Date.now(),
+          })
+          .where(
+            and(
+              eq(operations.id, member.op),
+              eq(operations.kind, "independent"),
+              eq(operations.phase, "admitted"),
+              eq(operations.clientTurnRequestId, receipt.request),
+              eq(operations.cancelRequested, false),
+            ),
+          )
+          .run();
+    }
     return true;
   });
 }

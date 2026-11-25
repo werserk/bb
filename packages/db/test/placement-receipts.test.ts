@@ -1,3 +1,9 @@
+import {
+  cancelPlacementOperation,
+  observePlacementWorkers,
+  readPlacementWorker,
+  refuseReservedPlacement,
+} from "../src/index.js";
 import { placementPreparedGroups } from "../src/data/placement-prepared-input.js";
 import {
   deleteThreadEventSuffixInTransaction,
@@ -1536,3 +1542,181 @@ it("checks the complete Send now scope before follower ungrouping and before rep
     expect(deny).toThrow("actor cannot send this group");
     expect(snapshots()).toEqual(claimed);
   }));
+
+function unusedGuard(db: DbConnection, id: string) {
+  return {
+    operationId: id,
+    workerId: "worker",
+    expectedRevision: readPlacementOperation(db, id)!.revision,
+    fence: 1,
+  };
+}
+function observeFree(
+  db: DbConnection,
+  guard: ReturnType<typeof unusedGuard>,
+  revision: number,
+  custodyRevision = revision,
+  aliases: ReturnType<typeof observation>[] = [],
+) {
+  const w = observation({ revision });
+  w.custody.revision = custodyRevision;
+  return observePlacementWorkers(db, {
+    providerId: "claude",
+    ownerPluginId: "workers",
+    expectedOwnerRevision: 2,
+    workers: [w, ...aliases],
+    unusedReservations: [guard],
+  });
+}
+it("cancel wins after native claim, rolls back a late append, and releases only on newer guarded free custody", () =>
+  scratch((db, open) => {
+    const { op, follow, claimed } = group(db);
+    const other = open();
+    const guardBefore = unusedGuard(db, op.id);
+    const qid = op.queueReceipt!.queuedMessageId;
+    expect(cancelPlacementOperation(other, op.id)?.phase).toBe(
+      "cancel_requested",
+    );
+    expect(
+      other
+        .select()
+        .from(queue)
+        .all()
+        .map((q) => q.id),
+    ).toEqual([follow.queueReceipt!.queuedMessageId]);
+    expect(() =>
+      db.transaction((tx) => appendFixture(tx, op.id, claimed, first), {
+        behavior: "immediate",
+      }),
+    ).toThrow();
+    expect(db.select().from(events).all()).toHaveLength(0);
+    expect(readPlacementQueueAttempts(db, qid)[0]?.request).toBeNull();
+    const fresh = open(),
+      guard = unusedGuard(fresh, op.id);
+    const slot = () =>
+      readPlacementWorker(fresh, "workers", "worker")!.slotState;
+    expect(observeFree(fresh, guardBefore, 2)).toMatchObject({
+      kind: "observed",
+    });
+    expect(observeFree(fresh, guard, 3, 2).kind).toBe("observed");
+    expect(observeFree(fresh, { ...guard, fence: 2 }, 4).kind).toBe("observed");
+    expect(slot()).toBe("reserved");
+    const alias = observation({ workerId: "b", revision: 1 });
+    alias.custody = { ...alias.custody, workerId: "b", status: "unknown" };
+    expect(observeFree(fresh, guard, 5, 5, [alias]).kind).toBe("observed");
+    expect(slot()).toBe("reserved");
+    alias.revision = 2;
+    alias.custody = { ...alias.custody, revision: 2, status: "free" };
+    expect(observeFree(fresh, guard, 6, 6, [alias]).kind).toBe("observed");
+    expect(slot()).toBe("free");
+    expect(readPlacementOperation(fresh, op.id)?.phase).toBe("cancelled");
+    expect(readPlacementQueueAttempts(fresh, qid)[0]?.op).toBe(op.id);
+  }));
+it("terminal pre-attach refusal keeps the same fence through rollback and reopen until a fresh observation", () =>
+  scratch((db, open) => {
+    const op = acceptPrepared(db, "orphan");
+    expect(reservePlacementWorker(db, candidate(db, op.id)).kind).toBe(
+      "reserved",
+    );
+    const guard = unusedGuard(db, op.id);
+    const args = {
+      ...guard,
+      ownerRevision: 2,
+      reason: "workspace_unavailable" as const,
+    };
+    expect(
+      refuseReservedPlacement(db, { ...args, ownerRevision: 9 }).kind,
+    ).toBe("stale");
+    expect(refuseReservedPlacement(db, args).kind).toBe("refused");
+    const reopened = open();
+    const current = unusedGuard(reopened, op.id);
+    expect(() =>
+      reopened.transaction(() => {
+        observeFree(reopened, current, 2);
+        throw Error("undo");
+      }),
+    ).toThrow("undo");
+    expect(readPlacementWorker(db, "workers", "worker")?.slotState).toBe(
+      "reserved",
+    );
+    expect(observeFree(db, current, 2).kind).toBe("observed");
+    expect(readPlacementWorker(db, "workers", "worker")?.slotState).toBe(
+      "free",
+    );
+    expect(readPlacementOperation(db, op.id)).toMatchObject({
+      phase: "refused",
+      reason: "workspace_unavailable",
+    });
+  }));
+it.each([
+  "prepared",
+  "refused_unsent",
+  "possibly_sent",
+  "prior-possibly-sent",
+] as const)(
+  "admission first preserves %s custody and historical attempts across reopen",
+  (mode) =>
+    scratch((db, open) => {
+      const op = resident(db);
+      let claimed = claimFixture(db, op.queueReceipt!.queuedMessageId);
+      let { guard } = db.transaction((tx) =>
+        appendFixture(tx, op.id, claimed, first),
+      );
+      if (mode === "possibly_sent" || mode === "prior-possibly-sent") {
+        const cmd = {
+          ...guard,
+          ...fixtureCommand,
+          currentAgentSessionId: fixtureCommand.agentSessionId,
+        };
+        expect(preparePlacementExecutionCommand(db, cmd).kind).toBe("prepared");
+        expect(claimPlacementExecutionCommand(db, cmd).kind).toBe("won");
+      }
+      if (mode === "prior-possibly-sent") {
+        const next = follower(db, op.threadId!, fixtureAuthority);
+        claimed = claimFixture(db, next.queueReceipt!.queuedMessageId);
+        ({ guard } = db.transaction((tx) =>
+          appendFixture(tx, op.id, claimed, second),
+        ));
+      }
+      if (mode === "refused_unsent" || mode === "prior-possibly-sent")
+        expect(
+          db.transaction((tx) =>
+            refusePlacementBeforeHandoff(tx, guard, (w) =>
+              appendStoredThreadEventInTransaction(w, {
+                threadId: guard.threadId,
+                scope: threadScope(),
+                type: "client/turn/rejected",
+                data: {
+                  requestId: guard.requestId,
+                  reason: "managed_admission_unavailable",
+                  message: "fixture",
+                },
+              }),
+            ),
+          ),
+        ).toBe(true);
+      if (mode !== "refused_unsent") cancelPlacementOperation(open(), op.id);
+      const fresh = open();
+      expect(
+        readPlacementQueueAttempts(fresh, op.queueReceipt!.queuedMessageId)[0]
+          ?.request,
+      ).toBe(first);
+      expect(observeFree(fresh, unusedGuard(fresh, op.id), 2).kind).toBe(
+        "observed",
+      );
+      expect(readPlacementWorker(fresh, "workers", "worker")?.slotState).toBe(
+        mode === "refused_unsent" ? "free" : "active",
+      );
+      if (mode === "prior-possibly-sent") {
+        expect(
+          readPlacementDispatchReceipt(fresh, {
+            threadId: op.threadId!,
+            requestId: first,
+          })?.state,
+        ).toBe("possibly_sent");
+        expect(readPlacementDispatchReceipt(fresh, guard)?.state).toBe(
+          "refused_unsent",
+        );
+      }
+    }),
+);
