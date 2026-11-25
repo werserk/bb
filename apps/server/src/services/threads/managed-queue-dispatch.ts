@@ -6,6 +6,10 @@ import {
   queuedThreadMessages,
   placementActionIdentities,
   placementAttempts,
+  placementBindings,
+  placementEffects,
+  getStoredProviderSession,
+  getLatestTurnRequestEventRow,
   placementOperations,
   readPlacementOperationRecord,
   releaseQueuedMessageClaim,
@@ -30,6 +34,9 @@ import {
   canonicalJsonBytes,
   flattenPromptInputGroups,
   type PromptInput,
+  clientSubmissionQueueId,
+  resolvedThreadExecutionOptionsSchema,
+  type ResolvedThreadExecutionOptions,
   type ThreadQueuedMessage,
   type TurnRequestEventData,
   isStandaloneBuiltinClearCommand,
@@ -40,7 +47,8 @@ import {
   type WorkspacePurpose,
   type PermissionEscalation,
 } from "@bb/domain";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { createThreadRequestSchema } from "@bb/server-contract";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { MANAGED_EXECUTION_UNSUPPORTED } from "./managed-execution.js";
 import type { AppDeps, PlacementSendScope } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -49,6 +57,7 @@ import type { DispatchAttemptArgs } from "./dispatch-attempt.js";
 export type ReadPlacementScope = () => PlacementSendScope | null;
 
 export interface ManagedQueuePlacement {
+  startExecution?: ResolvedThreadExecutionOptions;
   guard: PlacementExecutionGuard;
   groupsByQueueId: ReadonlyMap<string, PromptInput[][]>;
   readScope: ReadPlacementScope;
@@ -151,23 +160,127 @@ export function authorizeManagedQueueMembers(
   return true;
 }
 
+// A pending row is also the post-.270 refusal state. Only the original unspent
+// independent action may admit a first request, even after native history edits.
+export function requireManagedPendingStart(
+  db: DbQueryConnection,
+  head: Pick<
+    QueuedThreadMessageRow,
+    "id" | "threadId" | "placementOperationId"
+  >,
+  selectedId: string,
+): ResolvedThreadExecutionOptions {
+  const thread = getThread(db, head.threadId);
+  if (
+    selectedId !== head.id ||
+    !head.placementOperationId ||
+    thread?.status !== "pending" ||
+    thread.archivedAt !== null ||
+    thread.deletedAt !== null ||
+    !thread.environmentId ||
+    !thread.startupContext
+  )
+    placementDispatchUnavailable();
+  const binding = db
+    .select({ origin: placementBindings.boundFromOperationId })
+    .from(placementBindings)
+    .where(eq(placementBindings.threadId, thread.id))
+    .get();
+  const op = readPlacementOperationRecord(db, head.placementOperationId);
+  const action = readPlacementActionReceipt(db, head.placementOperationId);
+  if (
+    binding?.origin !== head.placementOperationId ||
+    op?.kind !== "independent" ||
+    op.cancelRequested ||
+    op.phase !== "queued" ||
+    op.threadId !== thread.id ||
+    op.queuedMessageId !== head.id ||
+    !op.preparedRequest ||
+    !op.preparedExecution ||
+    !action?.submissionUuid ||
+    clientSubmissionQueueId(action.submissionUuid) !== head.id
+  )
+    placementDispatchUnavailable();
+  const request = createThreadRequestSchema.parse(
+    JSON.parse(op.preparedRequest),
+  );
+  const execution = resolvedThreadExecutionOptionsSchema.parse(
+    JSON.parse(op.preparedExecution),
+  );
+  if (
+    request.environment.type !== "reuse" ||
+    request.environment.environmentId !== thread.environmentId ||
+    request.projectId !== thread.projectId ||
+    request.providerId !== thread.providerId ||
+    execution.source !== "client/thread/start"
+  )
+    placementDispatchUnavailable();
+  const expectedContext = {
+    kind: "pending",
+    environmentIntent: request.environment,
+    fork: null,
+    startedOnBehalfOf: request.startedOnBehalfOf ?? null,
+    titleProvided: Boolean(request.title),
+    execution,
+  };
+  let actualContext: unknown;
+  try {
+    actualContext = JSON.parse(thread.startupContext);
+  } catch {
+    placementDispatchUnavailable();
+  }
+  if (
+    canonicalJsonBytes(actualContext) !== canonicalJsonBytes(expectedContext) ||
+    getStoredProviderSession(db, thread.id).kind !== "none" ||
+    getLatestTurnRequestEventRow(db, thread.id) ||
+    db
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.threadId, thread.id),
+          or(
+            isNotNull(events.providerThreadId),
+            isNotNull(events.turnId),
+            eq(events.type, "client/thread/start"),
+          ),
+        ),
+      )
+      .limit(1)
+      .get() ||
+    db
+      .select({ id: placementEffects.request })
+      .from(placementEffects)
+      .where(eq(placementEffects.thread, thread.id))
+      .limit(1)
+      .get()
+  )
+    placementDispatchUnavailable();
+  return execution;
+}
+
 export function prepareManagedQueueGroup(
   db: DbQueryConnection,
   rows: readonly QueuedThreadMessageRow[],
   purpose?: WorkspacePurpose,
   readScope?: ReadPlacementScope,
+  selectedId = rows[0]?.id,
 ): ManagedQueuePlacement {
   const threadId = rows[0]?.threadId;
   if (!threadId || !purpose || !readScope) placementDispatchUnavailable();
   const guard = readPlacementResidentGuard(db, threadId, purpose);
   if (!guard || rows.some((row) => row.placementFence !== guard.fence))
     placementDispatchUnavailable();
+  const startExecution =
+    getThread(db, threadId)?.status === "pending"
+      ? requireManagedPendingStart(db, rows[0]!, selectedId!)
+      : undefined;
   const groupsByQueueId = new Map<string, PromptInput[][]>();
   for (const row of rows) {
     if (row.payloadKind !== "inline" || !row.placementOperationId)
       placementDispatchUnavailable();
     const op = readPlacementOperationRecord(db, row.placementOperationId);
-    if (!op) placementDispatchUnavailable();
+    if (!op || op.cancelRequested) placementDispatchUnavailable();
     try {
       const groups = placementPreparedGroups(op.preparedRequest, op.kind);
       if (
@@ -182,7 +295,7 @@ export function prepareManagedQueueGroup(
       throw error;
     }
   }
-  return { guard, readScope, groupsByQueueId };
+  return { guard, readScope, groupsByQueueId, startExecution };
 }
 
 export function managedOrdinaryPresentation(
@@ -346,7 +459,11 @@ export function managedOrdinaryClaim(
     args.retryOf ||
     args.systemNotice ||
     !args.thread.environmentId ||
-    !["idle", "error"].includes(args.thread.status) ||
+    (placement.startExecution
+      ? args.thread.status !== "pending" ||
+        args.source.kind !== "drain" ||
+        !args.source.sendNow
+      : !["idle", "error"].includes(args.thread.status)) ||
     isStandaloneBuiltinCompactCommand(args.payload.input) ||
     isStandaloneBuiltinClearCommand(args.payload.input)
   )
