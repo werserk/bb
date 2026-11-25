@@ -1,3 +1,4 @@
+import { assertNativeThreadExecution } from "./managed-execution.js";
 import { resolveThreadHostCommandEnvironment } from "./thread-command-environment.js";
 import { recoverRefusedOwnerInputInTransaction } from "./deferred-steer.js";
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
@@ -1060,6 +1061,7 @@ export async function prepareReadyThreadTurnCommand(
   deps: LoggedWorkSessionDeps,
   args: Omit<ThreadStartCommandArgs, "fork">,
 ): Promise<PreparedReadyThreadTurnCommand> {
+  assertNativeThreadExecution(deps.db, args.thread.id);
   await ensureHostSessionReadyForWork(deps, {
     hostId: args.environment.hostId,
   });
@@ -1811,6 +1813,7 @@ export async function stopThreadForCurrentState(
   environment: RequestThreadStopForCurrentStateEnvironment | null,
   options?: { requireStopped: true },
 ): Promise<void> {
+  assertNativeThreadExecution(deps.db, thread.id);
   await revokeThreadDesktopBrowserControl(deps, thread.id);
   const failure = await threadStopRequestDeduper.run(thread.id, () =>
     stopThreadUntilSettled(deps, thread.id, environment),

@@ -1,3 +1,4 @@
+import { ManagedExecutionUnsupported } from "../threads/managed-execution.js";
 import { getEnvironment } from "@bb/db";
 import { resolveHostEnvironment } from "./host-environment.js";
 import { randomUUID } from "node:crypto";
@@ -274,6 +275,11 @@ export async function runLiveHostCommand<
   } catch (error) {
     const normalized =
       error instanceof Error ? error : new Error(String(error));
+    // Managed refusal has its own transactional outcome. Native failure settlement
+    // can requeue input or mark a turn stopped even though this RPC never went out.
+    if (normalized instanceof ManagedExecutionUnsupported) {
+      throw normalized;
+    }
     noteTurnTraceCommandFailed(args.command);
     if (
       args.preserveOnHostUnavailable === true &&

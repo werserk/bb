@@ -1,3 +1,4 @@
+import { assertNativeExecutionCommand } from "../threads/managed-execution.js";
 import { hostCommandMayWake } from "./wake-policy.js";
 import { isHostCleanupAllowed } from "./cleanup-context.js";
 import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
@@ -78,6 +79,7 @@ export async function callHostOnlineRpcForWork(
   deps: WorkSessionDeps,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
 ): Promise<HostDaemonRpcResultForCommand> {
+  assertNativeExecutionCommand(deps.db, args.command);
   await waitForReconnectingDaemon(deps, args.hostId);
   await prepareHostForWork(deps, args, false);
   return callHostOnlineRpcWithRetry(deps, args, {
@@ -371,6 +373,7 @@ function requestHostOnlineRpcResponse(
   deps: Pick<WorkSessionDeps, "hub" | "db">,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
 ): Promise<HostDaemonOnlineRpcResponseMessage> {
+  assertNativeExecutionCommand(deps.db, args.command);
   if (args.command.type === "environment.inspect_cleanup") {
     const sessionId = deps.hub.getDaemonSessionIdForHost(args.hostId);
     const session = sessionId ? getSessionById(deps.db, { sessionId }) : null;
