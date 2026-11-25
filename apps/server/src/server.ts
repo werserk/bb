@@ -1074,13 +1074,20 @@ export function createApp(
         protocolHeader: context.req.header("sec-websocket-protocol"),
         sessionId: context.req.query("sessionId") ?? null,
       });
+      let connection: ReturnType<typeof onDaemonSocketOpen> | null = null;
+      const current = () =>
+        connection !== null &&
+        deps.hub.captureDaemonConnection(websocketContext.hostId) ===
+          connection;
       return {
-        onOpen: (_event, socket) =>
-          onDaemonSocketOpen(deps, {
+        onOpen: (_event, socket) => {
+          connection = onDaemonSocketOpen(deps, {
             ...websocketContext,
             socket,
-          }),
-        onMessage: (event, socket) =>
+          });
+        },
+        onMessage: (event, socket) => {
+          if (!current()) return;
           onDaemonSocketMessage(
             deps,
             {
@@ -1091,8 +1098,11 @@ export function createApp(
             },
             pluginService,
             serverMove,
-          ),
-        onClose: () => onDaemonSocketClose(deps, websocketContext.sessionId),
+          );
+        },
+        onClose: () => {
+          if (current()) onDaemonSocketClose(deps, websocketContext.sessionId);
+        },
       };
     }),
   );
