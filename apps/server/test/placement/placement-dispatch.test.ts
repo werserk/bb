@@ -1,3 +1,5 @@
+import { resolvePendingThreadSessionOptions } from "../../src/services/threads/thread-session-options.js";
+import { seedEnvironment, seedHostSession, seedProjectWithSource } from "../helpers/seed.js";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import {
@@ -241,14 +243,26 @@ async function registerManaged(harness: TestAppHarness, policy: PlacementOwnerPo
   ).toBe("observed");
 }
 
-async function accept(harness: TestAppHarness, key: string, text: string) {
+async function accept(
+  harness: TestAppHarness,
+  key: string,
+  text: string,
+  options?: {
+    sendAt?: number;
+    sessionOptions?: Record<string, boolean | string>;
+  },
+) {
+  const payload = request(key, text);
+  if (options && payload.intent.kind === "independent")
+    Object.assign(payload.intent.request, options);
   const response = await harness.app.request("/api/v1/placement/operations", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(request(key, text)),
+    body: JSON.stringify(payload),
   });
   expect(response.status).toBe(200);
-  return ((await response.json()) as { operation: { id: string } }).operation.id;
+  return ((await response.json()) as { operation: { id: string } }).operation
+    .id;
 }
 
 function placed(harness: TestAppHarness, operationId: string) {
@@ -672,6 +686,321 @@ describe("placement dispatch", () => {
       ]);
     });
   });
+
+  it("refuses an unqualified reschedule of the bound first qsub before editing it", async () => {
+    await withDispatch(async (h, send) => {
+      await registerManaged(h, freeWorkers());
+      const op = await accept(h, "reschedule", "original");
+      await h.placement.wake(PROVIDER);
+      const { record } = placed(h, op);
+      const threadId = record.threadId!,
+        queueId = record.queuedMessageId!;
+      const target =
+        "/api/v1/threads/" + threadId + "/queued-messages/" + queueId;
+      const patch = (body: object) =>
+        h.app.request(target, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const original = getQueuedThreadMessage(h.db, queueId)!;
+      const originalChanges = h.db.$client
+        .prepare("select total_changes()")
+        .pluck()
+        .get();
+      const response = await patch({
+        sendAt: Date.now() + 300000,
+        expectedUpdatedAt: original.updatedAt,
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: "invalid_request",
+        message: "The first managed message keeps its accepted send time",
+      });
+      expect(getQueuedThreadMessage(h.db, queueId)).toEqual(original);
+      expect(h.db.$client.prepare("select total_changes()").pluck().get()).toBe(
+        originalChanges,
+      );
+      const unchanged = await patch({
+        sendAt: null,
+        expectedUpdatedAt: original.updatedAt,
+      });
+      expect(unchanged.status).toBe(200);
+      const sameContent = await patch({
+        input: JSON.parse(original.content),
+        expectedUpdatedAt: getQueuedThreadMessage(h.db, queueId)!.updatedAt,
+      });
+      expect(sameContent.status).toBe(200);
+      expect((await send(threadId, queueId, "local")).body.code).toBe(
+        "managed_execution_unsupported",
+      );
+    });
+  });
+
+  it.each([false, true])(
+    "preserves the scheduled suffix and rejects a previously cleared follower schedule (cleared=%s)",
+    async (cleared) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const op = await accept(h, "prefix", "original");
+        await h.placement.wake(PROVIDER);
+        const { record } = placed(h, op);
+        const threadId = record.threadId!,
+          head = record.queuedMessageId!;
+        const due = addFollower(h, op);
+        const future = addFollower(h, op, "local", Date.now() + 300000);
+        const tail = addFollower(h, op);
+        const ids = [head, due.id, future.id, tail.id];
+        expect(
+          setQueuedThreadMessageGroupBoundary({
+            db: h.db,
+            notifier: h.hub,
+            threadId,
+            expectedGroupedPrefixQueuedMessageIds: ids,
+            groupBoundaryQueuedMessageId: tail.id,
+          }).kind,
+        ).toBe("updated");
+        if (cleared) {
+          h.db
+            .update(queuedThreadMessages)
+            .set({ sendAt: null, waitingOn: null })
+            .where(eq(queuedThreadMessages.id, future.id))
+            .run();
+        }
+        const suffix = [future.id, tail.id].map((id) =>
+          getQueuedThreadMessage(h.db, id),
+        );
+        const result = await send(threadId, head, "local");
+        if (cleared) {
+          expect(result.body.code).toBe("placement_dispatch_unavailable");
+          expect(listEvents(h.db, { threadId })).toEqual([]);
+          expect(
+            ids.map((id) => getQueuedThreadMessage(h.db, id)?.claimToken),
+          ).toEqual(ids.map(() => null));
+          expect(h.db.select().from(placementEffects).all()).toEqual([]);
+          return;
+        }
+        expect(result.body).toMatchObject({
+          code: "managed_execution_unsupported",
+          details: {
+            state: "refused_unsent",
+            sourceQueuedMessageIds: ids.slice(0, 2),
+          },
+        });
+        expect(
+          [future.id, tail.id].map((id) => getQueuedThreadMessage(h.db, id)),
+        ).toEqual(suffix);
+      });
+    },
+  );
+
+  it.each(["singleton", "due follower", "drifted", "claim rollback"] as const)(
+    "keeps the accepted schedule and options for explicit first Send now (%s)",
+    async (variant) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const at = Date.now() + 3600000;
+        const options = { quality: "high" };
+        const id = await accept(h, "scheduled", "first", {
+          sendAt: at,
+          sessionOptions: options,
+        });
+        await h.placement.wake(PROVIDER);
+        const { record } = placed(h, id);
+        const threadId = record.threadId!,
+          head = record.queuedMessageId!;
+        const ids = [head];
+        if (variant === "due follower") {
+          ids.push(addFollower(h, id).id);
+          expect(
+            setQueuedThreadMessageGroupBoundary({
+              db: h.db,
+              notifier: h.hub,
+              threadId,
+              expectedGroupedPrefixQueuedMessageIds: ids,
+              groupBoundaryQueuedMessageId: ids[1]!,
+            }).kind,
+          ).toBe("updated");
+        }
+        expect(getQueuedThreadMessage(h.db, head)).toMatchObject({
+          sendAt: at,
+          waitingOn: JSON.stringify({ kind: "time" }),
+          claimToken: null,
+        });
+        expect(resolvePendingThreadSessionOptions(h.db, threadId)).toEqual(
+          options,
+        );
+        const equalTime = await h.app.request(
+          "/api/v1/threads/" + threadId + "/queued-messages/" + head,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              sendAt: at,
+              expectedUpdatedAt: getQueuedThreadMessage(h.db, head)!.updatedAt,
+            }),
+          },
+        );
+        expect(equalTime.status).toBe(200);
+        const baseline = listEvents(h.db, { threadId });
+        await runQueuedMessageDispatch(h.deps, {
+          kind: "time-reached",
+          now: Date.now(),
+        });
+        await advanceThreadProvisioning(h.deps, { threadId });
+        expect(listEvents(h.db, { threadId })).toEqual(baseline);
+        expect((await send(threadId, head, "other")).status).toBe(404);
+        if (variant === "drifted") {
+          // A persisted row from before the qualified-schedule rule.
+          h.db
+            .update(queuedThreadMessages)
+            .set({ sendAt: at + 1000 })
+            .where(eq(queuedThreadMessages.id, head))
+            .run();
+        }
+        if (variant === "claim rollback") {
+          h.db.$client.exec(
+            "CREATE TRIGGER lose_scheduled_claim AFTER INSERT ON events WHEN NEW.type='client/turn/requested' BEGIN UPDATE queued_thread_messages SET claim_token='other' WHERE thread_id=NEW.thread_id; END",
+          );
+        }
+        const result = await send(threadId, head, "local");
+        if (variant === "drifted" || variant === "claim rollback") {
+          expect(result.body).toMatchObject({
+            code: "placement_dispatch_unavailable",
+          });
+          expect(listEvents(h.db, { threadId })).toEqual(baseline);
+          expect(getQueuedThreadMessage(h.db, head)).toMatchObject({
+            sendAt: variant === "drifted" ? at + 1000 : at,
+            claimToken: null,
+            waitingOn: JSON.stringify({ kind: "time" }),
+          });
+          expect(h.db.select().from(placementEffects).all()).toHaveLength(0);
+        } else {
+          expect(result.body).toMatchObject({
+            code: "managed_execution_unsupported",
+            details: { state: "refused_unsent", sourceQueuedMessageIds: ids },
+          });
+          const requested = listEvents(h.db, { threadId }).filter(
+            (e) => e.type === "client/turn/requested",
+          );
+          expect(requested).toHaveLength(1);
+          expect(JSON.parse(requested[0]!.data)).toMatchObject({
+            target: { kind: "thread-start" },
+            execution: JSON.parse(record.preparedExecution!),
+          });
+          expect(await send(threadId, head, "local")).toEqual(result);
+        }
+        expect(resolvePendingThreadSessionOptions(h.db, threadId)).toEqual(
+          options,
+        );
+        expect(
+          listQueuedThreadCommands(h, "thread.start", threadId),
+        ).toHaveLength(0);
+      });
+    },
+  );
+
+  it("keeps ordinary unmanaged rescheduling on the pending native thread", async () => {
+    await withTestHarness(async (h) => {
+      const { host } = seedHostSession(h.deps);
+      const { project } = seedProjectWithSource(h.deps, { hostId: host.id });
+      const env = seedEnvironment(h.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+      const sendAt = Date.now() + 300000;
+      const created = await h.app.request("/api/v1/threads", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.id,
+          providerId: "codex",
+          origin: "app",
+          environment: { type: "reuse", environmentId: env.id },
+          input: [{ type: "text", text: "normal", mentions: [] }],
+          sendAt,
+        }),
+      });
+      expect(created.status).toBe(201);
+      const thread = await created.json();
+      const [queued] = h.db
+        .select()
+        .from(queuedThreadMessages)
+        .where(eq(queuedThreadMessages.threadId, thread.id))
+        .all();
+      const newTime = sendAt + 60000;
+      const changed = await h.app.request(
+        "/api/v1/threads/" + thread.id + "/queued-messages/" + queued!.id,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sendAt: newTime,
+            expectedUpdatedAt: queued!.updatedAt,
+          }),
+        },
+      );
+      expect(changed.status).toBe(200);
+      expect(getQueuedThreadMessage(h.db, queued!.id)).toMatchObject({
+        sendAt: newTime,
+      });
+    });
+  });
+
+  it.each(["before claim", "inside admission"] as const)(
+    "preserves both native rows if the follower is cancelled %s",
+    async (when) => {
+      await withDispatch(async (h, send) => {
+        await registerManaged(h, freeWorkers());
+        const id = await accept(h, "cancel group", "head");
+        await h.placement.wake(PROVIDER);
+        const { record } = placed(h, id);
+        const threadId = record.threadId!,
+          head = record.queuedMessageId!;
+        const follower = addFollower(h, id);
+        expect(
+          setQueuedThreadMessageGroupBoundary({
+            db: h.db,
+            notifier: h.hub,
+            threadId,
+            expectedGroupedPrefixQueuedMessageIds: [head, follower.id],
+            groupBoundaryQueuedMessageId: follower.id,
+          }).kind,
+        ).toBe("updated");
+        if (when === "before claim")
+          h.db
+            .update(placementOperations)
+            .set({ cancelRequested: true })
+            .where(eq(placementOperations.id, follower.op))
+            .run();
+        else {
+          h.db.$client.exec(
+            "CREATE TEMP TABLE fixture_cancel_target (op TEXT PRIMARY KEY)",
+          );
+          h.db.$client
+            .prepare("INSERT INTO fixture_cancel_target VALUES (?)")
+            .run(follower.op);
+          h.db.$client.exec(
+            "CREATE TEMP TRIGGER cancel_during_first AFTER INSERT ON events WHEN NEW.type='client/turn/requested' BEGIN UPDATE placement_operation SET cancel_requested=1 WHERE id IN (SELECT op FROM fixture_cancel_target); END",
+          );
+        }
+        expect((await send(threadId, head, "local")).body.code).toBe(
+          "placement_dispatch_unavailable",
+        );
+        expect(
+          [head, follower.id].map((q) => getQueuedThreadMessage(h.db, q)),
+        ).toMatchObject([
+          { claimToken: null, groupWithNext: true },
+          { claimToken: null },
+        ]);
+        expect(listEvents(h.db, { threadId })).toHaveLength(0);
+        expect(h.db.select().from(placementEffects).all()).toHaveLength(0);
+        expect(
+          listQueuedThreadCommands(h, "thread.start", threadId),
+        ).toHaveLength(0);
+      });
+    },
+  );
 
   it("attaches an orphaned reservation on the next wake without a second thread", async () => {
     await withDispatch(async (harness) => {

@@ -62,6 +62,8 @@ import {
   environments,
   events,
   queuedThreadMessages,
+  placementBindings,
+  placementActionIdentities,
   threads,
 } from "../schema.js";
 import {
@@ -398,6 +400,7 @@ export type UpdateQueuedThreadMessageResult =
   | { kind: "claimed" }
   | { kind: "stale" }
   | { kind: "immutable" }
+  | { kind: "first_schedule_immutable" }
   | QueuedThreadMessageGroupBoundaryInvalidExecutionOptions;
 
 export interface QueuedThreadMessageEditHoldArgs {
@@ -1055,6 +1058,28 @@ export function hasTimeWait(
   }
 }
 
+export function isBoundFirstQueueMessage(
+  db: DbQueryConnection,
+  row: Pick<QueuedThreadMessageRow, "id" | "threadId" | "placementOperationId">,
+): boolean {
+  if (!row.placementOperationId) return false;
+  const action = db
+    .select({ uuid: placementActionIdentities.submissionUuid })
+    .from(placementBindings)
+    .innerJoin(
+      placementActionIdentities,
+      eq(placementActionIdentities.op, placementBindings.boundFromOperationId),
+    )
+    .where(
+      and(
+        eq(placementBindings.threadId, row.threadId),
+        eq(placementBindings.boundFromOperationId, row.placementOperationId),
+      ),
+    )
+    .get();
+  return !!action?.uuid && clientSubmissionQueueId(action.uuid) === row.id;
+}
+
 export function updateQueuedThreadMessage(
   db: DbConnection,
   notifier: DbNotifier,
@@ -1075,6 +1100,11 @@ export function updateQueuedThreadMessage(
         return { kind: "stale" };
       }
 
+      // A native queue edit cannot revise the independent action's accepted schedule.
+      const boundFirstSchedule =
+        input.reschedule !== null && isBoundFirstQueueMessage(tx, existing);
+      if (boundFirstSchedule && input.reschedule?.sendAt !== existing.sendAt)
+        return { kind: "first_schedule_immutable" };
       if (
         input.execution !== null &&
         !executionFitsQueuedMessageGroup(tx, existing, input.execution)
@@ -1094,7 +1124,7 @@ export function updateQueuedThreadMessage(
         );
       }
       const transition =
-        input.reschedule === null
+        input.reschedule === null || boundFirstSchedule
           ? null
           : rescheduleTransition(existing, input.reschedule.sendAt);
       const schedulePatch =
@@ -1607,6 +1637,7 @@ export type QueuedThreadMessageGroupClaimPolicy =
         tx: DbTransaction,
         members: readonly GroupMember[],
       ) => void;
+      stopBeforeFutureFollower?: () => boolean;
       assertGroupAllowed?: (
         tx: DbTransaction,
         rows: readonly QueuedThreadMessageRow[],
@@ -1735,10 +1766,20 @@ function claimExplicitQueuedMessageGroup(
     clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);
     clearQueuedMessageGroupEdgeInTransaction(tx, existing, now);
   }
-  return claimQueuedThreadMessagesInTransaction(
-    tx,
-    group[0]?.id === id ? group : [existing],
-  );
+  if (group[0]?.id !== id)
+    return claimQueuedThreadMessagesInTransaction(tx, [existing]);
+  if (policy.stopBeforeFutureFollower?.()) {
+    const now = Date.now();
+    const boundary = group.findIndex(
+      (row, index) => index > 0 && row.sendAt !== null && row.sendAt > now,
+    );
+    if (boundary > 0)
+      return claimQueuedThreadMessagesInTransaction(
+        tx,
+        group.slice(0, boundary),
+      );
+  }
+  return claimQueuedThreadMessagesInTransaction(tx, group);
 }
 
 export function claimQueuedThreadMessageGroup(

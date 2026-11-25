@@ -520,6 +520,7 @@ export {
   setQueuedThreadMessageGroupBoundary,
   supersedeQueuedRetriesInTransaction,
   updateCoalescedQueuedThreadMessageInTransaction,
+  isBoundFirstQueueMessage,
   updateQueuedThreadMessage,
 } from "./queued-thread-messages.js";
 export type {

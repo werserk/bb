@@ -507,6 +507,7 @@ function claimQueuedThreadMessageForSend(
             );
             policy.authorizeMembers?.(tx, group);
           },
+          stopBeforeFutureFollower: () => placement?.firstStart !== undefined,
           assertGroupAllowed: (tx, group) => {
             if (managedGroup)
               placement = prepareManagedQueueGroup(

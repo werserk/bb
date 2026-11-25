@@ -6,6 +6,7 @@ import {
   deleteQueuedThreadMessage,
   getEnvironment,
   getQueuedThreadMessage,
+  isBoundFirstQueueMessage,
   getThread,
   listActiveVisiblePinnedThreadRootsWithPendingInteractionState,
   pinThread,
@@ -213,6 +214,14 @@ function assertPinnedThreadOrderResult(
   }
 }
 
+function refuseFirstScheduleChange(): never {
+  throw new ApiError(
+    409,
+    "invalid_request",
+    "The first managed message keeps its accepted send time",
+  );
+}
+
 export function registerThreadActionRoutes(
   app: Hono,
   deps: AppDeps,
@@ -354,6 +363,16 @@ export function registerThreadActionRoutes(
       context.req.param("queuedMessageId"),
     );
     if (
+      existingQueuedMessage?.threadId === thread.id &&
+      existingQueuedMessage.updatedAt === payload.expectedUpdatedAt &&
+      existingQueuedMessage.claimToken === null &&
+      payload.sendAt !== undefined &&
+      payload.sendAt !== existingQueuedMessage.sendAt &&
+      isBoundFirstQueueMessage(deps.db, existingQueuedMessage)
+    ) {
+      refuseFirstScheduleChange();
+    }
+    if (
       payload.input !== undefined &&
       existingQueuedMessage !== null &&
       existingQueuedMessage.systemNotice !== null
@@ -389,6 +408,7 @@ export function registerThreadActionRoutes(
       id: context.req.param("queuedMessageId"),
       threadId: thread.id,
     });
+    if (result.kind === "first_schedule_immutable") refuseFirstScheduleChange();
     if (result.kind === "immutable")
       throw new ApiError(
         409,
