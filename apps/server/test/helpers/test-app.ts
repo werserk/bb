@@ -116,6 +116,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   tunnelIngressNow?: () => number;
   placementPurpose?: WorkspacePurpose;
   placementRuntimeRootKey?: AppDeps["placementRuntimeRootKey"];
+  fixtureDb?: DbConnection;
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
     pluginId: string;
@@ -184,11 +185,12 @@ export async function createTestAppHarness(
     tunnelIngressNow: _tunnelIngressNow,
     placementPurpose,
     placementRuntimeRootKey,
+    fixtureDb,
     ...configOverrides
   } = overrides;
   const logger = createTestLogger();
   const dataDir = await mkdtemp(join(tmpdir(), "bb-server-test-"));
-  const db = createTestDb();
+  const db = fixtureDb ?? createTestDb();
   setAppSettings(db, {
     ...getAppSettings(db),
     machineGitCredentialsEnabled: false,

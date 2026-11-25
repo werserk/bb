@@ -1,4 +1,9 @@
 import {
+  guestQualificationFrame,
+  guestStartFrame271,
+  labRpcResponse,
+} from "./managed-guest-lab.js";
+import {
   hostDaemonContributedEnvEntrySchema,
   type HostDaemonOnlineRpcCommandType,
   type HostDaemonSettledCommandType,
@@ -429,7 +434,7 @@ const terminalCloseReasonSchema = z.enum([
 ]);
 const hostDaemonOnlineRpcRequestIdSchema = z.string().min(1);
 
-const hostDaemonOnlineRpcRequestMessageSchema = z
+const nativeOnlineRpcRequestMessageSchema = z
   .object({
     type: z.literal("host-rpc.request"),
     requestId: hostDaemonOnlineRpcRequestIdSchema,
@@ -437,6 +442,11 @@ const hostDaemonOnlineRpcRequestMessageSchema = z
   })
   .strict();
 
+const hostDaemonOnlineRpcRequestMessageSchema = z.union([
+  nativeOnlineRpcRequestMessageSchema,
+  guestStartFrame271,
+  guestQualificationFrame,
+]);
 const hostDaemonOnlineRpcCancelMessageSchema = z
   .object({
     type: z.literal("host-rpc.cancel"),
@@ -582,7 +592,10 @@ const hostDaemonOnlineRpcResponseFailureSchema = z
   .object({
     type: z.literal("host-rpc.response"),
     requestId: hostDaemonOnlineRpcRequestIdSchema,
-    commandType: hostDaemonRpcCommandTypeSchema,
+    commandType: z.union([
+      hostDaemonRpcCommandTypeSchema,
+      z.enum(["managed.lab.qualify", "managed.thread.start"]),
+    ]),
     ok: z.literal(false),
     errorCode: z.string().min(1),
     errorMessage: z.string().min(1),
@@ -590,6 +603,7 @@ const hostDaemonOnlineRpcResponseFailureSchema = z
   .strict();
 
 export const hostDaemonOnlineRpcResponseMessageSchema = z.union([
+  labRpcResponse,
   hostDaemonOnlineRpcResponseSuccessSchema,
   hostDaemonOnlineRpcResponseFailureSchema,
 ]);
@@ -717,7 +731,7 @@ const hostDaemonTerminalAckMessageSchema = z
   })
   .strict();
 
-export const hostDaemonServerWsMessageSchema = z.discriminatedUnion("type", [
+const nativeServerMessageSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("provider-session-policy.replace"),
@@ -755,7 +769,7 @@ export const hostDaemonServerWsMessageSchema = z.discriminatedUnion("type", [
       type: z.literal("heartbeat-ack"),
     })
     .strict(),
-  hostDaemonOnlineRpcRequestMessageSchema,
+  nativeOnlineRpcRequestMessageSchema,
   hostDaemonOnlineRpcCancelMessageSchema,
   hostDaemonWatchSetReplaceMessageSchema,
   hostDaemonConnectSharesReplaceMessageSchema,
@@ -767,6 +781,11 @@ export const hostDaemonServerWsMessageSchema = z.discriminatedUnion("type", [
   hostDaemonTerminalCloseMessageSchema,
   hostDaemonTerminalFlowControlMessageSchema,
   hostDaemonTerminalAckMessageSchema,
+]);
+export const hostDaemonServerWsMessageSchema = z.union([
+  nativeServerMessageSchema,
+  guestQualificationFrame,
+  guestStartFrame271,
 ]);
 export type HostDaemonServerWsMessage = z.infer<
   typeof hostDaemonServerWsMessageSchema
