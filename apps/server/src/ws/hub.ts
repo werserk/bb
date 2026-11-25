@@ -51,6 +51,12 @@ const THREAD_LIST_EVENTS_APPENDED_COALESCE_MS = 1_000;
 const LIST_RELEVANT_THREAD_EVENT_TYPES: ReadonlySet<ThreadEventType> =
   new Set<ThreadEventType>(["client/turn/requested", "turn/completed"]);
 
+// Server-local reference. Object identity identifies one authenticated socket registration.
+export interface DaemonConnectionRef {
+  readonly hostId: string;
+  readonly sessionId: string;
+}
+
 interface HubSocket {
   close(code?: number, reason?: string): void;
   raw?: { bufferedAmount: number };
@@ -77,9 +83,7 @@ type ThreadTimelineTagListener = (
 ) => void;
 
 export type ThreadTimelineSubscriberBaseline =
-  | { kind: "legacy" }
-  | { kind: "pending" }
-  | { kind: "tag"; tag: string };
+  { kind: "legacy" } | { kind: "pending" } | { kind: "tag"; tag: string };
 
 export interface ThreadTimelineSubscriber {
   baseline: ThreadTimelineSubscriberBaseline;
@@ -278,6 +282,7 @@ export class NotificationHub implements DbNotifier {
   private readonly daemonSessions = new Map<
     string,
     {
+      connection: DaemonConnectionRef;
       connectedAt: number;
       heardSinceLivenessCheck: boolean;
       hostId: string;
@@ -755,14 +760,22 @@ export class NotificationHub implements DbNotifier {
     this.daemonSessionLocalApiPortsBySessionId.set(sessionId, localApiPort);
   }
 
-  registerDaemon(sessionId: string, hostId: string, socket: HubSocket): void {
+  registerDaemon(
+    sessionId: string,
+    hostId: string,
+    socket: HubSocket,
+  ): DaemonConnectionRef {
     this.cancelPendingDaemonDisconnect(sessionId);
     const existingSessionId = this.daemonSessionIdsByHost.get(hostId);
     if (existingSessionId && existingSessionId !== sessionId) {
       this.cancelPendingDaemonDisconnect(existingSessionId);
       this.unregisterDaemon(existingSessionId);
     }
+    if (this.daemonSessions.has(sessionId))
+      this.rejectHostOnlineRpcWaitersForSession(sessionId);
+    const connection = Object.freeze({ hostId, sessionId });
     this.daemonSessions.set(sessionId, {
+      connection,
       connectedAt: Date.now(),
       heardSinceLivenessCheck: true,
       hostId,
@@ -776,6 +789,12 @@ export class NotificationHub implements DbNotifier {
     this.daemonSessionIdsByHost.set(hostId, sessionId);
     this.resolveDaemonRegistrationWaiters(hostId);
     this.notifyHost(hostId, ["host-connected"]);
+    return connection;
+  }
+
+  captureDaemonConnection(hostId: string): DaemonConnectionRef | null {
+    const id = this.daemonSessionIdsByHost.get(hostId);
+    return id ? (this.daemonSessions.get(id)?.connection ?? null) : null;
   }
 
   unregisterDaemon(sessionId: string): void {
@@ -964,6 +983,7 @@ export class NotificationHub implements DbNotifier {
 
   requestHostOnlineRpc(args: {
     hostId: string;
+    expectedConnection?: DaemonConnectionRef;
     message: HostDaemonOnlineRpcRequestMessage;
     signal?: AbortSignal;
     timeoutMs: number;
@@ -973,7 +993,11 @@ export class NotificationHub implements DbNotifier {
       return Promise.reject(new HostOnlineRpcUnavailableError());
     }
     const session = this.daemonSessions.get(sessionId);
-    if (!session) {
+    if (
+      !session ||
+      (args.expectedConnection !== undefined &&
+        session.connection !== args.expectedConnection)
+    ) {
       return Promise.reject(new HostOnlineRpcUnavailableError());
     }
     const signal = args.signal;
@@ -986,7 +1010,8 @@ export class NotificationHub implements DbNotifier {
       (resolve, reject) => {
         const abandon = (error: Error): void => {
           this.deleteHostOnlineRpcWaiter(requestId, waiter);
-          this.sendHostOnlineRpcCancel(sessionId, requestId);
+          if (this.daemonSessions.get(sessionId) === session)
+            this.sendHostOnlineRpcCancel(sessionId, requestId);
           reject(error);
         };
         const onAbort = (): void => {
