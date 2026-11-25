@@ -4,6 +4,8 @@ import {
   fixtureCommand,
 } from "../../../packages/db/test/helpers/placement-dispatch.js";
 import {
+  deleteThreadEventSuffixInTransaction,
+  PlacementDispatchConflictError,
   readPlacementDispatchReceipt,
   preparePlacementExecutionCommand,
   claimPlacementExecutionCommand,
@@ -12,7 +14,7 @@ import {
 import { NotificationHub } from "../../../apps/server/src/ws/hub.js";
 import { threadScope, turnScope } from "@bb/domain";
 import { appendThreadEventInTransaction } from "../../../apps/server/src/services/threads/thread-events.js";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import {
   acceptPlacementOperation,
@@ -300,6 +302,10 @@ it("270 atomically records one native rejection and retains actual ordered membe
       hub: new NotificationHub(),
       placementWorkspacePurpose: purpose,
     };
+  const notified = vi.spyOn(deps.hub, "notifyThread").mockImplementation(() => {
+    expect(db.$client.inTransaction).toBe(false);
+    expect(readPlacementDispatchReceipt(db, key)?.state).toBe("refused_unsent");
+  });
   await expect(dispatchManagedOrdinaryTurn(deps, key)).rejects.toMatchObject({
     status: 409,
     body: { code: "managed_execution_unsupported" },
@@ -307,14 +313,22 @@ it("270 atomically records one native rejection and retains actual ordered membe
   await expect(dispatchManagedOrdinaryTurn(deps, key)).rejects.toMatchObject({
     body: { details: { state: "refused_unsent" } },
   });
+  const rejected = rejectedEvents();
+  expect(rejected).toHaveLength(1);
   expect(readPlacementDispatchReceipt(db, key)).toMatchObject({
     state: "refused_unsent",
     members: receipt.members,
     commandId: null,
     nativeExecutionId: null,
+    rejectionEventId: rejected[0]!.id,
+    liveRejectionEventId: rejected[0]!.id,
+    rejectionReason: "managed_execution_unsupported",
   });
-  const rejected = rejectedEvents();
-  expect(rejected).toHaveLength(1);
+  expect(notified).toHaveBeenCalledTimes(1);
+  expect(notified).toHaveBeenCalledWith(threadId, ["events-appended"], {
+    eventTypes: ["client/turn/rejected"],
+    timelineSequence: rejected[0]!.sequence,
+  });
   expect(rejected[0]!.sequence).toBeGreaterThan(receipt.requestSequence);
   expect(JSON.parse(rejected[0]!.data)).toMatchObject({
     requestId,
@@ -327,12 +341,15 @@ it("rolls back the refusal when its native event cannot commit", async () => {
     "CREATE TEMP TRIGGER block_rejection BEFORE INSERT ON events WHEN NEW.type='client/turn/rejected' BEGIN SELECT RAISE(ABORT, 'synthetic event fault'); END",
   );
   const key = { threadId, requestId };
+  const hub = new NotificationHub();
+  const notified = vi.spyOn(hub, "notifyThread");
   await expect(
     dispatchManagedOrdinaryTurn(
-      { db, hub: new NotificationHub(), placementWorkspacePurpose: purpose },
+      { db, hub, placementWorkspacePurpose: purpose },
       key,
     ),
   ).rejects.toMatchObject({ cause: { message: "synthetic event fault" } });
+  expect(notified).not.toHaveBeenCalled();
   expect(readPlacementDispatchReceipt(db, key)?.state).toBe("prepared");
   expect(rejectedEvents()).toHaveLength(0);
 });
@@ -376,12 +393,120 @@ it("rolls back the just-appended rejection when its refusal CAS loses", async ()
     "CREATE TEMP TRIGGER hold_effect BEFORE UPDATE OF state ON placement_effect BEGIN SELECT RAISE(IGNORE); END",
   );
   const key = { threadId, requestId };
+  const hub = new NotificationHub();
+  const notified = vi.spyOn(hub, "notifyThread");
   await expect(
     dispatchManagedOrdinaryTurn(
-      { db, hub: new NotificationHub(), placementWorkspacePurpose: purpose },
+      { db, hub, placementWorkspacePurpose: purpose },
       key,
     ),
-  ).rejects.toMatchObject({ body: { code: "managed_execution_recorded" } });
+  ).rejects.toBeInstanceOf(PlacementDispatchConflictError);
+  expect(notified).not.toHaveBeenCalled();
   expect(readPlacementDispatchReceipt(db, key)?.state).toBe("prepared");
   expect(rejectedEvents()).toHaveLength(0);
+});
+
+it("preserves the runtime rejection identity after a native suffix edit and reopen", async () => {
+  commitOrdinaryFixture();
+  const key = { threadId, requestId };
+  const hub = new NotificationHub();
+  const notified = vi.spyOn(hub, "notifyThread");
+  const dispatch = () =>
+    dispatchManagedOrdinaryTurn(
+      { db, hub, placementWorkspacePurpose: purpose },
+      key,
+    );
+  await expect(dispatch()).rejects.toMatchObject({
+    body: { code: "managed_execution_unsupported" },
+  });
+  const [original] = rejectedEvents();
+  if (!original) throw new Error("Missing native rejection");
+  db.transaction((tx) => {
+    expect(
+      deleteThreadEventSuffixInTransaction(tx, {
+        threadId,
+        cutoffSequence: original.sequence,
+        oldMaxSequence: original.sequence,
+      }).deletedEventCount,
+    ).toBe(1);
+    expect(
+      appendThreadEventInTransaction(tx, {
+        threadId,
+        environmentId: original.environmentId,
+        type: "client/turn/rejected",
+        scope: threadScope(),
+        data: {
+          requestId,
+          reason: "managed_admission_unavailable",
+          message: "Replacement fixture",
+        },
+      }),
+    ).toBe(original.sequence);
+  });
+  const image = db.$client.serialize();
+  db.$client.close();
+  db = createConnection(image);
+  const [replacement] = rejectedEvents();
+  expect(replacement?.sequence).toBe(original.sequence);
+  expect(replacement?.id).not.toBe(original.id);
+  expect(readPlacementDispatchReceipt(db, key)).toMatchObject({
+    state: "refused_unsent",
+    rejectionEventId: original.id,
+    liveRejectionEventId: null,
+    rejectionReason: "managed_execution_unsupported",
+  });
+  await expect(dispatch()).rejects.toMatchObject({
+    body: { details: { state: "refused_unsent" } },
+  });
+  expect(notified).toHaveBeenCalledTimes(1);
+  expect(rejectedEvents()).toHaveLength(1);
+});
+
+it("sends no notification when the outer commit fails after the linked append", async () => {
+  commitOrdinaryFixture();
+  db.$client.exec(`
+    CREATE TEMP TABLE commit_parent(id INTEGER PRIMARY KEY);
+    CREATE TEMP TABLE commit_child(parent_id INTEGER REFERENCES commit_parent(id) DEFERRABLE INITIALLY DEFERRED);
+    CREATE TEMP TRIGGER fail_outer_commit AFTER UPDATE OF state ON placement_effect
+      WHEN NEW.state='refused_unsent' BEGIN INSERT INTO commit_child VALUES(1); END;
+  `);
+  const key = { threadId, requestId };
+  const hub = new NotificationHub();
+  const notified = vi.spyOn(hub, "notifyThread");
+  await expect(
+    dispatchManagedOrdinaryTurn(
+      { db, hub, placementWorkspacePurpose: purpose },
+      key,
+    ),
+  ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+  expect(db.$client.inTransaction).toBe(false);
+  expect(notified).not.toHaveBeenCalled();
+  expect(rejectedEvents()).toHaveLength(0);
+  expect(readPlacementDispatchReceipt(db, key)).toMatchObject({
+    state: "prepared",
+    rejectionEventId: null,
+    liveRejectionEventId: null,
+    rejectionReason: null,
+  });
+});
+
+it("requires post-commit entry before appending or notifying", async () => {
+  commitOrdinaryFixture();
+  const key = { threadId, requestId };
+  const hub = new NotificationHub();
+  const notified = vi.spyOn(hub, "notifyThread");
+  let pending!: Promise<void>;
+  db.transaction(() => {
+    pending = dispatchManagedOrdinaryTurn(
+      { db, hub, placementWorkspacePurpose: purpose },
+      key,
+    );
+  });
+  await expect(pending).rejects.toMatchObject({
+    status: 409,
+    body: { code: "managed_admission_unavailable" },
+  });
+  expect(notified).not.toHaveBeenCalled();
+  expect(rejectedEvents()).toHaveLength(0);
+  expect(readPlacementDispatchReceipt(db, key)?.state).toBe("prepared");
 });

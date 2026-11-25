@@ -3,7 +3,6 @@ import {
   getEnvironment,
   getLastStoredProviderThreadId,
   getStoredTurnRequestEventByRequestId,
-  hasStoredTerminalClientTurnRequestEvent,
   readPlacementDispatchReceipt,
   readPlacementAdmittedExecution,
   refusePlacementBeforeHandoff,
@@ -152,28 +151,32 @@ export async function dispatchManagedOrdinaryTurn(
   },
   committed: { threadId: string; requestId: ClientTurnRequestId },
 ): Promise<void> {
+  if (deps.db.$client.inTransaction)
+    throw new ApiError(
+      409,
+      "managed_admission_unavailable",
+      "Managed dispatch requires the admission transaction to have committed",
+      false,
+    );
   const { refusal, sequence } = deps.db.transaction(
     (tx) => {
-      const requested = getStoredTurnRequestEventByRequestId(tx, committed);
-      if (!requested)
-        throw new ApiError(
-          409,
-          "managed_request_missing",
-          "Committed native turn request was not found",
-          false,
-        );
       const receipt = readPlacementDispatchReceipt(tx, committed);
-      if (!receipt || receipt.requestSequence !== requested.sequence)
+      // Distinguish a bare native request for existing callers. It cannot authorize the append.
+      if (!receipt && getStoredTurnRequestEventByRequestId(tx, committed))
         throw new ApiError(
           409,
           "managed_receipt_missing",
           "Native request has no matching committed dispatch receipt",
           false,
         );
-      if (
-        receipt.state !== "prepared" ||
-        hasStoredTerminalClientTurnRequestEvent(tx, committed)
-      ) {
+      if (!receipt?.liveEventId)
+        throw new ApiError(
+          409,
+          "managed_request_missing",
+          "Committed native turn request was not found",
+          false,
+        );
+      if (receipt.state !== "prepared") {
         throw new ApiError(
           409,
           "managed_execution_recorded",
@@ -200,30 +203,37 @@ export async function dispatchManagedOrdinaryTurn(
             false,
           );
 
-      // No live RPC on protocol 270. Commit a definite refusal and the matching native event together.
-      // An immediate writer lock orders this transaction with the final send claim.
-      const sequence = appendThreadEventInTransaction(tx, {
-        threadId: committed.threadId,
-        environmentId: getThread(tx, committed.threadId)?.environmentId ?? null,
-        type: "client/turn/rejected",
-        scope: threadScope(),
-        data: {
-          requestId: committed.requestId,
-          reason: refusal.body.code,
-          message: refusal.body.message,
+      // The writer validates and links this append before the outer transaction can notify clients.
+      let sequence: number | undefined;
+      const changed = refusePlacementBeforeHandoff(
+        tx,
+        {
+          ...committed,
+          executionOwnerOperationId: receipt.executionOwnerOperationId,
+          fence: receipt.fence,
         },
-      });
-      const changed = refusePlacementBeforeHandoff(tx, {
-        ...committed,
-        executionOwnerOperationId: receipt.executionOwnerOperationId,
-        fence: receipt.fence,
-      });
-      if (!changed)
+        (writer) => {
+          sequence = appendThreadEventInTransaction(writer, {
+            threadId: committed.threadId,
+            environmentId:
+              getThread(writer, committed.threadId)?.environmentId ?? null,
+            type: "client/turn/rejected",
+            scope: threadScope(),
+            data: {
+              requestId: committed.requestId,
+              reason: refusal.body.code,
+              message: refusal.body.message,
+            },
+          });
+          return sequence;
+        },
+      );
+      if (!changed || sequence === undefined)
         throw new ApiError(
           409,
           "managed_execution_recorded",
           "Managed dispatch changed before refusal",
-          false,
+          { retryable: false, details: { state: receipt.state } },
         );
       return { refusal, sequence };
     },
