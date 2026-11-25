@@ -1,3 +1,4 @@
+import { setOwnerMode } from "@bb/db/internal-placement-owner";
 import { eq } from "drizzle-orm";
 import {
   archiveThread,
@@ -2687,10 +2688,25 @@ it("refuses a claimed placement row whose thread has no managed binding", async 
       authority: "local-input-parity",
       principal: "owner",
     });
-    registerPlacementOwner(harness.db, {
-      ownerPluginId: "workers",
-      providerId: thread.providerId,
-    });
+    const owner = { ownerPluginId: "workers", providerId: thread.providerId };
+    registerPlacementOwner(harness.db, owner);
+    const activated = setOwnerMode(
+      harness.db,
+      {
+        ...owner,
+        expectedRevision: 1,
+        mode: "managed",
+        handoffReceiptId: "fixture",
+      },
+      () => ({
+        ...owner,
+        ownerRevision: 1,
+        kind: "committed_handoff",
+        handoffReceiptId: "fixture",
+        quiescenceReceiptId: "fixture-quiesced",
+      }),
+    );
+    expect(activated.kind).toBe("updated");
     const accepted = acceptPlacementOperation(harness.db, {
       principalScope: "owner",
       submissionKey: "send",
