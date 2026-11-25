@@ -98,3 +98,4 @@ export {
 export * from "./workspace-binding.js";
 export * from "./placement.js";
 export * from "./placement-canonical.js";
+export * from "./placement-receipts.js";

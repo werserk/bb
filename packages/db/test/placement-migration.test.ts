@@ -76,6 +76,13 @@ it.each(["placement-pre0153", "placement-pre0006-on57"])(
         "workspace",
         "binding",
         "retry_consent",
+        "source_fact",
+        "action_identity",
+        "step",
+        "attempt",
+        "effect",
+        "grant_key",
+        "retry_target",
       ])
         expect(
           db.$client.prepare(`SELECT * FROM placement_${table}`).all(),

@@ -1,3 +1,5 @@
+import { failFixture } from "./helpers/placement-dispatch.js";
+import { fixtureAuthority } from "./helpers/placement.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,6 +43,7 @@ import type { WorkerObservation } from "@bb/domain";
 const scope = {
   ownerPluginId: "workers",
   providerId: "claude",
+  authority: fixtureAuthority,
   principalScope: "owner",
 };
 const worker = { ownerPluginId: "workers", workerId: "worker" };
@@ -68,7 +71,8 @@ function admit(db: DbConnection, id: string) {
       admitPlacementDispatch(tx, {
         ...candidate(db, id),
         fence: 1,
-        queuedMessageId: `queue-${id}`,
+        queuedMessageId: readPlacementOperation(db, id)!.queueReceipt!
+          .queuedMessageId,
       }),
     { behavior: "immediate" },
   );
@@ -510,25 +514,39 @@ it("admits a time wait only once the native row is due and refuses a non-time wa
     const set = other.$client.prepare(
       "update queued_thread_messages set state=?, waiting_on=json_object('kind',?),send_at=? where id=?",
     );
-    set.run("scheduled", "time", Date.now() + 3600000, "queue-" + op.id);
+    set.run(
+      "scheduled",
+      "time",
+      Date.now() + 3600000,
+      readPlacementOperation(db, op.id)!.queueReceipt!.queuedMessageId,
+    );
     expect(admit(db, op.id)).toEqual({
       kind: "wait",
       reason: "native_queue_wait",
     });
-    set.run("waiting", "host-offline", null, "queue-" + op.id);
+    set.run(
+      "waiting",
+      "host-offline",
+      null,
+      readPlacementOperation(db, op.id)!.queueReceipt!.queuedMessageId,
+    );
     expect(admit(db, op.id).kind).toBe("wait");
-    set.run("scheduled", "time", Date.now() - 1, "queue-" + op.id);
+    set.run(
+      "scheduled",
+      "time",
+      Date.now() - 1,
+      readPlacementOperation(db, op.id)!.queueReceipt!.queuedMessageId,
+    );
     expect(admit(db, op.id).kind).toBe("admitted");
   }));
 it("one attributed action funds one retry and the migrated DB requires both scheduler fields", () =>
   scratch((db, open) => {
     const op = acceptPrepared(db, "failed");
     attachAndQueue(db, op.id);
-    db.$client
-      .prepare("update placement_operation set phase='failed' where id=?")
-      .run(op.id);
+    const failedRequestId = failFixture(db, op.id);
     const args = {
       ...scope,
+      failedRequestId,
       failedOperationId: op.id,
       permissionProvenance: {
         actionId: "one-click",
@@ -624,4 +642,217 @@ it("accepts an environment alias only with matching host resolution and rechecks
       kind: "wait",
       reason: "workspace_unavailable",
     });
+  }));
+
+it("retains separate source histories across a host round trip and owner reload", () =>
+  scratch((db, open) => {
+    const op = acceptPrepared(db, "round-trip");
+    const first = observation({ revision: 2 });
+    first.quota = {
+      revision: 9,
+      freshness: "fresh",
+      block: {
+        kind: "quota",
+        model: null,
+        generation: "gen",
+        evidenceId: "nine",
+        recheckAt: null,
+      },
+    };
+    first.exclusion.revision = 7;
+    first.custody.revision = 6;
+    expect(publish(db, first).kind).toBe("observed");
+    expect(
+      reservePlacementWorker(db, {
+        ...candidate(db, op.id),
+        workerRevision: 2,
+      }),
+    ).toMatchObject({ reason: "quota_blocked" });
+    const other = observation({ revision: 3, agentHostId: "H2" });
+    other.custody.agentHostId = "H2";
+    other.routes = [];
+    expect(publish(db, other).kind).toBe("observed");
+    db.$client.close();
+    const reopened = open();
+    resetPlacementOwnerAvailability(reopened);
+    expect(
+      registerPlacementOwner(reopened, {
+        providerId: "claude",
+        ownerPluginId: "workers",
+      }).kind,
+    ).toBe("registered");
+    const returning = { ...first, revision: 4 };
+    for (const patch of [
+      { quota: observation().quota },
+      { quota: { ...first.quota, block: null } },
+      { custody: observation().custody },
+      { custody: { ...first.custody, lock: { device: "1", inode: "other" } } },
+      { exclusion: observation().exclusion },
+      { exclusion: { ...first.exclusion, status: "included" as const } },
+    ])
+      expect(publish(reopened, { ...returning, ...patch }, 2).kind).toBe(
+        "stale",
+      );
+    expect(publish(reopened, returning, 2).kind).toBe("observed");
+    expect(
+      reservePlacementWorker(reopened, {
+        ...candidate(reopened, op.id),
+        ownerRevision: 2,
+        workerRevision: 4,
+      }),
+    ).toMatchObject({ reason: "quota_blocked" });
+    expect(
+      publish(
+        reopened,
+        {
+          ...returning,
+          revision: 5,
+          quota: { ...first.quota, revision: 10, block: null },
+        },
+        2,
+      ).kind,
+    ).toBe("observed");
+    expect(
+      reservePlacementWorker(reopened, {
+        ...candidate(reopened, op.id),
+        ownerRevision: 2,
+        workerRevision: 5,
+      }).kind,
+    ).toBe("reserved");
+  }));
+
+it("allows an independently routed host with its own quota revision one", () =>
+  scratch((db) => {
+    const op = acceptPrepared(db, "different-host");
+    const first = observation({ revision: 2 });
+    first.quota = {
+      revision: 9,
+      freshness: "fresh",
+      block: {
+        kind: "quota",
+        model: null,
+        generation: "gen",
+        evidenceId: "nine",
+        recheckAt: null,
+      },
+    };
+    expect(publish(db, first).kind).toBe("observed");
+    const second = observation({
+      revision: 3,
+      agentHostId: "independent-host",
+    });
+    second.custody.agentHostId = second.agentHostId;
+    second.routes[0]!.agent.hostId = second.agentHostId;
+    expect(publish(db, second).kind).toBe("observed");
+    expect(
+      reservePlacementWorker(db, { ...candidate(db, op.id), workerRevision: 3 })
+        .kind,
+    ).toBe("reserved");
+  }));
+
+it.each(["quota", "exclusion"] as const)(
+  "retains shared %s after replacement and checks a sibling's current source at admission",
+  (stream) =>
+    scratch((db, open) => {
+      const owner = acceptPrepared(db, "resident");
+      attachAndQueue(db, owner.id);
+      const a = observation({ workerId: "sibling", revision: 1 });
+      a.custody.workerId = a.workerId;
+      const b = observation({ revision: 2 });
+      const batch = (conn: DbConnection, ws: WorkerObservation[], epoch = 1) =>
+        observePlacementWorkers(conn, {
+          ...scope,
+          expectedOwnerRevision: epoch,
+          workers: ws,
+        }).kind;
+      const blocked = structuredClone(a);
+      if (stream === "quota")
+        blocked.quota = {
+          revision: 9,
+          freshness: "fresh",
+          block: {
+            kind: "quota",
+            model: null,
+            generation: "gen",
+            evidenceId: "shared-nine",
+            recheckAt: null,
+          },
+        };
+      else
+        blocked.exclusion = { ...a.exclusion, revision: 9, status: "included" };
+      expect(batch(db, [b, blocked])).toBe("observed");
+      const admission = (conn: DbConnection, rev: number, epoch = 1) =>
+        conn.transaction(
+          (tx) =>
+            admitPlacementDispatch(tx, {
+              ...candidate(conn, owner.id),
+              workerRevision: rev,
+              ownerRevision: epoch,
+              fence: 1,
+              queuedMessageId: readPlacementOperation(conn, owner.id)!
+                .queueReceipt!.queuedMessageId,
+            }),
+          { behavior: "immediate" },
+        );
+      expect(admission(db, 2)).toMatchObject({
+        reason: stream === "quota" ? "quota_blocked" : "worker_disabled",
+      });
+      expect(batch(db, [])).toBe("observed");
+      db.$client.close();
+      const next = open();
+      resetPlacementOwnerAvailability(next);
+      registerPlacementOwner(next, scope);
+      const independent = observation({ workerId: "replacement" });
+      independent.custody.workerId = independent.workerId;
+      expect(batch(next, [independent], 2)).toBe("stale");
+      independent[stream].revision = 9;
+      expect(batch(next, [independent], 2)).toBe("stale");
+      b.revision = 3;
+      b[stream].revision = 10;
+      expect(batch(next, [b], 2)).toBe("observed");
+      expect(admission(next, 3, 2).kind).toBe("admitted");
+    }),
+);
+
+it("requires fresh evidence to clear a known shared quota block", () =>
+  scratch((db, open) => {
+    const op = acceptPrepared(db, "fresh-clear");
+    const w = observation({ revision: 2 });
+    w.quota = {
+      revision: 8,
+      freshness: "fresh",
+      block: {
+        kind: "quota",
+        model: null,
+        generation: "gen",
+        evidenceId: "eight",
+        recheckAt: null,
+      },
+    };
+    expect(publish(db, w).kind).toBe("observed");
+    const next = open();
+    expect(
+      publish(next, {
+        ...w,
+        revision: 3,
+        quota: { revision: 9, freshness: "unknown", block: null },
+      }).kind,
+    ).toBe("observed");
+    expect(
+      reservePlacementWorker(db, {
+        ...candidate(db, op.id),
+        workerRevision: 3,
+      }),
+    ).toMatchObject({ reason: "quota_blocked" });
+    expect(
+      publish(next, {
+        ...w,
+        revision: 4,
+        quota: { revision: 10, freshness: "fresh", block: null },
+      }).kind,
+    ).toBe("observed");
+    expect(
+      reservePlacementWorker(db, { ...candidate(db, op.id), workerRevision: 4 })
+        .kind,
+    ).toBe("reserved");
   }));

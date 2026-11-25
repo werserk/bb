@@ -1,3 +1,5 @@
+import { failFixture } from "./helpers/placement-dispatch.js";
+import { fixtureAuthority } from "./helpers/placement.js";
 import { workspaceBindingRef } from "@bb/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMigratedConnection } from "../src/testing.js";
@@ -31,6 +33,7 @@ describe("durable placement acceptance", () => {
   it("replays one stable receipt and conflicting input writes nothing", async () => {
     const db = fixture();
     const args = {
+      authority: fixtureAuthority,
       principalScope: "owner",
       submissionKey: "key",
       providerId: "claude",
@@ -63,7 +66,6 @@ describe("durable placement acceptance", () => {
 
 import { eq } from "drizzle-orm";
 import {
-  placementOperations,
   placementBindings,
   environments,
   queuedThreadMessages,
@@ -170,7 +172,6 @@ it("keeps the accepted receipt after queue consumption and repeats no insertion"
         operationId: op.id,
         fence: 1,
         queuedMessageId: "replacement",
-        requestId: "replacement",
         insertQueue: () => {
           throw new Error("duplicate insertion");
         },
@@ -344,11 +345,9 @@ it("consumes exactly one consent and accepts retry only awaiting scheduler, with
   const db = managed(),
     op = acceptPrepared(db, "failed");
   attachAndQueue(db, op.id);
-  db.update(placementOperations)
-    .set({ phase: "failed" })
-    .where(eq(placementOperations.id, op.id))
-    .run();
+  const failedRequestId = failFixture(db, op.id);
   const grant = grantPlacementRetryConsent(db, {
+    failedRequestId,
     failedOperationId: op.id,
     principalScope: "owner",
     submissionKey: "action",
@@ -360,6 +359,7 @@ it("consumes exactly one consent and accepts retry only awaiting scheduler, with
   });
   if (grant.kind !== "granted") throw new Error("missing consent");
   const args = {
+    authority: fixtureAuthority,
     principalScope: "owner",
     submissionKey: "retry",
     ownerPluginId: "workers",
@@ -619,6 +619,7 @@ it("fork pins source Agent while a newly prepared Workspace leaves the source bi
     observation: { ...observation().custody, revision: 2 },
   });
   const fork = acceptPlacementOperation(db, {
+    authority: fixtureAuthority,
     principalScope: "owner",
     submissionKey: "fork",
     ownerPluginId: "workers",

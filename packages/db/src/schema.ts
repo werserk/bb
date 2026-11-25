@@ -19,6 +19,11 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import {
+  placementStepKinds,
+  placementEffectStates,
+  placementRetryStates,
+} from "@bb/domain";
 import { sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
@@ -1084,7 +1089,7 @@ export const queuedThreadMessages = sqliteTable(
     ),
     check(
       "queued_thread_messages_placement_check",
-      sql`(${table.placementOperationId} IS NULL) = (${table.placementFence} IS NULL)`,
+      sql`${table.placementFence} IS NULL OR (${table.placementOperationId} IS NOT NULL AND ${table.placementFence} > 0)`,
     ),
     index("queued_thread_messages_thread_created_idx").on(
       table.threadId,
@@ -1569,7 +1574,7 @@ export const placementOperations = sqliteTable(
     reservationId: text("reservation_id"),
     fence: integer("fence"),
     queuedMessageId: text("queued_message_id").unique(),
-    clientTurnRequestId: text("client_turn_request_id").unique(),
+    clientTurnRequestId: text("client_turn_request_id"),
     cancelRequested: integer("cancel_requested", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -1588,6 +1593,7 @@ export const placementOperations = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
+    index("placement_operation_latest_request_idx").on(t.clientTurnRequestId),
     uniqueIndex("placement_operation_submission").on(
       t.principalScope,
       t.submissionKey,
@@ -1655,9 +1661,6 @@ export const placementWorkers = sqliteTable(
     providerVersion: text("provider_version").notNull(),
     observationRevision: integer("observation_revision").notNull(),
     policyRevision: integer("policy_revision").notNull(),
-    routeEvidence: text("route_evidence", { mode: "json" })
-      .$type<WorkerObservation["routes"]>()
-      .notNull(),
     observation: text("observation", { mode: "json" })
       .$type<WorkerObservation>()
       .notNull(),
@@ -1741,6 +1744,7 @@ export const placementRetryConsents = sqliteTable(
   "placement_retry_consent",
   {
     id: text("consent_id").primaryKey(),
+    actionId: text("action_id").notNull(),
     principalScope: text("principal_scope").notNull(),
     submissionKey: text("submission_key").notNull(),
     failedOperationId: text("failed_operation_id")
@@ -1758,10 +1762,7 @@ export const placementRetryConsents = sqliteTable(
       .notNull(),
   },
   (t) => [
-    uniqueIndex("placement_consent_action").on(
-      t.principalScope,
-      sql`json_extract(${t.permissionProvenance}, '$.actionId')`,
-    ),
+    uniqueIndex("placement_consent_action").on(t.principalScope, t.actionId),
     uniqueIndex("placement_consent_submission").on(
       t.principalScope,
       t.submissionKey,
@@ -1769,3 +1770,159 @@ export const placementRetryConsents = sqliteTable(
     check("placement_consent_budget", sql`${t.allowedAttempts} = 1`),
   ],
 );
+
+export const placementActionIdentities = sqliteTable(
+  "placement_action_identity",
+  {
+    op: text("op")
+      .notNull()
+      .primaryKey()
+      .references(() => placementOperations.id),
+    protocol: text("native_protocol"),
+    submissionUuid: text("submission_uuid").unique(),
+    authority: text("authority").notNull(),
+  },
+  (t) => [
+    check(
+      "placement_action_protocol",
+      sql`(${t.protocol} IS NULL)=(${t.submissionUuid} IS NOT NULL)`,
+    ),
+    check(
+      "placement_submission_normalized",
+      sql`${t.submissionUuid} IS NULL OR ${t.submissionUuid}=lower(${t.submissionUuid})`,
+    ),
+    check("placement_authority_json", sql`json_valid(${t.authority})`),
+  ],
+);
+export const placementSteps = sqliteTable(
+  "placement_step",
+  {
+    op: text("op")
+      .notNull()
+      .references(() => placementActionIdentities.op),
+    step: integer("step").notNull(),
+    kind: text("kind", { enum: placementStepKinds }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.op, t.step] }),
+    check("placement_step_number", sql`${t.step}>=0`),
+    check(
+      "placement_step_kind",
+      sql`${t.kind} IN ('compact','input','retry','answer','clear')`,
+    ),
+  ],
+);
+export const placementEffects = sqliteTable(
+  "placement_effect",
+  {
+    request: text("request").notNull().primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .unique()
+      .references(() => events.id),
+    thread: text("thread")
+      .notNull()
+      .references(() => threads.id),
+    root: text("root")
+      .notNull()
+      .references((): AnySQLiteColumn => placementEffects.request),
+    executionOwnerOperationId: text("execution_owner_operation_id")
+      .notNull()
+      .references(() => placementOperations.id),
+    nativeExecutionId: text("native_execution_id").unique(),
+    agentSessionId: text("agent_session_id"),
+    commandId: text("command_id").unique(),
+    binding: text("binding").notNull(),
+    fence: integer("fence").notNull(),
+    execution: text("execution").notNull(),
+    state: text("state", { enum: placementEffectStates }).notNull(),
+  },
+  (t) => [
+    check(
+      "placement_effect_command_tuple",
+      sql`(${t.commandId} IS NULL)=(${t.nativeExecutionId} IS NULL) AND (${t.commandId} IS NULL)=(${t.agentSessionId} IS NULL) AND (${t.commandId} IS NOT NULL OR ${t.state} IN ('prepared','refused_unsent','cancelled'))`,
+    ),
+    check("placement_effect_fence", sql`${t.fence}>0`),
+    check(
+      "placement_effect_state",
+      sql`${t.state} IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled')`,
+    ),
+  ],
+);
+export const placementAttempts = sqliteTable(
+  "placement_attempt",
+  {
+    op: text("op").notNull(),
+    step: integer("step").notNull(),
+    attempt: integer("attempt").notNull(),
+    queueId: text("queue_id"),
+    queueDigest: text("queue_digest"),
+    queueOrdinal: integer("queue_ordinal"),
+    request: text("request").references(() => placementEffects.request),
+    ordinal: integer("ordinal"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.op, t.step, t.attempt] }),
+    foreignKey({
+      columns: [t.op, t.step],
+      foreignColumns: [placementSteps.op, placementSteps.step],
+    }),
+    uniqueIndex("placement_attempt_request_member").on(t.request, t.ordinal),
+    uniqueIndex("placement_attempt_queue_member").on(t.queueId, t.queueOrdinal),
+    index("placement_attempt_queue").on(t.queueId),
+    check(
+      "placement_attempt_numbers",
+      sql`${t.attempt}>=0 AND (${t.queueOrdinal} IS NULL OR ${t.queueOrdinal}>=0) AND (${t.ordinal} IS NULL OR ${t.ordinal}>=0)`,
+    ),
+    check(
+      "placement_attempt_links",
+      sql`(${t.queueId} IS NULL)=(${t.queueDigest} IS NULL) AND (${t.queueId} IS NULL)=(${t.queueOrdinal} IS NULL) AND (${t.request} IS NULL)=(${t.ordinal} IS NULL)`,
+    ),
+  ],
+);
+export const placementRetryTargets = sqliteTable(
+  "placement_retry_target",
+  {
+    consent: text("consent")
+      .notNull()
+      .primaryKey()
+      .references(() => placementRetryConsents.id),
+    failedRequest: text("failed_request")
+      .notNull()
+      .references(() => placementEffects.request),
+    root: text("root")
+      .notNull()
+      .references(() => placementEffects.request),
+    groupDigest: text("group_digest").notNull(),
+    state: text("state", { enum: placementRetryStates }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("placement_one_retry")
+      .on(t.failedRequest)
+      .where(sql`${t.state} IN ('held','scheduled','spent')`),
+    uniqueIndex("placement_one_live_chain_retry")
+      .on(t.root)
+      .where(sql`${t.state} IN ('held','scheduled')`),
+    check(
+      "placement_retry_state",
+      sql`${t.state} IN ('held','scheduled','spent','revoked','expired','superseded')`,
+    ),
+  ],
+);
+export const placementGrantKeys = sqliteTable(
+  "placement_grant_key",
+  {
+    principal: text("principal").notNull(),
+    transportKey: text("transport_key").notNull(),
+    consent: text("consent")
+      .notNull()
+      .references(() => placementRetryConsents.id),
+  },
+  (t) => [primaryKey({ columns: [t.principal, t.transportKey] })],
+);
+
+export const placementSourceFacts = sqliteTable("placement_source_fact", {
+  source: text("source").primaryKey().notNull(),
+  revision: integer("revision").notNull(),
+  bytes: text("bytes").notNull(),
+});

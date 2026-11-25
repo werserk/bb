@@ -1,3 +1,9 @@
+import {
+  queueMemberDigest,
+  readPlacementActionReceipt,
+} from "./placement-action-receipts.js";
+import { placementAttempts } from "../schema.js";
+import { clientSubmissionQueueId } from "@bb/domain";
 import { and, eq } from "drizzle-orm";
 import {
   canonicalWorkspaceBytes,
@@ -398,12 +404,11 @@ export function recordPlacementQueueReceipt(
   args: {
     operationId: string;
     fence: number;
-    queuedMessageId: string;
-    requestId: string | null;
+    queuedMessageId?: string;
     insertQueue: (
       tx: DbTransaction,
       identity: { operationId: string; fence: number },
-    ) => void;
+    ) => string | void;
     onCommitted: () => void;
   },
 ) {
@@ -413,7 +418,8 @@ export function recordPlacementQueueReceipt(
     op.cancelRequested ||
     !op.binding ||
     !op.threadId ||
-    op.fence !== args.fence ||
+    (op.fence !== args.fence &&
+      !(op.kind === "continuation" && op.fence === null)) ||
     op.retryScheduleState === "awaiting_scheduler"
   )
     return { kind: "refused" as const };
@@ -429,19 +435,39 @@ export function recordPlacementQueueReceipt(
   );
   if (
     !w ||
-    w.ownerOperationId !== op.id ||
+    (w.ownerOperationId !== op.id &&
+      !(
+        op.kind === "continuation" &&
+        w.threadId === op.threadId &&
+        w.ownerOperationId &&
+        op.preparedExecution
+      )) ||
     w.fence !== args.fence ||
-    !["reserved", "resident"].includes(w.slotState)
+    !["reserved", "resident", "active"].includes(w.slotState)
   )
     return { kind: "stale" as const };
-  args.insertQueue(tx, { operationId: op.id, fence: args.fence });
-  const row = tx
-    .select()
-    .from(queue)
-    .where(eq(queue.id, args.queuedMessageId))
-    .get();
+  const receipt = readPlacementActionReceipt(tx, op.id);
+  if (!receipt || (!receipt.protocol && !receipt.submissionUuid))
+    throw new Error("Missing action identity");
+  const expected = receipt.submissionUuid
+    ? clientSubmissionQueueId(receipt.submissionUuid)
+    : null;
+  const actual =
+    args.insertQueue(tx, { operationId: op.id, fence: args.fence }) ??
+    args.queuedMessageId;
+  if (
+    !actual ||
+    (expected !== null && actual !== expected) ||
+    (args.queuedMessageId && actual !== args.queuedMessageId)
+  )
+    throw new Error("Wrong placement queue identity");
+  const row = tx.select().from(queue).where(eq(queue.id, actual)).get();
   if (
     !row ||
+    (receipt.protocol &&
+      (row.payloadKind !== "questionResponse" ||
+        row.questionId !== receipt.protocol.questionId ||
+        row.questionRevision !== receipt.protocol.revision)) ||
     row.threadId !== op.threadId ||
     row.placementOperationId !== op.id ||
     row.placementFence !== args.fence
@@ -449,11 +475,21 @@ export function recordPlacementQueueReceipt(
     throw new Error(
       "Placement queue insertion must persist the exact operation/thread/fence",
     );
+  tx.insert(placementAttempts)
+    .values({
+      op: op.id,
+      step: receipt.steps.at(-1)!.step,
+      attempt: 0,
+      queueId: row.id,
+      queueDigest: queueMemberDigest(row),
+      queueOrdinal: 0,
+    })
+    .run();
   const saved = tx
     .update(operations)
     .set({
       queuedMessageId: row.id,
-      clientTurnRequestId: args.requestId,
+
       phase: "queued",
       revision: op.revision + 1,
       updatedAt: Date.now(),

@@ -42,6 +42,7 @@ function makeRow(overrides: Partial<EnvironmentRow> = {}): EnvironmentRow {
     teardownMessage: null,
     resource: null,
     ownerThreadId: null,
+    ownerPlacementOperationId: null,
     attempt: 0,
     statusMessage: null,
     pendingLog: "",

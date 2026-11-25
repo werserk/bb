@@ -1,3 +1,4 @@
+import { fixtureAuthority } from "./helpers/placement.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +36,7 @@ it("reopens a single admitted Agent and physical Workspace with its original rec
       db.$client.prepare(`SELECT count(*) FROM ${table}`).pluck().get(),
     );
   const scope = {
+    authority: fixtureAuthority,
     principalScope: "owner",
     ownerPluginId: "workers",
     providerId: "claude",

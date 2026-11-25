@@ -1,7 +1,14 @@
+import {
+  currentPlacementRetryTarget,
+  closePlacementRetry,
+} from "./placement-retry.js";
+import { actionIdentity, insertAction } from "./placement-action-receipts.js";
+import { placementActionIdentities as identities } from "../schema.js";
+import type { PlacementQuestionProtocol, PlacementAuthority } from "@bb/domain";
 import { createThreadId } from "../ids.js";
 import { readPlacementThreadBinding } from "./placement-bindings.js";
 import { randomUUID } from "node:crypto";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   canonicalJsonBytes,
   canonicalPlacementPayload,
@@ -10,8 +17,6 @@ import {
   placementOperationSchema,
   type PlacementOperation,
   type PlacementPayload,
-  placementPermissionProvenanceSchema,
-  type PlacementPermissionProvenance,
 } from "@bb/domain";
 import type { DbConnection, DbQueryConnection } from "../connection.js";
 import {
@@ -88,10 +93,18 @@ export function acceptPlacementOperation(
     submissionKey: string;
     ownerPluginId: string;
     providerId: string;
+    authority: PlacementAuthority;
+    protocol?: PlacementQuestionProtocol;
     request: PlacementPayload;
   },
 ): PlacementAcceptanceResult {
   const request = placementPayloadSchema.parse(args.request);
+  const identity = actionIdentity(
+    request,
+    args.principalScope,
+    args.authority,
+    args.protocol,
+  );
   const bytes = canonicalPlacementPayload(request);
   const digest = sha256Digest(bytes);
   return db.transaction(
@@ -106,10 +119,29 @@ export function acceptPlacementOperation(
           ),
         )
         .get();
-      if (old)
-        return old.payloadDigest === digest
+      if (old) {
+        const saved = tx
+          .select()
+          .from(identities)
+          .where(eq(identities.op, old.id))
+          .get();
+        return old.ownerPluginId === args.ownerPluginId &&
+          old.providerId === args.providerId &&
+          saved?.authority === identity.authority &&
+          saved.protocol === identity.protocol &&
+          old.payloadDigest === digest
           ? { kind: "accepted", operation: placementOperationProjection(old) }
           : { kind: "conflict" };
+      }
+      if (
+        identity.uuid &&
+        tx
+          .select()
+          .from(identities)
+          .where(eq(identities.submissionUuid, identity.uuid))
+          .get()
+      )
+        return { kind: "conflict" };
       const owner = tx
         .select()
         .from(owners)
@@ -156,7 +188,7 @@ export function acceptPlacementOperation(
       if (
         intent.kind === "retry" &&
         (!failed ||
-          failed.phase !== "failed" ||
+          !currentPlacementRetryTarget(tx, intent.consentId) ||
           !failed.binding ||
           failed.ownerPluginId !== args.ownerPluginId ||
           failed.providerId !== args.providerId ||
@@ -230,6 +262,7 @@ export function acceptPlacementOperation(
         })
         .returning()
         .get();
+      insertAction(tx, id, identity);
       if (consent)
         tx.update(consents)
           .set({ consumedByOperationId: id })
@@ -253,6 +286,8 @@ export function cancelPlacementOperation(
         ["completed", "cancelled", "refused"].includes(op.phase)
       )
         return op ? placementOperationProjection(op) : null;
+      if (op.consentId && closePlacementRetry(tx, op.consentId, "revoked"))
+        return readPlacementOperation(tx, id);
       const held = tx
         .select({ id: workers.ownerOperationId })
         .from(workers)
@@ -274,69 +309,8 @@ export function cancelPlacementOperation(
     { behavior: "immediate" },
   );
 }
-export function grantPlacementRetryConsent(
-  db: DbConnection,
-  args: {
-    failedOperationId: string;
-    principalScope: string;
-    submissionKey: string;
-    permissionProvenance: PlacementPermissionProvenance;
-  },
-) {
-  const provenance = placementPermissionProvenanceSchema.parse(
-    args.permissionProvenance,
-  );
-  return db.transaction(
-    (tx) => {
-      const old = tx
-        .select()
-        .from(consents)
-        .where(
-          and(
-            eq(consents.principalScope, args.principalScope),
-            or(
-              eq(consents.submissionKey, args.submissionKey),
-              sql`json_extract(${consents.permissionProvenance}, '$.actionId') = ${provenance.actionId}`,
-            ),
-          ),
-        )
-        .all();
-      if (old.length)
-        return old.length === 1 &&
-          old[0]!.permissionProvenance.actionId === provenance.actionId &&
-          old[0]!.failedOperationId === args.failedOperationId
-          ? { kind: "granted" as const, consent: old[0]! }
-          : { kind: "conflict" as const };
-      const failed = readPlacementOperationRecord(tx, args.failedOperationId);
-      if (!failed?.binding || failed.phase !== "failed")
-        return { kind: "refused" as const };
-      const consent = tx
-        .insert(consents)
-        .values({
-          id: `consent_${randomUUID()}`,
-          principalScope: args.principalScope,
-          submissionKey: args.submissionKey,
-          failedOperationId: failed.id,
-          bindingDigest: sha256Digest(canonicalJsonBytes(failed.binding)),
-          failedPayloadDigest: failed.payloadDigest,
-          permissionProvenance: provenance,
-        })
-        .returning()
-        .get();
-      return { kind: "granted" as const, consent };
-    },
-    { behavior: "immediate" },
-  );
-}
-export function revokePlacementRetryConsent(db: DbConnection, id: string) {
-  return db.transaction(
-    (tx) =>
-      tx
-        .update(consents)
-        .set({ revokedAt: sql`coalesce(${consents.revokedAt},${Date.now()})` })
-        .where(eq(consents.id, id))
-        .returning()
-        .get() ?? null,
-    { behavior: "immediate" },
-  );
-}
+export {
+  grantPlacementRetryConsent,
+  revokePlacementRetryConsent,
+  schedulePlacementRetry,
+} from "./placement-retry.js";

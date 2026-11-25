@@ -73,6 +73,7 @@ import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
 import { liveThread } from "./threads.js";
 
 export interface CreateQueuedThreadMessageInput {
+  placement?: { operationId: string; fence: number | null };
   clientSubmissionId?: string;
   serviceTurn?: ServiceTurnDescriptor;
   threadId: string;
@@ -866,6 +867,8 @@ export function createQueuedThreadMessageInTransaction(
     .insert(queuedThreadMessages)
     .values({
       id,
+      placementOperationId: input.placement?.operationId,
+      placementFence: input.placement?.fence,
       threadId: input.threadId,
       content: JSON.stringify(input.content),
       serviceTurn: input.serviceTurn ?? null,
@@ -1571,7 +1574,10 @@ export type QueuedThreadMessageGroupClaimPolicy =
        */
       retryingFailure: boolean;
     }
-  | { kind: "explicit-send" };
+  | {
+      kind: "explicit-send";
+      assertGroupAllowed?: (tx: DbTransaction, rows: readonly QueuedThreadMessageRow[]) => void;
+    };
 
 function isAutomaticQueuedThreadMessageGroupClaimAllowed(
   rows: readonly QueuedThreadMessageRow[],
@@ -1597,7 +1603,19 @@ export function claimQueuedThreadMessageGroup(
   const claimedQueuedMessages = db.transaction(
     (tx) => {
       const existing = getQueuedThreadMessage(tx, id);
-      if (!existing || isQueuedThreadMessageClaimed(existing)) {
+      if (!existing) return null;
+      if (isQueuedThreadMessageClaimed(existing)) {
+        if (policy.kind === "explicit-send" && policy.assertGroupAllowed) {
+          if (!existing.claimToken) throw new Error("Missing native group claim token");
+          const claimed = tx.select().from(queuedThreadMessages)
+            .where(and(
+              eq(queuedThreadMessages.threadId, existing.threadId),
+              eq(queuedThreadMessages.claimToken, existing.claimToken),
+            ))
+            .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+            .all();
+          policy.assertGroupAllowed(tx, claimed);
+        }
         return null;
       }
 
@@ -1627,6 +1645,7 @@ export function claimQueuedThreadMessageGroup(
       ) {
         return null;
       }
+      if (policy.kind === "explicit-send") policy.assertGroupAllowed?.(tx, group);
       if (policy.kind === "explicit-send" && group[0]?.id !== id) {
         const now = Date.now();
         clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);

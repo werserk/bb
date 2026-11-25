@@ -1,3 +1,4 @@
+import { publishSourceFacts } from "./placement-source-facts.js";
 import { and, eq, notInArray } from "drizzle-orm";
 import {
   canonicalJsonBytes,
@@ -99,37 +100,6 @@ export function readPlacementWorker(
       .get() ?? null
   );
 }
-function staleEvidence<T extends { revision: number }>(previous: T, next: T) {
-  return (
-    next.revision < previous.revision ||
-    (next.revision === previous.revision &&
-      canonicalJsonBytes(previous) !== canonicalJsonBytes(next))
-  );
-}
-
-type Route = WorkerObservation["routes"][number];
-function routeKey(route: Route) {
-  return canonicalJsonBytes([
-    route.workspace,
-    route.agent,
-    route.tier,
-    route.fixtureRunId,
-  ]);
-}
-
-function mergeRoutes(previous: Route[], next: Route[]) {
-  const history = new Map(previous.map((route) => [routeKey(route), route]));
-  const seen = new Set<string>();
-  for (const route of next) {
-    const key = routeKey(route);
-    const prior = history.get(key);
-    if (seen.has(key) || (prior && staleEvidence(prior, route))) return null;
-    seen.add(key);
-    history.set(key, route);
-  }
-  return [...history.values()];
-}
-
 export function observePlacementWorkers(
   db: DbConnection,
   args: {
@@ -151,29 +121,26 @@ export function observePlacementWorkers(
         owner.revision !== args.expectedOwnerRevision
       )
         return { kind: "stale" as const };
-      const histories = new Map<string, Route[]>();
+
       for (const w of observed) {
         const old = readPlacementWorker(tx, args.ownerPluginId, w.workerId);
-        const history = mergeRoutes(old?.routeEvidence ?? [], w.routes);
-        if (!history) return { kind: "stale" as const };
-        histories.set(w.workerId, history);
         if (
           w.providerId !== args.providerId ||
           (old &&
             (old.providerId !== args.providerId ||
               w.revision <= old.observationRevision ||
               old.observation.exclusion.authorityPluginId !==
-                w.exclusion.authorityPluginId ||
-              staleEvidence(old.observation.exclusion, w.exclusion) ||
-              (old.generation === w.generation &&
-                old.accountId === w.accountId &&
-                old.agentHostId === w.agentHostId &&
-                (staleEvidence(old.observation.quota, w.quota) ||
-                  (old.nativeCustody &&
-                    staleEvidence(old.nativeCustody, w.custody))))))
+                w.exclusion.authorityPluginId))
         )
           return { kind: "stale" as const };
+        const routes = w.routes.map((r) =>
+          canonicalJsonBytes([r.workspace, r.agent, r.tier, r.fixtureRunId]),
+        );
+        if (new Set(routes).size !== routes.length)
+          return { kind: "stale" as const };
       }
+      if (!publishSourceFacts(tx, args.ownerPluginId, observed))
+        return { kind: "stale" as const };
       const ids = observed.map((w) => w.workerId);
       tx.update(workers)
         .set({ available: false })
@@ -210,7 +177,6 @@ export function observePlacementWorkers(
           providerVersion: w.providerVersion,
           observationRevision: w.revision,
           policyRevision: w.exclusion.revision,
-          routeEvidence: histories.get(w.workerId)!,
           observation: w,
           nativeCustody: w.custody,
           available: true,

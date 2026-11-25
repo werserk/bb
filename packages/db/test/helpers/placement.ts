@@ -1,3 +1,5 @@
+import { readPlacementActionReceipt } from "../../src/data/placement-action-receipts.js";
+import { clientSubmissionQueueId } from "@bb/domain";
 import { eq } from "drizzle-orm";
 import {
   workspaceBindingRef,
@@ -30,6 +32,18 @@ import {
   reservePlacementWorker,
   type PlacementCandidate,
 } from "../../src/data/placement-admission.js";
+export const fixtureAuthority = {
+  principal: "owner",
+  actor: "local-unverified",
+  origin: null,
+  plugin: null,
+  requestedBy: null,
+  sender: null,
+  initiator: "user",
+  escalation: "ask",
+  permission: "auto",
+  serviceTurn: null,
+} as const;
 export const workspace: WorkspaceBinding = {
   schemaVersion: 1,
   workspaceBindingId: "ws",
@@ -145,8 +159,10 @@ export function acceptPrepared(
   db: DbConnection,
   key: string,
   patch: Partial<WorkspaceBinding> = {},
+  requestOptions: { compactFirst?: boolean } = {},
 ) {
   const accepted = acceptPlacementOperation(db, {
+    authority: fixtureAuthority,
     principalScope: "owner",
     submissionKey: key,
     ownerPluginId: "workers",
@@ -156,7 +172,7 @@ export function acceptPrepared(
       intent: {
         kind: "independent",
         selection: { mode: "auto" },
-        request: { input: key },
+        request: { input: key, ...requestOptions },
       },
     },
   });
@@ -224,19 +240,23 @@ export function attachAndQueue(
       if (attached.kind !== "attached" || !attached.operation.threadId)
         throw new Error("attach failed");
       const threadId = attached.operation.threadId;
+      const qid = clientSubmissionQueueId(
+        readPlacementActionReceipt(tx, id)!.submissionUuid!,
+      );
       return recordPlacementQueueReceipt(tx, {
         operationId: id,
         fence: reserved.fence,
-        queuedMessageId: `queue-${id}`,
-        requestId: `request-${id}`,
+        queuedMessageId: qid,
         insertQueue: (t, identity) => {
           t.insert(queuedThreadMessages)
             .values({
-              id: `queue-${id}`,
+              id: qid,
               threadId,
               placementOperationId: identity.operationId,
               placementFence: identity.fence,
-              content: "original bytes",
+              content: JSON.stringify([
+                { type: "text", text: "original bytes", mentions: [] },
+              ]),
               model: "model",
               reasoningLevel: "high",
               permissionMode: "auto",

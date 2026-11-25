@@ -1,3 +1,4 @@
+import { fixtureAuthority } from "./placement.js";
 import { createConnection } from "../../src/connection.js";
 import { acceptPlacementOperation } from "../../src/data/placement-operations.js";
 import { reservePlacementWorker } from "../../src/data/placement-admission.js";
@@ -9,6 +10,7 @@ process.once("message", () => {
     const result =
       process.argv[3] === "accept"
         ? acceptPlacementOperation(db, {
+            authority: fixtureAuthority,
             principalScope: "owner",
             submissionKey: "process-key",
             ownerPluginId: "workers",

@@ -182,6 +182,13 @@ export function rewindPlacementMigration(db: DbConnection): void {
       "ALTER TABLE environments DROP COLUMN owner_placement_operation_id",
     );
   for (const table of [
+    "placement_grant_key",
+    "placement_retry_target",
+    "placement_attempt",
+    "placement_effect",
+    "placement_step",
+    "placement_action_identity",
+    "placement_source_fact",
     "placement_binding",
     "placement_retry_consent",
     "placement_worker",

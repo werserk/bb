@@ -1,3 +1,8 @@
+import {
+  readSharedPolicy,
+  currentRoute,
+  recordCustodyFact,
+} from "./placement-source-facts.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
@@ -23,6 +28,7 @@ import {
   placementCounters as counters,
   placementWorkspaces as workspaces,
   placementRetryConsents as consents,
+  placementEffects as effects,
   threads,
   queuedThreadMessages as queue,
 } from "../schema.js";
@@ -64,7 +70,7 @@ function matchesBinding(w: Worker, b: PlacementBinding): boolean {
     w.generation === b.generation
   );
 }
-function eligibility(
+export function placementMemberIneligible(
   db: DbQueryConnection,
   op: Operation,
   w: Worker,
@@ -83,15 +89,20 @@ function eligibility(
   if (o.admission !== "enabled")
     return o.admission === "draining" ? "worker_draining" : "worker_disabled";
   if (o.auth !== "authenticated") return "auth_required";
-  if (o.exclusion.status !== "excluded") return "worker_disabled";
+  const policy = readSharedPolicy(db, w.ownerPluginId, o);
+  if (!policy || policy.exclusion.status !== "excluded")
+    return "worker_disabled";
   const execution = op.preparedExecution
     ? JSON.parse(op.preparedExecution)
     : null;
   if (
-    o.quota.block?.generation === w.generation &&
-    (o.quota.block.model === null || execution?.model === o.quota.block.model)
+    policy.quota.block?.generation === w.generation &&
+    (policy.quota.block.model === null ||
+      execution?.model === policy.quota.block.model)
   )
-    return o.quota.block.kind === "auth" ? "auth_required" : "quota_blocked";
+    return policy.quota.block.kind === "auth"
+      ? "auth_required"
+      : "quota_blocked";
   if (
     o.qualification.tier !== purpose.kind ||
     (purpose.kind === "local-fixture" &&
@@ -137,14 +148,20 @@ function eligibility(
     )
       return "binding_changed";
   }
-  const route = w.observation.routes.find(
+  const publishedRoute = w.observation.routes.find(
     (r) =>
       r.workspace.workspaceBindingId === op.resolvedWorkspaceId &&
       r.workspace.revision === op.resolvedWorkspaceRevision &&
       r.workspace.workspaceDigest === op.resolvedWorkspaceDigest &&
       (routeRevision === undefined || r.revision === routeRevision),
   );
-  if (!route) return "unsupported_tool_route";
+  const route =
+    publishedRoute && currentRoute(db, w.ownerPluginId, o, publishedRoute);
+  if (
+    !route ||
+    (routeRevision !== undefined && route.revision !== routeRevision)
+  )
+    return "unsupported_tool_route";
   if (
     route.agent.hostId !== w.agentHostId ||
     route.agent.generation !== w.generation ||
@@ -197,7 +214,7 @@ function olderCompatible(
     .all();
   return older.some(
     (candidate) =>
-      eligibility(db, candidate, w, purpose) === null &&
+      placementMemberIneligible(db, candidate, w, purpose) === null &&
       (candidate.consentId === null ||
         db
           .select({ id: consents.id })
@@ -254,7 +271,7 @@ function validateCandidate(db: DbQueryConnection, args: PlacementCandidate) {
   const w = readPlacementWorker(db, op.ownerPluginId, args.workerId);
   if (!w || w.observationRevision !== args.workerRevision)
     return wait("reconciliation_required");
-  const reason = eligibility(
+  const reason = placementMemberIneligible(
     db,
     op,
     w,
@@ -510,6 +527,8 @@ export function recordPlacementRuntimeState(
         custody.revision <= (w.nativeCustody?.revision ?? 0)
       )
         return wait("binding_changed");
+      if (!recordCustodyFact(tx, w.ownerPluginId, w.providerId, custody))
+        return wait("custody_unknown");
       const held =
         custody.status === "held" &&
         (w.nativeCustody?.status !== "held" ||
@@ -519,10 +538,22 @@ export function recordPlacementRuntimeState(
         custody.holder.threadId === w.threadId &&
         custody.lock?.device === w.fenceLock?.device &&
         custody.lock?.inode === w.fenceLock?.inode;
+      const unresolved = tx
+        .select({ request: effects.request })
+        .from(effects)
+        .where(
+          and(
+            eq(effects.executionOwnerOperationId, op.id),
+            eq(effects.fence, w.fence),
+            inArray(effects.state, ["prepared", "possibly_sent"]),
+          ),
+        )
+        .get();
       const state =
         !held || args.activity === "unknown"
           ? "unknown"
           : args.activity === "idle" &&
+              !unresolved &&
               !args.backgroundWork &&
               !args.pendingInteraction
             ? "resident"
@@ -686,6 +717,8 @@ export function finishPlacementReclaim(
         observation.lock.inode !== w.fenceLock.inode ||
         observation.revision <= w.nativeCustody.revision
       )
+        return wait("custody_unknown");
+      if (!recordCustodyFact(tx, w.ownerPluginId, w.providerId, observation))
         return wait("custody_unknown");
       tx.update(workers)
         .set({

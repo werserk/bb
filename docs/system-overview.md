@@ -552,6 +552,13 @@ for causal legacy handoff, lock ownership and review dispositions.
 
 ### Placement custody contracts and storage
 
+Admission re-reads shared source facts inside the writer transaction. Quota belongs
+to the reporting owner, provider, account, Agent host and generation. Central
+exclusion belongs to the physical host and pins its policy authority. A route
+belongs to its publisher, provider, Workspace ref, Agent, tier and fixture run.
+Native custody also identifies the exact worker, host and generation. A new
+registration fences the previous publisher and preserves these source histories.
+
 The domain owns the closed Workspace v1 descriptor, normalized capability set,
 canonical digest, Agent binding, worker evidence, and placement operation
 projection. Server-contract composes the existing create/send/fork schemas into
@@ -589,6 +596,24 @@ Registration requires fresh worker publication. Route watermarks survive route
 withdrawal and quota, custody and exclusion revisions are checked independently
 of the enclosing observation. An attributed retry action has one budget per
 principal across grant retransmissions.
+
+Each action owns a stable submission identity and ordered steps. Attempts link
+the original native queue receipts to one actual requested event in native
+member order. The ordinary dispatch writer validates claimed rows in the
+caller's append-and-consume transaction. Each effect retains its execution
+owner, fence, binding and requested event. Command preparation pins the native
+execution, transport command and authenticated Agent connection. Only the
+winner of the durable handoff transition may send. Reopening a possibly-sent
+effect requires correlated evidence. The historical receipt supplies no
+authority for post-handoff tools.
+
+A retry grant pins an exact failed event and member plus a digest of the
+ordered group. Transport aliases identify one attributed grant. Partial
+unique indexes serialize successors for the failed request and root.
+ProviderRetry schedules an unfenced native row, and due dispatch checks its
+derived agent-only input, current entitlement and binding before spending it.
+A newer native requested event supersedes outstanding targets in the same
+transaction when the native writer calls the reconciliation hook.
 
 Fork migration 0006 adds nullable ownership references without rebuilding legacy
 queue/environment tables, preserving fork-only columns and existing Codex and
