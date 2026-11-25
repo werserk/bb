@@ -39,6 +39,8 @@ import type {
 } from "../../types.js";
 import {
   managedOrdinaryRequest,
+  authorizeManagedQueueMembers,
+  requireManagedPendingStart,
   type ManagedQueuePlacement,
   placementDispatchUnavailable,
   threadRequiresPlacement,
@@ -523,8 +525,9 @@ function appendAndQueueSendThreadMessageInTransaction({
                   systemMessageSubject: systemNotice.subject,
                 }
               : {}),
-            requestMethod: "turn/start",
-            source: "tell",
+            requestMethod:
+              target.kind === "thread-start" ? "thread/start" : "turn/start",
+            source: target.kind === "thread-start" ? "spawn" : "tell",
             target,
             requestId: requestId ?? createClientTurnRequestId(),
           },
@@ -554,6 +557,103 @@ function appendAndQueueSendThreadMessageInTransaction({
     activeThread,
     request,
   };
+}
+
+export async function dispatchManagedQueueRequest(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  claim: NonNullable<SendThreadMessageArgs["managedClaim"]>,
+  event: Pick<
+    AppendAndQueueSendThreadMessageArgs,
+    | "beforeAppendInTransaction"
+    | "thread"
+    | "environmentId"
+    | "execution"
+    | "initiator"
+    | "input"
+    | "inputGroups"
+    | "clientSubmissions"
+    | "sourceQueuedMessageIds"
+    | "dispatchProvenance"
+    | "originPluginId"
+    | "senderThreadId"
+  > & { target: { kind: "thread-start" | "new-turn" } },
+) {
+  const { thread, environmentId, target } = event;
+  if (!environmentId) placementDispatchUnavailable();
+  let appended: AppendAndQueueSendThreadMessageResult;
+  try {
+    appended = appendAndQueueSendThreadMessageInTransaction({
+      ...event,
+      db: deps.db,
+      requestId: null,
+      systemNotice: undefined,
+      beforeAppendInTransaction: ({ tx }) => {
+        event.beforeAppendInTransaction?.({ tx });
+        if (target.kind === "thread-start") {
+          if (!authorizeManagedQueueMembers(tx, claim.rows, claim.readScope))
+            placementDispatchUnavailable();
+          const current = requireManagedPendingStart(
+            tx,
+            claim.rows[0]!,
+            claim.rows[0]!.id,
+          );
+          if (
+            canonicalJsonBytes(current) !== canonicalJsonBytes(event.execution)
+          )
+            placementDispatchUnavailable();
+        }
+      },
+      queueInTransaction: ({ tx, requestId, requestEventSequence }) => {
+        const current = getEnvironment(tx, environmentId);
+        if (
+          !deps.placementWorkspacePurpose ||
+          canonicalJsonBytes(deps.placementWorkspacePurpose) !==
+            canonicalJsonBytes(claim.guard.purpose) ||
+          current?.status !== "ready" ||
+          !current.path
+        )
+          placementDispatchUnavailable();
+        managedOrdinaryRequest(
+          tx,
+          {
+            threadId: thread.id,
+            requestId,
+            requestSequence: requestEventSequence,
+            ...claim.guard,
+            claimed: claim.rows,
+          },
+          resolvePermissionEscalation({ initiator: event.initiator }),
+          claim.readScope,
+        );
+        claim.consume({ tx });
+        return { activeThread: null };
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof PlacementGroupFairnessError &&
+      error.retainedHead &&
+      claim.rows.length > 1
+    )
+      throw error;
+    if (error instanceof PlacementDispatchConflictError)
+      placementDispatchUnavailable();
+    throw error;
+  }
+  deps.hub.notifyThread(
+    thread.id,
+    [
+      ...new Set([
+        ...appended.request.notificationChanges,
+        "queue-changed" as const,
+      ]),
+    ],
+    appended.request.notificationMetadata,
+  );
+  await dispatchManagedOrdinaryTurn(deps, {
+    threadId: thread.id,
+    requestId: appended.request.requestId,
+  });
 }
 
 export async function sendThreadMessage(
@@ -711,79 +811,22 @@ async function sendThreadMessageWithoutContextClear(
   });
 
   if (args.managedClaim) {
-    const claim = args.managedClaim;
-    let appended: AppendAndQueueSendThreadMessageResult;
-    try {
-      appended = appendAndQueueSendThreadMessageInTransaction({
-        db: deps.db,
-        beforeAppendInTransaction,
-        dispatchProvenance: args.dispatchProvenance,
-        environmentId: environment.id,
-        execution,
-        initiator,
-        input,
-        inputGroups,
-        clientSubmissions: payload.clientSubmissions,
-        sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
-        originPluginId: args.originPluginId,
-        requestId: null,
-        senderThreadId,
-        systemNotice: undefined,
-        target: { kind: "new-turn" },
-        thread,
-        queueInTransaction: ({ tx, requestId, requestEventSequence }) => {
-          const current = getEnvironment(tx, environment.id);
-          if (
-            !deps.placementWorkspacePurpose ||
-            canonicalJsonBytes(deps.placementWorkspacePurpose) !==
-              canonicalJsonBytes(claim.guard.purpose) ||
-            current?.status !== "ready" ||
-            !current.path ||
-            mode !== "start"
-          )
-            placementDispatchUnavailable();
-          managedOrdinaryRequest(
-            tx,
-            {
-              threadId: thread.id,
-              requestId,
-              requestSequence: requestEventSequence,
-              ...claim.guard,
-              claimed: claim.rows,
-            },
-            permissionEscalation,
-            claim.readScope,
-          );
-          claim.consume({ tx });
-          return { activeThread: null };
-        },
-      });
-    } catch (error) {
-      if (
-        error instanceof PlacementGroupFairnessError &&
-        error.retainedHead &&
-        claim.rows.length > 1
-      )
-        throw error;
-      if (error instanceof PlacementDispatchConflictError)
-        placementDispatchUnavailable();
-      throw error;
-    }
-    deps.hub.notifyThread(
-      thread.id,
-      [
-        ...new Set([
-          ...appended.request.notificationChanges,
-          "queue-changed" as const,
-        ]),
-      ],
-      appended.request.notificationMetadata,
-    );
-    await dispatchManagedOrdinaryTurn(deps, {
-      threadId: thread.id,
-      requestId: appended.request.requestId,
+    if (mode !== "start") placementDispatchUnavailable();
+    return dispatchManagedQueueRequest(deps, args.managedClaim, {
+      beforeAppendInTransaction,
+      thread,
+      environmentId: environment.id,
+      execution,
+      initiator,
+      input,
+      inputGroups,
+      clientSubmissions: payload.clientSubmissions,
+      sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
+      dispatchProvenance: args.dispatchProvenance,
+      originPluginId: args.originPluginId,
+      senderThreadId,
+      target: { kind: "new-turn" },
     });
-    return;
   }
 
   if (

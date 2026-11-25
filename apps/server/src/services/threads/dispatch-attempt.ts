@@ -104,6 +104,7 @@ import {
   formatAgentThreadInput,
   resolveMessageSenderThreadId,
   sendThreadMessage,
+  dispatchManagedQueueRequest,
   type SendThreadMessageTransactionPreflight,
 } from "./thread-send.js";
 import {
@@ -468,11 +469,13 @@ async function runDispatchAttempt(
       : payload.mode,
   );
 
-  const execution = await buildExecutionOptions(
-    deps,
-    payload,
-    args.executionDefaults ?? { threadId: thread.id },
-  );
+  const execution =
+    managedClaim?.startExecution ??
+    (await buildExecutionOptions(
+      deps,
+      payload,
+      args.executionDefaults ?? { threadId: thread.id },
+    ));
   if (payload.compactFirst) {
     const { compactFirst, ...request } = payload;
     await compactThreadContext(deps, thread);
@@ -598,6 +601,7 @@ async function runDispatchAttempt(
     const { environment: dispatchEnvironment, host: dispatchHost } =
       dispatchEnvironmentAndHost(deps, thread.environmentId);
     if (
+      !managedClaim?.startExecution &&
       dispatchHost !== null &&
       isMachineWaitingForExecution(deps, dispatchHost.id)
     ) {
@@ -621,6 +625,7 @@ async function runDispatchAttempt(
     }
 
     if (
+      !managedClaim?.startExecution &&
       dispatchEnvironment !== null &&
       goneThreadEnvironmentDetails(dispatchEnvironment) === null &&
       dispatchHost !== null &&
@@ -668,7 +673,7 @@ async function runDispatchAttempt(
       return;
     }
 
-    if (firstDispatch) {
+    if (firstDispatch && !managedClaim?.startExecution) {
       admitted.value = await admitPendingThread(deps, {
         author,
         claimed,
@@ -766,6 +771,38 @@ async function runDispatchAttempt(
   }
 
   // --- 2. dispatch --------------------------------------------------------
+
+  if (managedClaim?.startExecution) {
+    await dispatchManagedQueueRequest(
+      deps,
+      {
+        ...managedClaim,
+        consume: consumeClaimedRows(
+          managedClaim.rows,
+          thread.id,
+          respectManualStopPause,
+        ),
+      },
+      {
+        thread,
+        target: { kind: "thread-start" },
+        environmentId: thread.environmentId,
+        execution,
+        ...author,
+        input: payload.input,
+        inputGroups: payload.inputGroups,
+        sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
+        clientSubmissions: payload.clientSubmissions,
+        originPluginId: args.originPluginId,
+        dispatchProvenance: {
+          origin: args.origin,
+          originPluginId: args.originPluginId,
+          requestedBy: args.startedOnBehalfOf,
+        },
+      },
+    );
+    return { kind: "dispatched" };
+  }
 
   if (firstDispatch) {
     const admission = admitted.value;

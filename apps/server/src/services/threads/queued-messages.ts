@@ -514,6 +514,7 @@ function claimQueuedThreadMessageForSend(
                 group,
                 deps.placementWorkspacePurpose,
                 args.readPlacementScope,
+                args.queuedMessageId,
               );
             policy.assertGroupAllowed?.(tx, group);
           },
