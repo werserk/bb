@@ -63,6 +63,9 @@ CREATE TABLE `placement_effect` (
 	`event_id` text NOT NULL,
 	`request_sequence` integer NOT NULL,
 	`live_event_id` text,
+	`rejection_event_id` text,
+	`live_rejection_event_id` text,
+	`rejection_reason` text,
 	`thread` text NOT NULL,
 	`root` text NOT NULL,
 	`execution_owner_operation_id` text NOT NULL,
@@ -74,10 +77,12 @@ CREATE TABLE `placement_effect` (
 	`execution` text NOT NULL,
 	`state` text NOT NULL,
 	FOREIGN KEY (`live_event_id`) REFERENCES `events`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`live_rejection_event_id`) REFERENCES `events`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`thread`) REFERENCES `threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`root`) REFERENCES `placement_effect`(`request`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`execution_owner_operation_id`) REFERENCES `placement_operation`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "placement_effect_live_identity" CHECK("placement_effect"."live_event_id" IS NULL OR "placement_effect"."live_event_id"="placement_effect"."event_id"),
+	CONSTRAINT "placement_effect_rejection" CHECK(("placement_effect"."rejection_event_id" IS NULL AND "placement_effect"."live_rejection_event_id" IS NULL AND "placement_effect"."rejection_reason" IS NULL) OR ("placement_effect"."state"='refused_unsent' AND "placement_effect"."rejection_event_id" IS NOT NULL AND ("placement_effect"."live_rejection_event_id" IS NULL OR "placement_effect"."live_rejection_event_id" IS "placement_effect"."rejection_event_id") AND ("placement_effect"."rejection_reason" IS NULL OR "placement_effect"."rejection_reason" IN ('managed_execution_unsupported','managed_admission_unavailable')))),
 	CONSTRAINT "placement_effect_command_tuple" CHECK(("placement_effect"."command_id" IS NULL)=("placement_effect"."native_execution_id" IS NULL) AND ("placement_effect"."command_id" IS NULL)=("placement_effect"."agent_session_id" IS NULL) AND ("placement_effect"."command_id" IS NOT NULL OR "placement_effect"."state" IN ('prepared','refused_unsent','cancelled'))),
 	CONSTRAINT "placement_effect_fence" CHECK("placement_effect"."fence">0),
 	CONSTRAINT "placement_effect_state" CHECK("placement_effect"."state" IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled'))
@@ -85,6 +90,8 @@ CREATE TABLE `placement_effect` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_event_id_unique` ON `placement_effect` (`event_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_live_event_id_unique` ON `placement_effect` (`live_event_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `placement_effect_rejection_event_id_unique` ON `placement_effect` (`rejection_event_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `placement_effect_live_rejection_event_id_unique` ON `placement_effect` (`live_rejection_event_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_native_execution_id_unique` ON `placement_effect` (`native_execution_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_command_id_unique` ON `placement_effect` (`command_id`);--> statement-breakpoint
 CREATE INDEX `placement_active_effect_owner_fence` ON `placement_effect` (`execution_owner_operation_id`,`fence`) WHERE "placement_effect"."state" IN ('possibly_sent','prepared');--> statement-breakpoint
@@ -233,6 +240,7 @@ CREATE TABLE `placement_worker` (
 	`last_assigned_seq` integer,
 	`reclaim_operation_id` text,
 	`reclaim_source_fence` integer,
+	`reclaim_holder` text,
 	`physical_lock` text,
 	`fence_lock` text,
 	`native_custody` text,
@@ -347,7 +355,7 @@ BEGIN SELECT RAISE(ABORT,'immutable prepared placement input'); END;
 
 --> statement-breakpoint
 CREATE TRIGGER placement_effect_anchor BEFORE INSERT ON placement_effect
-WHEN NEW.live_event_id IS NOT NEW.event_id OR NOT EXISTS (SELECT 1 FROM events
+WHEN NEW.rejection_event_id IS NOT NULL OR NEW.state <> 'prepared' OR NEW.live_event_id IS NOT NEW.event_id OR NOT EXISTS (SELECT 1 FROM events
  WHERE id=NEW.event_id AND thread_id=NEW.thread AND sequence=NEW.request_sequence AND type='client/turn/requested' AND json_extract(data,'$.requestId')=NEW.request)
 BEGIN SELECT RAISE(ABORT,'missing native requested event'); END;
 --> statement-breakpoint
@@ -358,6 +366,23 @@ BEGIN SELECT RAISE(ABORT,'immutable native event link'); END;
 CREATE TRIGGER placement_effect_detached AFTER UPDATE OF live_event_id ON placement_effect
 WHEN NEW.live_event_id IS NULL AND OLD.state='prepared'
 BEGIN UPDATE placement_effect SET state='cancelled' WHERE request=OLD.request; END;
+--> statement-breakpoint
+CREATE TRIGGER placement_effect_require_rejection BEFORE UPDATE OF state ON placement_effect
+WHEN NEW.state='refused_unsent' AND (OLD.live_event_id IS NULL OR NEW.live_rejection_event_id IS NULL
+ OR NEW.live_rejection_event_id IS NOT NEW.rejection_event_id OR NOT EXISTS (
+ SELECT 1 FROM events e WHERE e.id=NEW.rejection_event_id AND e.thread_id=OLD.thread
+ AND e.sequence>OLD.request_sequence AND e.type='client/turn/rejected' AND e.scope_kind='thread'
+ AND json_extract(e.data,'$.requestId')=OLD.request AND json_extract(e.data,'$.deferredToQueuedMessageId') IS NULL
+ AND NEW.rejection_reason IS (CASE WHEN json_extract(e.data,'$.reason') IN ('managed_execution_unsupported','managed_admission_unavailable')
+ THEN json_extract(e.data,'$.reason') END)))
+BEGIN SELECT RAISE(ABORT,'missing native rejection evidence'); END;
+--> statement-breakpoint
+CREATE TRIGGER placement_effect_rejection_immutable BEFORE UPDATE OF rejection_event_id,rejection_reason,live_rejection_event_id ON placement_effect
+WHEN NOT (OLD.state='prepared' AND NEW.state='refused_unsent') AND NOT (
+ OLD.rejection_event_id IS NEW.rejection_event_id AND OLD.rejection_reason IS NEW.rejection_reason
+ AND OLD.live_rejection_event_id IS NOT NULL AND NEW.live_rejection_event_id IS NULL
+ AND NOT EXISTS(SELECT 1 FROM events WHERE id=OLD.live_rejection_event_id))
+BEGIN SELECT RAISE(ABORT,'immutable native rejection evidence'); END;
 --> statement-breakpoint
 CREATE TRIGGER placement_worker_physical_pin BEFORE UPDATE OF physical_lock ON placement_worker
 WHEN NEW.physical_lock IS NOT NULL AND (json_extract(NEW.physical_lock,'$[0]') IS NOT NEW.agent_host_id

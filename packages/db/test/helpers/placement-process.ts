@@ -1,3 +1,4 @@
+import { setOwnerMode } from "../../src/internal-placement-owner.js";
 import { fixtureAuthority } from "./placement.js";
 import { createConnection } from "../../src/connection.js";
 import { acceptPlacementOperation } from "../../src/data/placement-operations.js";
@@ -8,8 +9,20 @@ const db = createConnection(process.argv[2]);
 process.send?.("ready");
 process.once("message", () => {
   try {
+    if (process.argv[3] === "mode-race" && process.argv[4] === "disable") {
+      process.send?.(
+        setOwnerMode(db, {
+          providerId: "claude",
+          ownerPluginId: "workers",
+          mode: "disabled",
+          expectedRevision: 2,
+          handoffReceiptId: null,
+        }),
+      );
+      return;
+    }
     const result =
-      process.argv[3] === "accept"
+      process.argv[3] === "accept" || process.argv[3] === "mode-race"
         ? acceptPlacementOperation(db, {
             authority: fixtureAuthority,
             principalScope: "owner",

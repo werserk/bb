@@ -592,6 +592,14 @@ path alongside its canonical descriptor. Resolving a path alias requires a
 host resolution tied to that environment and alias. Attach and admission check
 the location again. Forks inherit the source Workspace by default. An explicit
 reuse target or unmanaged host/path can identify an alternate Workspace.
+Registration starts with managed admission disabled. The internal owner-mode writer
+checks the current revision. Activation requires a server-owned verifier reading
+qualified empty-inventory evidence or a committed legacy handoff and quiescence
+receipt under the same transaction. The default has no verifier. Policy wait and
+refusal writes check the evaluated owner revision and the unreserved operation
+revision. A new managed accept checks the persisted mode under its writer lock.
+An exact authenticated replay uses its original submission context even after
+mode or execution defaults change.
 Registration requires fresh worker publication. Route watermarks survive route
 withdrawal and quota, custody and exclusion revisions are checked independently
 of the enclosing observation. An attributed retry action has one budget per
@@ -623,8 +631,18 @@ A worker reservation pins a unique physical resource across all worker and
 account aliases using the Agent host, device and inode. The free observation
 has no boot ID. An epoch or boot change alone cannot discharge a pinned lock.
 Held or unknown reports on an identified lock also block other reporting
-sources until that source observes it free. The logical operation/fence and
-holder boot/process evidence remain necessary for a confirmed close.
+sources while effective. Closing a completed pinned resident accepts corroboration
+of the same boot, process incarnation, thread and fence on its physical lock.
+The reclaim records that holder. Matching operation closure and a newer free
+observation discharge only reports for that incarnation in the release transaction.
+An identical source revision stays discharged across restart. A newer held or
+unknown report blocks reservation again.
+
+A definite pre-handoff refusal appends the native rejection and captures its event
+ID and allowlisted response code in the same transaction. Deleting that rejection
+clears its live link. Historical readback keeps the original evidence independently
+of the requested event's live link. An unknown or unverified reason gives generic
+historical status. A suffix replacement cannot supply the original reason.
 
 The send claim, reservation and reclaim-start writers own their outer SQLite
 transaction. A call on a connection already inside a transaction refuses

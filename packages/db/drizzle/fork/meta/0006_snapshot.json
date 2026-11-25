@@ -2740,6 +2740,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "rejection_event_id": {
+          "name": "rejection_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "live_rejection_event_id": {
+          "name": "live_rejection_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rejection_reason": {
+          "name": "rejection_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "thread": {
           "name": "thread",
           "type": "text",
@@ -2826,6 +2847,20 @@
           ],
           "isUnique": true
         },
+        "placement_effect_rejection_event_id_unique": {
+          "name": "placement_effect_rejection_event_id_unique",
+          "columns": [
+            "rejection_event_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_live_rejection_event_id_unique": {
+          "name": "placement_effect_live_rejection_event_id_unique",
+          "columns": [
+            "live_rejection_event_id"
+          ],
+          "isUnique": true
+        },
         "placement_effect_native_execution_id_unique": {
           "name": "placement_effect_native_execution_id_unique",
           "columns": [
@@ -2857,6 +2892,19 @@
           "tableTo": "events",
           "columnsFrom": [
             "live_event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "placement_effect_live_rejection_event_id_events_id_fk": {
+          "name": "placement_effect_live_rejection_event_id_events_id_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "events",
+          "columnsFrom": [
+            "live_rejection_event_id"
           ],
           "columnsTo": [
             "id"
@@ -2910,6 +2958,10 @@
         "placement_effect_live_identity": {
           "name": "placement_effect_live_identity",
           "value": "\"placement_effect\".\"live_event_id\" IS NULL OR \"placement_effect\".\"live_event_id\"=\"placement_effect\".\"event_id\""
+        },
+        "placement_effect_rejection": {
+          "name": "placement_effect_rejection",
+          "value": "(\"placement_effect\".\"rejection_event_id\" IS NULL AND \"placement_effect\".\"live_rejection_event_id\" IS NULL AND \"placement_effect\".\"rejection_reason\" IS NULL) OR (\"placement_effect\".\"state\"='refused_unsent' AND \"placement_effect\".\"rejection_event_id\" IS NOT NULL AND (\"placement_effect\".\"live_rejection_event_id\" IS NULL OR \"placement_effect\".\"live_rejection_event_id\" IS \"placement_effect\".\"rejection_event_id\") AND (\"placement_effect\".\"rejection_reason\" IS NULL OR \"placement_effect\".\"rejection_reason\" IN ('managed_execution_unsupported','managed_admission_unavailable')))"
         },
         "placement_effect_command_tuple": {
           "name": "placement_effect_command_tuple",
@@ -3908,6 +3960,13 @@
         "reclaim_source_fence": {
           "name": "reclaim_source_fence",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reclaim_holder": {
+          "name": "reclaim_holder",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

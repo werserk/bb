@@ -560,7 +560,11 @@ it("writes ordered group membership with independent execution owner, rolls back
       }).kind,
     ).toBe("held");
     expect(
-      reopened.transaction((tx) => refusePlacementBeforeHandoff(tx, guard)),
+      reopened.transaction((tx) =>
+        refusePlacementBeforeHandoff(tx, guard, () => {
+          throw Error("unexpected append");
+        }),
+      ),
     ).toBe(false);
     expect(
       reopened.transaction((tx) =>
@@ -934,22 +938,25 @@ it("rolls back an unexpected native error and persists a correlated pre-send ref
     const { guard } = db.transaction((tx) =>
       appendFixture(tx, op.id, claimed, first),
     );
+    expect(() =>
+      db.transaction((tx) => refusePlacementBeforeHandoff(tx, guard, () => 0)),
+    ).toThrow(PlacementDispatchConflictError);
     expect(
-      db.transaction((tx) => refusePlacementBeforeHandoff(tx, guard)),
-    ).toBe(false);
-    db.transaction((tx) => {
-      appendStoredThreadEventInTransaction(tx, {
-        threadId: guard.threadId,
-        scope: threadScope(),
-        type: "client/turn/rejected",
-        data: {
-          requestId: first,
-          reason: "host_unavailable",
-          message: "fixture refusal before handoff",
-        },
-      });
-      expect(refusePlacementBeforeHandoff(tx, guard)).toBe(true);
-    });
+      db.transaction((tx) =>
+        refusePlacementBeforeHandoff(tx, guard, (write) =>
+          appendStoredThreadEventInTransaction(write, {
+            threadId: guard.threadId,
+            scope: threadScope(),
+            type: "client/turn/rejected",
+            data: {
+              requestId: first,
+              reason: "host_unavailable",
+              message: "fixture refusal before handoff",
+            },
+          }),
+        ),
+      ),
+    ).toBe(true);
     db.$client.close();
     const next = open();
     expect(readPlacementDispatchReceipt(next, guard)?.state).toBe(

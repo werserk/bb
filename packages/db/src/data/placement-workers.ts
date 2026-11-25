@@ -160,6 +160,11 @@ export function observePlacementWorkers(
           (w.custody.status !== "held" ||
             canonicalJsonBytes(old.nativeCustody.holder) !==
               canonicalJsonBytes(w.custody.holder));
+        const changedClosingHolder =
+          old?.slotState === "reclaiming" &&
+          w.custody.status === "held" &&
+          canonicalJsonBytes(w.custody.holder) !==
+            canonicalJsonBytes(old.reclaimHolder);
         const changed =
           old &&
           (old.agentHostId !== w.agentHostId ||
@@ -186,7 +191,8 @@ export function observePlacementWorkers(
             .set({
               ...data,
               slotState:
-                (changed || lostResident) && old.slotState !== "free"
+                (changed || lostResident || changedClosingHolder) &&
+                old.slotState !== "free"
                   ? "unknown"
                   : old.slotState,
             })

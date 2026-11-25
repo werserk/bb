@@ -77,7 +77,7 @@ function admit(db: DbConnection, id: string) {
     { behavior: "immediate" },
   );
 }
-function publish(db: DbConnection, value: WorkerObservation, epoch = 1) {
+function publish(db: DbConnection, value: WorkerObservation, epoch = 2) {
   return observePlacementWorkers(db, {
     ...scope,
     expectedOwnerRevision: epoch,
@@ -308,7 +308,7 @@ it("preserves source watermarks when an envelope advances, a route disappears or
     expect(registerPlacementOwner(db, scope).kind).toBe("registered");
     const rebased = {
       ...candidate(db, op.id),
-      ownerRevision: 2,
+      ownerRevision: 3,
       workerRevision: 3,
       routeEvidenceRevision: 7,
     };
@@ -316,8 +316,8 @@ it("preserves source watermarks when an envelope advances, a route disappears or
       kind: "wait",
       reason: "worker_offline",
     });
-    expect(publish(db, { ...blocked, revision: 4 }, 1).kind).toBe("stale");
-    expect(publish(db, { ...blocked, revision: 4 }, 2).kind).toBe("observed");
+    expect(publish(db, { ...blocked, revision: 4 }, 2).kind).toBe("stale");
+    expect(publish(db, { ...blocked, revision: 4 }, 3).kind).toBe("observed");
     expect(
       reservePlacementWorker(db, { ...rebased, workerRevision: 4 }),
     ).toEqual({ kind: "wait", reason: "quota_blocked" });
@@ -325,7 +325,7 @@ it("preserves source watermarks when an envelope advances, a route disappears or
       publish(
         db,
         { ...blocked, revision: 5, quota: { ...initial.quota, revision: 10 } },
-        2,
+        3,
       ).kind,
     ).toBe("observed");
     expect(
@@ -468,6 +468,19 @@ it.each([false, true])(
           custody: { ...runtime.custody, revision: 3 },
         }),
       ).toMatchObject({ state: "resident" });
+      const original = observation({ revision: 2 });
+      original.custody = { ...runtime.custody, revision: 3 };
+      const corroborating = structuredClone(original);
+      corroborating.workerId = corroborating.custody.workerId = "alias";
+      expect(
+        observePlacementWorkers(reopened, {
+          ...worker,
+          providerId: "claude",
+          expectedOwnerRevision: 2,
+          workers: [original, corroborating],
+        }).kind,
+      ).toBe("observed");
+      reclaim.workerRevision = 2;
       expect(beginPlacementReclaim(competitor, reclaim).kind).toBe("wait");
       expect(
         beginPlacementReclaim(competitor, {
@@ -504,6 +517,12 @@ it.each([false, true])(
           closedSourceOperationId: follow.id,
         }),
       ).toEqual({ kind: "released" });
+      expect(
+        reservePlacementWorker(reopened, {
+          ...candidate(reopened, target.id),
+          workerRevision: 2,
+        }),
+      ).toMatchObject({ kind: "reserved", fence: 2 });
     }),
 );
 it("admits a time wait only once the native row is due and refuses a non-time wait", () =>
@@ -690,14 +709,14 @@ it("retains separate source histories across a host round trip and owner reload"
       { exclusion: observation().exclusion },
       { exclusion: { ...first.exclusion, status: "included" as const } },
     ])
-      expect(publish(reopened, { ...returning, ...patch }, 2).kind).toBe(
+      expect(publish(reopened, { ...returning, ...patch }, 3).kind).toBe(
         "stale",
       );
-    expect(publish(reopened, returning, 2).kind).toBe("observed");
+    expect(publish(reopened, returning, 3).kind).toBe("observed");
     expect(
       reservePlacementWorker(reopened, {
         ...candidate(reopened, op.id),
-        ownerRevision: 2,
+        ownerRevision: 3,
         workerRevision: 4,
       }),
     ).toMatchObject({ reason: "quota_blocked" });
@@ -709,13 +728,13 @@ it("retains separate source histories across a host round trip and owner reload"
           revision: 5,
           quota: { ...first.quota, revision: 10, block: null },
         },
-        2,
+        3,
       ).kind,
     ).toBe("observed");
     expect(
       reservePlacementWorker(reopened, {
         ...candidate(reopened, op.id),
-        ownerRevision: 2,
+        ownerRevision: 3,
         workerRevision: 5,
       }).kind,
     ).toBe("reserved");
@@ -759,7 +778,7 @@ it.each(["quota", "exclusion"] as const)(
       const a = observation({ workerId: "sibling", revision: 1 });
       a.custody.workerId = a.workerId;
       const b = observation({ revision: 2 });
-      const batch = (conn: DbConnection, ws: WorkerObservation[], epoch = 1) =>
+      const batch = (conn: DbConnection, ws: WorkerObservation[], epoch = 2) =>
         observePlacementWorkers(conn, {
           ...scope,
           expectedOwnerRevision: epoch,
@@ -781,7 +800,7 @@ it.each(["quota", "exclusion"] as const)(
       else
         blocked.exclusion = { ...a.exclusion, revision: 9, status: "included" };
       expect(batch(db, [b, blocked])).toBe("observed");
-      const admission = (conn: DbConnection, rev: number, epoch = 1) =>
+      const admission = (conn: DbConnection, rev: number, epoch = 2) =>
         conn.transaction(
           (tx) =>
             admitPlacementDispatch(tx, {
@@ -804,13 +823,13 @@ it.each(["quota", "exclusion"] as const)(
       registerPlacementOwner(next, scope);
       const independent = observation({ workerId: "replacement" });
       independent.custody.workerId = independent.workerId;
-      expect(batch(next, [independent], 2)).toBe("stale");
+      expect(batch(next, [independent], 3)).toBe("stale");
       independent[stream].revision = 9;
-      expect(batch(next, [independent], 2)).toBe("stale");
+      expect(batch(next, [independent], 3)).toBe("stale");
       b.revision = 3;
       b[stream].revision = 10;
-      expect(batch(next, [b], 2)).toBe("observed");
-      expect(admission(next, 3, 2).kind).toBe("admitted");
+      expect(batch(next, [b], 3)).toBe("observed");
+      expect(admission(next, 3, 3).kind).toBe("admitted");
     }),
 );
 

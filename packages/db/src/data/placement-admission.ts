@@ -2,6 +2,7 @@ import {
   readSharedPolicy,
   physicalLockKey,
   foreignLockReport,
+  dischargeClosedHolderReports,
   currentRoute,
   recordCustodyFact,
 } from "./placement-source-facts.js";
@@ -86,6 +87,20 @@ export function placementMemberIneligible(
   purpose: WorkspacePurpose,
   routeRevision?: number,
 ): PlacementReason | null {
+  if (
+    w.nativeCustody &&
+    foreignLockReport(db, w.ownerPluginId, w.providerId, w.nativeCustody)
+  )
+    return "custody_unknown";
+  return memberPolicyReason(db, op, w, purpose, routeRevision);
+}
+function memberPolicyReason(
+  db: DbQueryConnection,
+  op: Operation,
+  w: Worker,
+  purpose: WorkspacePurpose,
+  routeRevision?: number,
+): PlacementReason | null {
   const o = w.observation;
   if (op.providerId !== w.providerId) return "binding_changed";
   if (op.binding && !matchesBinding(w, op.binding)) return "binding_changed";
@@ -94,11 +109,6 @@ export function placementMemberIneligible(
     op.requestedSelection.workerId !== w.workerId
   )
     return "binding_changed";
-  if (
-    w.nativeCustody &&
-    foreignLockReport(db, w.ownerPluginId, w.providerId, w.nativeCustody)
-  )
-    return "custody_unknown";
   if (!w.available || !o.connected) return "worker_offline";
   if (o.admission !== "enabled")
     return o.admission === "draining" ? "worker_draining" : "worker_disabled";
@@ -195,12 +205,20 @@ export function placementMemberIneligible(
   }
   return null;
 }
+function continuesResident(op: Operation, w: Worker) {
+  return (
+    (op.kind === "continuation" || op.kind === "retry") &&
+    op.threadId !== null &&
+    op.threadId === w.threadId
+  );
+}
 export function olderCompatible(
   db: DbQueryConnection,
   op: Operation,
   w: Worker,
   purpose: WorkspacePurpose,
   otherThanThread?: string,
+  forReclaim = false,
 ) {
   const older = db
     .select()
@@ -230,9 +248,13 @@ export function olderCompatible(
     )
     .orderBy(asc(operations.acceptedSeq))
     .all();
-  return older.find(
-    (candidate) =>
-      placementMemberIneligible(db, candidate, w, purpose) === null &&
+  return older.find((candidate) => {
+    const eligibility =
+      forReclaim && !continuesResident(candidate, w)
+        ? memberPolicyReason
+        : placementMemberIneligible;
+    return (
+      eligibility(db, candidate, w, purpose) === null &&
       queuedCandidateDue(db, candidate) &&
       (candidate.consentId === null ||
         db
@@ -245,10 +267,15 @@ export function olderCompatible(
               eq(consents.consumedByOperationId, candidate.id),
             ),
           )
-          .get() !== undefined),
-  );
+          .get() !== undefined)
+    );
+  });
 }
-function validateCandidate(db: DbQueryConnection, args: PlacementCandidate) {
+function validateCandidate(
+  db: DbQueryConnection,
+  args: PlacementCandidate,
+  memberEligibility = placementMemberIneligible,
+) {
   const op = readPlacementOperationRecord(db, args.operationId);
   if (
     !op ||
@@ -290,7 +317,7 @@ function validateCandidate(db: DbQueryConnection, args: PlacementCandidate) {
   const w = readPlacementWorker(db, op.ownerPluginId, args.workerId);
   if (!w || w.observationRevision !== args.workerRevision)
     return wait("reconciliation_required");
-  const reason = placementMemberIneligible(
+  const reason = memberEligibility(
     db,
     op,
     w,
@@ -402,10 +429,7 @@ export function reservePlacementWorker(
       if (!["pending", "accepted"].includes(op.phase) && !pendingAttempt)
         return wait("reconciliation_required");
       const continuingResident =
-        (op.kind === "continuation" || op.kind === "retry") &&
-        op.threadId !== null &&
-        op.threadId === w.threadId &&
-        w.slotState === "resident";
+        continuesResident(op, w) && w.slotState === "resident";
       if (w.slotState !== "free" && !continuingResident)
         return wait(
           w.slotState === "unknown" ? "custody_unknown" : "selected_busy",
@@ -698,13 +722,12 @@ export function beginPlacementReclaim(
     return wait("reconciliation_required");
   return db.transaction(
     (tx) => {
-      const checked = validateCandidate(tx, args);
+      const checked = validateCandidate(tx, args, memberPolicyReason);
       if (checked.kind !== "valid") return checked;
       const { op, w } = checked;
       if (
         w.slotState !== "resident" ||
-        ((op.kind === "continuation" || op.kind === "retry") &&
-          op.threadId === w.threadId) ||
+        continuesResident(op, w) ||
         w.fence !== args.expectedSourceFence ||
         w.ownerOperationId !== args.expectedSourceOperationId ||
         !w.ownerOperationId ||
@@ -717,17 +740,31 @@ export function beginPlacementReclaim(
       if (
         !source ||
         source.phase !== "completed" ||
+        !source.binding ||
+        !matchesBinding(w, source.binding) ||
+        !w.nativeCustody?.lock ||
+        w.physicalLock !==
+          physicalLockKey(w.nativeCustody.agentHostId, w.nativeCustody.lock) ||
         w.nativeCustody?.status !== "held" ||
         w.nativeCustody.holder?.fence !== w.fence ||
-        w.nativeCustody.holder.threadId !== w.threadId
+        w.nativeCustody.holder.threadId !== w.threadId ||
+        foreignLockReport(
+          tx,
+          w.ownerPluginId,
+          w.providerId,
+          w.nativeCustody,
+          w.nativeCustody.holder,
+        )
       )
         return wait("custody_unknown");
-      if (olderCompatible(tx, op, w, args.purpose)) return wait("all_busy");
+      if (olderCompatible(tx, op, w, args.purpose, undefined, true))
+        return wait("all_busy");
       tx.update(workers)
         .set({
           slotState: "reclaiming",
           reclaimOperationId: op.id,
           reclaimSourceFence: w.fence,
+          reclaimHolder: w.nativeCustody.holder,
         })
         .where(
           and(
@@ -783,11 +820,27 @@ export function beginCancelledPlacementRelease(
           ))
       )
         return wait("reconciliation_required");
+      const custody = w.nativeCustody;
+      const holder =
+        custody?.status === "held" &&
+        custody.lock &&
+        custody.holder?.fence === w.fence &&
+        custody.holder.threadId !== null &&
+        custody.holder.threadId === w.threadId &&
+        physicalLockKey(custody.agentHostId, custody.lock) === w.physicalLock
+          ? custody.holder
+          : null;
+      if (
+        custody &&
+        foreignLockReport(tx, w.ownerPluginId, w.providerId, custody, holder)
+      )
+        return wait("custody_unknown");
       tx.update(workers)
         .set({
           slotState: "reclaiming",
           reclaimOperationId: op.id,
           reclaimSourceFence: w.fence,
+          reclaimHolder: holder,
         })
         .where(
           and(
@@ -840,14 +893,30 @@ export function finishPlacementReclaim(
           physicalLockKey(observation.agentHostId, observation.lock) ||
         observation.lock.device !== w.fenceLock.device ||
         observation.lock.inode !== w.fenceLock.inode ||
-        observation.revision <= w.nativeCustody.revision
+        observation.revision <= w.nativeCustody.revision ||
+        foreignLockReport(
+          tx,
+          w.ownerPluginId,
+          w.providerId,
+          observation,
+          w.reclaimHolder,
+        )
       )
         return wait("custody_unknown");
       if (!recordCustodyFact(tx, w.ownerPluginId, w.providerId, observation))
         return wait("custody_unknown");
+      if (w.reclaimHolder)
+        dischargeClosedHolderReports(
+          tx,
+          w.ownerPluginId,
+          w.providerId,
+          observation,
+          w.reclaimHolder,
+        );
       tx.update(workers)
         .set({
           slotState: "free",
+          reclaimHolder: null,
           ownerOperationId: null,
           threadId: null,
           reclaimOperationId: null,

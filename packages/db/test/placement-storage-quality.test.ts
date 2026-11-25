@@ -59,7 +59,7 @@ function publish(rows: ReturnType<typeof observation>[]) {
     S.observePlacementWorkers(db, {
       ownerPluginId: "workers",
       providerId: "claude",
-      expectedOwnerRevision: 1,
+      expectedOwnerRevision: 2,
       workers: rows,
     }).kind,
   ).toBe("observed");
@@ -83,6 +83,187 @@ function reserve(id: string, name: string) {
       .observationRevision,
   });
 }
+function completedResidentWithAlias() {
+  const { cmd, op } = resident();
+  expect(S.claimPlacementExecutionCommand(db, cmd).kind).toBe("won");
+  expect(
+    db.transaction((tx) =>
+      S.settlePlacementExecutionCommand(tx, { ...cmd, outcome: "succeeded" }),
+    ),
+  ).toBe(true);
+  const a = observation({ revision: 2 });
+  const holder = {
+    bootId: "boot",
+    processStart: "p",
+    threadId: cmd.threadId,
+    fence: 1,
+  };
+  a.custody = { ...a.custody, revision: 2, status: "held", holder };
+  expect(
+    S.recordPlacementRuntimeState(db, {
+      ...worker,
+      operationId: op,
+      fence: 1,
+      activity: "idle",
+      backgroundWork: false,
+      pendingInteraction: false,
+      custody: a.custody,
+    }),
+  ).toMatchObject({ state: "resident" });
+  const b = alias("alias");
+  return { op, a, b, holder };
+}
+it.each([false, true])(
+  "closes a corroborated completed resident, alias withdrawn=%s",
+  (withdrawn) => {
+    const { op, a, b, holder } = completedResidentWithAlias();
+    b.custody = { ...b.custody, revision: 9, status: "held", holder };
+    publish([a, b]);
+    if (withdrawn) {
+      a.revision++;
+      publish([a]);
+    }
+    const target = acceptPrepared(db, "target", {}, {}, "worker");
+    const later = acceptPrepared(db, "later", {}, {}, "worker");
+    reopen();
+    const begin = (id: string) =>
+      S.beginPlacementReclaim(db, {
+        ...candidate(db, id),
+        workerRevision: a.revision,
+        expectedSourceFence: 1,
+        expectedSourceOperationId: op,
+      });
+    expect(begin(later.id)).toEqual({ kind: "wait", reason: "all_busy" });
+    expect(begin(target.id).kind).toBe("reclaiming");
+    expect(begin(target.id).kind).toBe("wait");
+    expect(reserve(target.id, "worker").kind).toBe("wait");
+    const free = { ...observation().custody, revision: 4 };
+    const finish = {
+      ...worker,
+      operationId: target.id,
+      closedSourceOperationId: op,
+      fence: 1,
+      processClosed: true,
+      observation: free,
+    };
+    expect(
+      S.finishPlacementReclaim(db, { ...finish, processClosed: false }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, { ...finish, observation: a.custody }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, {
+        ...finish,
+        observation: { ...free, revision: 2 },
+      }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, {
+        ...finish,
+        closedSourceOperationId: later.id,
+      }).kind,
+    ).toBe("wait");
+    expect(S.readPlacementWorker(db, "workers", "worker")).toMatchObject({
+      slotState: "reclaiming",
+      ownerOperationId: op,
+      reclaimHolder: holder,
+    });
+    a.revision++;
+    a.custody = { ...free, revision: 3 };
+    const rows = () => (withdrawn ? [a] : [a, b]);
+    b.revision++;
+    publish(rows());
+    reopen();
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("released");
+    reopen();
+    a.revision++;
+    a.custody = free;
+    b.revision++;
+    publish([a, b]);
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("wait");
+    b.revision++;
+    b.custody = {
+      ...b.custody,
+      revision: 10,
+      holder: { ...holder, processStart: "new" },
+    };
+    a.revision++;
+    publish([a, b]);
+    expect(reserve(target.id, "worker")).toEqual({
+      kind: "wait",
+      reason: "custody_unknown",
+    });
+    a.revision++;
+    b.revision++;
+    b.custody = { ...b.custody, revision: 11, holder: null, status: "free" };
+    publish([a, b]);
+    reopen();
+    expect(reserve(target.id, "worker")).toMatchObject({
+      kind: "reserved",
+      fence: 2,
+    });
+    expect(reserve(later.id, "worker").kind).toBe("wait");
+  },
+);
+it.each(["bootId", "processStart", "threadId", "fence", "unknown"] as const)(
+  "holds custody across contradictory alias %s before and during reclaim",
+  (different) => {
+    const { op, a, b, holder } = completedResidentWithAlias();
+    function report(conflicting: boolean) {
+      b.revision++;
+      a.revision++;
+      b.custody = {
+        ...b.custody,
+        revision: b.revision,
+        status: conflicting && different === "unknown" ? "unknown" : "held",
+        holder: !conflicting
+          ? holder
+          : different === "unknown"
+            ? null
+            : {
+                ...holder,
+                [different]: different === "fence" ? 2 : "different",
+              },
+      };
+      publish([a, b]);
+    }
+    report(true);
+    const target = acceptPrepared(db, "target", {}, {}, "worker");
+    const begin = () =>
+      S.beginPlacementReclaim(db, {
+        ...candidate(db, target.id),
+        workerRevision: a.revision,
+        expectedSourceFence: 1,
+        expectedSourceOperationId: op,
+      });
+    expect(begin()).toEqual({ kind: "wait", reason: "custody_unknown" });
+    report(false);
+    expect(begin().kind).toBe("reclaiming");
+    report(true);
+    a.revision++;
+    publish([a]);
+    reopen();
+    const finish = {
+      ...worker,
+      operationId: target.id,
+      closedSourceOperationId: op,
+      fence: 1,
+      processClosed: true,
+      observation: { ...observation().custody, revision: 3 },
+    };
+    expect(S.finishPlacementReclaim(db, finish)).toEqual({
+      kind: "wait",
+      reason: "custody_unknown",
+    });
+    expect(
+      S.readPlacementWorker(db, "workers", "worker")?.ownerOperationId,
+    ).toBe(op);
+    report(false);
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("released");
+    expect(reserve(target.id, "worker").kind).toBe("reserved");
+  },
+);
 it("keeps the original host/inode locked through withdrawal, drift, reclaim and missing closure", () => {
   const a = acceptPrepared(db, "a", {}, {}, "worker");
   expect(db.transaction(() => reserve(a.id, "worker")).kind).toBe("wait");
@@ -166,6 +347,129 @@ it.each(["held", "unknown"] as const)(
     b.revision = 3;
     publish([free, b]);
     expect(reserve(target.id, "b").kind).toBe("reserved");
+  },
+);
+it.each([
+  "managed_execution_unsupported",
+  "managed_admission_unavailable",
+  "host_unavailable",
+])(
+  "preserves original pre-send refusal %s across rejection-only native suffix replacement",
+  (reason) => {
+    const { cmd, guard, receipt } = resident();
+    const append = (
+      tx: S.DbTransaction,
+      code: string,
+      requestId = guard.requestId,
+    ) =>
+      appendStoredThreadEventInTransaction(tx, {
+        threadId: guard.threadId,
+        scope: threadScope(),
+        type: "client/turn/rejected",
+        data: {
+          requestId,
+          reason: code,
+          message: "managed_admission_unavailable",
+        },
+      });
+    const read = () => S.readPlacementDispatchReceipt(db, guard)!;
+    const seq = receipt.requestSequence + 1;
+    const cut = (tx: S.DbTransaction, cutoffSequence = seq) =>
+      S.deleteThreadEventSuffixInTransaction(tx, {
+        threadId: guard.threadId,
+        cutoffSequence,
+        oldMaxSequence: seq,
+      });
+    const record = (tx: S.DbTransaction) =>
+      S.refusePlacementBeforeHandoff(tx, guard, (write) =>
+        append(write, reason),
+      );
+    db.transaction((tx) => {
+      expect(() =>
+        S.refusePlacementBeforeHandoff(tx, guard, (write) =>
+          append(write, reason, "creq_9999999999"),
+        ),
+      ).toThrow(S.PlacementDispatchConflictError);
+      expect(tx.select().from(events).all()).toHaveLength(1);
+      expect(read().state).toBe("prepared");
+    });
+    expect(() =>
+      db.transaction((tx) => {
+        expect(record(tx)).toBe(true);
+        throw Error("undo refusal");
+      }),
+    ).toThrow("undo refusal");
+    reopen();
+    expect(read()).toMatchObject({
+      state: "prepared",
+      rejectionEventId: null,
+      liveRejectionEventId: null,
+      rejectionReason: null,
+    });
+    expect(db.transaction(record)).toBe(true);
+    const before = read();
+    expect(before).toMatchObject({
+      state: "refused_unsent",
+      rejectionReason: reason === "host_unavailable" ? null : reason,
+      liveEventId: receipt.eventId,
+    });
+    expect(before.rejectionEventId).toBeTruthy();
+    expect(before.liveRejectionEventId).toBe(before.rejectionEventId);
+    const replace = (tx: S.DbTransaction) => {
+      expect(cut(tx).deletedEventCount).toBe(1);
+      expect(
+        append(
+          tx,
+          reason === "managed_admission_unavailable"
+            ? "managed_execution_unsupported"
+            : "managed_admission_unavailable",
+        ),
+      ).toBe(seq);
+    };
+    expect(() =>
+      db.transaction((tx) => {
+        replace(tx);
+        throw Error("undo edit");
+      }),
+    ).toThrow("undo edit");
+    reopen();
+    expect(read()).toEqual(before);
+    db.transaction(replace);
+    reopen();
+    const replacement = db
+      .select()
+      .from(events)
+      .all()
+      .find((row) => row.sequence === seq)!;
+    expect(replacement.id).not.toBe(before.rejectionEventId);
+    expect(read()).toEqual({ ...before, liveRejectionEventId: null });
+    expect(() =>
+      db.$client
+        .prepare(
+          "update placement_effect set rejection_event_id=?, live_rejection_event_id=? where request=?",
+        )
+        .run(replacement.id, replacement.id, guard.requestId),
+    ).toThrow();
+    const calls = vi.fn(() => 0);
+    expect(
+      db.transaction((tx) => S.refusePlacementBeforeHandoff(tx, guard, calls)),
+    ).toBe(false);
+    expect(
+      db.transaction((tx) => cut(tx, receipt.requestSequence))
+        .deletedEventCount,
+    ).toBe(2);
+    reopen();
+    expect(read()).toEqual({
+      ...before,
+      liveEventId: null,
+      liveRejectionEventId: null,
+    });
+    expect(
+      db.transaction((tx) => S.refusePlacementBeforeHandoff(tx, guard, calls)),
+    ).toBe(false);
+    expect(calls).not.toHaveBeenCalled();
+    expect(S.claimPlacementExecutionCommand(db, cmd).kind).toBe("refused");
+    expect(db.select().from(events).all()).toHaveLength(0);
   },
 );
 it.each(["prepared", "possibly_sent", "succeeded", "failed_accepted"] as const)(

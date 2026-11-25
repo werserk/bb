@@ -13,6 +13,11 @@
       "types": "./src/internal-environment-lifecycle.ts",
       "default": "./src/internal-environment-lifecycle.ts"
     },
+    "./internal-placement-owner": {
+      "source": "./src/internal-placement-owner.ts",
+      "types": "./src/internal-placement-owner.ts",
+      "default": "./src/internal-placement-owner.ts"
+    },
     "./testing": {
       "source": "./src/testing.ts",
       "types": "./src/testing.ts",
