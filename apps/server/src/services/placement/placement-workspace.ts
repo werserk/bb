@@ -30,8 +30,8 @@ export type PlacementMaterialization =
 /**
  * Pre-thread preparation that performs no host side effect: an independent
  * launch may reuse an already-ready environment. Fresh environment
- * preparation, pre-thread forks and roots outside the POSIX descriptor have no
- * operation-owned provider path yet and are refused visibly. The prepared
+ * preparation, pre-thread forks, plugin submissions and roots outside the POSIX
+ * descriptor have no operation-owned provider path yet and are refused visibly. The prepared
  * permission never exceeds the one accepted with the receipt.
  */
 export function materializePlacementWorkspace(
@@ -49,7 +49,12 @@ export function materializePlacementWorkspace(
   if (intent.kind !== "independent")
     return { kind: "refuse", reason: "unsupported_preparation" };
   const request = createThreadRequestSchema.parse(intent.request);
-  if (request.environment.type !== "reuse")
+  if (
+    request.environment.type !== "reuse" ||
+    request.originKind !== null ||
+    request.sourceSeqEnd !== undefined ||
+    request.pluginSubmission !== undefined
+  )
     return { kind: "refuse", reason: "unsupported_preparation" };
   if (
     request.input.some(

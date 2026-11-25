@@ -55,10 +55,22 @@ export type PlacementSendScope = Pick<
   principal: string;
 };
 
+export interface PlacementRuntimeRootIdentity {
+  ownerPluginId: string;
+  providerId: string;
+  accountId: string;
+  agentHostId: string;
+  workerId: string;
+  generation: string;
+}
+
 export interface AppDeps {
   // Supplied only by a server composition with trusted invocation attribution.
   resolvePlacementSendScope?: (request: Request) => PlacementSendScope | null;
   placementWorkspacePurpose?: WorkspacePurpose;
+  placementRuntimeRootKey?: (
+    identity: PlacementRuntimeRootIdentity,
+  ) => string | null;
   config: ServerRuntimeConfig;
   db: DbConnection;
   hub: NotificationHub;

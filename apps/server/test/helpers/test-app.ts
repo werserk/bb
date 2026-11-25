@@ -51,7 +51,11 @@ import { createNoopTelemetryService } from "../../src/services/system/telemetry.
 import { createSetupGuideExperiment } from "../../src/services/system/setup-guide-experiment.js";
 import { TerminalSessionLifecycle } from "../../src/services/terminals/terminal-session-lifecycle.js";
 import { createLifecycleDedupers } from "../../src/lifecycle-dedupers.js";
-import type { ServerAppDeps, ServerRuntimeConfig } from "../../src/types.js";
+import type {
+  AppDeps,
+  ServerAppDeps,
+  ServerRuntimeConfig,
+} from "../../src/types.js";
 import {
   type NotificationHub,
   NotificationHub as NotificationHubImpl,
@@ -111,6 +115,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   seedFirstPartyProviders?: boolean;
   tunnelIngressNow?: () => number;
   placementPurpose?: WorkspacePurpose;
+  placementRuntimeRootKey?: AppDeps["placementRuntimeRootKey"];
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
     pluginId: string;
@@ -178,6 +183,7 @@ export async function createTestAppHarness(
     seedFirstPartyProviders = true,
     tunnelIngressNow: _tunnelIngressNow,
     placementPurpose,
+    placementRuntimeRootKey,
     ...configOverrides
   } = overrides;
   const logger = createTestLogger();
@@ -394,6 +400,8 @@ export async function createTestAppHarness(
     sharedPorts,
   };
   if (placementPurpose) deps.placementWorkspacePurpose = placementPurpose;
+  if (placementRuntimeRootKey)
+    deps.placementRuntimeRootKey = placementRuntimeRootKey;
   const { app, pluginCatalogService, pluginService, placement, serverMove } =
     createApp(deps);
   installDefaultEnvironmentProviders();

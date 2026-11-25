@@ -21,6 +21,7 @@ import type {
   PlacementPolicyDecision,
 } from "../../src/services/placement/placement-service.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+import { fixtureRootKey } from "./fixture-root.js";
 
 const PROVIDER = "claude-code";
 const OWNER = "account-workers";
@@ -211,7 +212,10 @@ const fixturePurpose = { kind: "local-fixture" as const, fixtureRunId: RUN };
 
 async function withPlacement<T>(run: (harness: TestAppHarness) => Promise<T>) {
   return withTestHarness(
-    { placementPurpose: fixturePurpose },
+    {
+      placementPurpose: fixturePurpose,
+      placementRuntimeRootKey: fixtureRootKey,
+    },
     async (harness) => {
       seedWorkspace(harness);
       return run(harness);

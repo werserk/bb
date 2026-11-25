@@ -34,6 +34,7 @@ import type {
 } from "../../src/services/placement/placement-service.js";
 import { seedEnvironment, seedProjectWithSource } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+import { fixtureRootKey } from "./fixture-root.js";
 
 const PROVIDER = "claude-code";
 const OWNER = "account-workers";
@@ -266,7 +267,10 @@ function withPlacement<T>(
 ) {
   return withTestHarness(
     purpose
-      ? { placementPurpose: { kind: "local-fixture", fixtureRunId: RUN } }
+      ? {
+          placementPurpose: { kind: "local-fixture", fixtureRunId: RUN },
+          placementRuntimeRootKey: fixtureRootKey,
+        }
       : {},
     async (harness) => {
       seedWorkspace(harness);

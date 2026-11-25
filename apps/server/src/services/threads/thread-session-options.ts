@@ -1,5 +1,5 @@
 import { listLatestThreadStateEventRowsByThreadIds } from "@bb/db";
-import type { DbConnection } from "@bb/db";
+import type { DbConnection, DbTransaction } from "@bb/db";
 import {
   THREAD_SESSION_OPTIONS_STATE_KIND,
   THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
@@ -16,7 +16,10 @@ import {
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { decodeStoredEventRowCached } from "./stored-event-decode-cache.js";
-import { appendThreadEvent } from "./thread-events.js";
+import {
+  appendThreadEvent,
+  appendThreadEventInTransaction,
+} from "./thread-events.js";
 
 interface ThreadStateSnapshot {
   payload: unknown;
@@ -107,16 +110,32 @@ export function seedThreadSessionOptionSelections(
   });
 }
 
-function writeThreadSessionOptionSelections(
-  deps: Pick<AppDeps, "db" | "hub">,
+export function seedThreadSessionOptionSelectionsInTransaction(
+  tx: DbTransaction,
   args: {
     threadId: string;
     environmentId: string | null;
-    providerThreadId: string;
     selections: SessionOptionSelections;
   },
 ): void {
-  appendThreadEvent(deps, {
+  if (Object.keys(args.selections).length === 0) return;
+  appendThreadEventInTransaction(
+    tx,
+    sessionOptionSelectionsEvent({ ...args, providerThreadId: "" }),
+  );
+}
+
+interface SessionOptionSelectionsWrite {
+  threadId: string;
+  environmentId: string | null;
+  providerThreadId: string;
+  selections: SessionOptionSelections;
+}
+
+function sessionOptionSelectionsEvent(
+  args: SessionOptionSelectionsWrite,
+): Parameters<typeof appendThreadEventInTransaction>[1] {
+  return {
     threadId: args.threadId,
     environmentId: args.environmentId,
     type: "thread/extensionState/updated",
@@ -126,7 +145,14 @@ function writeThreadSessionOptionSelections(
       kind: THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
       payload: { selections: args.selections },
     },
-  });
+  };
+}
+
+function writeThreadSessionOptionSelections(
+  deps: Pick<AppDeps, "db" | "hub">,
+  args: SessionOptionSelectionsWrite,
+): void {
+  appendThreadEvent(deps, sessionOptionSelectionsEvent(args));
 }
 
 export function resolvePendingThreadSessionOptions(

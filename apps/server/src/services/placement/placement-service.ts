@@ -335,6 +335,21 @@ export function createPlacementService(deps: PlacementDeps) {
         slotState: row.slotState,
         lastAssignedSeq: row.lastAssignedSeq,
       }));
+    const rootKeyOf = (workerId: string) => {
+      const observation = workers.find(
+        (w) => w.workerId === workerId,
+      )?.observation;
+      return observation && deps.placementRuntimeRootKey
+        ? deps.placementRuntimeRootKey({
+            ownerPluginId: registered.ownerPluginId,
+            providerId: record.providerId,
+            accountId: observation.accountId,
+            agentHostId: observation.agentHostId,
+            workerId,
+            generation: observation.generation,
+          })
+        : null;
+    };
     let decision: PlacementPolicyDecision;
     try {
       decision = await registered.policy.evaluate({
@@ -364,6 +379,13 @@ export function createPlacementService(deps: PlacementDeps) {
     }
     let lastReason: PlacementReason = "all_busy";
     for (const candidate of decision.candidates) {
+      if (
+        record.kind === "independent" &&
+        rootKeyOf(candidate.workerId) === null
+      ) {
+        lastReason = "unsupported_tool_route";
+        continue;
+      }
       const current = readPlacementOperationRecord(deps.db, operationId);
       if (!current) return;
       const result = reservePlacementWorker(deps.db, {
@@ -390,8 +412,14 @@ export function createPlacementService(deps: PlacementDeps) {
 
   function dispatch(operationId: string) {
     const result = dispatchReservedPlacement(deps, operationId);
-    if (result !== "queued")
-      deps.logger.warn(`placement dispatch ${result} for ${operationId}`);
+    if (result.kind === "retry" || result.kind === "terminal")
+      deps.logger.warn(
+        `placement dispatch ${result.kind} for ${operationId}: ${
+          result.kind === "retry"
+            ? result.reason
+            : `${result.reason}: ${result.error}`
+        }`,
+      );
   }
 
   function persistWait(
@@ -446,6 +474,23 @@ export function createPlacementService(deps: PlacementDeps) {
     return false;
   }
 
+  function retainedAuthority(principalScope: string, submissionKey: string) {
+    const row = deps.db
+      .select({ id: placementOperations.id })
+      .from(placementOperations)
+      .where(
+        and(
+          eq(placementOperations.principalScope, principalScope),
+          eq(placementOperations.submissionKey, submissionKey),
+        ),
+      )
+      .get();
+    const receipt = row ? readPlacementActionReceipt(deps.db, row.id) : null;
+    if (!receipt)
+      throw new Error("Placement submission is missing its action receipt");
+    return receipt.authority;
+  }
+
   function newWorkScope(request: PlacementRequestV1) {
     const scope = resolveOwnerScope(request);
     const owner = readPlacementOwner(deps.db, scope.providerId);
@@ -469,13 +514,20 @@ export function createPlacementService(deps: PlacementDeps) {
       });
       const fresh = retained ? null : newWorkScope(request);
       const scope = retained ?? fresh!;
-      const authority = derivePlacementAuthority(deps, {
-        invocation,
-        request,
-        permission: fresh
-          ? effectivePermission(request, fresh.providerId, fresh.sourceThreadId)
-          : retained!.permission,
-      });
+      const authority = fresh
+        ? derivePlacementAuthority(deps, {
+            invocation,
+            request,
+            permission: effectivePermission(
+              request,
+              fresh.providerId,
+              fresh.sourceThreadId,
+            ),
+          })
+        : retainedAuthority(
+            placementPrincipal(invocation),
+            request.submissionKey,
+          );
       const result = acceptPlacementOperation(deps.db, {
         principalScope: authority.principal,
         submissionKey: request.submissionKey,

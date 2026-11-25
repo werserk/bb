@@ -42,6 +42,7 @@ import type {
   PlacementPolicyDecision,
 } from "../../src/services/placement/placement-service.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+import { fixtureLaunchProfileId, fixtureRootKey } from "./fixture-root.js";
 
 import { createApp } from "../../src/server.js";
 import * as managedRuntime from "../../src/services/threads/managed-execution.js";
@@ -56,6 +57,10 @@ const ENV = "env_dispatch";
 const HOST = "host_dispatch";
 const ROOT = "/scratch/dispatch";
 const purpose = { kind: "local-fixture" as const, fixtureRunId: RUN };
+const harnessOptions = {
+  placementPurpose: purpose,
+  placementRuntimeRootKey: fixtureRootKey,
+};
 
 const workspace = normalizeWorkspaceBinding({
   schemaVersion: 1,
@@ -114,7 +119,10 @@ function observation(): WorkerObservation {
         ),
       },
     ],
-    launchProfileId: null,
+    launchProfileId: fixtureLaunchProfileId({
+      workerId: "worker-a",
+      generation: "gen-a",
+    }),
   };
 }
 
@@ -169,7 +177,7 @@ async function withDispatch<T>(
     }>,
   ) => Promise<T>,
 ) {
-  return withTestHarness({ placementPurpose: purpose }, async (harness) => {
+  return withTestHarness(harnessOptions, async (harness) => {
     harness.db
       .insert(hosts)
       .values({ id: HOST, name: "Workspace", type: "persistent", createdAt: 1, updatedAt: 1 })
@@ -374,7 +382,7 @@ describe("placement dispatch", () => {
       ).toMatchObject({
         boundFromOperationId: id,
         workerId: "worker-a",
-        runtimeRootKey: `placement:${id}`,
+        runtimeRootKey: "fixture-root:worker-a:gen-a",
       });
 
       await harness.placement.wake(PROVIDER);
