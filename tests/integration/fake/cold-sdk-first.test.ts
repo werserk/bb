@@ -12,6 +12,7 @@ import { createNodeBbSdk } from "@bb/sdk/node";
 import {
   createConnection,
   afterCommit,
+  hasStoredTerminalClientTurnRequestEvent,
   placementEffects,
   getThread,
   getStoredProviderSession,
@@ -27,6 +28,7 @@ import {
 import { setOwnerMode } from "@bb/db/internal-placement-owner";
 import {
   PERSONAL_PROJECT_ID,
+  clientTurnRequestIdSchema,
   clientSubmissionQueueId,
   normalizeWorkspaceBinding,
   workspaceBindingRef,
@@ -49,6 +51,7 @@ import {
   createTestDaemonHostKey,
   type TestAppHarness,
 } from "../../../apps/server/test/helpers/test-app.js";
+import { settleUnconfirmedTurnStartInTransaction } from "../../../apps/server/src/services/threads/unconfirmed-turn-requests.js";
 import { registerColdDispatchLab } from "../../../apps/server/src/services/threads/cold-dispatch-lab.js";
 import { createColdFirstHandler } from "../helpers/cold-first-dispatch.js";
 import {
@@ -266,6 +269,7 @@ it.each([
   "replaced-socket",
   "no-sender",
   "retire-after-claim",
+  "native-terminal-before-claim",
 ])("local SDK pending start: %s", async (mode) => {
   const registry = new FixtureEnrollmentRegistry();
   const scratch = await mkdtemp(join(tmpdir(), "cold-sdk-server-"));
@@ -350,6 +354,38 @@ it.each([
         .where(eq(placementBindings.threadId, threadId))
         .get()?.runtimeRootKey,
     ).toBe(registry.rootKey(binding));
+    let terminalRequest: string | null = null;
+    if (mode === "native-terminal-before-claim") {
+      const read = registry.read.bind(registry);
+      vi.spyOn(registry, "read").mockImplementation((identity) => {
+        const candidate = read(identity);
+        if (candidate && !terminalRequest && !db.$client.inTransaction) {
+          const effect = db
+            .select()
+            .from(placementEffects)
+            .where(eq(placementEffects.thread, threadId))
+            .get();
+          if (effect?.state === "prepared" && effect.commandId) {
+            const key = {
+              threadId,
+              requestId: clientTurnRequestIdSchema.parse(effect.request),
+            };
+            const other = createConnection(dbFile);
+            try {
+              other.transaction(
+                (tx) => settleUnconfirmedTurnStartInTransaction(tx, key),
+                { behavior: "immediate" },
+              );
+            } finally {
+              other.$client.close();
+            }
+            expect(hasStoredTerminalClientTurnRequestEvent(db, key)).toBe(true);
+            terminalRequest = key.requestId;
+          }
+        }
+        return candidate;
+      });
+    }
     let retiredAfterWin = false;
     if (mode === "retire-after-claim") {
       const read = registry.read.bind(registry);
@@ -440,6 +476,24 @@ it.each([
     expect(initial.status).toBe(409);
     expect(replay.status).toBe(409);
     expect(replay).toEqual(initial);
+    if (mode === "native-terminal-before-claim") {
+      expect(terminalRequest).toBe(key.requestId);
+      expect(r.commandId).toBeTruthy();
+      expect(r.nativeExecutionId).toBe(r.commandId);
+      const observed = {
+        receipt: r.state,
+        frames: lab.guest.starts(),
+        creates: lab.ids.length,
+      };
+      console.info(
+        "second writer committed native rejection after prepare",
+        observed,
+      );
+      expect(observed).toEqual({ receipt: "prepared", frames: 0, creates: 0 });
+      expect(replay.body.details).toMatchObject({ state: "prepared" });
+      expect(lab.guest.journal.createdSession(r.commandId!)).toBeNull();
+      return;
+    }
     if (mode === "retire-after-claim") {
       expect(retiredAfterWin).toBe(true);
       expect(r.state).toBe("possibly_sent");
