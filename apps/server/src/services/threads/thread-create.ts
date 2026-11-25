@@ -550,7 +550,7 @@ interface ResolveCreateThreadVisibilityArgs {
   requestedVisibility: ThreadVisibility | undefined;
 }
 
-function resolveCreateThreadVisibility(
+export function resolveCreateThreadVisibility(
   args: ResolveCreateThreadVisibilityArgs,
 ): ThreadVisibility {
   if (args.requestedVisibility !== undefined) {

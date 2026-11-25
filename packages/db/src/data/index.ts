@@ -68,6 +68,8 @@ export {
 
 export {
   createThread,
+  insertThreadInTransaction,
+  notifyThreadCreated,
   InvalidLifecycleOwnerError,
   countThreads,
   countNonDeletedAssignedChildThreads,

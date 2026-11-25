@@ -40,6 +40,7 @@ import { createAsyncRerunner } from "../lib/async-deduper.js";
 import { getLastExecutionOptions } from "../threads/thread-events.js";
 import { loadThreadExecutionDefaults } from "../threads/project-execution-defaults.js";
 import { toThreadResponseFromThread } from "../threads/thread-runtime-display.js";
+import { dispatchReservedPlacement } from "./placement-dispatch.js";
 import { materializePlacementWorkspace } from "./placement-workspace.js";
 import {
   derivePlacementAuthority,
@@ -208,7 +209,11 @@ export function createPlacementService(deps: PlacementDeps) {
   type OperationRow = NonNullable<ReturnType<typeof readPlacementOperationRecord>>;
   type WaitSource = Parameters<typeof recordPlacementWait>[1]["source"];
 
-  function waitingOperations(providerId: string, ownerPluginId: string) {
+  function waitingOperations(
+    providerId: string,
+    ownerPluginId: string,
+    phases: readonly PlacementOperation["phase"][] = WAKE_PHASES,
+  ) {
     return deps.db
       .select()
       .from(placementOperations)
@@ -217,7 +222,7 @@ export function createPlacementService(deps: PlacementDeps) {
           eq(placementOperations.providerId, providerId),
           eq(placementOperations.ownerPluginId, ownerPluginId),
           eq(placementOperations.cancelRequested, false),
-          inArray(placementOperations.phase, [...WAKE_PHASES]),
+          inArray(placementOperations.phase, [...phases]),
         ),
       )
       .orderBy(asc(placementOperations.acceptedSeq))
@@ -255,6 +260,19 @@ export function createPlacementService(deps: PlacementDeps) {
       if (!registered || currentEpoch(providerId, registered) === null) {
         recordOwnerUnavailable(providerId);
         return;
+      }
+      for (const record of waitingOperations(
+        providerId,
+        registered.ownerPluginId,
+        ["reserved"],
+      )) {
+        try {
+          dispatch(record.id);
+        } catch (error) {
+          deps.logger.warn(
+            `placement dispatch failed for ${record.id}: ${String(error)}`,
+          );
+        }
       }
       for (const record of waitingOperations(providerId, registered.ownerPluginId)) {
         if (record.kind === "retry") continue;
@@ -343,7 +361,10 @@ export function createPlacementService(deps: PlacementDeps) {
         routeEvidenceRevision: candidate.routeEvidenceRevision,
         purpose,
       });
-      if (result.kind === "reserved") return;
+      if (result.kind === "reserved") {
+        dispatch(operationId);
+        return;
+      }
       const parsed = placementReasonSchema.safeParse(
         "reason" in result ? result.reason : null,
       );
@@ -351,6 +372,12 @@ export function createPlacementService(deps: PlacementDeps) {
     }
     const latest = readPlacementOperationRecord(deps.db, operationId);
     if (latest) persistWait(latest, source, lastReason);
+  }
+
+  function dispatch(operationId: string) {
+    const result = dispatchReservedPlacement(deps, operationId);
+    if (result !== "queued")
+      deps.logger.warn(`placement dispatch ${result} for ${operationId}`);
   }
 
   function persistWait(

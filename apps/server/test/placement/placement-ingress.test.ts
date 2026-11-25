@@ -312,7 +312,7 @@ describe("placement ingress", () => {
     });
   });
 
-  it("reserves the sole fake worker through normal wake and keeps later work waiting", async () => {
+  it("reserves the sole fake worker through normal wake, queues it once and keeps later work waiting", async () => {
     await withPlacement(async (harness) => {
       const owner = harness.placement.registerOwner({
         providerId: PROVIDER,
@@ -339,9 +339,9 @@ describe("placement ingress", () => {
         (await get(harness, `/placement/operations/${first.operation.id}`)).text,
       );
       expect(reserved).toMatchObject({
-        phase: "reserved",
+        phase: "queued",
         reason: null,
-        threadId: null,
+        threadId: expect.any(String),
         binding: {
           ownerPluginId: OWNER,
           providerId: PROVIDER,
@@ -358,7 +358,11 @@ describe("placement ingress", () => {
       expect(later).toMatchObject({ phase: "pending", binding: null });
       expect(["all_busy", "selected_busy"]).toContain(later.reason);
       expect(second.operation.acceptedSeq).toBeGreaterThan(first.operation.acceptedSeq);
-      expect(sideEffectCounts(harness)).toEqual(before);
+      expect(sideEffectCounts(harness)).toEqual({
+        ...before,
+        threads: before.threads + 1,
+        queued: before.queued + 1,
+      });
       expect(owner.ownerRevision).toBeGreaterThan(0);
     });
   });
