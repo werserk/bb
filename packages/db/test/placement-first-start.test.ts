@@ -341,6 +341,9 @@ it.each([-1, 0, 1])(
 );
 it.each([
   "valid",
+  "request-rejected",
+  "other-request-rejected",
+  "rejection-rolled-back",
   "mismatched-ids",
   "missing",
   "event",
@@ -504,6 +507,34 @@ it.each([
           },
         }),
       );
+    if (
+      mode === "request-rejected" ||
+      mode === "other-request-rejected" ||
+      mode === "rejection-rolled-back"
+    ) {
+      const reject = () =>
+        other.transaction((tx) => {
+          appendStoredThreadEventInTransaction(tx, {
+            threadId,
+            type: "client/turn/rejected",
+            scope: threadScope(),
+            data: {
+              requestId:
+                mode === "other-request-rejected"
+                  ? "creq_7777777777"
+                  : requestId,
+              reason: "turn_start_unconfirmed",
+              message: "Fixture rejection",
+            },
+          });
+          if (mode === "rejection-rolled-back") throw Error("rollback fixture");
+        });
+      if (mode === "rejection-rolled-back")
+        expect(reject).toThrow("rollback fixture");
+      else reject();
+      db.$client.close();
+      db = S.createConnection(join(dir, "scratch.db"));
+    }
     const args =
       mode === "missing" || mode === "stripped"
         ? command
@@ -511,9 +542,14 @@ it.each([
     const first = S.claimPlacementExecutionCommand(db, args);
     let simulatedTransport = 0;
     if (first.kind === "won") simulatedTransport++;
-    expect(simulatedTransport).toBe(mode === "valid" ? 1 : 0);
+    const eligible =
+      mode === "valid" ||
+      mode === "other-request-rejected" ||
+      mode === "rejection-rolled-back";
+    expect(first.kind).toBe(eligible ? "won" : "refused");
+    expect(simulatedTransport).toBe(eligible ? 1 : 0);
     expect(S.readPlacementDispatchReceipt(other, guard)?.state).toBe(
-      mode === "valid" ? "possibly_sent" : "prepared",
+      eligible ? "possibly_sent" : "prepared",
     );
     if (mode === "valid") {
       db.$client.close();

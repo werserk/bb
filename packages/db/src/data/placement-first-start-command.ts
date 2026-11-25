@@ -12,7 +12,10 @@ import {
 } from "@bb/domain";
 import type { DbTransaction } from "../connection.js";
 import { events, placementBindings, placementEffects } from "../schema.js";
-import { getStoredProviderSession } from "./events.js";
+import {
+  getStoredProviderSession,
+  hasStoredTerminalClientTurnRequestEvent,
+} from "./events.js";
 import { getThread } from "./threads.js";
 import { readPlacementOperationRecord } from "./placement-operations.js";
 import { readPlacementWorker } from "./placement-workers.js";
@@ -168,6 +171,10 @@ export function permitsPlacementCommand(
     body.retryOfRequestId ||
     body.retryAttempt ||
     body.questionResponse ||
+    hasStoredTerminalClientTurnRequestEvent(tx, {
+      threadId: r.thread,
+      requestId: body.requestId,
+    }) ||
     hasOtherStart(tx, r)
   )
     return false;
