@@ -423,8 +423,25 @@ class ReorderQueuedThreadMessageRollback extends Error {
   }
 }
 
+type GroupEnvelope = Pick<
+  QueuedThreadMessageRow,
+  | "payloadKind"
+  | "serviceTurn"
+  | "senderThreadId"
+  | "model"
+  | "reasoningLevel"
+  | "permissionMode"
+  | "serviceTier"
+>;
+type GroupPosition = GroupEnvelope &
+  Pick<QueuedThreadMessageRow, "id" | "groupWithNext">;
+type GroupMember = Pick<
+  QueuedThreadMessageRow,
+  "id" | "threadId" | "placementOperationId"
+>;
+
 function collectLeadGroupIds(
-  queuedMessages: readonly QueuedThreadMessageRow[],
+  queuedMessages: readonly GroupPosition[],
 ): string[] {
   const ids: string[] = [];
   const firstQueuedMessage = queuedMessages[0] ?? null;
@@ -455,10 +472,10 @@ function collectLeadGroupIds(
  * left waiting) or staples an unrelated later row onto it. Membership is one
  * question, eligibility another; callers apply eligibility to whole groups.
  */
-function partitionQueuedMessageGroups(
-  queuedMessages: readonly QueuedThreadMessageRow[],
-): QueuedThreadMessageRow[][] {
-  const groups: QueuedThreadMessageRow[][] = [];
+function partitionQueuedMessageGroups<T extends GroupPosition>(
+  queuedMessages: readonly T[],
+): T[][] {
+  const groups: T[][] = [];
   let index = 0;
   while (index < queuedMessages.length) {
     const size = collectLeadGroupIds(queuedMessages.slice(index)).length;
@@ -535,8 +552,8 @@ function stringArraysEqual(
 }
 
 function queuedMessageGroupingEnvelopeMatches(
-  firstQueuedMessage: QueuedThreadMessageRow | null,
-  queuedMessage: QueuedThreadMessageRow,
+  firstQueuedMessage: GroupEnvelope | null,
+  queuedMessage: GroupEnvelope,
 ): boolean {
   return (
     firstQueuedMessage !== null &&
@@ -554,7 +571,7 @@ function queuedMessageGroupingEnvelopeMatches(
   );
 }
 
-function isQueuedThreadMessageClaimed(row: QueuedThreadMessageRow): boolean {
+function isQueuedThreadMessageClaimed(row: Pick<QueuedThreadMessageRow, "state">): boolean {
   return row.state === "claimed";
 }
 
@@ -651,10 +668,10 @@ function getPreviousQueuedThreadMessage(
   db: DbQueryConnection,
   queuedMessage: QueuedThreadMessageRow,
   includeClaimed = false,
-): QueuedThreadMessageRow | null {
+): Pick<QueuedThreadMessageRow, "id" | "groupWithNext"> | null {
   return (
     db
-      .select()
+      .select({ id: queuedThreadMessages.id, groupWithNext: queuedThreadMessages.groupWithNext })
       .from(queuedThreadMessages)
       .where(
         and(
@@ -1586,7 +1603,14 @@ export type QueuedThreadMessageGroupClaimPolicy =
     }
   | {
       kind: "explicit-send";
-      assertGroupAllowed?: (tx: DbTransaction, rows: readonly QueuedThreadMessageRow[]) => void;
+      authorizeMembers?: (
+        tx: DbTransaction,
+        members: readonly GroupMember[],
+      ) => void;
+      assertGroupAllowed?: (
+        tx: DbTransaction,
+        rows: readonly QueuedThreadMessageRow[],
+      ) => void;
     };
 
 function isAutomaticQueuedThreadMessageGroupClaimAllowed(
@@ -1604,6 +1628,119 @@ function isAutomaticQueuedThreadMessageGroupClaimAllowed(
   );
 }
 
+const groupMemberFields = {
+  id: queuedThreadMessages.id,
+  threadId: queuedThreadMessages.threadId,
+  placementOperationId: queuedThreadMessages.placementOperationId,
+};
+
+const groupPositionFields = {
+  ...groupMemberFields,
+  groupWithNext: queuedThreadMessages.groupWithNext,
+  payloadKind: queuedThreadMessages.payloadKind,
+  serviceTurn: queuedThreadMessages.serviceTurn,
+  senderThreadId: queuedThreadMessages.senderThreadId,
+  model: queuedThreadMessages.model,
+  reasoningLevel: queuedThreadMessages.reasoningLevel,
+  permissionMode: queuedThreadMessages.permissionMode,
+  serviceTier: queuedThreadMessages.serviceTier,
+};
+
+function claimExplicitQueuedMessageGroup(
+  tx: DbTransaction,
+  id: string,
+  policy: Extract<
+    QueuedThreadMessageGroupClaimPolicy,
+    { kind: "explicit-send" }
+  >,
+): ClaimedQueuedThreadMessageRow[] | null {
+  const q = queuedThreadMessages;
+  const target = tx
+    .select({ threadId: q.threadId, state: q.state, claimToken: q.claimToken })
+    .from(q)
+    .where(eq(q.id, id))
+    .get();
+  if (!target) return null;
+  const held = target.state === "claimed";
+  const order = [asc(q.sortKey), asc(q.id)];
+  let members: readonly GroupMember[] | undefined;
+  if (held) {
+    if (!policy.authorizeMembers && !policy.assertGroupAllowed) return null;
+    if (!target.claimToken) throw new Error("Missing native group claim token");
+    members = tx
+      .select(groupMemberFields)
+      .from(q)
+      .where(
+        and(
+          eq(q.threadId, target.threadId),
+          eq(q.claimToken, target.claimToken),
+        ),
+      )
+      .orderBy(...order)
+      .all();
+  } else {
+    const positions = tx
+      .select(groupPositionFields)
+      .from(q)
+      .where(and(eq(q.threadId, target.threadId), liveQueuedThreadMessage()))
+      .orderBy(...order)
+      .all();
+    members = partitionQueuedMessageGroups(positions).find((rows) =>
+      rows.some((row) => row.id === id),
+    );
+  }
+  if (!members?.length) return null;
+  policy.authorizeMembers?.(
+    tx,
+    members.map(({ id, threadId, placementOperationId }) => ({
+      id,
+      threadId,
+      placementOperationId,
+    })),
+  );
+  if (held && !policy.assertGroupAllowed) return null;
+
+  // Hydrate only this authorized partition in the same IMMEDIATE transaction.
+  const group = queryInSqliteVariableBatches({
+    values: members.map((row) => row.id),
+    dedupeKey: (value) => value,
+    fixedVariableCount: 0,
+    variableCountPerValue: 1,
+    queryBatch: (ids) =>
+      tx
+        .select()
+        .from(q)
+        .where(inArray(q.id, [...ids]))
+        .orderBy(...order)
+        .all(),
+  });
+  const existing = group.find((row) => row.id === id);
+  if (!existing || group.length !== members.length) return null;
+  policy.assertGroupAllowed?.(tx, group);
+  if (
+    held ||
+    hasClaimedQueuedThreadMessages(tx, target.threadId, {
+      placementOnly: existing.placementOperationId === null,
+    })
+  )
+    return null;
+  if (group[0]?.id !== id) {
+    if (existing.placementOperationId !== null) {
+      const claimed = claimQueuedThreadMessagesInTransaction(tx, [existing]);
+      if (claimed)
+        claimed[0]!.deferredSplitGroupIds = group.map((row) => row.id);
+      return claimed;
+    }
+    const now = Date.now();
+    clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);
+    clearQueuedMessageGroupEdgeInTransaction(tx, existing, now);
+  }
+  return claimQueuedThreadMessagesInTransaction(
+    tx,
+    group[0]?.id === id ? group : [existing],
+  );
+}
+
 export function claimQueuedThreadMessageGroup(
   db: DbConnection,
   notifier: DbNotifier,
@@ -1612,69 +1749,25 @@ export function claimQueuedThreadMessageGroup(
 ): ClaimedQueuedThreadMessageRow[] | null {
   const claimedQueuedMessages = db.transaction(
     (tx) => {
+      if (policy.kind === "explicit-send")
+        return claimExplicitQueuedMessageGroup(tx, id, policy);
       const existing = getQueuedThreadMessage(tx, id);
-      if (!existing) return null;
-      if (isQueuedThreadMessageClaimed(existing)) {
-        if (policy.kind === "explicit-send" && policy.assertGroupAllowed) {
-          if (!existing.claimToken) throw new Error("Missing native group claim token");
-          const claimed = tx.select().from(queuedThreadMessages)
-            .where(and(
-              eq(queuedThreadMessages.threadId, existing.threadId),
-              eq(queuedThreadMessages.claimToken, existing.claimToken),
-            ))
-            .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
-            .all();
-          policy.assertGroupAllowed(tx, claimed);
-        }
+      if (!existing || hasClaimedQueuedThreadMessages(tx, existing.threadId))
         return null;
-      }
-
+      const group = partitionQueuedMessageGroups(
+        listQueuedThreadMessages(tx, existing.threadId),
+      ).find((rows) => rows.some((row) => row.id === id));
       if (
-        policy.kind === "automatic" &&
-        hasClaimedQueuedThreadMessages(tx, existing.threadId)
-      ) {
+        !group ||
+        !isAutomaticQueuedThreadMessageGroupClaimAllowed(
+          group,
+          isThreadQueueAutoSendPaused(tx, existing.threadId),
+          policy.retryingFailure,
+          Date.now(),
+        ) ||
+        !policy.isGroupEligible(group)
+      )
         return null;
-      }
-      const queuedMessages = listQueuedThreadMessages(tx, existing.threadId);
-      const group =
-        partitionQueuedMessageGroups(queuedMessages).find((rows) =>
-          rows.some((row) => row.id === id),
-        ) ?? null;
-      if (group === null) {
-        return null;
-      }
-      if (
-        (policy.kind === "automatic" &&
-          !isAutomaticQueuedThreadMessageGroupClaimAllowed(
-            group,
-            isThreadQueueAutoSendPaused(tx, existing.threadId),
-            policy.retryingFailure,
-            Date.now(),
-          )) ||
-        (policy.kind === "automatic" && !policy.isGroupEligible(group))
-      ) {
-        return null;
-      }
-      if (policy.kind === "explicit-send") {
-        policy.assertGroupAllowed?.(tx, group);
-        // The live queue omits claimed rows. Never form a second batch across a managed claim.
-        if (
-          hasClaimedQueuedThreadMessages(tx, existing.threadId, {
-            placementOnly: existing.placementOperationId === null,
-          })
-        ) return null;
-      }
-      if (policy.kind === "explicit-send" && group[0]?.id !== id) {
-        if (existing.placementOperationId !== null) {
-          const claimed = claimQueuedThreadMessagesInTransaction(tx, [existing]);
-          if (claimed) claimed[0]!.deferredSplitGroupIds = group.map(row => row.id);
-          return claimed;
-        }
-        const now = Date.now();
-        clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);
-        clearQueuedMessageGroupEdgeInTransaction(tx, existing, now);
-        return claimQueuedThreadMessagesInTransaction(tx, [existing]);
-      }
       return claimQueuedThreadMessagesInTransaction(tx, group);
     },
     { behavior: "immediate" },
@@ -2106,7 +2199,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
     if (existingRows.length !== 1) return false;
     const target = existingRows[0]!;
     const ordered = db
-      .select()
+      .select({ ...groupPositionFields, state: queuedThreadMessages.state })
       .from(queuedThreadMessages)
       .where(eq(queuedThreadMessages.threadId, target.threadId))
       .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
