@@ -70,7 +70,11 @@ function observation(): WorkerObservation {
     admission: "enabled",
     connected: true,
     auth: "authenticated",
-    qualification: { tier: "local-fixture", evidenceId: "fx", fixtureRunId: RUN },
+    qualification: {
+      tier: "local-fixture",
+      evidenceId: "fx",
+      fixtureRunId: RUN,
+    },
     custody: {
       revision: 1,
       status: "free",
@@ -141,7 +145,11 @@ const freeWorkers: PlacementOwnerPolicy = {
       }));
     return candidates.length === 0
       ? { kind: "wait", reason: "all_busy" }
-      : { kind: "candidates", ownerRevision: context.ownerRevision, candidates };
+      : {
+          kind: "candidates",
+          ownerRevision: context.ownerRevision,
+          candidates,
+        };
   },
 };
 
@@ -166,7 +174,13 @@ function deferredPolicy() {
 function seedWorkspace(harness: TestAppHarness) {
   harness.db
     .insert(hosts)
-    .values({ id: HOST, name: "Workspace", type: "persistent", createdAt: 1, updatedAt: 1 })
+    .values({
+      id: HOST,
+      name: "Workspace",
+      type: "persistent",
+      createdAt: 1,
+      updatedAt: 1,
+    })
     .run();
   harness.db
     .insert(environments)
@@ -211,11 +225,15 @@ function setMode(
       ownerRevision: expectedRevision,
     }),
   );
-  if (result.kind !== "updated") throw new Error(`mode ${mode}: ${result.kind}`);
+  if (result.kind !== "updated")
+    throw new Error(`mode ${mode}: ${result.kind}`);
   return result.owner.revision;
 }
 
-function setDefaultPermission(harness: TestAppHarness, permissionMode: PermissionMode) {
+function setDefaultPermission(
+  harness: TestAppHarness,
+  permissionMode: PermissionMode,
+) {
   upsertProjectExecutionDefaults(harness.db, {
     projectId: PERSONAL_PROJECT_ID,
     providerId: PROVIDER,
@@ -232,7 +250,10 @@ async function post(harness: TestAppHarness, path: string, body?: unknown) {
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  return { status: response.status, body: (await response.json()) as Record<string, any> };
+  return {
+    status: response.status,
+    body: (await response.json()) as Record<string, any>,
+  };
 }
 
 function operationCount(harness: TestAppHarness) {
@@ -244,7 +265,9 @@ function withPlacement<T>(
   purpose = true,
 ) {
   return withTestHarness(
-    purpose ? { placementPurpose: { kind: "local-fixture", fixtureRunId: RUN } } : {},
+    purpose
+      ? { placementPurpose: { kind: "local-fixture", fixtureRunId: RUN } }
+      : {},
     async (harness) => {
       seedWorkspace(harness);
       return run(harness);
@@ -270,8 +293,13 @@ async function installPlugins(harness: TestAppHarness, names: string[]) {
         },
       }),
     );
-    await writeFile(join(dir, "index.ts"), "export default function plugin() {}");
-    expect((await harness.pluginService.installPath(dir)).status).toBe("running");
+    await writeFile(
+      join(dir, "index.ts"),
+      "export default function plugin() {}",
+    );
+    expect((await harness.pluginService.installPath(dir)).status).toBe(
+      "running",
+    );
   }
 }
 
@@ -315,7 +343,11 @@ function managedThread(
   });
 }
 
-function bindThread(harness: TestAppHarness, threadId: string, operationId: string) {
+function bindThread(
+  harness: TestAppHarness,
+  threadId: string,
+  operationId: string,
+) {
   const ref = workspaceBindingRef(workspace);
   harness.db
     .insert(placementBindings)
@@ -338,7 +370,9 @@ function bindThread(harness: TestAppHarness, threadId: string, operationId: stri
 }
 
 function serviceRequest(key: string, threadId: string, senderThreadId: string) {
-  const input = [{ type: "text" as const, text: "synthetic service", mentions: [] }];
+  const input = [
+    { type: "text" as const, text: "synthetic service", mentions: [] },
+  ];
   return {
     input,
     request: {
@@ -373,15 +407,20 @@ describe("placement ingress authority", () => {
         setMode(h, register(h, freeWorkers).ownerRevision, "managed");
         const accepted = await sdk.accept(independent("same"));
         const args = { operationId: accepted.operation.id };
-        const local = (await post(h, "/placement/operations", independent("same"))).body
-          .operation;
+        const local = (
+          await post(h, "/placement/operations", independent("same"))
+        ).body.operation;
         expect(local.id).not.toBe(accepted.operation.id);
-        expect(readPlacementActionReceipt(h.db, args.operationId)!.authority).toMatchObject({
+        expect(
+          readPlacementActionReceipt(h.db, args.operationId)!.authority,
+        ).toMatchObject({
           actor: "plugin",
           principal: `plugin:${CLIENT}`,
           plugin: CLIENT,
         });
-        expect(readPlacementActionReceipt(h.db, local.id)!.authority).toMatchObject({
+        expect(
+          readPlacementActionReceipt(h.db, local.id)!.authority,
+        ).toMatchObject({
           actor: "local-unverified",
           principal: "local",
           plugin: null,
@@ -389,15 +428,22 @@ describe("placement ingress authority", () => {
         expect(JSON.stringify(await owner.get(args))).not.toContain(SECRET);
         for (const caller of [owner, other])
           for (const op of ["recoverDraft", "cancel"] as const)
-            await expect(caller[op](args)).rejects.toMatchObject({ status: 404 });
+            await expect(caller[op](args)).rejects.toMatchObject({
+              status: 404,
+            });
         await expect(other.get(args)).rejects.toMatchObject({ status: 404 });
-        expect((await post(h, `/placement/operations/${args.operationId}/cancel`)).status).toBe(404);
+        expect(
+          (await post(h, `/placement/operations/${args.operationId}/cancel`))
+            .status,
+        ).toBe(404);
         const draftOverHttp = await h.app.request(
           `/api/v1/placement/operations/${args.operationId}/draft`,
         );
         expect(draftOverHttp.status).toBe(404);
         for (const op of ["get", "recoverDraft", "cancel"] as const)
-          await expect(sdk[op]({ operationId: local.id })).rejects.toMatchObject({
+          await expect(
+            sdk[op]({ operationId: local.id }),
+          ).rejects.toMatchObject({
             status: 404,
           });
         const draft = await sdk.recoverDraft(args);
@@ -407,11 +453,13 @@ describe("placement ingress authority", () => {
         await h.placement.wake(PROVIDER);
         expect(await sdk.accept(independent("same"))).toEqual({
           kind: "cancelled",
-          operation: (await sdk.get(args)),
+          operation: await sdk.get(args),
         });
         await h.pluginService.reload(CLIENT);
         await expect(sdk.get(args)).rejects.toMatchObject({ status: 403 });
-        expect((await placementSdk(h, CLIENT).get(args)).id).toBe(args.operationId);
+        expect((await placementSdk(h, CLIENT).get(args)).id).toBe(
+          args.operationId,
+        );
       });
     });
   });
@@ -421,11 +469,15 @@ describe("placement ingress authority", () => {
       await withPluginSdk(h, [OWNER, CLIENT], async () => {
         setMode(h, register(h, freeWorkers).ownerRevision, "managed");
         const seedOp = async (key: string) =>
-          (await post(h, "/placement/operations", independent(key))).body.operation.id;
+          (await post(h, "/placement/operations", independent(key))).body
+            .operation.id;
         const target = managedThread(h, PERSONAL_PROJECT_ID, ENV);
         bindThread(h, target.id, await seedOp("seed-target"));
         const second = seedProjectWithSource(h.deps, { hostId: HOST }).project;
-        const otherEnv = seedEnvironment(h.deps, { hostId: HOST, projectId: second.id });
+        const otherEnv = seedEnvironment(h.deps, {
+          hostId: HOST,
+          projectId: second.id,
+        });
         const foreignSender = managedThread(h, second.id, otherEnv.id);
         const api = h.pluginService.getApi(CLIENT)!;
         const crossed = serviceRequest("crossed", target.id, foreignSender.id);
@@ -445,10 +497,14 @@ describe("placement ingress authority", () => {
         });
         bindThread(h, unmanaged.id, await seedOp("seed-unmanaged"));
         const before = operationCount(h);
-        await expect(api.sdk.experimental_placement.accept(crossed.request)).rejects.toMatchObject({
+        await expect(
+          api.sdk.experimental_placement.accept(crossed.request),
+        ).rejects.toMatchObject({
           status: 403,
         });
-        expect((await post(h, "/placement/operations", crossed.request)).status).toBe(403);
+        expect(
+          (await post(h, "/placement/operations", crossed.request)).status,
+        ).toBe(403);
         const sender = managedThread(h, PERSONAL_PROJECT_ID, ENV);
         await expect(
           api.sdk.experimental_placement.accept(
@@ -459,11 +515,15 @@ describe("placement ingress authority", () => {
         const scoped = await api.sdk.experimental_placement.accept(
           serviceRequest("scoped", target.id, sender.id).request,
         );
-        expect(readPlacementActionReceipt(h.db, scoped.operation.id)!.authority).toMatchObject({
+        expect(
+          readPlacementActionReceipt(h.db, scoped.operation.id)!.authority,
+        ).toMatchObject({
           actor: "plugin",
           sender: sender.id,
           initiator: "agent",
-          serviceTurn: { origin: { pluginId: CLIENT, senderThreadId: sender.id } },
+          serviceTurn: {
+            origin: { pluginId: CLIENT, senderThreadId: sender.id },
+          },
         });
       });
     });
@@ -476,25 +536,42 @@ describe("placement ingress authority", () => {
         h,
         "/placement/operations",
         independent("behalf", {
-          startedOnBehalfOf: { initiator: "system", senderThreadId: "missing-thread" },
+          startedOnBehalfOf: {
+            initiator: "system",
+            senderThreadId: "missing-thread",
+          },
         }),
       );
-      expect(behalf).toMatchObject({ status: 400, body: { code: "invalid_request" } });
+      expect(behalf).toMatchObject({
+        status: 400,
+        body: { code: "invalid_request" },
+      });
       const sender = await post(
         h,
         "/placement/operations",
         independent("sender", { senderThreadId: "missing-thread" }),
       );
-      expect(sender).toMatchObject({ status: 400, body: { code: "parent_thread_invalid" } });
+      expect(sender).toMatchObject({
+        status: 400,
+        body: { code: "parent_thread_invalid" },
+      });
       const foreignPlugin = await post(
         h,
         "/placement/operations",
-        independent("plugin-origin", { origin: "plugin", originPluginId: OWNER }),
+        independent("plugin-origin", {
+          origin: "plugin",
+          originPluginId: OWNER,
+        }),
       );
       expect(foreignPlugin.status).toBe(200);
       expect(
-        readPlacementActionReceipt(h.db, foreignPlugin.body.operation.id)!.authority,
-      ).toMatchObject({ actor: "local-unverified", plugin: null, origin: "plugin" });
+        readPlacementActionReceipt(h.db, foreignPlugin.body.operation.id)!
+          .authority,
+      ).toMatchObject({
+        actor: "local-unverified",
+        plugin: null,
+        origin: "plugin",
+      });
       expect(operationCount(h)).toBe(1);
       const live = createThread(h.db, h.hub, {
         projectId: PERSONAL_PROJECT_ID,
@@ -508,7 +585,8 @@ describe("placement ingress authority", () => {
         independent("live-sender", { senderThreadId: live.id }),
       );
       expect(
-        readPlacementActionReceipt(h.db, attributed.body.operation.id)!.authority,
+        readPlacementActionReceipt(h.db, attributed.body.operation.id)!
+          .authority,
       ).toMatchObject({ sender: live.id, initiator: "user" });
     });
   });
@@ -516,17 +594,43 @@ describe("placement ingress authority", () => {
   it("replays the exact receipt with its retained permission after defaults and mode change", async () => {
     await withPlacement(async (h) => {
       setDefaultPermission(h, "auto");
-      const revision = setMode(h, register(h, freeWorkers).ownerRevision, "managed");
-      const first = await post(h, "/placement/operations", independent("replay"));
+      const revision = setMode(
+        h,
+        register(h, freeWorkers).ownerRevision,
+        "managed",
+      );
+      const first = await post(
+        h,
+        "/placement/operations",
+        independent("replay"),
+      );
       const id = first.body.operation.id;
-      expect(readPlacementActionReceipt(h.db, id)!.authority.permission).toBe("auto");
+      expect(readPlacementActionReceipt(h.db, id)!.authority.permission).toBe(
+        "auto",
+      );
       setDefaultPermission(h, "full");
-      const afterDefaults = await post(h, "/placement/operations", independent("replay"));
-      expect(afterDefaults).toMatchObject({ status: 200, body: { operation: { id } } });
+      const afterDefaults = await post(
+        h,
+        "/placement/operations",
+        independent("replay"),
+      );
+      expect(afterDefaults).toMatchObject({
+        status: 200,
+        body: { operation: { id } },
+      });
       setMode(h, revision, "disabled");
-      const afterDisable = await post(h, "/placement/operations", independent("replay"));
-      expect(afterDisable).toMatchObject({ status: 200, body: { operation: { id } } });
-      expect(readPlacementActionReceipt(h.db, id)!.authority.permission).toBe("auto");
+      const afterDisable = await post(
+        h,
+        "/placement/operations",
+        independent("replay"),
+      );
+      expect(afterDisable).toMatchObject({
+        status: 200,
+        body: { operation: { id } },
+      });
+      expect(readPlacementActionReceipt(h.db, id)!.authority.permission).toBe(
+        "auto",
+      );
       const changed = await post(
         h,
         "/placement/operations",
@@ -536,8 +640,15 @@ describe("placement ingress authority", () => {
         status: 409,
         body: { code: "placement_submission_conflict" },
       });
-      const fresh = await post(h, "/placement/operations", independent("fresh"));
-      expect(fresh).toMatchObject({ status: 409, body: { code: "placement_refused" } });
+      const fresh = await post(
+        h,
+        "/placement/operations",
+        independent("fresh"),
+      );
+      expect(fresh).toMatchObject({
+        status: 409,
+        body: { code: "placement_refused" },
+      });
       expect(operationCount(h)).toBe(1);
     });
   });
@@ -548,19 +659,38 @@ describe("placement ingress authority", () => {
       const owner = register(h, freeWorkers);
       setMode(h, owner.ownerRevision, "managed");
       owner.dispose();
-      const loosened = await post(h, "/placement/operations", independent("loosened"));
-      expect(loosened.body.operation).toMatchObject({ phase: "pending", reason: "owner_unavailable" });
+      const loosened = await post(
+        h,
+        "/placement/operations",
+        independent("loosened"),
+      );
+      expect(loosened.body.operation).toMatchObject({
+        phase: "pending",
+        reason: "owner_unavailable",
+      });
       setDefaultPermission(h, "full");
-      const tightened = await post(h, "/placement/operations", independent("tightened"));
-      expect(readPlacementActionReceipt(h.db, tightened.body.operation.id)!.authority.permission).toBe("full");
+      const tightened = await post(
+        h,
+        "/placement/operations",
+        independent("tightened"),
+      );
+      expect(
+        readPlacementActionReceipt(h.db, tightened.body.operation.id)!.authority
+          .permission,
+      ).toBe("full");
       setDefaultPermission(h, "auto");
       register(h, freeWorkers);
       await h.placement.wake(PROVIDER);
-      const draft = (id: string) => h.placement.recoverDraft({ kind: "client" }, id);
-      expect(draft(loosened.body.operation.id).preparedExecution).toMatchObject({
-        permissionMode: "auto",
-      });
-      expect(draft(tightened.body.operation.id).preparedExecution).toMatchObject({
+      const draft = (id: string) =>
+        h.placement.recoverDraft({ kind: "client" }, id);
+      expect(draft(loosened.body.operation.id).preparedExecution).toMatchObject(
+        {
+          permissionMode: "auto",
+        },
+      );
+      expect(
+        draft(tightened.body.operation.id).preparedExecution,
+      ).toMatchObject({
         permissionMode: "auto",
       });
     });
@@ -571,8 +701,9 @@ describe("placement ingress authority", () => {
       const stale = deferredPolicy();
       const old = register(h, stale.policy);
       setMode(h, old.ownerRevision, "managed");
-      const refused = (await post(h, "/placement/operations", independent("refuse-race"))).body
-        .operation;
+      const refused = (
+        await post(h, "/placement/operations", independent("refuse-race"))
+      ).body.operation;
       await vi.waitFor(() => expect(stale.context()).toBeDefined());
       old.dispose();
       register(h, freeWorkers);
@@ -592,8 +723,9 @@ describe("placement ingress authority", () => {
         ownerPluginId: OWNER,
         workers: [observation()],
       });
-      const reserved = (await post(h, "/placement/operations", independent("reserve-race")))
-        .body.operation;
+      const reserved = (
+        await post(h, "/placement/operations", independent("reserve-race"))
+      ).body.operation;
       await vi.waitFor(() => expect(stale.context()?.workers).toHaveLength(1));
       const epoch = stale.context().ownerRevision;
       old.dispose();
@@ -603,14 +735,18 @@ describe("placement ingress authority", () => {
       stale.finish({
         kind: "candidates",
         ownerRevision: epoch,
-        candidates: [{ workerId: "worker-a", workerRevision: 1, routeEvidenceRevision: 1 }],
+        candidates: [
+          { workerId: "worker-a", workerRevision: 1, routeEvidenceRevision: 1 },
+        ],
       });
       await vi.waitFor(() => expect(waiting.context()).toBeDefined());
       expect(h.placement.get({ kind: "client" }, reserved.id)).toMatchObject({
         reason: null,
         binding: null,
       });
-      expect(h.db.select().from(placementWorkers).get()).toMatchObject({ slotState: "free" });
+      expect(h.db.select().from(placementWorkers).get()).toMatchObject({
+        slotState: "free",
+      });
       waiting.finish({ kind: "wait", reason: "selected_busy" });
       await resumed;
       expect(h.placement.get({ kind: "client" }, reserved.id)).toMatchObject({
@@ -624,9 +760,13 @@ describe("placement ingress authority", () => {
     await withPlacement(async (h) => {
       const owner = register(h, freeWorkers);
       setMode(h, owner.ownerRevision, "managed");
-      const id = (await post(h, "/placement/operations", independent("waiting"))).body.operation.id;
+      const id = (
+        await post(h, "/placement/operations", independent("waiting"))
+      ).body.operation.id;
       await h.placement.wake(PROVIDER);
-      expect(h.placement.get({ kind: "client" }, id)).toMatchObject({ reason: "all_busy" });
+      expect(h.placement.get({ kind: "client" }, id)).toMatchObject({
+        reason: "all_busy",
+      });
       owner.dispose();
       await h.placement.wake(PROVIDER);
       expect(h.placement.get({ kind: "client" }, id)).toMatchObject({
@@ -648,16 +788,22 @@ describe("placement ingress authority", () => {
         await post(
           h,
           "/placement/operations",
-          independent("windows", { environment: { type: "reuse", environmentId: windows.id } }),
+          independent("windows", {
+            environment: { type: "reuse", environmentId: windows.id },
+          }),
         )
       ).body.operation;
-      const later = (await post(h, "/placement/operations", independent("posix"))).body.operation;
+      const later = (
+        await post(h, "/placement/operations", independent("posix"))
+      ).body.operation;
       await h.placement.wake(PROVIDER);
       await h.placement.wake(PROVIDER);
-      expect(h.placement.get({ kind: "client" }, unsupported.id)).toMatchObject({
-        phase: "refused",
-        reason: "unsupported_preparation",
-      });
+      expect(h.placement.get({ kind: "client" }, unsupported.id)).toMatchObject(
+        {
+          phase: "refused",
+          reason: "unsupported_preparation",
+        },
+      );
       expect(h.placement.get({ kind: "client" }, later.id)).toMatchObject({
         phase: "pending",
         reason: "all_busy",
@@ -673,15 +819,18 @@ describe("placement ingress authority", () => {
         ownerPluginId: OWNER,
         workers: [observation()],
       });
-      const id = (await post(h, "/placement/operations", independent("no-purpose"))).body
-        .operation.id;
+      const id = (
+        await post(h, "/placement/operations", independent("no-purpose"))
+      ).body.operation.id;
       await h.placement.wake(PROVIDER);
       expect(h.placement.get({ kind: "client" }, id)).toMatchObject({
         phase: "pending",
         reason: "unsupported_tool_route",
         binding: null,
       });
-      expect(h.db.select().from(placementWorkers).get()).toMatchObject({ slotState: "free" });
+      expect(h.db.select().from(placementWorkers).get()).toMatchObject({
+        slotState: "free",
+      });
       expect(h.db.select().from(threads).all()).toHaveLength(0);
       expect(h.db.select().from(queuedThreadMessages).all()).toHaveLength(0);
     }, false);
@@ -689,14 +838,25 @@ describe("placement ingress authority", () => {
 
   it("refuses new work when the owner is disabled inside the accept transaction", async () => {
     await withPlacement(async (h) => {
-      const revision = setMode(h, register(h, freeWorkers).ownerRevision, "managed");
+      const revision = setMode(
+        h,
+        register(h, freeWorkers).ownerRevision,
+        "managed",
+      );
       const original = h.db.transaction.bind(h.db);
       vi.spyOn(h.db, "transaction").mockImplementationOnce((...args) => {
         setMode(h, revision, "disabled");
         return original(...args);
       });
-      const result = await post(h, "/placement/operations", independent("interleaved"));
-      expect(result).toMatchObject({ status: 409, body: { code: "placement_refused" } });
+      const result = await post(
+        h,
+        "/placement/operations",
+        independent("interleaved"),
+      );
+      expect(result).toMatchObject({
+        status: 409,
+        body: { code: "placement_refused" },
+      });
       expect(operationCount(h)).toBe(0);
     });
   });

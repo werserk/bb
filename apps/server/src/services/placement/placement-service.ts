@@ -90,7 +90,11 @@ const PLACED_PHASES = new Set<PlacementOperation["phase"]>([
 ]);
 
 function notFound(): never {
-  throw new ApiError(404, "placement_not_found", "Placement operation not found");
+  throw new ApiError(
+    404,
+    "placement_not_found",
+    "Placement operation not found",
+  );
 }
 
 function refusedBeforeAcceptance(reason: string, message: string): never {
@@ -140,7 +144,10 @@ export function createPlacementService(deps: PlacementDeps) {
           intent.failedOperationId,
         );
         if (!failed) notFound();
-        return { providerId: failed.providerId, sourceThreadId: failed.threadId };
+        return {
+          providerId: failed.providerId,
+          sourceThreadId: failed.threadId,
+        };
       }
     }
   }
@@ -161,7 +168,8 @@ export function createPlacementService(deps: PlacementDeps) {
     }
     if (intent.request.permissionMode !== undefined)
       return intent.request.permissionMode;
-    const source = sourceThreadId === null ? null : getThread(deps.db, sourceThreadId);
+    const source =
+      sourceThreadId === null ? null : getThread(deps.db, sourceThreadId);
     if (source) {
       const last = getLastExecutionOptions(deps, source.id);
       return last?.permissionMode === "accept-edits" ||
@@ -181,7 +189,8 @@ export function createPlacementService(deps: PlacementDeps) {
   function toAcceptance(operation: PlacementOperation): PlacementAcceptance {
     if (operation.phase === "refused")
       return { kind: "refused", operation, outcome: "not-created" };
-    if (operation.phase === "cancelled") return { kind: "cancelled", operation };
+    if (operation.phase === "cancelled")
+      return { kind: "cancelled", operation };
     const thread =
       operation.threadId !== null && PLACED_PHASES.has(operation.phase)
         ? getThread(deps.db, operation.threadId)
@@ -206,7 +215,9 @@ export function createPlacementService(deps: PlacementDeps) {
     ownerPluginId: string;
     policy: PlacementOwnerPolicy;
   };
-  type OperationRow = NonNullable<ReturnType<typeof readPlacementOperationRecord>>;
+  type OperationRow = NonNullable<
+    ReturnType<typeof readPlacementOperationRecord>
+  >;
   type WaitSource = Parameters<typeof recordPlacementWait>[1]["source"];
 
   function waitingOperations(
@@ -274,7 +285,10 @@ export function createPlacementService(deps: PlacementDeps) {
           );
         }
       }
-      for (const record of waitingOperations(providerId, registered.ownerPluginId)) {
+      for (const record of waitingOperations(
+        providerId,
+        registered.ownerPluginId,
+      )) {
         if (record.kind === "retry") continue;
         try {
           if (record.resolvedWorkspaceDigest === null) {
@@ -468,7 +482,10 @@ export function createPlacementService(deps: PlacementDeps) {
         ownerPluginId: scope.ownerPluginId,
         providerId: scope.providerId,
         authority,
-        request: { schemaVersion: request.schemaVersion, intent: request.intent },
+        request: {
+          schemaVersion: request.schemaVersion,
+          intent: request.intent,
+        },
       });
       if (result.kind === "conflict")
         throw new ApiError(
@@ -484,7 +501,10 @@ export function createPlacementService(deps: PlacementDeps) {
       return toAcceptance(result.operation);
     },
 
-    get(invocation: PlacementInvocation, operationId: string): PlacementOperation {
+    get(
+      invocation: PlacementInvocation,
+      operationId: string,
+    ): PlacementOperation {
       const record = readPlacementOperationRecord(deps.db, operationId);
       if (
         !record ||
@@ -521,7 +541,10 @@ export function createPlacementService(deps: PlacementDeps) {
       });
     },
 
-    cancel(invocation: PlacementInvocation, operationId: string): PlacementOperation {
+    cancel(
+      invocation: PlacementInvocation,
+      operationId: string,
+    ): PlacementOperation {
       readOwned(invocation, operationId);
       const operation = cancelPlacementOperation(deps.db, operationId);
       if (!operation) notFound();

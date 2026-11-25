@@ -56,7 +56,11 @@ function observation(revision = 1): WorkerObservation {
     admission: "enabled",
     connected: true,
     auth: "authenticated",
-    qualification: { tier: "local-fixture", evidenceId: "fx", fixtureRunId: RUN },
+    qualification: {
+      tier: "local-fixture",
+      evidenceId: "fx",
+      fixtureRunId: RUN,
+    },
     custody: {
       revision,
       status: "free",
@@ -127,7 +131,11 @@ const policy: PlacementOwnerPolicy = {
       }));
     return candidates.length === 0
       ? { kind: "wait", reason: "all_busy" }
-      : { kind: "candidates", ownerRevision: context.ownerRevision, candidates };
+      : {
+          kind: "candidates",
+          ownerRevision: context.ownerRevision,
+          candidates,
+        };
   },
 };
 
@@ -202,17 +210,24 @@ function sideEffectCounts(harness: TestAppHarness) {
 const fixturePurpose = { kind: "local-fixture" as const, fixtureRunId: RUN };
 
 async function withPlacement<T>(run: (harness: TestAppHarness) => Promise<T>) {
-  return withTestHarness({ placementPurpose: fixturePurpose }, async (harness) => {
-    seedWorkspace(harness);
-    return run(harness);
-  });
+  return withTestHarness(
+    { placementPurpose: fixturePurpose },
+    async (harness) => {
+      seedWorkspace(harness);
+      return run(harness);
+    },
+  );
 }
 
 describe("placement ingress", () => {
   it("refuses an unmanaged provider before acceptance and persists nothing", async () => {
     await withPlacement(async (harness) => {
       const before = sideEffectCounts(harness);
-      const response = await post(harness, "/placement/operations", request("k1"));
+      const response = await post(
+        harness,
+        "/placement/operations",
+        request("k1"),
+      );
       expect(response.status).toBe(409);
       expect(JSON.parse(response.text)).toMatchObject({
         code: "placement_refused",
@@ -232,7 +247,11 @@ describe("placement ingress", () => {
       });
       fixtureManagedOwnerMode(harness);
       const first = await post(harness, "/placement/operations", request("k1"));
-      const second = await post(harness, "/placement/operations", request("k1"));
+      const second = await post(
+        harness,
+        "/placement/operations",
+        request("k1"),
+      );
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
       const a = JSON.parse(first.text);
@@ -249,10 +268,14 @@ describe("placement ingress", () => {
         request("k1", "different bytes"),
       );
       expect(changed.status).toBe(409);
-      expect(JSON.parse(changed.text).code).toBe("placement_submission_conflict");
+      expect(JSON.parse(changed.text).code).toBe(
+        "placement_submission_conflict",
+      );
       expect(changed.text).not.toContain(SECRET_PROMPT);
       expect(changed.text).not.toContain(a.operation.id);
-      expect(harness.db.select().from(placementOperations).all()).toHaveLength(1);
+      expect(harness.db.select().from(placementOperations).all()).toHaveLength(
+        1,
+      );
     });
   });
 
@@ -271,16 +294,27 @@ describe("placement ingress", () => {
       );
       await harness.placement.wake(PROVIDER);
       const waiting = JSON.parse(
-        (await get(harness, `/placement/operations/${noWorker.operation.id}`)).text,
+        (await get(harness, `/placement/operations/${noWorker.operation.id}`))
+          .text,
       );
-      expect(waiting).toMatchObject({ phase: "pending", reason: "all_busy", threadId: null, binding: null, queueReceipt: null });
+      expect(waiting).toMatchObject({
+        phase: "pending",
+        reason: "all_busy",
+        threadId: null,
+        binding: null,
+        queueReceipt: null,
+      });
 
       const fresh = JSON.parse(
         (
           await post(
             harness,
             "/placement/operations",
-            request("fresh", "x", { type: "host", hostId: HOST, workspace: { type: "personal" } }),
+            request("fresh", "x", {
+              type: "host",
+              hostId: HOST,
+              workspace: { type: "personal" },
+            }),
           )
         ).text,
       );
@@ -290,14 +324,22 @@ describe("placement ingress", () => {
           await post(
             harness,
             "/placement/operations",
-            request("fresh", "x", { type: "host", hostId: HOST, workspace: { type: "personal" } }),
+            request("fresh", "x", {
+              type: "host",
+              hostId: HOST,
+              workspace: { type: "personal" },
+            }),
           )
         ).text,
       );
       expect(refusedReplay).toMatchObject({
         kind: "refused",
         outcome: "not-created",
-        operation: { id: fresh.operation.id, phase: "refused", reason: "unsupported_preparation" },
+        operation: {
+          id: fresh.operation.id,
+          phase: "refused",
+          reason: "unsupported_preparation",
+        },
       });
 
       owner.dispose();
@@ -332,11 +374,13 @@ describe("placement ingress", () => {
         (await post(harness, "/placement/operations", request("seq1"))).text,
       );
       const second = JSON.parse(
-        (await post(harness, "/placement/operations", request("seq2", "next"))).text,
+        (await post(harness, "/placement/operations", request("seq2", "next")))
+          .text,
       );
       await harness.placement.wake(PROVIDER);
       const reserved = JSON.parse(
-        (await get(harness, `/placement/operations/${first.operation.id}`)).text,
+        (await get(harness, `/placement/operations/${first.operation.id}`))
+          .text,
       );
       expect(reserved).toMatchObject({
         phase: "queued",
@@ -353,11 +397,14 @@ describe("placement ingress", () => {
         },
       });
       const later = JSON.parse(
-        (await get(harness, `/placement/operations/${second.operation.id}`)).text,
+        (await get(harness, `/placement/operations/${second.operation.id}`))
+          .text,
       );
       expect(later).toMatchObject({ phase: "pending", binding: null });
       expect(["all_busy", "selected_busy"]).toContain(later.reason);
-      expect(second.operation.acceptedSeq).toBeGreaterThan(first.operation.acceptedSeq);
+      expect(second.operation.acceptedSeq).toBeGreaterThan(
+        first.operation.acceptedSeq,
+      );
       expect(sideEffectCounts(harness)).toEqual({
         ...before,
         threads: before.threads + 1,
@@ -385,7 +432,9 @@ describe("placement ingress", () => {
       expect(own.status).toBe(200);
       const draft = JSON.parse(own.text);
       expect(draft.originalRequest.submissionKey).toBe("draft");
-      expect(draft.originalRequest.intent.request.input[0].text).toBe(SECRET_PROMPT);
+      expect(draft.originalRequest.intent.request.input[0].text).toBe(
+        SECRET_PROMPT,
+      );
 
       const forged = await get(harness, `/placement/operations/${id}/draft`, {
         "x-bb-plugin-caller": "not-a-live-token",
@@ -405,11 +454,17 @@ describe("placement ingress", () => {
         /not found/i,
       );
 
-      const missing = await get(harness, `/placement/operations/plc_missing/draft`);
+      const missing = await get(
+        harness,
+        `/placement/operations/plc_missing/draft`,
+      );
       expect(missing.status).toBe(404);
       expect(JSON.parse(missing.text).code).toBe("placement_not_found");
 
-      const cancelled = await post(harness, `/placement/operations/${id}/cancel`);
+      const cancelled = await post(
+        harness,
+        `/placement/operations/${id}/cancel`,
+      );
       expect(cancelled.status).toBe(200);
       expect(JSON.parse(cancelled.text)).toMatchObject({
         id,
@@ -438,7 +493,8 @@ describe("placement ingress", () => {
               : { ok: false },
         );
       const local = JSON.parse(
-        (await post(harness, "/placement/operations", request("same-key"))).text,
+        (await post(harness, "/placement/operations", request("same-key")))
+          .text,
       );
       const plugin = JSON.parse(
         (
@@ -464,9 +520,9 @@ describe("placement ingress", () => {
         `/placement/operations/${plugin.operation.id}/draft`,
         pluginHeaders,
       );
-      expect(JSON.parse(ownDraft.text).originalRequest.intent.request.input[0].text).toBe(
-        "plugin body",
-      );
+      expect(
+        JSON.parse(ownDraft.text).originalRequest.intent.request.input[0].text,
+      ).toBe("plugin body");
       const localView = await get(
         harness,
         `/placement/operations/${plugin.operation.id}/draft`,

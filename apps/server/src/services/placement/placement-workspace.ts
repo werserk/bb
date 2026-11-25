@@ -51,9 +51,16 @@ export function materializePlacementWorkspace(
   const request = createThreadRequestSchema.parse(intent.request);
   if (request.environment.type !== "reuse")
     return { kind: "refuse", reason: "unsupported_preparation" };
-  if (request.input.some((item) => item.type !== "text" || item.mentions.length > 0))
+  if (
+    request.input.some(
+      (item) => item.type !== "text" || item.mentions.length > 0,
+    )
+  )
     return { kind: "refuse", reason: "unsupported_preparation" };
-  const environment = getEnvironment(deps.db, request.environment.environmentId);
+  const environment = getEnvironment(
+    deps.db,
+    request.environment.environmentId,
+  );
   if (!environment || environment.projectId !== request.projectId)
     return { kind: "refuse", reason: "workspace_unavailable" };
   if (environment.status !== "ready" || !environment.path)
