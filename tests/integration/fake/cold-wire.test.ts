@@ -43,7 +43,7 @@ import {
   type LabManifest,
 } from "../helpers/cold-guest-channel.js";
 
-it.each(["accepted", "lost-ack", "replacement"])(
+it.each(["accepted", "lost-ack", "replacement", "retire-after-claim"])(
   "authenticated cold start, diagnostic admission: %s",
   async (mode) => {
     const hostId = "agent-host";
@@ -260,6 +260,51 @@ it.each(["accepted", "lost-ack", "replacement"])(
         console.info(
           "same session replacement: challenges=1 starts=0 creates=0 state=prepared",
         );
+        return;
+      }
+      if (mode === "retire-after-claim") {
+        const result = await channel.deliver(ref, start, () => {
+          const won = claim();
+          expect(won).toBe(true);
+          manifest = null;
+          return won;
+        });
+        expect(result).toBe("unknown");
+        // A later ordered response is a receive barrier on the same socket.
+        const barrier = await server.hub
+          .requestHostOnlineRpc({
+            hostId,
+            expectedConnection: ref,
+            timeoutMs: 1000,
+            message: {
+              type: "host-rpc.request",
+              requestId: randomUUID(),
+              command: {
+                type: "managed.lab.qualify",
+                challenge: {
+                  domain: "bb.synthetic-cold-create.271",
+                  hostId,
+                  sessionId,
+                  manifestDigest: f.pin.descriptorDigest,
+                  nonce: randomUUID(),
+                  registrationNonce: randomUUID(),
+                },
+              },
+            },
+          })
+          .catch(() => null);
+        const observed = {
+          starts: guest.starts(),
+          creates: createCount,
+          state: readPlacementDispatchReceipt(db, guard)?.state,
+        };
+        console.info("retirement after claim", observed);
+        expect(observed).toEqual({
+          starts: 0,
+          creates: 0,
+          state: "possibly_sent",
+        });
+        expect(barrier?.ok).toBe(true);
         return;
       }
       const delivery = channel.deliver(ref, start, claim);
