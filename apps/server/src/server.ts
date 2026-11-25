@@ -54,7 +54,6 @@ import {
   createPlacementService,
   type PlacementService,
 } from "./services/placement/placement-service.js";
-import type { WorkspacePurpose } from "@bb/domain";
 import { registerPluginRoutes } from "./routes/plugins.js";
 import { registerPluginCatalogRoutes } from "./routes/plugin-catalog.js";
 import { registerPluginInstallJobRoutes } from "./routes/plugin-install-jobs.js";
@@ -215,7 +214,6 @@ export interface ServerMoveAppOptions {
 
 interface CreateAppOptions {
   bbAppArtifactService?: BbAppArtifactService;
-  placementPurpose?: WorkspacePurpose;
   serverMove?: ServerMoveAppOptions;
   slowApiRequestLogThresholdMs?: number;
   performanceDiagnosticsEnabled?: () => boolean;
@@ -952,9 +950,7 @@ export function createApp(
   registerEnvironmentRoutes(publicApi, deps, pluginService);
   registerThreadRoutes(publicApi, deps, pluginService);
   registerQueueRoutes(publicApi, deps);
-  const placement = createPlacementService(deps, {
-    purpose: options?.placementPurpose ?? { kind: "live" },
-  });
+  const placement = createPlacementService(deps);
   registerPlacementRoutes(publicApi, placement, pluginService);
   registerSystemRoutes(publicApi, deps, pluginService);
   registerUiPreferenceRoutes(publicApi, deps);

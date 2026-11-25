@@ -581,13 +581,13 @@ function resolveCreateThreadPluginMetadata(
   };
 }
 
-export async function createThreadFromRequest(
-  deps: ThreadCreateDeps,
+/**
+ * The synchronous project, origin and source-relationship checks a native
+ * create performs before any side effect.
+ */
+export function assertThreadCreateRelationships(
+  deps: Pick<ThreadCreateDeps, "db">,
   rawRequestInput: ThreadCreateServiceRequestInput,
-  options: {
-    providerInput?: ThreadCreateServiceRequestInput["input"];
-    forkSourceEnvironmentId?: string;
-  } = {},
 ) {
   const project = requirePublicProjectForThreadCreate(
     deps,
@@ -609,10 +609,7 @@ export async function createThreadFromRequest(
     );
   }
   const pluginMetadata = resolveCreateThreadPluginMetadata(rawRequestInput);
-  const requestInput = { ...rawRequestInput };
-  requestInput.input = (
-    await appendPluginMentionContext({ input: requestInput.input })
-  ).input;
+  const requestInput = rawRequestInput;
   assertProjectWorkspaceCompatibility(project, requestInput);
   const originKind = requestInput.originKind ?? null;
   const sourceThreadId =
@@ -657,15 +654,6 @@ export async function createThreadFromRequest(
       "originKind requires a sourceThreadId",
     );
   }
-  const forkSourceEnvironmentId =
-    options.forkSourceEnvironmentId ??
-    (originKind === "fork" &&
-    sourceThread !== null &&
-    sourceThread.environmentId !== null &&
-    requestInput.environment.type === "reuse" &&
-    requestInput.environment.environmentId === sourceThread.environmentId
-      ? sourceThread.environmentId
-      : undefined);
   if (requestInput.startedOnBehalfOf !== null) {
     const senderThread = sourceThread ?? parentThread;
     if (senderThread === null) {
@@ -692,6 +680,43 @@ export async function createThreadFromRequest(
       );
     }
   }
+  return {
+    pluginMetadata,
+    originKind,
+    hierarchyParentThreadId,
+    parentThread,
+    sourceThread,
+  };
+}
+
+export async function createThreadFromRequest(
+  deps: ThreadCreateDeps,
+  rawRequestInput: ThreadCreateServiceRequestInput,
+  options: {
+    providerInput?: ThreadCreateServiceRequestInput["input"];
+    forkSourceEnvironmentId?: string;
+  } = {},
+) {
+  const {
+    pluginMetadata,
+    originKind,
+    hierarchyParentThreadId,
+    parentThread,
+    sourceThread,
+  } = assertThreadCreateRelationships(deps, rawRequestInput);
+  const requestInput = { ...rawRequestInput };
+  requestInput.input = (
+    await appendPluginMentionContext({ input: requestInput.input })
+  ).input;
+  const forkSourceEnvironmentId =
+    options.forkSourceEnvironmentId ??
+    (originKind === "fork" &&
+    sourceThread !== null &&
+    sourceThread.environmentId !== null &&
+    requestInput.environment.type === "reuse" &&
+    requestInput.environment.environmentId === sourceThread.environmentId
+      ? sourceThread.environmentId
+      : undefined);
   await deps.providerRegistry.whenRegistrationsSettled();
   const {
     defaultModel: inheritedDefaultModel,

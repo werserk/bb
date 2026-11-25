@@ -1,6 +1,8 @@
 import { getEnvironment, type placementOperations } from "@bb/db";
 import {
+  clampPermissionModeToCeiling,
   normalizeWorkspaceBinding,
+  type PermissionMode,
   placementPayloadSchema,
   resolvedThreadExecutionOptionsSchema,
   type JsonValue,
@@ -28,14 +30,19 @@ export type PlacementMaterialization =
 /**
  * Pre-thread preparation that performs no host side effect: an independent
  * launch may reuse an already-ready environment. Fresh environment
- * preparation and pre-thread forks have no operation-owned provider path yet
- * and are refused visibly.
+ * preparation, pre-thread forks and roots outside the POSIX descriptor have no
+ * operation-owned provider path yet and are refused visibly. The prepared
+ * permission never exceeds the one accepted with the receipt.
  */
 export function materializePlacementWorkspace(
   deps: Pick<AppDeps, "db" | "providerRegistry">,
-  record: OperationRecord,
-  requiredCapabilities: readonly WorkspaceCapability[],
+  args: {
+    record: OperationRecord;
+    acceptedPermission: PermissionMode;
+    requiredCapabilities: readonly WorkspaceCapability[];
+  },
 ): PlacementMaterialization {
+  const { record, requiredCapabilities } = args;
   const { intent } = placementPayloadSchema.parse(
     JSON.parse(record.canonicalRequest),
   );
@@ -58,9 +65,9 @@ export function materializePlacementWorkspace(
   });
   const model = request.model ?? defaults.model;
   if (model === null) return { kind: "refuse", reason: "capability_mismatch" };
-  return {
-    kind: "prepared",
-    workspace: normalizeWorkspaceBinding({
+  let workspace: WorkspaceBinding;
+  try {
+    workspace = normalizeWorkspaceBinding({
       schemaVersion: 1,
       workspaceBindingId: `env:${environment.id}`,
       revision: 1,
@@ -72,13 +79,25 @@ export function materializePlacementWorkspace(
       canonicalRoot: environment.path,
       adapter: { id: "bb-mcp-workspace", version: "1" },
       requiredCapabilities: [...requiredCapabilities],
-    }),
+    });
+  } catch {
+    return { kind: "refuse", reason: "unsupported_preparation" };
+  }
+  const permissionMode = clampPermissionModeToCeiling({
+    ceiling: args.acceptedPermission,
+    permissionMode: request.permissionMode ?? defaults.permissionMode,
+  });
+  if (permissionMode === null)
+    return { kind: "refuse", reason: "capability_mismatch" };
+  return {
+    kind: "prepared",
+    workspace,
     preparedRequest: intent.request,
     preparedExecution: resolvedThreadExecutionOptionsSchema.parse({
       model,
       serviceTier: request.serviceTier ?? defaults.serviceTier,
       reasoningLevel: request.reasoningLevel ?? defaults.reasoningLevel,
-      permissionMode: request.permissionMode ?? defaults.permissionMode,
+      permissionMode,
       source: "client/thread/start",
     }),
     attachmentReceipts: [],

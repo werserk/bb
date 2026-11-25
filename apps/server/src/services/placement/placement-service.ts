@@ -13,6 +13,7 @@ import {
   readPlacementOwner,
   readPlacementThreadBinding,
   readPlacementActionReceipt,
+  readPlacementSubmissionContext,
   recordPlacementWait,
   registerPlacementOwner,
   reservePlacementWorker,
@@ -24,7 +25,6 @@ import {
   type PlacementOperation,
   type PlacementReason,
   type WorkerObservation,
-  type WorkspacePurpose,
   workspaceCapabilities,
 } from "@bb/domain";
 import {
@@ -98,13 +98,10 @@ function refusedBeforeAcceptance(reason: string, message: string): never {
   });
 }
 
-export function createPlacementService(
-  deps: PlacementDeps,
-  options: { purpose: WorkspacePurpose },
-) {
+export function createPlacementService(deps: PlacementDeps) {
   const policies = new Map<
     string,
-    { ownerPluginId: string; ownerRevision: number; policy: PlacementOwnerPolicy }
+    { ownerPluginId: string; policy: PlacementOwnerPolicy }
   >();
   const wakes = createAsyncRerunner<string>();
   resetPlacementOwnerAvailability(deps.db);
@@ -183,6 +180,7 @@ export function createPlacementService(
   function toAcceptance(operation: PlacementOperation): PlacementAcceptance {
     if (operation.phase === "refused")
       return { kind: "refused", operation, outcome: "not-created" };
+    if (operation.phase === "cancelled") return { kind: "cancelled", operation };
     const thread =
       operation.threadId !== null && PLACED_PHASES.has(operation.phase)
         ? getThread(deps.db, operation.threadId)
@@ -203,41 +201,92 @@ export function createPlacementService(
     return record;
   }
 
+  type Registered = {
+    ownerPluginId: string;
+    policy: PlacementOwnerPolicy;
+  };
+  type OperationRow = NonNullable<ReturnType<typeof readPlacementOperationRecord>>;
+  type WaitSource = Parameters<typeof recordPlacementWait>[1]["source"];
+
+  function waitingOperations(providerId: string, ownerPluginId: string) {
+    return deps.db
+      .select()
+      .from(placementOperations)
+      .where(
+        and(
+          eq(placementOperations.providerId, providerId),
+          eq(placementOperations.ownerPluginId, ownerPluginId),
+          eq(placementOperations.cancelRequested, false),
+          inArray(placementOperations.phase, [...WAKE_PHASES]),
+        ),
+      )
+      .orderBy(asc(placementOperations.acceptedSeq))
+      .all();
+  }
+
+  function currentEpoch(providerId: string, registered: Registered) {
+    const owner = readPlacementOwner(deps.db, providerId);
+    return policies.get(providerId) === registered &&
+      owner?.ownerPluginId === registered.ownerPluginId &&
+      owner.available &&
+      owner.mode === "managed"
+      ? owner.revision
+      : null;
+  }
+
+  function recordOwnerUnavailable(providerId: string) {
+    const owner = readPlacementOwner(deps.db, providerId);
+    if (!owner || (owner.available && owner.mode === "managed")) return;
+    const source: WaitSource = {
+      kind: "owner_unavailable",
+      providerId,
+      ownerPluginId: owner.ownerPluginId,
+      ownerRevision: owner.revision,
+    };
+    for (const record of waitingOperations(providerId, owner.ownerPluginId)) {
+      if (record.phase === "queued") continue;
+      persistWait(record, source, "owner_unavailable");
+    }
+  }
+
   async function wakeProvider(providerId: string): Promise<void> {
     await wakes.run(providerId, async () => {
       const registered = policies.get(providerId);
-      if (!registered) return;
-      const operations = deps.db
-        .select()
-        .from(placementOperations)
-        .where(
-          and(
-            eq(placementOperations.providerId, providerId),
-            eq(placementOperations.ownerPluginId, registered.ownerPluginId),
-            eq(placementOperations.cancelRequested, false),
-            inArray(placementOperations.phase, [...WAKE_PHASES]),
-          ),
-        )
-        .orderBy(asc(placementOperations.acceptedSeq))
-        .all();
-      for (const record of operations) {
+      if (!registered || currentEpoch(providerId, registered) === null) {
+        recordOwnerUnavailable(providerId);
+        return;
+      }
+      for (const record of waitingOperations(providerId, registered.ownerPluginId)) {
         if (record.kind === "retry") continue;
-        if (record.resolvedWorkspaceDigest === null) {
-          if (record.kind === "continuation") continue;
-          if (!materialize(record)) continue;
+        try {
+          if (record.resolvedWorkspaceDigest === null) {
+            if (record.kind === "continuation") continue;
+            if (!materialize(providerId, registered, record)) continue;
+          }
+          await advanceOperation(providerId, registered, record.id);
+        } catch (error) {
+          deps.logger.warn(
+            `placement wake failed for ${record.id}: ${String(error)}`,
+          );
         }
-        await advanceOperation(registered, record.id);
       }
     });
   }
 
   async function advanceOperation(
-    registered: { ownerPluginId: string; ownerRevision: number; policy: PlacementOwnerPolicy },
+    providerId: string,
+    registered: Registered,
     operationId: string,
   ): Promise<void> {
+    const epoch = currentEpoch(providerId, registered);
     const record = readPlacementOperationRecord(deps.db, operationId);
-    if (!record) return;
-    const operation = placementOperationProjection(record);
+    if (epoch === null || !record) return;
+    const source: WaitSource = {
+      kind: "policy",
+      providerId,
+      ownerPluginId: registered.ownerPluginId,
+      ownerRevision: epoch,
+    };
     const workers = deps.db
       .select()
       .from(placementWorkers)
@@ -257,8 +306,8 @@ export function createPlacementService(
     let decision: PlacementPolicyDecision;
     try {
       decision = await registered.policy.evaluate({
-        operation,
-        ownerRevision: registered.ownerRevision,
+        operation: placementOperationProjection(record),
+        ownerRevision: epoch,
         workers,
       });
     } catch (error) {
@@ -267,8 +316,18 @@ export function createPlacementService(
       );
       decision = { kind: "wait", reason: "owner_unavailable" };
     }
+    if (currentEpoch(providerId, registered) !== epoch) return;
     if (decision.kind !== "candidates") {
-      persistWait(record.id, record.revision, decision.reason, decision.kind);
+      persistWait(record, source, decision.reason, decision.kind);
+      return;
+    }
+    const purpose = deps.placementWorkspacePurpose;
+    if (decision.ownerRevision !== epoch || purpose === undefined) {
+      persistWait(
+        record,
+        source,
+        purpose === undefined ? "unsupported_tool_route" : "owner_unavailable",
+      );
       return;
     }
     let lastReason: PlacementReason = "all_busy";
@@ -278,11 +337,11 @@ export function createPlacementService(
       const result = reservePlacementWorker(deps.db, {
         operationId,
         expectedRevision: current.revision,
-        ownerRevision: decision.ownerRevision,
+        ownerRevision: epoch,
         workerId: candidate.workerId,
         workerRevision: candidate.workerRevision,
         routeEvidenceRevision: candidate.routeEvidenceRevision,
-        purpose: options.purpose,
+        purpose,
       });
       if (result.kind === "reserved") return;
       const parsed = placementReasonSchema.safeParse(
@@ -291,33 +350,45 @@ export function createPlacementService(
       if (parsed.success) lastReason = parsed.data;
     }
     const latest = readPlacementOperationRecord(deps.db, operationId);
-    if (latest) persistWait(latest.id, latest.revision, lastReason);
+    if (latest) persistWait(latest, source, lastReason);
   }
 
   function persistWait(
-    operationId: string,
-    expectedRevision: number,
+    record: OperationRow,
+    source: WaitSource,
     reason: PlacementReason,
     outcome: "wait" | "refuse" = "wait",
   ) {
     recordPlacementWait(deps.db, {
-      operationId,
-      expectedRevision,
+      operationId: record.id,
+      expectedRevision: record.revision,
       outcome,
       reason,
+      source,
     });
   }
 
   function materialize(
-    record: NonNullable<ReturnType<typeof readPlacementOperationRecord>>,
+    providerId: string,
+    registered: Registered,
+    record: OperationRow,
   ): boolean {
-    const result = materializePlacementWorkspace(
-      deps,
+    const epoch = currentEpoch(providerId, registered);
+    const receipt = readPlacementActionReceipt(deps.db, record.id);
+    if (epoch === null || !receipt) return false;
+    const source: WaitSource = {
+      kind: "policy",
+      providerId,
+      ownerPluginId: registered.ownerPluginId,
+      ownerRevision: epoch,
+    };
+    const result = materializePlacementWorkspace(deps, {
       record,
-      workspaceCapabilities,
-    );
+      acceptedPermission: receipt.authority.permission,
+      requiredCapabilities: workspaceCapabilities,
+    });
     if (result.kind !== "prepared") {
-      persistWait(record.id, record.revision, result.reason, result.kind);
+      persistWait(record, source, result.reason, result.kind);
       return false;
     }
     const prepared = preparePlacementOperation(deps.db, {
@@ -330,8 +401,19 @@ export function createPlacementService(
     });
     if (prepared.kind === "prepared") return true;
     if (prepared.kind === "conflict")
-      persistWait(record.id, record.revision, "workspace_unavailable", "refuse");
+      persistWait(record, source, "workspace_unavailable", "refuse");
     return false;
+  }
+
+  function newWorkScope(request: PlacementRequestV1) {
+    const scope = resolveOwnerScope(request);
+    const owner = readPlacementOwner(deps.db, scope.providerId);
+    if (!owner)
+      refusedBeforeAcceptance(
+        "owner_unavailable",
+        "The provider is not managed by a placement owner",
+      );
+    return { ...scope, ownerPluginId: owner.ownerPluginId };
   }
 
   return {
@@ -340,31 +422,23 @@ export function createPlacementService(
       input: PlacementRequestV1,
     ): Promise<PlacementAcceptance> {
       const request = placementRequestV1Schema.parse(input);
-      const scope = resolveOwnerScope(request);
-      const owner = readPlacementOwner(deps.db, scope.providerId);
-      if (!owner)
-        refusedBeforeAcceptance(
-          "owner_unavailable",
-          "The provider is not managed by a placement owner",
-        );
-      if (request.intent.kind === "independent" && owner.mode !== "managed")
-        refusedBeforeAcceptance(
-          "owner_unavailable",
-          "The placement owner is not accepting new independent work",
-        );
-      const authority = derivePlacementAuthority({
+      const retained = readPlacementSubmissionContext(deps.db, {
+        principalScope: placementPrincipal(invocation),
+        submissionKey: request.submissionKey,
+      });
+      const fresh = retained ? null : newWorkScope(request);
+      const scope = retained ?? fresh!;
+      const authority = derivePlacementAuthority(deps, {
         invocation,
         request,
-        permission: effectivePermission(
-          request,
-          scope.providerId,
-          scope.sourceThreadId,
-        ),
+        permission: fresh
+          ? effectivePermission(request, fresh.providerId, fresh.sourceThreadId)
+          : retained!.permission,
       });
       const result = acceptPlacementOperation(deps.db, {
         principalScope: authority.principal,
         submissionKey: request.submissionKey,
-        ownerPluginId: owner.ownerPluginId,
+        ownerPluginId: scope.ownerPluginId,
         providerId: scope.providerId,
         authority,
         request: { schemaVersion: request.schemaVersion, intent: request.intent },
@@ -442,7 +516,6 @@ export function createPlacementService(
         );
       const entry = {
         ownerPluginId: args.ownerPluginId,
-        ownerRevision: result.owner.revision,
         policy: args.policy,
       };
       policies.set(args.providerId, entry);
@@ -471,12 +544,17 @@ export function createPlacementService(
       workers: WorkerObservation[];
     }): Promise<"observed" | "stale" | "conflict"> {
       const registered = policies.get(args.providerId);
-      if (!registered || registered.ownerPluginId !== args.ownerPluginId)
+      const owner = readPlacementOwner(deps.db, args.providerId);
+      if (
+        !registered ||
+        registered.ownerPluginId !== args.ownerPluginId ||
+        owner?.ownerPluginId !== args.ownerPluginId
+      )
         throw new Error(`No live placement owner for ${args.providerId}`);
       const observed = observePlacementWorkers(deps.db, {
         providerId: args.providerId,
         ownerPluginId: args.ownerPluginId,
-        expectedOwnerRevision: registered.ownerRevision,
+        expectedOwnerRevision: owner.revision,
         workers: args.workers,
       });
       if (observed.kind === "observed") await wakeProvider(args.providerId);
