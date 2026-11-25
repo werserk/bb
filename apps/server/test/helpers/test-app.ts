@@ -57,6 +57,7 @@ import {
   NotificationHub as NotificationHubImpl,
 } from "../../src/ws/hub.js";
 import { WatchInterestCoordinator } from "../../src/ws/watch-interests.js";
+import type { WorkspacePurpose } from "@bb/domain";
 import { HostSharedPortCoordinator } from "../../src/ws/host-shared-ports.js";
 import {
   PluginToolCallRegistry,
@@ -75,6 +76,7 @@ export interface TestAppHarness {
   hub: NotificationHub;
   pluginService: ReturnType<typeof createApp>["pluginService"];
   pluginCatalogService: ReturnType<typeof createApp>["pluginCatalogService"];
+  placement: ReturnType<typeof createApp>["placement"];
   serverMove: ReturnType<typeof createApp>["serverMove"];
   cleanup(): Promise<void>;
 }
@@ -108,6 +110,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   liveCommandsClock?: () => number;
   seedFirstPartyProviders?: boolean;
   tunnelIngressNow?: () => number;
+  placementPurpose?: WorkspacePurpose;
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
     pluginId: string;
@@ -174,6 +177,7 @@ export async function createTestAppHarness(
     liveCommandsClock,
     seedFirstPartyProviders = true,
     tunnelIngressNow: _tunnelIngressNow,
+    placementPurpose,
     ...configOverrides
   } = overrides;
   const logger = createTestLogger();
@@ -389,8 +393,8 @@ export async function createTestAppHarness(
     watchInterests,
     sharedPorts,
   };
-  const { app, pluginCatalogService, pluginService, serverMove } =
-    createApp(deps);
+  const { app, pluginCatalogService, pluginService, placement, serverMove } =
+    createApp(deps, placementPurpose ? { placementPurpose } : undefined);
   installDefaultEnvironmentProviders();
 
   return {
@@ -401,6 +405,7 @@ export async function createTestAppHarness(
     hub,
     pluginService,
     pluginCatalogService,
+    placement,
     serverMove,
     async cleanup(): Promise<void> {
       clearAllThreadProvisionSchedules();
