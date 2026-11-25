@@ -1684,6 +1684,9 @@ export const placementWorkers = sqliteTable(
     lastAssignedSeq: integer("last_assigned_seq"),
     reclaimOperationId: text("reclaim_operation_id"),
     reclaimSourceFence: integer("reclaim_source_fence"),
+    reclaimHolder: text("reclaim_holder", { mode: "json" }).$type<
+      NonNullable<WorkerCustody["holder"]>
+    >(),
     physicalLock: text("physical_lock").unique(),
     fenceLock: text("fence_lock", { mode: "json" }).$type<
       NonNullable<WorkerCustody["lock"]>

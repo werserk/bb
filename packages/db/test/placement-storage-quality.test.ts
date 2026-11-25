@@ -83,6 +83,187 @@ function reserve(id: string, name: string) {
       .observationRevision,
   });
 }
+function completedResidentWithAlias() {
+  const { cmd, op } = resident();
+  expect(S.claimPlacementExecutionCommand(db, cmd).kind).toBe("won");
+  expect(
+    db.transaction((tx) =>
+      S.settlePlacementExecutionCommand(tx, { ...cmd, outcome: "succeeded" }),
+    ),
+  ).toBe(true);
+  const a = observation({ revision: 2 });
+  const holder = {
+    bootId: "boot",
+    processStart: "p",
+    threadId: cmd.threadId,
+    fence: 1,
+  };
+  a.custody = { ...a.custody, revision: 2, status: "held", holder };
+  expect(
+    S.recordPlacementRuntimeState(db, {
+      ...worker,
+      operationId: op,
+      fence: 1,
+      activity: "idle",
+      backgroundWork: false,
+      pendingInteraction: false,
+      custody: a.custody,
+    }),
+  ).toMatchObject({ state: "resident" });
+  const b = alias("alias");
+  return { op, a, b, holder };
+}
+it.each([false, true])(
+  "closes a corroborated completed resident, alias withdrawn=%s",
+  (withdrawn) => {
+    const { op, a, b, holder } = completedResidentWithAlias();
+    b.custody = { ...b.custody, revision: 9, status: "held", holder };
+    publish([a, b]);
+    if (withdrawn) {
+      a.revision++;
+      publish([a]);
+    }
+    const target = acceptPrepared(db, "target", {}, {}, "worker");
+    const later = acceptPrepared(db, "later", {}, {}, "worker");
+    reopen();
+    const begin = (id: string) =>
+      S.beginPlacementReclaim(db, {
+        ...candidate(db, id),
+        workerRevision: a.revision,
+        expectedSourceFence: 1,
+        expectedSourceOperationId: op,
+      });
+    expect(begin(later.id)).toEqual({ kind: "wait", reason: "all_busy" });
+    expect(begin(target.id).kind).toBe("reclaiming");
+    expect(begin(target.id).kind).toBe("wait");
+    expect(reserve(target.id, "worker").kind).toBe("wait");
+    const free = { ...observation().custody, revision: 4 };
+    const finish = {
+      ...worker,
+      operationId: target.id,
+      closedSourceOperationId: op,
+      fence: 1,
+      processClosed: true,
+      observation: free,
+    };
+    expect(
+      S.finishPlacementReclaim(db, { ...finish, processClosed: false }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, { ...finish, observation: a.custody }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, {
+        ...finish,
+        observation: { ...free, revision: 2 },
+      }).kind,
+    ).toBe("wait");
+    expect(
+      S.finishPlacementReclaim(db, {
+        ...finish,
+        closedSourceOperationId: later.id,
+      }).kind,
+    ).toBe("wait");
+    expect(S.readPlacementWorker(db, "workers", "worker")).toMatchObject({
+      slotState: "reclaiming",
+      ownerOperationId: op,
+      reclaimHolder: holder,
+    });
+    a.revision++;
+    a.custody = { ...free, revision: 3 };
+    const rows = () => (withdrawn ? [a] : [a, b]);
+    b.revision++;
+    publish(rows());
+    reopen();
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("released");
+    reopen();
+    a.revision++;
+    a.custody = free;
+    b.revision++;
+    publish([a, b]);
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("wait");
+    b.revision++;
+    b.custody = {
+      ...b.custody,
+      revision: 10,
+      holder: { ...holder, processStart: "new" },
+    };
+    a.revision++;
+    publish([a, b]);
+    expect(reserve(target.id, "worker")).toEqual({
+      kind: "wait",
+      reason: "custody_unknown",
+    });
+    a.revision++;
+    b.revision++;
+    b.custody = { ...b.custody, revision: 11, holder: null, status: "free" };
+    publish([a, b]);
+    reopen();
+    expect(reserve(target.id, "worker")).toMatchObject({
+      kind: "reserved",
+      fence: 2,
+    });
+    expect(reserve(later.id, "worker").kind).toBe("wait");
+  },
+);
+it.each(["bootId", "processStart", "threadId", "fence", "unknown"] as const)(
+  "holds custody across contradictory alias %s before and during reclaim",
+  (different) => {
+    const { op, a, b, holder } = completedResidentWithAlias();
+    function report(conflicting: boolean) {
+      b.revision++;
+      a.revision++;
+      b.custody = {
+        ...b.custody,
+        revision: b.revision,
+        status: conflicting && different === "unknown" ? "unknown" : "held",
+        holder: !conflicting
+          ? holder
+          : different === "unknown"
+            ? null
+            : {
+                ...holder,
+                [different]: different === "fence" ? 2 : "different",
+              },
+      };
+      publish([a, b]);
+    }
+    report(true);
+    const target = acceptPrepared(db, "target", {}, {}, "worker");
+    const begin = () =>
+      S.beginPlacementReclaim(db, {
+        ...candidate(db, target.id),
+        workerRevision: a.revision,
+        expectedSourceFence: 1,
+        expectedSourceOperationId: op,
+      });
+    expect(begin()).toEqual({ kind: "wait", reason: "custody_unknown" });
+    report(false);
+    expect(begin().kind).toBe("reclaiming");
+    report(true);
+    a.revision++;
+    publish([a]);
+    reopen();
+    const finish = {
+      ...worker,
+      operationId: target.id,
+      closedSourceOperationId: op,
+      fence: 1,
+      processClosed: true,
+      observation: { ...observation().custody, revision: 3 },
+    };
+    expect(S.finishPlacementReclaim(db, finish)).toEqual({
+      kind: "wait",
+      reason: "custody_unknown",
+    });
+    expect(
+      S.readPlacementWorker(db, "workers", "worker")?.ownerOperationId,
+    ).toBe(op);
+    report(false);
+    expect(S.finishPlacementReclaim(db, finish).kind).toBe("released");
+    expect(reserve(target.id, "worker").kind).toBe("reserved");
+  },
+);
 it("keeps the original host/inode locked through withdrawal, drift, reclaim and missing closure", () => {
   const a = acceptPrepared(db, "a", {}, {}, "worker");
   expect(db.transaction(() => reserve(a.id, "worker")).kind).toBe("wait");

@@ -623,8 +623,12 @@ A worker reservation pins a unique physical resource across all worker and
 account aliases using the Agent host, device and inode. The free observation
 has no boot ID. An epoch or boot change alone cannot discharge a pinned lock.
 Held or unknown reports on an identified lock also block other reporting
-sources until that source observes it free. The logical operation/fence and
-holder boot/process evidence remain necessary for a confirmed close.
+sources while effective. Closing a completed pinned resident accepts corroboration
+of the same boot, process incarnation, thread and fence on its physical lock.
+The reclaim records that holder. Matching operation closure and a newer free
+observation discharge only reports for that incarnation in the release transaction.
+An identical source revision stays discharged across restart. A newer held or
+unknown report blocks reservation again.
 
 The send claim, reservation and reclaim-start writers own their outer SQLite
 transaction. A call on a connection already inside a transaction refuses

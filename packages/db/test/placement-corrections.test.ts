@@ -468,6 +468,19 @@ it.each([false, true])(
           custody: { ...runtime.custody, revision: 3 },
         }),
       ).toMatchObject({ state: "resident" });
+      const original = observation({ revision: 2 });
+      original.custody = { ...runtime.custody, revision: 3 };
+      const corroborating = structuredClone(original);
+      corroborating.workerId = corroborating.custody.workerId = "alias";
+      expect(
+        observePlacementWorkers(reopened, {
+          ...worker,
+          providerId: "claude",
+          expectedOwnerRevision: 1,
+          workers: [original, corroborating],
+        }).kind,
+      ).toBe("observed");
+      reclaim.workerRevision = 2;
       expect(beginPlacementReclaim(competitor, reclaim).kind).toBe("wait");
       expect(
         beginPlacementReclaim(competitor, {
@@ -504,6 +517,12 @@ it.each([false, true])(
           closedSourceOperationId: follow.id,
         }),
       ).toEqual({ kind: "released" });
+      expect(
+        reservePlacementWorker(reopened, {
+          ...candidate(reopened, target.id),
+          workerRevision: 2,
+        }),
+      ).toMatchObject({ kind: "reserved", fence: 2 });
     }),
 );
 it("admits a time wait only once the native row is due and refuses a non-time wait", () =>
