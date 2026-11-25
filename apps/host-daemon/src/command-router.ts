@@ -109,22 +109,36 @@ export class CommandRouter {
   async handleOnlineRpcRequest(
     message: HostDaemonOnlineRpcRequestMessage,
   ): Promise<HostDaemonOnlineRpcResponseMessage> {
+    const command = message.command;
+    if (
+      command.type === "managed.thread.start" ||
+      command.type === "managed.lab.qualify"
+    ) {
+      return {
+        type: "host-rpc.response",
+        requestId: message.requestId,
+        commandType: command.type,
+        ok: false,
+        errorCode: "managed_guest_required",
+        errorMessage: "A qualified synthetic receiver is required",
+      };
+    }
     const handlerStartedAtMs = performance.now();
     const abortController = new AbortController();
     this.onlineRpcAbortControllers.set(message.requestId, abortController);
     try {
-      const result = await runWithTurnSubmitTrace(message.command, () =>
-        this.executeHostRpcCommand(message.command, abortController.signal),
+      const result = await runWithTurnSubmitTrace(command, () =>
+        this.executeHostRpcCommand(command, abortController.signal),
       );
       this.logOnlineRpc({
-        commandType: message.command.type,
+        commandType: command.type,
         handlerMs: elapsedMs(handlerStartedAtMs),
         ok: true,
       });
       return hostDaemonOnlineRpcResponseMessageSchema.parse({
         type: "host-rpc.response",
         requestId: message.requestId,
-        commandType: message.command.type,
+        commandType: command.type,
         ok: true,
         result,
       });
@@ -133,14 +147,14 @@ export class CommandRouter {
       if (!isExpectedOnlineRpcFailureError(error)) {
         this.logger.warn(
           {
-            type: message.command.type,
+            type: command.type,
             err: error,
           },
           "online host RPC failed",
         );
       }
       this.logOnlineRpc({
-        commandType: message.command.type,
+        commandType: command.type,
         errorCode,
         handlerMs: elapsedMs(handlerStartedAtMs),
         ok: false,
@@ -148,7 +162,7 @@ export class CommandRouter {
       return {
         type: "host-rpc.response",
         requestId: message.requestId,
-        commandType: message.command.type,
+        commandType: command.type,
         ok: false,
         errorCode,
         errorMessage: error instanceof Error ? error.message : String(error),

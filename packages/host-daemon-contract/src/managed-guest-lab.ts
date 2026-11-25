@@ -81,3 +81,54 @@ export function decodeForProtectedGuest(
 }
 
 export type ManagedGuestCommand = z.infer<typeof managedCommand>;
+
+// Only the disposable 271 test composition installs these variants in the WS union.
+export const guestStartFrame271 = managedFrame271.extend({
+  command: z.strictObject({
+    type: z.literal("managed.thread.start"),
+    ...launch,
+  }),
+});
+export const guestChallenge = z.strictObject({
+  domain: z.literal("bb.synthetic-cold-create.271"),
+  hostId: id,
+  sessionId: id,
+  manifestDigest: id,
+  registrationNonce: z.uuid(),
+  nonce: z.uuid(),
+});
+export const guestQualificationFrame = z.strictObject({
+  type: z.literal("host-rpc.request"),
+  requestId: z.uuid(),
+  command: z.strictObject({
+    type: z.literal("managed.lab.qualify"),
+    challenge: guestChallenge,
+  }),
+});
+export const guestReport = z.strictObject({
+  commandId,
+  threadId: id,
+  requestId: clientTurnRequestIdSchema,
+  epoch,
+  agentSessionId: id,
+  manifestDigest: id,
+  bodyDigest: id,
+  disposition: z.literal("applied"),
+  guestSessionId: id,
+});
+export const labRpcResponse = z.discriminatedUnion("commandType", [
+  z.strictObject({
+    type: z.literal("host-rpc.response"),
+    requestId: z.uuid(),
+    ok: z.literal(true),
+    commandType: z.literal("managed.lab.qualify"),
+    result: z.strictObject({ signature: z.string().min(1).max(256) }),
+  }),
+  z.strictObject({
+    type: z.literal("host-rpc.response"),
+    requestId: z.uuid(),
+    ok: z.literal(true),
+    commandType: z.literal("managed.thread.start"),
+    result: guestReport,
+  }),
+]);
