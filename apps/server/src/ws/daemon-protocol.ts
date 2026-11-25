@@ -1,3 +1,4 @@
+import type { DaemonConnectionRef } from "./hub.js";
 import { reportEnvironmentHookProgress } from "../services/environments/environment-hooks.js";
 import { syncDesktopBrowserTabs } from "../services/desktop-browsers.js";
 import { heartbeatSession } from "@bb/db";
@@ -102,12 +103,16 @@ export function onDaemonSocketOpen(
   deps: LoggedPendingInteractionWorkSessionDeps &
     Pick<AppDeps, "hub" | "logger" | "sharedPorts" | "terminalSessions">,
   args: { hostId: string; sessionId: string; socket: DaemonSocket },
-): void {
+): DaemonConnectionRef {
   deps.logger.info(
     { sessionId: args.sessionId, hostId: args.hostId },
     "Daemon WebSocket opened",
   );
-  deps.hub.registerDaemon(args.sessionId, args.hostId, args.socket);
+  const connection = deps.hub.registerDaemon(
+    args.sessionId,
+    args.hostId,
+    args.socket,
+  );
   handleDaemonSocketOpened(deps, { hostId: args.hostId });
   deps.sharedPorts.pushCurrentSharedPortsForHost(args.hostId);
   deps.sharedPorts.pushCurrentNextTunnelForHost(args.hostId);
@@ -118,7 +123,7 @@ export function onDaemonSocketOpen(
     });
   }
   if (isServerMoveFrozen(deps.db)) {
-    return;
+    return connection;
   }
   // A dispatch that arrived while this machine was away parked its row on a
   // `host-offline` wait with no schedule, so no sweep can see it — the
@@ -140,6 +145,7 @@ export function onDaemonSocketOpen(
       "Environment provisioning reconnect resume failed",
     );
   });
+  return connection;
 }
 
 export function onDaemonSocketMessage(
