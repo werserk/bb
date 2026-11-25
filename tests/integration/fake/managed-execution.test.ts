@@ -1,3 +1,15 @@
+import {
+  appendFixture,
+  claimFixture,
+  fixtureCommand,
+} from "../../../packages/db/test/helpers/placement-dispatch.js";
+import {
+  readPlacementDispatchReceipt,
+  preparePlacementExecutionCommand,
+  claimPlacementExecutionCommand,
+  events,
+} from "@bb/db";
+import { NotificationHub } from "../../../apps/server/src/ws/hub.js";
 import { threadScope, turnScope } from "@bb/domain";
 import { appendThreadEventInTransaction } from "../../../apps/server/src/services/threads/thread-events.js";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -21,6 +33,8 @@ import {
   candidate,
   observation,
   setupPlacement,
+  fixtureAuthority,
+  purpose,
   workspace,
 } from "../../../packages/db/test/helpers/placement.js";
 import {
@@ -48,7 +62,8 @@ function admit(id: string) {
     db.transaction((tx) =>
       admitPlacementDispatch(tx, {
         ...candidate(db, id),
-        queuedMessageId: "queue-" + id,
+        queuedMessageId: readPlacementOperation(db, id)!.queueReceipt!
+          .queuedMessageId,
         fence: 1,
       }),
     ),
@@ -83,6 +98,7 @@ it("a new operation on the same physical fence supersedes the resident owner", (
     }),
   ).toMatchObject({ state: "resident" });
   const next = acceptPlacementOperation(db, {
+    authority: fixtureAuthority,
     ownerPluginId: "workers",
     providerId: "claude",
     principalScope: "owner",
@@ -180,7 +196,10 @@ it.each(["host", "root", "generation"])(
 it("a historical per-member queue receipt cannot authorize the post-commit entry", async () => {
   admit(operationId);
   await expect(
-    dispatchManagedOrdinaryTurn({ db }, { threadId, requestId }),
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub() },
+      { threadId, requestId },
+    ),
   ).rejects.toMatchObject({
     status: 409,
     body: { code: "managed_request_missing" },
@@ -216,10 +235,13 @@ it("a committed native request by itself cannot authorize dispatch", async () =>
   );
   expect(committed.requestId).toBe(requestId);
   await expect(
-    dispatchManagedOrdinaryTurn({ db }, { threadId, requestId }),
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub() },
+      { threadId, requestId },
+    ),
   ).rejects.toMatchObject({
     status: 409,
-    body: { code: "managed_execution_unsupported" },
+    body: { code: "managed_receipt_missing" },
   });
 });
 
@@ -253,4 +275,113 @@ it("refuses a matching active provider turn without authenticated command and ca
       turnId,
     }),
   ).toThrow(/verified command handoff/);
+});
+
+function commitOrdinaryFixture() {
+  const op = readPlacementOperation(db, operationId)!;
+  const rows = claimFixture(db, op.queueReceipt!.queuedMessageId);
+  return db.transaction(
+    (tx) => appendFixture(tx, operationId, rows, requestId),
+    { behavior: "immediate" },
+  );
+}
+function rejectedEvents() {
+  return db
+    .select()
+    .from(events)
+    .where(eq(events.type, "client/turn/rejected"))
+    .all();
+}
+it("270 atomically records one native rejection and retains actual ordered membership", async () => {
+  const { receipt } = commitOrdinaryFixture();
+  const key = { threadId, requestId },
+    deps = {
+      db,
+      hub: new NotificationHub(),
+      placementWorkspacePurpose: purpose,
+    };
+  await expect(dispatchManagedOrdinaryTurn(deps, key)).rejects.toMatchObject({
+    status: 409,
+    body: { code: "managed_execution_unsupported" },
+  });
+  await expect(dispatchManagedOrdinaryTurn(deps, key)).rejects.toMatchObject({
+    body: { details: { state: "refused_unsent" } },
+  });
+  expect(readPlacementDispatchReceipt(db, key)).toMatchObject({
+    state: "refused_unsent",
+    members: receipt.members,
+    commandId: null,
+    nativeExecutionId: null,
+  });
+  const rejected = rejectedEvents();
+  expect(rejected).toHaveLength(1);
+  expect(rejected[0]!.sequence).toBeGreaterThan(receipt.requestSequence);
+  expect(JSON.parse(rejected[0]!.data)).toMatchObject({
+    requestId,
+    reason: "managed_execution_unsupported",
+  });
+});
+it("rolls back the refusal when its native event cannot commit", async () => {
+  commitOrdinaryFixture();
+  db.$client.exec(
+    "CREATE TEMP TRIGGER block_rejection BEFORE INSERT ON events WHEN NEW.type='client/turn/rejected' BEGIN SELECT RAISE(ABORT, 'synthetic event fault'); END",
+  );
+  const key = { threadId, requestId };
+  await expect(
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub(), placementWorkspacePurpose: purpose },
+      key,
+    ),
+  ).rejects.toMatchObject({ cause: { message: "synthetic event fault" } });
+  expect(readPlacementDispatchReceipt(db, key)?.state).toBe("prepared");
+  expect(rejectedEvents()).toHaveLength(0);
+});
+it("a competing send claim cannot become a definitive rejection", async () => {
+  const { guard } = commitOrdinaryFixture();
+  const cmd = { ...guard, ...fixtureCommand };
+  expect(preparePlacementExecutionCommand(db, cmd).kind).toBe("prepared");
+  expect(
+    claimPlacementExecutionCommand(db, {
+      ...cmd,
+      currentAgentSessionId: cmd.agentSessionId,
+    }).kind,
+  ).toBe("won");
+  await expect(
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub(), placementWorkspacePurpose: purpose },
+      { threadId, requestId },
+    ),
+  ).rejects.toMatchObject({ body: { details: { state: "possibly_sent" } } });
+  expect(readPlacementDispatchReceipt(db, { threadId, requestId })?.state).toBe(
+    "possibly_sent",
+  );
+  expect(rejectedEvents()).toHaveLength(0);
+});
+it("no composition purpose records an unavailable admission with no command", async () => {
+  commitOrdinaryFixture();
+  await expect(
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub() },
+      { threadId, requestId },
+    ),
+  ).rejects.toMatchObject({ body: { code: "managed_admission_unavailable" } });
+  expect(JSON.parse(rejectedEvents()[0]!.data).reason).toBe(
+    "managed_admission_unavailable",
+  );
+});
+
+it("rolls back the just-appended rejection when its refusal CAS loses", async () => {
+  commitOrdinaryFixture();
+  db.$client.exec(
+    "CREATE TEMP TRIGGER hold_effect BEFORE UPDATE OF state ON placement_effect BEGIN SELECT RAISE(IGNORE); END",
+  );
+  const key = { threadId, requestId };
+  await expect(
+    dispatchManagedOrdinaryTurn(
+      { db, hub: new NotificationHub(), placementWorkspacePurpose: purpose },
+      key,
+    ),
+  ).rejects.toMatchObject({ body: { code: "managed_execution_recorded" } });
+  expect(readPlacementDispatchReceipt(db, key)?.state).toBe("prepared");
+  expect(rejectedEvents()).toHaveLength(0);
 });
