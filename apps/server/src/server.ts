@@ -49,6 +49,12 @@ import { registerUiPreferenceRoutes } from "./routes/ui-preferences.js";
 import { registerTerminalRoutes } from "./routes/terminals.js";
 import { registerThreadRoutes } from "./routes/threads/index.js";
 import { registerQueueRoutes } from "./routes/queue.js";
+import { registerPlacementRoutes } from "./routes/placement.js";
+import {
+  createPlacementService,
+  type PlacementService,
+} from "./services/placement/placement-service.js";
+import type { WorkspacePurpose } from "@bb/domain";
 import { registerPluginRoutes } from "./routes/plugins.js";
 import { registerPluginCatalogRoutes } from "./routes/plugin-catalog.js";
 import { registerPluginInstallJobRoutes } from "./routes/plugin-install-jobs.js";
@@ -170,6 +176,7 @@ interface ServerApp {
   injectWebSocket: ReturnType<typeof createNodeWebSocket>["injectWebSocket"];
   pluginService: PluginService;
   pluginCatalogService: PluginCatalogService;
+  placement: PlacementService;
   serverMove: ServerMoveCoordinator;
   tunnelIngress: TunnelIngressManager;
 }
@@ -208,6 +215,7 @@ export interface ServerMoveAppOptions {
 
 interface CreateAppOptions {
   bbAppArtifactService?: BbAppArtifactService;
+  placementPurpose?: WorkspacePurpose;
   serverMove?: ServerMoveAppOptions;
   slowApiRequestLogThresholdMs?: number;
   performanceDiagnosticsEnabled?: () => boolean;
@@ -944,6 +952,10 @@ export function createApp(
   registerEnvironmentRoutes(publicApi, deps, pluginService);
   registerThreadRoutes(publicApi, deps, pluginService);
   registerQueueRoutes(publicApi, deps);
+  const placement = createPlacementService(deps, {
+    purpose: options?.placementPurpose ?? { kind: "live" },
+  });
+  registerPlacementRoutes(publicApi, placement, pluginService);
   registerSystemRoutes(publicApi, deps, pluginService);
   registerUiPreferenceRoutes(publicApi, deps);
   const pluginInstallJobs = createPluginInstallJobs({
@@ -1114,6 +1126,7 @@ export function createApp(
     injectWebSocket,
     pluginService,
     pluginCatalogService,
+    placement,
     serverMove,
     tunnelIngress,
   };

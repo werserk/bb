@@ -369,6 +369,7 @@ function wrapSdkForPlugin(
 ): PluginBbSdk {
   return {
     ...sdk,
+    experimental_placement: rpcCallerSdk.experimental_placement,
     plugins: {
       ...sdk.plugins,
       callRpc(args) {

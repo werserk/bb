@@ -4107,6 +4107,31 @@ skipped. The same route backs `bb prompt-history list`.
 
 Before stabilization, audit whether `limit` should be a number, whether the cursor format needs versioning, whether project or thread filters belong on this call rather than on `projects.promptHistory` and `threads.promptHistory`, and whether skipped rows should fill the page.
 
+## Placement operations (`bb.sdk.experimental_placement`)
+
+`ExperimentalPlacementArea` submits work to a per-server placement owner
+instead of starting a thread directly. `accept(request)` takes a
+`placementRequestV1Schema` body (`schemaVersion`, caller-chosen
+`submissionKey`, and an `independent`, `continuation`, `fork` or `retry`
+intent) and returns `pending`, `placed` (with the thread) or `refused`
+(`not-created`). The submission is durable before any side effect: the same
+principal, key and bytes return the same operation, while changed bytes
+return `409 placement_submission_conflict` without the stored payload.
+`get({ operationId })` returns the operation projection, `recoverDraft`
+returns the original request, and `cancel` requests cancellation. The server
+derives the principal: a call without a caller token is `local`
+(`local-unverified`), a plugin's `bb.sdk` call is `plugin:<id>`, and an
+unknown token is refused with 403. Another principal's operation reads as
+`404 placement_not_found`; the registered owner plugin may also `get` it.
+A provider without a managed placement owner is refused before acceptance.
+
+Docs: none yet; the contract lives in `packages/server-contract/src/api/placement.ts`.
+Before stabilization, decide how an owner plugin registers its policy and
+worker observations through the plugin API, whether list/reconcile belong on
+this area, whether `local-unverified` callers should keep draft recovery, and
+how fresh environment preparation and pre-thread forks are supported (both
+are refused as `unsupported_preparation` today).
+
 ## `ThreadChatMessageReference.experimental_messageSeq`
 
 The message reference handed to `messageAction` runs, `ThreadChat` consumer

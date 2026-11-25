@@ -15,6 +15,13 @@ import {
   type ConversationQuestionsOpenPage,
 } from "@bb/domain";
 import { z as planZ } from "zod";
+import {
+  placementRequestV1Schema,
+  type PlacementRequestV1,
+  type PlacementAcceptance,
+  type PlacementDraftRecovery,
+} from "./api/placement.js";
+import type { PlacementOperation } from "@bb/domain";
 import type { ThreadPlansReadResponse } from "@bb/domain";
 import {
   machineEnvironmentSetSchema,
@@ -445,6 +452,45 @@ type PathThreadInteractionId = {
 };
 
 export const publicApiRoutes = {
+  placement: {
+    /**
+     * Durably accepts one placement submission before any thread, Workspace
+     * or provider side effect. The caller's principal and authority are
+     * derived by the server; an identical retry of the same submissionKey
+     * returns the original operation, changed bytes return 409 without a
+     * payload.
+     */
+    accept: defineRoute({
+      path: "/placement/operations",
+      method: "post",
+      request: jsonRequest<EmptyInput, PlacementRequestV1>(
+        placementRequestV1Schema,
+      ),
+      response: jsonResponse<PlacementAcceptance>(),
+    }),
+    get: defineRoute({
+      path: "/placement/operations/:id",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<PlacementOperation>(),
+    }),
+    /**
+     * Returns the exact accepted request for the accepting principal only.
+     * Other callers receive 404 and no prompt material.
+     */
+    recoverDraft: defineRoute({
+      path: "/placement/operations/:id/draft",
+      method: "get",
+      request: noRequest<PathId>(),
+      response: jsonResponse<PlacementDraftRecovery>(),
+    }),
+    cancel: defineRoute({
+      path: "/placement/operations/:id/cancel",
+      method: "post",
+      request: noRequest<PathId>(),
+      response: jsonResponse<PlacementOperation>(),
+    }),
+  },
   promptHistory: {
     list: defineRoute({
       path: "/prompt-history",
