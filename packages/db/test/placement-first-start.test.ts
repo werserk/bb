@@ -341,6 +341,7 @@ it.each([-1, 0, 1])(
 );
 it.each([
   "valid",
+  "mismatched-ids",
   "missing",
   "event",
   "context",
@@ -373,6 +374,10 @@ it.each([
     const command = {
       ...guard,
       ...fixtureCommand,
+      commandId:
+        mode === "mismatched-ids"
+          ? fixtureCommand.commandId
+          : fixtureCommand.nativeExecutionId,
       currentAgentSessionId: fixtureCommand.agentSessionId,
     };
     expect(S.preparePlacementExecutionCommand(db, command).kind).toBe(
