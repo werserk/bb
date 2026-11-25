@@ -432,7 +432,7 @@ describe("placement dispatch", () => {
       expect(refused.status, JSON.stringify(refused.body)).toBe(409);
       expect(refused.body.code).toBe("managed_execution_unsupported");
       const after = placed(harness, id);
-      expect(after.record.phase).toBe("admitted");
+      expect(after.record.phase).toBe("refused");
       expect(after.threadRows).toHaveLength(1);
       expect(after.threadRows[0]!.status).toBe("pending");
       expect(after.queueRows).toHaveLength(0);
@@ -933,7 +933,7 @@ describe("placement dispatch", () => {
             head = record.queuedMessageId!;
           expect(getQueuedThreadMessage(h.db, head)).toMatchObject({
             sendAt,
-            waitingOn: null,
+            waitingOn: JSON.stringify({ kind: "time" }),
           });
           if (variant === "other wait") {
             h.db
