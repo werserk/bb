@@ -111,6 +111,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   seedFirstPartyProviders?: boolean;
   tunnelIngressNow?: () => number;
   placementPurpose?: WorkspacePurpose;
+  fixtureDb?: DbConnection;
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
     pluginId: string;
@@ -178,11 +179,12 @@ export async function createTestAppHarness(
     seedFirstPartyProviders = true,
     tunnelIngressNow: _tunnelIngressNow,
     placementPurpose,
+    fixtureDb,
     ...configOverrides
   } = overrides;
   const logger = createTestLogger();
   const dataDir = await mkdtemp(join(tmpdir(), "bb-server-test-"));
-  const db = createTestDb();
+  const db = fixtureDb ?? createTestDb();
   setAppSettings(db, {
     ...getAppSettings(db),
     machineGitCredentialsEnabled: false,

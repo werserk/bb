@@ -35,7 +35,16 @@ export const ordinary = {
   hostId: ingress.hostId,
   hostKey: "fixture-placeholder",
 };
-export async function initializeFixture() {
+export async function initializeFixture(
+  config: Pick<
+    ManagedGuestEnrollment,
+    "binding" | "runtimeRootKey" | "launchProfileId"
+  > = {
+    binding,
+    runtimeRootKey: "fixture-root",
+    launchProfileId: "fixture-counter",
+  },
+) {
   const root = await mkdtemp(join(tmpdir(), "guest-journal-"));
   const path = join(root, journalFilename);
   await writeFile(path, "", { flag: "wx", mode: 0o600 });
@@ -54,19 +63,22 @@ export async function initializeFixture() {
     device: String(inode.dev),
     inode: String(inode.ino),
     journalId,
-    binding,
-    runtimeRootKey: "fixture-root",
-    launchProfileId: "fixture-counter",
+    ...config,
   };
-  await persistHostId({ dataDir: root, hostId: ingress.hostId });
-  await writeHostAuthState(root, { ...ordinary, managedGuest: descriptor });
+  const hostId = config.binding.agentHostId;
+  await persistHostId({ dataDir: root, hostId });
+  await writeHostAuthState(root, {
+    ...ordinary,
+    hostId,
+    managedGuest: descriptor,
+  });
   return {
     root,
     path,
     descriptor,
     pin: {
-      hostId: ingress.hostId,
-      descriptorDigest: enrollmentDigest(ingress.hostId, descriptor),
+      hostId,
+      descriptorDigest: enrollmentDigest(hostId, descriptor),
     },
   };
 }
