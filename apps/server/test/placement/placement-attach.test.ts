@@ -603,4 +603,89 @@ describe("placement attach", () => {
       ["worker-a", "worker-b"],
     );
   });
+  it("replays an attached operation as placed after the first send is refused, across reopen, while a pre-thread refusal stays not-created", async () => {
+    await withAttach(
+      async (harness) => {
+        harness.deps.resolvePlacementSendScope = () => ({
+          principal: "local",
+          identity: "local-unverified",
+          authority: "local-input-parity",
+        });
+        const request = independent("refused-after-attach");
+        const id = await accept(harness, request);
+        await harness.placement.wake(PROVIDER);
+        const bound = state(harness, id);
+        expect(bound.record.phase).toBe("queued");
+        const threadId = bound.record.threadId!;
+        const sent = await post(
+          harness,
+          `/threads/${threadId}/queued-messages/${bound.record.queuedMessageId}/send`,
+          { mode: "auto" },
+        );
+        expect(sent.status, JSON.stringify(sent.body)).toBe(409);
+        expect(sent.body.code).toBe("managed_execution_unsupported");
+        const refused = state(harness, id);
+        expect(refused.record.phase).toBe("refused");
+        expect(refused.queue).toHaveLength(0);
+        const requestId = refused.record.clientTurnRequestId;
+        expect(requestId).not.toBeNull();
+
+        const changes = (db: DbConnection) =>
+          db.$client.prepare("select total_changes()").pluck().get();
+        const before = changes(harness.db);
+        const replay = await post(harness, "/placement/operations", request);
+        expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+        expect(replay.body).toMatchObject({
+          kind: "placed",
+          operation: {
+            id,
+            phase: "refused",
+            threadId,
+            queueReceipt: { requestId },
+          },
+          thread: { id: threadId, status: "pending" },
+        });
+        await harness.placement.wake(PROVIDER);
+        expect(changes(harness.db)).toBe(before);
+        expect(state(harness, id).threads).toHaveLength(1);
+
+        const path = join(harness.config.dataDir, "refused-reopen.sqlite");
+        await harness.db.$client.backup(path);
+        const db = createConnection(path);
+        try {
+          const { placement } = createApp({ ...harness.deps, db });
+          const reopened = changes(db);
+          const again = await placement.accept({ kind: "client" }, request);
+          expect(again).toMatchObject({
+            kind: "placed",
+            operation: { id, phase: "refused", threadId },
+            thread: { id: threadId },
+          });
+          expect(changes(db)).toBe(reopened);
+          expect(db.select().from(threads).all()).toHaveLength(1);
+          expect(db.select().from(placementOperations).all()).toHaveLength(1);
+        } finally {
+          db.$client.close();
+        }
+
+        const unsupported = independent("pre-thread-refusal", {
+          pluginSubmission: { pluginId: "fixture-plugin", data: {} },
+        });
+        const preThread = await accept(harness, unsupported);
+        await harness.placement.wake(PROVIDER);
+        const preReplay = await post(
+          harness,
+          "/placement/operations",
+          unsupported,
+        );
+        expect(preReplay.body).toMatchObject({
+          kind: "refused",
+          outcome: "not-created",
+          operation: { id: preThread, threadId: null },
+        });
+      },
+      fixtureRootKey,
+      ["worker-a", "worker-b"],
+    );
+  });
 });
