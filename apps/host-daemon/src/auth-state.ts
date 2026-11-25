@@ -39,6 +39,9 @@ export async function writeHostAuthState(
     {
       hostId: authState.hostId,
       hostKey: authState.hostKey,
+      ...("managedGuest" in authState
+        ? { managedGuest: authState.managedGuest }
+        : {}),
     },
     null,
     2,
