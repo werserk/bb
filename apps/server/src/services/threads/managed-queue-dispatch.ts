@@ -128,26 +128,38 @@ function assertQueueOwners(
   }
 }
 
-// The native claim writer supplies the partition before changing any group edge or token.
-export function checkManagedQueueGroup(
+export function authorizeManagedQueueMembers(
   db: DbQueryConnection,
-  rows: readonly QueuedThreadMessageRow[],
-  purpose?: WorkspacePurpose,
+  rows: readonly Pick<
+    QueuedThreadMessageRow,
+    "id" | "threadId" | "placementOperationId"
+  >[],
   readScope?: ReadPlacementScope,
-): ManagedQueuePlacement | undefined {
+): boolean {
   const first = rows[0];
-  if (!first) return;
-  const thread = getThread(db, first.threadId);
-  const marked = rows.some((row) => row.placementOperationId !== null);
-  if (!marked && (!thread || !threadRequiresPlacement(db, thread))) return;
+  if (!first) return false;
+  if (!rows.some((row) => row.placementOperationId !== null)) {
+    const thread = getThread(db, first.threadId);
+    if (!thread || !threadRequiresPlacement(db, thread)) return false;
+  }
   const scope = readScope?.() ?? null;
   for (const row of rows) {
     if (!row.placementOperationId) missingQueueEntry();
     const owners = readQueueMemberOwners(db, row.id, row.placementOperationId);
     assertQueueOwners(owners, scope, first.threadId, row.placementOperationId);
   }
-  if (!thread || !purpose || !readScope) placementDispatchUnavailable();
-  const guard = readPlacementResidentGuard(db, thread.id, purpose);
+  return true;
+}
+
+export function prepareManagedQueueGroup(
+  db: DbQueryConnection,
+  rows: readonly QueuedThreadMessageRow[],
+  purpose?: WorkspacePurpose,
+  readScope?: ReadPlacementScope,
+): ManagedQueuePlacement {
+  const threadId = rows[0]?.threadId;
+  if (!threadId || !purpose || !readScope) placementDispatchUnavailable();
+  const guard = readPlacementResidentGuard(db, threadId, purpose);
   if (!guard || rows.some((row) => row.placementFence !== guard.fence))
     placementDispatchUnavailable();
   const groupsByQueueId = new Map<string, PromptInput[][]>();
@@ -207,19 +219,27 @@ export function retainGrantedHead(
     placementDispatchUnavailable();
   deps.db.transaction(
     (tx) => {
+      const sameClaim = and(
+        eq(queuedThreadMessages.threadId, head.threadId),
+        eq(queuedThreadMessages.claimToken, head.claimToken),
+      );
+      const order = [
+        asc(queuedThreadMessages.sortKey),
+        asc(queuedThreadMessages.id),
+      ];
       const rows = tx
-        .select()
+        .select({
+          id: queuedThreadMessages.id,
+          threadId: queuedThreadMessages.threadId,
+          claimToken: queuedThreadMessages.claimToken,
+          state: queuedThreadMessages.state,
+          placementOperationId: queuedThreadMessages.placementOperationId,
+          placementFence: queuedThreadMessages.placementFence,
+          groupWithNext: queuedThreadMessages.groupWithNext,
+        })
         .from(queuedThreadMessages)
-        .where(
-          and(
-            eq(queuedThreadMessages.threadId, head.threadId),
-            eq(queuedThreadMessages.claimToken, head.claimToken),
-          ),
-        )
-        .orderBy(
-          asc(queuedThreadMessages.sortKey),
-          asc(queuedThreadMessages.id),
-        )
+        .where(sameClaim)
+        .orderBy(...order)
         .all();
       if (
         rows.length !== original.length ||
@@ -234,14 +254,21 @@ export function retainGrantedHead(
         )
       )
         placementDispatchUnavailable();
-      const current = checkManagedQueueGroup(
+      if (!authorizeManagedQueueMembers(tx, rows, placement.readScope))
+        placementDispatchUnavailable();
+      const verifiedRows = tx
+        .select()
+        .from(queuedThreadMessages)
+        .where(sameClaim)
+        .orderBy(...order)
+        .all();
+      const current = prepareManagedQueueGroup(
         tx,
-        rows,
+        verifiedRows,
         deps.placementWorkspacePurpose,
         placement.readScope,
       );
       if (
-        !current ||
         current.guard.executionOwnerOperationId !==
           placement.guard.executionOwnerOperationId ||
         canonicalJsonBytes(current.guard.purpose) !==

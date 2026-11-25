@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { claimQueuedThreadMessageGroup, createConnection } from "@bb/db";
+import {
+  claimQueuedThreadMessageGroup,
+  createConnection,
+  readPlacementDispatchReceipt,
+  setQueuedThreadMessageGroupBoundary,
+} from "@bb/db";
 import { expect, it, vi } from "vitest";
 import { createApp } from "../../src/server.js";
 import * as runtime from "../../src/services/threads/managed-execution.js";
@@ -79,6 +84,8 @@ it.each(["live", "claimed", "consumed"] as const)(
                 /"(?:prepared_request|queue_digest|queue_ordinal|ordinal|attempt|rejection_reason|native_protocol|submission_uuid)"/.test(
                   s,
                 ) ||
+                (s.includes('from "queued_thread_messages"') &&
+                  s.includes('"content"')) ||
                 (s.includes('from "events"') && s.includes('"data"')),
             );
             expect(forbiddenReads).toEqual([]);
@@ -98,3 +105,107 @@ it.each(["live", "claimed", "consumed"] as const)(
     });
   },
 );
+
+it("loads the authorized group only after both member checks and commits its ordered receipt", async () => {
+  await withTestHarness(async (h) => {
+    const f = seedManagedGroup(h);
+    const path = join(h.config.dataDir, "authorized.sqlite");
+    await h.db.$client.backup(path);
+    const statements: string[] = [];
+    const db = createConnection(path, {
+      slowQueryThresholdMs: 0,
+      slowQueryLogger: {
+        info({ sql }) {
+          statements.push(sql);
+        },
+      },
+    });
+    const handoff = vi.spyOn(runtime, "dispatchManagedOrdinaryTurn");
+    try {
+      const app = createApp({ ...h.deps, db }).app;
+      statements.length = 0;
+      const response = await f.send(app);
+      const body = await response.json();
+      const firstPayload = statements.findIndex(
+        (s) =>
+          s.includes('from "queued_thread_messages"') &&
+          s.includes('"content"'),
+      );
+      expect(firstPayload).toBeGreaterThan(0);
+      expect(
+        statements
+          .slice(0, firstPayload)
+          .filter(
+            (s) =>
+              s.includes('from "placement_action_identity"') &&
+              s.includes(
+                'json_extract("placement_action_identity"."authority"',
+              ),
+          ),
+      ).toHaveLength(f.queueIds.length);
+      expect(response.status).toBe(409);
+      expect(body.details).toMatchObject({
+        state: "refused_unsent",
+        sourceQueuedMessageIds: f.queueIds,
+      });
+      const key = {
+        threadId: f.threadId,
+        requestId: body.details.requested.requestId,
+      };
+      expect(
+        readPlacementDispatchReceipt(db, key)?.members.map((m) => m.queueId),
+      ).toEqual(f.queueIds);
+      expect(handoff.mock.calls.map((call) => call[1])).toEqual([key]);
+    } finally {
+      handoff.mockRestore();
+      db.$client.close();
+    }
+  });
+});
+
+it("keeps the same ordered group from authorization through claim while another connection tries to split it", async () => {
+  await withTestHarness(async (h) => {
+    const f = seedManagedGroup(h);
+    const path = join(h.config.dataDir, "claim-lock.sqlite");
+    await h.db.$client.backup(path);
+    const db = createConnection(path);
+    const rival = createConnection(path);
+    const phases: string[] = [];
+    try {
+      rival.$client.pragma("busy_timeout = 0");
+      const claimed = claimQueuedThreadMessageGroup(db, h.hub, f.queueIds[0]!, {
+        kind: "explicit-send",
+        authorizeMembers(_tx, members) {
+          phases.push("authorize");
+          expect(members).toEqual(
+            f.members.map((m, i) => ({
+              id: f.queueIds[i],
+              threadId: f.threadId,
+              placementOperationId: m.id,
+            })),
+          );
+          expect(() =>
+            setQueuedThreadMessageGroupBoundary({
+              db: rival,
+              notifier: h.hub,
+              threadId: f.threadId,
+              groupBoundaryQueuedMessageId: f.queueIds[0]!,
+              expectedGroupedPrefixQueuedMessageIds: [f.queueIds[0]!],
+            }),
+          ).toThrow(/locked|busy/i);
+        },
+        assertGroupAllowed(_tx, rows) {
+          phases.push("hydrate");
+          expect(rows.map((row) => row.id)).toEqual(f.queueIds);
+          expect(rows.every((row) => row.content.length > 0)).toBe(true);
+        },
+      });
+      expect(phases).toEqual(["authorize", "hydrate"]);
+      expect(claimed?.map((row) => row.id)).toEqual(f.queueIds);
+      expect(new Set(claimed?.map((row) => row.claimToken)).size).toBe(1);
+    } finally {
+      rival.$client.close();
+      db.$client.close();
+    }
+  });
+});

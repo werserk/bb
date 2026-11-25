@@ -1,8 +1,10 @@
+import { and, asc, eq, ne } from "drizzle-orm";
 import {
   retainedManagedSend,
   managedOrdinaryPresentation,
   retainGrantedHead,
-  checkManagedQueueGroup,
+  authorizeManagedQueueMembers,
+  prepareManagedQueueGroup,
   placementDispatchUnavailable,
   threadRequiresPlacement,
   type ReadPlacementScope,
@@ -10,8 +12,8 @@ import {
 } from "./managed-queue-dispatch.js";
 import {
   getLatestThreadSequence,
+  queuedThreadMessages,
   PlacementGroupFairnessError,
-  listQueuedThreadMessages,
   listStoredEventRowsContaining,
 } from "@bb/db";
 import { turnRequestEventDataSchema } from "@bb/domain";
@@ -455,12 +457,24 @@ async function withActiveQueuedMessageClaims<T>(
   }
 }
 
+function queueTargetIdentity(db: DbQueryConnection, id: string) {
+  return db
+    .select({
+      threadId: queuedThreadMessages.threadId,
+      placementOperationId: queuedThreadMessages.placementOperationId,
+    })
+    .from(queuedThreadMessages)
+    .where(eq(queuedThreadMessages.id, id))
+    .get();
+}
+
 function claimQueuedThreadMessageForSend(
   deps: Pick<AppDeps, "db" | "hub" | "placementWorkspacePurpose">,
   args: SendQueuedMessageArgs,
 ): { rows: ClaimedQueuedMessage[]; placement?: ManagedQueuePlacement } {
   let placement: ManagedQueuePlacement | undefined;
-  const existingQueuedMessage = getQueuedThreadMessage(
+  let managedGroup = false;
+  const existingQueuedMessage = queueTargetIdentity(
     deps.db,
     args.queuedMessageId,
   );
@@ -479,13 +493,28 @@ function claimQueuedThreadMessageForSend(
     policy.kind === "explicit-send"
       ? {
           kind: "explicit-send",
-          assertGroupAllowed: (tx, group) => {
-            placement = checkManagedQueueGroup(
+          authorizeMembers: (tx, group) => {
+            if (group[0]?.threadId !== args.threadId)
+              throw new ApiError(
+                404,
+                "invalid_request",
+                "Queued message not found",
+              );
+            managedGroup = authorizeManagedQueueMembers(
               tx,
               group,
-              deps.placementWorkspacePurpose,
               args.readPlacementScope,
             );
+            policy.authorizeMembers?.(tx, group);
+          },
+          assertGroupAllowed: (tx, group) => {
+            if (managedGroup)
+              placement = prepareManagedQueueGroup(
+                tx,
+                group,
+                deps.placementWorkspacePurpose,
+                args.readPlacementScope,
+              );
             policy.assertGroupAllowed?.(tx, group);
           },
         }
@@ -496,7 +525,7 @@ function claimQueuedThreadMessageForSend(
   }
   if (args.claimPolicy.kind === "automatic") return { rows: [] };
 
-  const latestQueuedMessage = getQueuedThreadMessage(
+  const latestQueuedMessage = queueTargetIdentity(
     deps.db,
     args.queuedMessageId,
   );
@@ -770,7 +799,7 @@ export async function sendQueuedMessageNow(
       submissionIds?: string[];
     }
 > {
-  const existing = getQueuedThreadMessage(deps.db, args.queuedMessageId);
+  const existing = queueTargetIdentity(deps.db, args.queuedMessageId);
   if (!existing) {
     const retained = retainedManagedSend(deps.db, args);
     if (retained) return retained;
@@ -780,29 +809,44 @@ export async function sendQueuedMessageNow(
     existing?.placementOperationId != null ||
     (requestThread && threadRequiresPlacement(deps.db, requestThread));
   if (!managed) args.assertNewSendAllowed?.();
-  const before = managed
-    ? []
-    : listQueuedThreadMessages(deps.db, args.threadId).map(
-        toThreadQueuedMessage,
-      );
-  const index = before.findIndex((row) => row.id === args.queuedMessageId);
-  const selection: ThreadQueuedMessage[] = [];
-  if (index === 0) {
-    for (const row of before) {
-      selection.push(row);
-      if (!row.groupWithNext) break;
-    }
-  } else if (index > 0) selection.push(before[index]!);
-  const sourceQueuedMessageIds = selection.map((row) => row.id);
-  const submissionIds = queuedSubmissionMembership(deps.db, selection).map(
-    (entry) => entry.id,
-  );
+  let sourceQueuedMessageIds: string[] = [];
+  let submissionIds: string[] = [];
   const floor = getLatestThreadSequence(deps.db, { threadId: args.threadId });
   try {
     await sendQueuedMessage(deps, {
       claimPolicy: {
         kind: "explicit-send",
-        assertGroupAllowed: managed ? args.assertNewSendAllowed : undefined,
+        assertGroupAllowed: (tx, group) => {
+          if (managed) {
+            args.assertNewSendAllowed?.();
+            return;
+          }
+          // Native Send now reports the selected row alone unless it heads the queue.
+          const first = tx
+            .select({ id: queuedThreadMessages.id })
+            .from(queuedThreadMessages)
+            .where(
+              and(
+                eq(queuedThreadMessages.threadId, args.threadId),
+                ne(queuedThreadMessages.state, "claimed"),
+              ),
+            )
+            .orderBy(
+              asc(queuedThreadMessages.sortKey),
+              asc(queuedThreadMessages.id),
+            )
+            .limit(1)
+            .get();
+          const selected = (
+            first?.id === args.queuedMessageId
+              ? group
+              : group.filter((row) => row.id === args.queuedMessageId)
+          ).map(toThreadQueuedMessage);
+          sourceQueuedMessageIds = selected.map((row) => row.id);
+          submissionIds = queuedSubmissionMembership(tx, selected).map(
+            (member) => member.id,
+          );
+        },
       },
       readPlacementScope: args.readPlacementScope,
       mode: args.mode,
@@ -813,23 +857,20 @@ export async function sendQueuedMessageNow(
     if (
       error instanceof ApiError &&
       (error.status === 409 || error.status === 404) &&
-      !getQueuedThreadMessage(deps.db, args.queuedMessageId)
+      !queueTargetIdentity(deps.db, args.queuedMessageId)
     ) {
       const retained = retainedManagedSend(deps.db, args);
       if (retained) return retained;
     }
     throw error;
   }
-  const remainingQueuedMessage = getQueuedThreadMessage(
-    deps.db,
-    args.queuedMessageId,
-  );
-  if (!remainingQueuedMessage) {
+  const remaining = queueTargetIdentity(deps.db, args.queuedMessageId);
+  if (!remaining) {
     const retained = retainedManagedSend(deps.db, args);
     if (retained) return retained;
   }
   if (managed) placementDispatchUnavailable();
-  if (!remainingQueuedMessage && sourceQueuedMessageIds.length) {
+  if (!remaining && sourceQueuedMessageIds.length) {
     for (const row of listStoredEventRowsContaining(deps.db, {
       threadId: args.threadId,
       type: "client/turn/requested",
@@ -857,6 +898,8 @@ export async function sendQueuedMessageNow(
         };
     }
   }
+  const remainingQueuedMessage =
+    remaining && getQueuedThreadMessage(deps.db, args.queuedMessageId);
   return remainingQueuedMessage
     ? {
         sourceQueuedMessageIds,
