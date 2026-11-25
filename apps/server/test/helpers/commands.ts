@@ -579,10 +579,13 @@ export async function reportQueuedCommandSuccess<
   if (!queued.rpcRequest) {
     throw new Error("Queued command is missing RPC request metadata");
   }
-  const parsedResult = parseHostDaemonRpcResultForCommand(
-    queued.rpcRequest.command,
-    result,
-  );
+  const command = queued.rpcRequest.command;
+  if (
+    command.type === "managed.thread.start" ||
+    command.type === "managed.lab.qualify"
+  )
+    throw Error("Lab guest must answer on its own socket");
+  const parsedResult = parseHostDaemonRpcResultForCommand(command, result);
   harness.hub.recordHostOnlineRpcResponse({
     message: hostDaemonOnlineRpcResponseMessageSchema.parse({
       type: "host-rpc.response",

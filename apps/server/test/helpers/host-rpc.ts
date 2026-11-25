@@ -5,6 +5,7 @@ import {
   type HostDaemonOnlineRpcResponseMessage,
   type HostDaemonOnlineRpcResult,
   type HostDaemonRpcResultForCommand,
+  type HostDaemonRpcCommand,
 } from "@bb/host-daemon-contract";
 import type { AvailableModel } from "@bb/domain";
 import type { TestAppHarness } from "./test-app.js";
@@ -47,9 +48,7 @@ interface ProviderHostRpcResponder {
 export type HostRpcHandlerResult =
   | {
       ok: true;
-      result: HostDaemonRpcResultForCommand<
-        HostDaemonOnlineRpcRequestMessage["command"]
-      >;
+      result: HostDaemonRpcResultForCommand<HostDaemonRpcCommand>;
     }
   | {
       ok: false;
