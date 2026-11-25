@@ -73,6 +73,11 @@ export async function startHostDaemon(
   let machineAuthProxy: MachineAuthProxy | undefined;
   try {
     const persistedAuth = await readHostAuthState(dataDir);
+    if (persistedAuth && "managedGuest" in persistedAuth) {
+      throw new Error(
+        "Protected guest enrollment requires the qualified launcher; native daemon startup refused",
+      );
+    }
     const identity = await loadHostIdentity({
       dataDir,
       providedHostId: options.hostId,

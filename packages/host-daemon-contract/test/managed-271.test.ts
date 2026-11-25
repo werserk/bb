@@ -4,7 +4,7 @@ import { hostDaemonRpcCommandSchema } from "../src/commands.js";
 import {
   decodeForProtectedGuest,
   managedFrame271,
-} from "./proposals/managed-271.js";
+} from "../src/managed-guest-lab.js";
 
 const ingress = { hostId: "guest", sessionId: "first", protocolVersion: 271 };
 const commandId = "rpc_" + randomUUID();
