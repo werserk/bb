@@ -303,102 +303,114 @@ export function createThread(
   notifier: DbNotifier,
   input: CreateThreadInput,
 ) {
-  const visibility = input.visibility ?? "visible";
-  const now = Date.now();
-  const id = createThreadId();
-  const originKind = input.originKind ?? null;
   const thread = db.transaction(
-    (tx) => {
-      if (input.lifecycleOwnerThreadId) {
-        const owner = tx
-          .select({ id: threads.id })
-          .from(threads)
-          .innerJoin(projects, eq(projects.id, threads.projectId))
-          .where(
-            and(
-              eq(threads.id, input.lifecycleOwnerThreadId),
-              liveThread,
-              isNull(projects.deletedAt),
-            ),
-          )
-          .get();
-        if (!owner) {
-          throw new InvalidLifecycleOwnerError();
-        }
-      }
-      const createdThread = tx
-        .insert(threads)
-        .values({
-          id,
-          projectId: input.projectId,
-          environmentId: input.environmentId ?? null,
-          providerId: input.providerId,
-          title: input.title ?? null,
-          titleFallback: input.titleFallback ?? null,
-          sectionId: input.sectionId ?? null,
-          pinnedAt: input.pinned ? now : null,
-          pinSortKey: input.pinned
-            ? createOrderKeyBetween({
-                previousKey: null,
-                nextKey: getFirstPinnedThread(tx)?.pinSortKey ?? null,
-              })
-            : null,
-          status: input.status ?? "starting",
-          statusChangedAt: now,
-          startupContext: input.startupContext ?? null,
-          parentThreadId:
-            originKind === null ? (input.parentThreadId ?? null) : null,
-          sourceThreadId:
-            input.sourceThreadId ??
-            (originKind === null ? null : (input.parentThreadId ?? null)),
-          lifecycleOwnerThreadId: input.lifecycleOwnerThreadId ?? null,
-          originKind,
-          originPluginId: input.originPluginId ?? null,
-          visibility,
-          parentNotifications: input.parentNotifications ?? "auto",
-          lastReadAt: now,
-          latestAttentionAt: now,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning()
-        .get();
-      if (
-        createdThread.originKind === "fork" &&
-        createdThread.sourceThreadId !== null
-      ) {
-        copyProjectAttachmentOwnership(
-          tx,
-          createdThread.sourceThreadId,
-          createdThread.id,
-        );
-      }
-      upsertThreadTitleSearchSegments(tx, {
-        threadId: createdThread.id,
-        title: createdThread.title,
-        titleFallback: createdThread.titleFallback,
-        updatedAt: now,
-      });
-      if (
-        input.pluginMetadata !== undefined &&
-        input.pluginMetadata !== null &&
-        Object.keys(input.pluginMetadata.metadata).length > 0
-      ) {
-        insertThreadPluginMetadata(tx, {
-          threadId: createdThread.id,
-          pluginId: input.pluginMetadata.pluginId,
-          metadata: input.pluginMetadata.metadata,
-        });
-      }
-      return createdThread;
-    },
+    (tx) => insertThreadInTransaction(tx, createThreadId(), input),
     { behavior: "immediate" },
   );
-  notifier.notifyThread(id, ["thread-created"], {
-    projectId: input.projectId,
-  });
-  notifier.notifyProject(input.projectId, ["threads-changed"]);
+  notifyThreadCreated(notifier, thread);
   return thread;
+}
+
+export function notifyThreadCreated(
+  notifier: DbNotifier,
+  thread: { id: string; projectId: string },
+) {
+  notifier.notifyThread(thread.id, ["thread-created"], {
+    projectId: thread.projectId,
+  });
+  notifier.notifyProject(thread.projectId, ["threads-changed"]);
+}
+
+export function insertThreadInTransaction(
+  tx: DbTransaction,
+  id: string,
+  input: CreateThreadInput,
+) {
+  const visibility = input.visibility ?? "visible";
+  const now = Date.now();
+  const originKind = input.originKind ?? null;
+  if (input.lifecycleOwnerThreadId) {
+    const owner = tx
+      .select({ id: threads.id })
+      .from(threads)
+      .innerJoin(projects, eq(projects.id, threads.projectId))
+      .where(
+        and(
+          eq(threads.id, input.lifecycleOwnerThreadId),
+          liveThread,
+          isNull(projects.deletedAt),
+        ),
+      )
+      .get();
+    if (!owner) {
+      throw new InvalidLifecycleOwnerError();
+    }
+  }
+  const createdThread = tx
+    .insert(threads)
+    .values({
+      id,
+      projectId: input.projectId,
+      environmentId: input.environmentId ?? null,
+      providerId: input.providerId,
+      title: input.title ?? null,
+      titleFallback: input.titleFallback ?? null,
+      sectionId: input.sectionId ?? null,
+      pinnedAt: input.pinned ? now : null,
+      pinSortKey: input.pinned
+        ? createOrderKeyBetween({
+            previousKey: null,
+            nextKey: getFirstPinnedThread(tx)?.pinSortKey ?? null,
+          })
+        : null,
+      status: input.status ?? "starting",
+      statusChangedAt: now,
+      startupContext: input.startupContext ?? null,
+      parentThreadId:
+        originKind === null ? (input.parentThreadId ?? null) : null,
+      sourceThreadId:
+        input.sourceThreadId ??
+        (originKind === null ? null : (input.parentThreadId ?? null)),
+      lifecycleOwnerThreadId: input.lifecycleOwnerThreadId ?? null,
+      originKind,
+      originPluginId: input.originPluginId ?? null,
+      visibility,
+      parentNotifications: input.parentNotifications ?? "auto",
+      lastReadAt: now,
+      latestAttentionAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get();
+  if (
+    createdThread.originKind === "fork" &&
+    createdThread.sourceThreadId !== null
+  ) {
+    copyProjectAttachmentOwnership(
+      tx,
+      createdThread.sourceThreadId,
+      createdThread.id,
+    );
+  }
+  upsertThreadTitleSearchSegments(tx, {
+    threadId: createdThread.id,
+    title: createdThread.title,
+    titleFallback: createdThread.titleFallback,
+    updatedAt: now,
+  });
+  if (
+    input.pluginMetadata !== undefined &&
+    input.pluginMetadata !== null &&
+    Object.keys(input.pluginMetadata.metadata).length > 0
+  ) {
+    insertThreadPluginMetadata(tx, {
+      threadId: createdThread.id,
+      pluginId: input.pluginMetadata.pluginId,
+      metadata: input.pluginMetadata.metadata,
+    });
+  }
+  return createdThread;
 }
 
 const prepareGetThread = (db: DbQueryConnection) =>
