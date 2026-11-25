@@ -233,6 +233,7 @@ CREATE TABLE `placement_worker` (
 	`last_assigned_seq` integer,
 	`reclaim_operation_id` text,
 	`reclaim_source_fence` integer,
+	`reclaim_holder` text,
 	`physical_lock` text,
 	`fence_lock` text,
 	`native_custody` text,

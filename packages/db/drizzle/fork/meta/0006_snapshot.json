@@ -3912,6 +3912,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "reclaim_holder": {
+          "name": "reclaim_holder",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "physical_lock": {
           "name": "physical_lock",
           "type": "text",

@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, lt, ne, sql } from "drizzle-orm";
 import {
   canonicalJsonBytes,
   workerObservationSchema,
@@ -79,27 +79,51 @@ function custodyReports(
     },
   ];
 }
+type Holder = NonNullable<WorkerCustody["holder"]>;
+function otherReports(owner: string, provider: string, c: WorkerCustody) {
+  if (!c.lock) throw new Error("Physical lock is required");
+  const resource = physicalLockKey(c.agentHostId, c.lock);
+  return and(
+    eq(facts.blockedLock, resource),
+    ne(
+      facts.source,
+      lockReportKey(resource, custodyFact(owner, provider, c).source),
+    ),
+  );
+}
+function reportsHolder(holder: Holder) {
+  return sql`(json_extract(${facts.bytes}, '$.status') IS 'held' AND json_extract(${facts.bytes}, '$.holder') IS ${key(holder)})`;
+}
 export function foreignLockReport(
   db: DbQueryConnection,
   owner: string,
   provider: string,
   c: WorkerCustody,
+  closingHolder?: Holder | null,
 ) {
   if (!c.lock) return false;
-  const resource = physicalLockKey(c.agentHostId, c.lock);
   return !!db
     .select({ source: facts.source })
     .from(facts)
     .where(
       and(
-        eq(facts.blockedLock, resource),
-        ne(
-          facts.source,
-          lockReportKey(resource, custodyFact(owner, provider, c).source),
-        ),
+        otherReports(owner, provider, c),
+        closingHolder ? sql`NOT ${reportsHolder(closingHolder)}` : undefined,
       ),
     )
     .get();
+}
+export function dischargeClosedHolderReports(
+  tx: DbTransaction,
+  owner: string,
+  provider: string,
+  free: WorkerCustody,
+  holder: Holder,
+) {
+  tx.update(facts)
+    .set({ blockedLock: null })
+    .where(and(otherReports(owner, provider, free), reportsHolder(holder)))
+    .run();
 }
 function get(db: DbQueryConnection, source: string) {
   return db.select().from(facts).where(eq(facts.source, source)).get();
@@ -109,6 +133,7 @@ function store(tx: DbTransaction, f: Fact) {
     .values(f)
     .onConflictDoUpdate({
       target: facts.source,
+      setWhere: lt(facts.revision, f.revision),
       set: {
         revision: f.revision,
         bytes: f.bytes,
