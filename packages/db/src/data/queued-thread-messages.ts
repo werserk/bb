@@ -735,8 +735,6 @@ function applyQueuedThreadMessageGroupBoundary(
   threadId: string,
   groupBoundaryQueuedMessageId: string,
 ): SetQueuedThreadMessageGroupBoundaryResult {
-  if (hasClaimedQueuedThreadMessages(db, threadId, { placementOnly: true }))
-    return { kind: "claimed" };
   const queuedMessages = listQueuedThreadMessages(db, threadId);
   const boundaryIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === groupBoundaryQueuedMessageId,
@@ -751,6 +749,8 @@ function applyQueuedThreadMessageGroupBoundary(
       ? { kind: "claimed" }
       : { kind: "not_found" };
   }
+  if (hasClaimedQueuedThreadMessages(db, threadId, { placementOnly: true }))
+    return { kind: "claimed" };
   if (expectedGroupedPrefixQueuedMessageIds !== null) {
     const currentGroupedPrefixIds = queuedMessages
       .slice(0, boundaryIndex + 1)

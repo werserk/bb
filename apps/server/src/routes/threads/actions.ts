@@ -303,8 +303,9 @@ export function registerThreadActionRoutes(
   post(routes.sendQueuedMessage, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureThreadQueueIsWritable(thread);
-    ensureThreadIsNotAwaitingUserInteraction(deps, thread.id);
     const result = await sendQueuedMessageNow(deps, {
+      assertNewSendAllowed: () =>
+        ensureThreadIsNotAwaitingUserInteraction(deps, thread.id),
       readPlacementScope: () => {
         const caller = plugins?.resolveRpcCaller(
           context.req.header(PLUGIN_RPC_CALLER_HEADER),

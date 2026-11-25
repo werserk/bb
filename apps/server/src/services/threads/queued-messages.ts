@@ -480,13 +480,13 @@ function claimQueuedThreadMessageForSend(
       ? {
           kind: "explicit-send",
           assertGroupAllowed: (tx, group) => {
-            policy.assertGroupAllowed?.(tx, group);
             placement = checkManagedQueueGroup(
               tx,
               group,
               deps.placementWorkspacePurpose,
               args.readPlacementScope,
             );
+            policy.assertGroupAllowed?.(tx, group);
           },
         }
       : policy,
@@ -748,6 +748,7 @@ export async function sendQueuedMessageNow(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: {
     readPlacementScope?: ReadPlacementScope;
+    assertNewSendAllowed?: () => void;
     mode: SendQueuedMessageMode;
     queuedMessageId: string;
     threadId: string;
@@ -778,6 +779,7 @@ export async function sendQueuedMessageNow(
   const managed =
     existing?.placementOperationId != null ||
     (requestThread && threadRequiresPlacement(deps.db, requestThread));
+  if (!managed) args.assertNewSendAllowed?.();
   const before = managed
     ? []
     : listQueuedThreadMessages(deps.db, args.threadId).map(
@@ -798,7 +800,10 @@ export async function sendQueuedMessageNow(
   const floor = getLatestThreadSequence(deps.db, { threadId: args.threadId });
   try {
     await sendQueuedMessage(deps, {
-      claimPolicy: { kind: "explicit-send" },
+      claimPolicy: {
+        kind: "explicit-send",
+        assertGroupAllowed: managed ? args.assertNewSendAllowed : undefined,
+      },
       readPlacementScope: args.readPlacementScope,
       mode: args.mode,
       queuedMessageId: args.queuedMessageId,
