@@ -48,7 +48,6 @@ it("reads the authorized consumed group during a later question and gates new in
       const original = await initial.json();
       expect(initial.status).toBe(409);
       expect(original).toMatchObject({
-        code: "managed_execution_unsupported",
         details: {
           state: "refused_unsent",
           sourceQueuedMessageIds: [head, second],
@@ -59,7 +58,19 @@ it("reads the authorized consumed group during a later question and gates new in
         threadId: f.threadId,
         requestId: original.details.requested.requestId,
       };
-      const receipt = readPlacementDispatchReceipt(h.db, key);
+      const receipt = readPlacementDispatchReceipt(h.db, key)!;
+      if ("rejectionEventId" in receipt) {
+        const rejection = listEvents(h.db, { threadId: f.threadId }).find(
+          (event) =>
+            event.type === "client/turn/rejected" &&
+            JSON.parse(event.data).requestId === key.requestId,
+        );
+        expect(rejection).toBeDefined();
+        expect(receipt.rejectionEventId).toBe(rejection!.id);
+        expect(original.code).toBe("managed_execution_unsupported");
+      } else {
+        expect(original.code).toBe("placement_dispatch_recorded");
+      }
       const path = join(h.config.dataDir, "pending-replay.sqlite");
       await h.db.$client.backup(path);
       const db = createConnection(path);

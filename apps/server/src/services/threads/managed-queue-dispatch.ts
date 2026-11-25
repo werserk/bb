@@ -11,8 +11,7 @@ import {
   readPlacementQueueAttempts,
   readPlacementActionReceipt,
   readPlacementDispatchReceipt,
-  getStoredTurnRequestEventByRequestId,
-  listStoredTurnRejectedRowsByClientRequestIds,
+  events,
   type DbConnection,
   readPlacementResidentGuard,
   readPlacementOwner,
@@ -34,7 +33,6 @@ import {
   isStandaloneBuiltinCompactCommand,
   clientTurnRequestIdSchema,
   turnRequestEventDataSchema,
-  turnRequestRejectedEventDataSchema,
   type Thread,
   type WorkspacePurpose,
   type PermissionEscalation,
@@ -331,10 +329,23 @@ export function retainedManagedSend(
       if (!receipt) missingQueueEntry();
       for (const member of receipt.members)
         assertMemberScope(tx, member.op, scope);
-      const stored = getStoredTurnRequestEventByRequestId(db, key);
-      if (!stored || stored.sequence !== receipt.requestSequence)
+      if (receipt.liveEventId !== receipt.eventId)
         placementDispatchUnavailable();
+      const stored = tx
+        .select({ data: events.data })
+        .from(events)
+        .where(
+          and(
+            eq(events.id, receipt.eventId),
+            eq(events.threadId, key.threadId),
+            eq(events.type, "client/turn/requested"),
+            eq(events.sequence, receipt.requestSequence),
+          ),
+        )
+        .get();
+      if (!stored) placementDispatchUnavailable();
       const body = turnRequestEventDataSchema.parse(JSON.parse(stored.data));
+      if (body.requestId !== key.requestId) placementDispatchUnavailable();
       const sources = body.sourceQueuedMessageIds;
       const submissionIds = (body.clientSubmissions ?? []).map(
         (member) => member.id,
@@ -377,29 +388,22 @@ export function retainedManagedSend(
           sourceQueuedMessageIds: sources,
           submissionIds: details.submissionIds,
         };
-      if (receipt.state === "refused_unsent") {
-        const rejected = listStoredTurnRejectedRowsByClientRequestIds(db, {
-          threadId: key.threadId,
-          clientRequestIds: [key.requestId],
-          afterSequence: receipt.requestSequence,
-        });
-        const reason =
-          rejected.length === 1
-            ? turnRequestRejectedEventDataSchema.parse(
-                JSON.parse(rejected[0]!.data),
-              ).reason
-            : null;
-        if (
-          reason === MANAGED_EXECUTION_UNSUPPORTED ||
-          reason === "managed_admission_unavailable"
-        ) {
-          throw new ApiError(
-            409,
-            reason,
-            "Managed execution was refused before provider handoff.",
-            { details, retryable: false },
-          );
-        }
+      // Older receipts have no durable rejection identity. Rewritten timeline rows cannot establish it.
+      if (
+        receipt.state === "refused_unsent" &&
+        "rejectionEventId" in receipt &&
+        typeof receipt.rejectionEventId === "string" &&
+        receipt.rejectionEventId.length > 0 &&
+        "rejectionReason" in receipt &&
+        (receipt.rejectionReason === MANAGED_EXECUTION_UNSUPPORTED ||
+          receipt.rejectionReason === "managed_admission_unavailable")
+      ) {
+        throw new ApiError(
+          409,
+          receipt.rejectionReason,
+          "Managed execution was refused before provider handoff.",
+          { details, retryable: false },
+        );
       }
       throw new ApiError(
         409,
