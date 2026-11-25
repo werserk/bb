@@ -1,3 +1,7 @@
+import {
+  reconcileObservedUnusedReservation,
+  type UnusedPlacementReservationGuard,
+} from "./placement-unused-reservation.js";
 import { publishSourceFacts } from "./placement-source-facts.js";
 import { and, eq, notInArray } from "drizzle-orm";
 import {
@@ -107,6 +111,7 @@ export function observePlacementWorkers(
     ownerPluginId: string;
     expectedOwnerRevision: number;
     workers: WorkerObservation[];
+    unusedReservations?: readonly UnusedPlacementReservationGuard[];
   },
 ) {
   const observed = args.workers.map((w) => workerObservationSchema.parse(w));
@@ -186,13 +191,35 @@ export function observePlacementWorkers(
           nativeCustody: w.custody,
           available: true,
         };
+        const guard = args.unusedReservations?.find(
+          (g) => g.workerId === w.workerId,
+        );
+        const releasing =
+          old &&
+          guard &&
+          owner.mode === "managed" &&
+          !changed &&
+          !lostResident &&
+          reconcileObservedUnusedReservation(tx, old, w, guard);
         if (old)
           tx.update(workers)
             .set({
               ...data,
-              slotState:
-                (changed || lostResident || changedClosingHolder) &&
-                old.slotState !== "free"
+              ...(releasing
+                ? {
+                    ownerOperationId: null,
+                    threadId: null,
+                    physicalLock: null,
+                    fenceLock: null,
+                    reclaimOperationId: null,
+                    reclaimSourceFence: null,
+                    reclaimHolder: null,
+                  }
+                : {}),
+              slotState: releasing
+                ? "free"
+                : (changed || lostResident || changedClosingHolder) &&
+                    old.slotState !== "free"
                   ? "unknown"
                   : old.slotState,
             })

@@ -2957,6 +2957,16 @@ export function listThreadIdsWithAppUpdateQueueWaits(
     .map((row) => row.threadId);
 }
 
+export function removeQueuedThreadMessageInTransaction(
+  tx: DbTransaction,
+  existing: QueuedThreadMessageRow,
+) {
+  clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing);
+  tx.delete(queuedThreadMessages)
+    .where(eq(queuedThreadMessages.id, existing.id))
+    .run();
+}
+
 export function deleteQueuedThreadMessage(
   db: DbConnection,
   notifier: DbNotifier,
@@ -2966,10 +2976,7 @@ export function deleteQueuedThreadMessage(
     (tx) => {
       const existing = getQueuedThreadMessage(tx, id);
       if (!existing) return null;
-      clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing);
-      tx.delete(queuedThreadMessages)
-        .where(eq(queuedThreadMessages.id, id))
-        .run();
+      removeQueuedThreadMessageInTransaction(tx, existing);
       return existing;
     },
     { behavior: "immediate" },

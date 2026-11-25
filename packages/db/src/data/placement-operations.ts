@@ -1,8 +1,17 @@
 import {
+  getQueuedThreadMessage,
+  removeQueuedThreadMessageInTransaction,
+} from "./queued-thread-messages.js";
+import {
   currentPlacementRetryTarget,
   closePlacementRetry,
 } from "./placement-retry.js";
-import { actionIdentity, insertAction } from "./placement-action-receipts.js";
+import {
+  actionIdentity,
+  insertAction,
+  readPlacementQueueAttempts,
+  queueMemberDigest,
+} from "./placement-action-receipts.js";
 import { placementActionIdentities as identities } from "../schema.js";
 import {
   placementAuthoritySchema,
@@ -313,6 +322,32 @@ export function cancelPlacementOperation(
   return db.transaction(
     (tx) => {
       const op = readPlacementOperationRecord(tx, id);
+      let retired = false;
+      if (
+        op?.queuedMessageId &&
+        op.threadId &&
+        !op.clientTurnRequestId &&
+        (op.phase === "queued" || op.phase === "cancel_requested") &&
+        !op.consentId
+      ) {
+        const row = getQueuedThreadMessage(tx, op.queuedMessageId);
+        const links = readPlacementQueueAttempts(tx, op.queuedMessageId);
+        if (
+          row &&
+          row.payloadKind === "inline" &&
+          row.threadId === op.threadId &&
+          row.placementOperationId === op.id &&
+          (row.placementFence === op.fence ||
+            (op.kind === "continuation" && op.fence === null)) &&
+          links.length === 1 &&
+          links[0]!.op === op.id &&
+          links[0]!.request === null &&
+          links[0]!.queueDigest === queueMemberDigest(row)
+        ) {
+          removeQueuedThreadMessageInTransaction(tx, row);
+          retired = true;
+        }
+      }
       if (
         !op ||
         op.cancelRequested ||
@@ -330,7 +365,10 @@ export function cancelPlacementOperation(
         .update(operations)
         .set({
           cancelRequested: true,
-          phase: held || op.queuedMessageId ? "cancel_requested" : "cancelled",
+          phase:
+            held || (op.queuedMessageId && !retired)
+              ? "cancel_requested"
+              : "cancelled",
           revision: op.revision + 1,
           updatedAt: Date.now(),
         })
