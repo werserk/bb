@@ -14,6 +14,7 @@ import {
 import { classifyLocalQuestionAnswer } from "./conversation-questions.js";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
+  clientSubmissionQueueId,
   flattenPromptInputGroups,
   canonicalJsonBytes,
   placementBindingSchema,
@@ -33,6 +34,8 @@ import type {
 } from "../connection.js";
 import {
   events,
+  placementBindings,
+  threads,
   placementEffects as effects,
   placementActionIdentities as identities,
   placementOperations as operations,
@@ -77,6 +80,11 @@ export type PlacementOrdinaryDispatchInput = PlacementDispatchKey &
   PlacementExecutionGuard & {
     requestSequence: number;
     claimed: readonly { id: string; claimToken: string }[];
+    explicitFirstSend?: {
+      queueId: string;
+      principal: string;
+      actor: PlacementAuthority["actor"];
+    };
   };
 type Attempt = typeof attempts.$inferSelect;
 
@@ -354,6 +362,54 @@ export function commitPlacementOrdinaryDispatch(
       ),
     "partial or wrong claim",
   );
+  const head = rows[0]!;
+  const firstStart =
+    body.target.kind === "thread-start" &&
+    body.request.method === "thread/start" &&
+    body.source === "spawn";
+  if (args.explicitFirstSend || firstStart) {
+    const op =
+      head.placementOperationId &&
+      readPlacementOperationRecord(tx, head.placementOperationId);
+    const binding = tx
+      .select({
+        origin: placementBindings.boundFromOperationId,
+        status: threads.status,
+      })
+      .from(placementBindings)
+      .innerJoin(threads, eq(threads.id, placementBindings.threadId))
+      .where(eq(placementBindings.threadId, args.threadId))
+      .get();
+    requireReceipt(
+      firstStart &&
+        head.payloadKind === "inline" &&
+        op &&
+        op.phase === "queued" &&
+        op.kind === "independent" &&
+        op.queuedMessageId === head.id &&
+        op.reservedThreadId === args.threadId &&
+        binding?.origin === op.id &&
+        binding.status === "pending" &&
+        op.preparedRequest,
+      "wrong original first input",
+    );
+    const action = readPlacementActionReceipt(tx, op.id);
+    requireReceipt(
+      action?.submissionUuid &&
+        clientSubmissionQueueId(action.submissionUuid) === head.id &&
+        action.steps.length === 1 &&
+        action.steps[0]?.kind === "input",
+      "wrong first submission",
+    );
+    const intent = args.explicitFirstSend;
+    requireReceipt(
+      !intent ||
+        (intent.queueId === head.id &&
+          intent.principal === action.authority.principal &&
+          intent.actor === action.authority.actor),
+      "wrong explicit first-send scope",
+    );
+  }
   const members: Attempt[] = [];
   const timeline: NonNullable<TurnRequestEventData["clientSubmissions"]> = [];
   const groups: NonNullable<TurnRequestEventData["inputGroups"]> = [];
@@ -366,7 +422,9 @@ export function commitPlacementOrdinaryDispatch(
         row.state === "claimed" &&
         row.claimedAt !== null &&
         (!row.waitingOn || (hasTimeWait(row) && row.sendAt !== null)) &&
-        (row.sendAt === null || row.sendAt <= Date.now()) &&
+        (row.sendAt === null ||
+          row.sendAt <= Date.now() ||
+          (args.explicitFirstSend && row.id === head.id)) &&
         (row.editHeldUntil === null || row.editHeldUntil <= Date.now()),
       "row is held or not due",
     );
@@ -403,6 +461,20 @@ export function commitPlacementOrdinaryDispatch(
           m.queueDigest === queueMemberDigest(row),
         "stale member",
       );
+      if (firstStart) {
+        requireReceipt(
+          row.payloadKind === "inline" && op.preparedRequest,
+          "invalid first group member",
+        );
+        const accepted = JSON.parse(op.canonicalRequest).intent.request;
+        const prepared = JSON.parse(op.preparedRequest);
+        requireReceipt(
+          (accepted.sendAt ?? null) === row.sendAt &&
+            (prepared.sendAt ?? null) === row.sendAt &&
+            (row.sendAt === null ? row.waitingOn === null : hasTimeWait(row)),
+          "first schedule differs",
+        );
+      }
       requireReceipt(receipt.currentStep === m.step, "prior step incomplete");
       requireReceipt(
         receipt.steps[m.step]?.kind !== "clear" &&

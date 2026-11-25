@@ -1,0 +1,283 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import { clientSubmissionQueueId, type TurnRequestEventData } from "@bb/domain";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import * as S from "../src/index.js";
+import {
+  placementEffects,
+  queuedThreadMessages as queue,
+  events,
+} from "../src/schema.js";
+import {
+  setupPlacement,
+  candidate,
+  fixtureAuthority,
+  workspace,
+} from "./helpers/placement.js";
+import {
+  appendFixture,
+  claimFixture,
+  fixtureExecution,
+} from "./helpers/placement-dispatch.js";
+
+let db: S.DbConnection, other: S.DbConnection, dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "placement-first-"));
+  const path = join(dir, "scratch.db");
+  db = S.createConnection(path);
+  S.migrate(db);
+  setupPlacement(db);
+  other = S.createConnection(path);
+});
+afterEach(() => {
+  db.$client.close();
+  other.$client.close();
+  rmSync(dir, { force: true, recursive: true });
+});
+function firstFixture(sendAt: number | null) {
+  const input = [{ type: "text" as const, text: "fixture", mentions: [] }];
+  const environment = { type: "reuse" as const, environmentId: "env" };
+  const request = {
+    projectId: "project",
+    providerId: "claude",
+    environment,
+    input,
+    origin: "app",
+    ...(sendAt === null ? {} : { sendAt }),
+  };
+  const a = S.acceptPlacementOperation(db, {
+    principalScope: "owner",
+    authority: fixtureAuthority,
+    providerId: "claude",
+    ownerPluginId: "workers",
+    submissionKey: "first",
+    request: {
+      schemaVersion: 1,
+      intent: { kind: "independent", selection: { mode: "auto" }, request },
+    },
+  });
+  if (a.kind !== "accepted") throw Error("accept");
+  const id = a.operation.id;
+  const p = S.preparePlacementOperation(db, {
+    operationId: id,
+    expectedRevision: a.operation.revision,
+    preparedRequest: request,
+    preparedExecution: fixtureExecution,
+    workspace,
+    attachmentReceipts: [],
+  });
+  if (p.kind !== "prepared") throw Error("prepare");
+  const r = S.reservePlacementWorker(db, candidate(db, id));
+  if (r.kind !== "reserved") throw Error("reserve");
+  const uuid = S.readPlacementActionReceipt(db, id)!.submissionUuid!;
+  const qid = clientSubmissionQueueId(uuid);
+  const threadId = db.transaction(
+    (tx) => {
+      const b = S.attachPlacementThread(tx, {
+        operationId: id,
+        fence: r.fence,
+        runtimeRootKey: "fixture-root",
+        sourceProviderThreadId: null,
+        sourceCheckpoint: null,
+        insertThread: (write, threadId) =>
+          S.insertThreadInTransaction(write, threadId, {
+            providerId: "claude",
+            projectId: "project",
+            environmentId: "env",
+            status: "pending",
+            startupContext: JSON.stringify({
+              kind: "pending",
+              environmentIntent: environment,
+              fork: null,
+              startedOnBehalfOf: null,
+              titleProvided: false,
+              execution: fixtureExecution,
+            }),
+          }),
+        onCommitted: () => {},
+      });
+      if (b.kind !== "attached" || !b.operation.threadId) throw Error("attach");
+      const threadId = b.operation.threadId;
+      const queued = S.recordPlacementQueueReceipt(tx, {
+        operationId: id,
+        fence: r.fence,
+        queuedMessageId: qid,
+        insertQueue: (write, identity) => {
+          S.createQueuedThreadMessageInTransaction(write, {
+            placement: identity,
+            clientSubmissionId: uuid,
+            threadId,
+            content: input,
+            ...fixtureExecution,
+            senderThreadId: null,
+            origin: null,
+            originPluginId: null,
+            requestedBy: null,
+            systemNotice: null,
+            sendAt,
+            waitingOn: sendAt === null ? null : { kind: "time" },
+            payload: { kind: "inline" },
+          });
+        },
+        onCommitted: () => {},
+      });
+      if (queued.kind !== "recorded") throw Error("queue");
+      return threadId;
+    },
+    { behavior: "immediate" },
+  );
+  const explicit = {
+    queueId: qid,
+    principal: fixtureAuthority.principal,
+    actor: fixtureAuthority.actor,
+  };
+  return { id, qid, threadId, explicit };
+}
+const nativeFirst: Partial<TurnRequestEventData> = {
+  source: "spawn",
+  target: { kind: "thread-start" },
+  request: { method: "thread/start", params: {} },
+};
+const requestId = "creq_2222222222";
+it.each([
+  "early",
+  "timer",
+  "scope",
+  "actor",
+  "selection",
+  "cleared",
+  "earlier",
+  "method",
+] as const)(
+  "scopes the first scheduled send and rolls back disallowed %s",
+  (mode) => {
+    const when = Date.now() + 600_000;
+    const { id, qid, explicit } = firstFixture(when);
+    if (mode === "cleared" || mode === "earlier")
+      db.update(queue)
+        .set({
+          state: mode === "cleared" ? "queued" : "scheduled",
+          sendAt: mode === "cleared" ? null : when - 300_000,
+          waitingOn:
+            mode === "cleared" ? null : JSON.stringify({ kind: "time" }),
+        })
+        .where(eq(queue.id, qid))
+        .run();
+    const claims = claimFixture(db, qid);
+    const write = () =>
+      db.transaction(
+        (tx) =>
+          appendFixture(
+            tx,
+            id,
+            claims,
+            requestId,
+            mode === "method" ? {} : nativeFirst,
+            1,
+            mode === "timer"
+              ? undefined
+              : {
+                  ...explicit,
+                  principal: mode === "scope" ? "other" : explicit.principal,
+                  actor: mode === "actor" ? "plugin" : explicit.actor,
+                  queueId: mode === "selection" ? "other" : qid,
+                },
+          ),
+        { behavior: "immediate" },
+      );
+    if (mode === "early") {
+      expect(write().receipt.members[0]?.op).toBe(id);
+      expect(other.select().from(queue).all()).toHaveLength(0);
+    } else {
+      expect(write).toThrow(S.PlacementDispatchConflictError);
+      expect(other.select().from(placementEffects).all()).toHaveLength(0);
+      expect(other.select().from(events).all()).toHaveLength(0);
+      expect(S.getQueuedThreadMessage(other, qid)?.claimToken).toBe(
+        claims[0]!.claimToken,
+      );
+    }
+  },
+);
+it.each(["due", "future", "cleared"] as const)(
+  "checks %s follower schedule against retained first group",
+  (mode) => {
+    const when = Date.now() + 600_000;
+    const { id, qid, explicit, threadId } = firstFixture(when);
+    const sendAt = mode === "due" ? Date.now() - 1000 : when + 1000;
+    const request = { input: "follower", sendAt };
+    const a = S.acceptPlacementOperation(db, {
+      principalScope: "owner",
+      authority: fixtureAuthority,
+      ownerPluginId: "workers",
+      providerId: "claude",
+      submissionKey: "f",
+      request: {
+        schemaVersion: 1,
+        intent: { kind: "continuation", threadId, request },
+      },
+    });
+    if (a.kind !== "accepted") throw Error("accept follower");
+    const f = a.operation.id;
+    expect(
+      S.preparePlacementOperation(db, {
+        operationId: f,
+        expectedRevision: a.operation.revision,
+        workspace,
+        preparedRequest: request,
+        preparedExecution: fixtureExecution,
+        attachmentReceipts: [],
+      }).kind,
+    ).toBe("prepared");
+    const uuid = S.readPlacementActionReceipt(db, f)!.submissionUuid!;
+    const second = clientSubmissionQueueId(uuid);
+    db.transaction((tx) =>
+      S.recordPlacementQueueReceipt(tx, {
+        operationId: f,
+        fence: 1,
+        queuedMessageId: second,
+        insertQueue: (w, i) => {
+          S.createQueuedThreadMessageInTransaction(w, {
+            placement: i,
+            clientSubmissionId: uuid,
+            threadId,
+            ...fixtureExecution,
+            content: [{ type: "text", text: "follower", mentions: [] }],
+            senderThreadId: null,
+            origin: null,
+            originPluginId: null,
+            requestedBy: null,
+            systemNotice: null,
+            sendAt: mode === "cleared" ? null : sendAt,
+            waitingOn: mode === "cleared" ? null : { kind: "time" },
+            payload: { kind: "inline" },
+          });
+        },
+        onCommitted: () => {},
+      }),
+    );
+    db.update(queue)
+      .set({ sortKey: "A", groupWithNext: true })
+      .where(eq(queue.id, qid))
+      .run();
+    db.update(queue).set({ sortKey: "B" }).where(eq(queue.id, second)).run();
+    const claimed = claimFixture(db, qid);
+    expect(claimed.length).toBe(2);
+    const write = () =>
+      db.transaction(
+        (tx) =>
+          appendFixture(tx, id, claimed, requestId, nativeFirst, 1, explicit),
+        { behavior: "immediate" },
+      );
+    if (mode === "due")
+      expect(write().receipt.members.map((m) => m.op)).toEqual([id, f]);
+    else {
+      expect(write).toThrow(S.PlacementDispatchConflictError);
+      expect(other.select().from(events).all()).toHaveLength(0);
+      expect(S.getQueuedThreadMessage(other, second)?.sendAt).toBe(
+        mode === "future" ? sendAt : null,
+      );
+    }
+  },
+);

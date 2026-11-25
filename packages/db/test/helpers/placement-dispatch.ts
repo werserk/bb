@@ -51,6 +51,9 @@ export function appendFixture(
   requestId: string,
   patch: Partial<TurnRequestEventData> = {},
   fence = 1,
+  explicitFirstSend?: Parameters<
+    typeof commitPlacementOrdinaryDispatch
+  >[1]["explicitFirstSend"],
 ) {
   const threadId = claimed[0]!.threadId;
   const inputGroups = claimed.map((q) => JSON.parse(q.content));
@@ -94,6 +97,7 @@ export function appendFixture(
   };
   const receipt = commitPlacementOrdinaryDispatch(tx, {
     ...guard,
+    explicitFirstSend,
     requestSequence,
     claimed,
   });
