@@ -7,8 +7,15 @@ import {
   getEnvironment,
   getThread,
   requireThreadLifecycleEventApplied,
+  PlacementDispatchConflictError,
+  PlacementGroupFairnessError,
 } from "@bb/db";
-import type { DbConnection, DbTransaction, EnvironmentRow } from "@bb/db";
+import type {
+  ClaimedQueuedThreadMessageRow,
+  DbConnection,
+  DbTransaction,
+  EnvironmentRow,
+} from "@bb/db";
 import type {
   ClientTurnRequestId,
   PromptInput,
@@ -20,6 +27,7 @@ import type {
   TurnRequestEventData,
 } from "@bb/domain";
 import {
+  canonicalJsonBytes,
   flattenPromptInputGroups,
   isStandaloneBuiltinClearCommand,
 } from "@bb/domain";
@@ -29,6 +37,13 @@ import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
 } from "../../types.js";
+import {
+  managedOrdinaryRequest,
+  type ManagedQueuePlacement,
+  placementDispatchUnavailable,
+  threadRequiresPlacement,
+} from "./managed-queue-dispatch.js";
+import { dispatchManagedOrdinaryTurn } from "./managed-execution.js";
 import { ApiError } from "../../errors.js";
 import {
   addRequestIdToTurnSubmitCommandPayload,
@@ -105,6 +120,10 @@ type SendThreadMessagePayload = SendMessageRequest & {
 };
 
 interface SendThreadMessageArgs {
+  managedClaim?: ManagedQueuePlacement & {
+    rows: readonly ClaimedQueuedThreadMessageRow[];
+    consume: SendThreadMessageTransactionPreflight;
+  };
   preserveSelfSender?: boolean;
   questionResponse?: TurnRequestEventData["questionResponse"];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
@@ -149,6 +168,7 @@ interface SendThreadMessageTransactionPreflightArgs {
 }
 
 interface SendThreadMessageQueueRequestArgs {
+  requestId: ClientTurnRequestId;
   requestEventSequence: number;
   tx: DbTransaction;
 }
@@ -185,7 +205,7 @@ interface AppendAndQueueSendThreadMessageArgs {
   inputGroups?: PromptInput[][];
   originPluginId: string | null;
   queueInTransaction: SendThreadMessageQueueRequest;
-  requestId: ClientTurnRequestId;
+  requestId: ClientTurnRequestId | null;
   senderThreadId: string | null;
   systemNotice: QueuedMessageSystemNotice | undefined;
   target: TurnRequestTarget;
@@ -459,6 +479,8 @@ function appendAndQueueSendThreadMessageInTransaction({
   let activeThread: Thread | null = null;
   const request = db.transaction(
     (tx) => {
+      if (requestId !== null && threadRequiresPlacement(tx, thread))
+        placementDispatchUnavailable();
       assertThreadHostAcceptsWork(tx, thread);
       beforeAppendInTransaction?.({ tx });
       if (
@@ -504,7 +526,7 @@ function appendAndQueueSendThreadMessageInTransaction({
             requestMethod: "turn/start",
             source: "tell",
             target,
-            requestId,
+            requestId: requestId ?? createClientTurnRequestId(),
           },
         );
       if (deferredFromRequestId === undefined)
@@ -519,6 +541,7 @@ function appendAndQueueSendThreadMessageInTransaction({
           },
         );
       const queueResult = queueInTransaction({
+        requestId: appended.requestId,
         requestEventSequence: appended.sequence,
         tx,
       });
@@ -537,6 +560,8 @@ export async function sendThreadMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
 ): Promise<void> {
+  if (!args.managedClaim && threadRequiresPlacement(deps.db, args.thread))
+    placementDispatchUnavailable();
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
     await clearThreadContext(deps, {
       ...(args.beforeAppendInTransaction !== undefined
@@ -654,7 +679,11 @@ async function sendThreadMessageWithoutContextClear(
   // A retry's model is provenance — the failed attempt's tuple, replayed —
   // not a fresh model choice, so it must not rewrite the thread's sticky
   // override the way an explicit user send's model does.
-  if (initiator === "user" && args.deferredFromRequestId === undefined) {
+  if (
+    !args.managedClaim &&
+    initiator === "user" &&
+    args.deferredFromRequestId === undefined
+  ) {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
       modelSource:
@@ -680,6 +709,82 @@ async function sendThreadMessageWithoutContextClear(
   const permissionEscalation = resolvePermissionEscalation({
     initiator,
   });
+
+  if (args.managedClaim) {
+    const claim = args.managedClaim;
+    let appended: AppendAndQueueSendThreadMessageResult;
+    try {
+      appended = appendAndQueueSendThreadMessageInTransaction({
+        db: deps.db,
+        beforeAppendInTransaction,
+        dispatchProvenance: args.dispatchProvenance,
+        environmentId: environment.id,
+        execution,
+        initiator,
+        input,
+        inputGroups,
+        clientSubmissions: payload.clientSubmissions,
+        sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
+        originPluginId: args.originPluginId,
+        requestId: null,
+        senderThreadId,
+        systemNotice: undefined,
+        target: { kind: "new-turn" },
+        thread,
+        queueInTransaction: ({ tx, requestId, requestEventSequence }) => {
+          const current = getEnvironment(tx, environment.id);
+          if (
+            !deps.placementWorkspacePurpose ||
+            canonicalJsonBytes(deps.placementWorkspacePurpose) !==
+              canonicalJsonBytes(claim.guard.purpose) ||
+            current?.status !== "ready" ||
+            !current.path ||
+            mode !== "start"
+          )
+            placementDispatchUnavailable();
+          managedOrdinaryRequest(
+            tx,
+            {
+              threadId: thread.id,
+              requestId,
+              requestSequence: requestEventSequence,
+              ...claim.guard,
+              claimed: claim.rows,
+            },
+            permissionEscalation,
+            claim.readScope,
+          );
+          claim.consume({ tx });
+          return { activeThread: null };
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof PlacementGroupFairnessError &&
+        error.retainedHead &&
+        claim.rows.length > 1
+      )
+        throw error;
+      if (error instanceof PlacementDispatchConflictError)
+        placementDispatchUnavailable();
+      throw error;
+    }
+    deps.hub.notifyThread(
+      thread.id,
+      [
+        ...new Set([
+          ...appended.request.notificationChanges,
+          "queue-changed" as const,
+        ]),
+      ],
+      appended.request.notificationMetadata,
+    );
+    await dispatchManagedOrdinaryTurn(deps, {
+      threadId: thread.id,
+      requestId: appended.request.requestId,
+    });
+    return;
+  }
 
   if (
     await dispatchTurnDuringReprovision({

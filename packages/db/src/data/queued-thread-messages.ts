@@ -143,6 +143,7 @@ export interface ClaimedQueuedThreadMessageRow extends QueuedThreadMessageRow {
   claimToken: string;
   state: "claimed";
   beforeClaim: Pick<QueuedThreadMessageRow, "state" | "waitingOn" | "sendAt">;
+  deferredSplitGroupIds?: readonly string[];
 }
 
 type QueuedMessageStateColumns = Pick<
@@ -306,7 +307,8 @@ export interface ClaimedQueuedThreadMessageMutationArgs {
 }
 
 export interface DeleteClaimedQueuedThreadMessageBatchInTransactionArgs {
-  queuedMessages: readonly ClaimedQueuedThreadMessageMutationArgs[];
+  queuedMessages: readonly (ClaimedQueuedThreadMessageMutationArgs &
+    Pick<ClaimedQueuedThreadMessageRow, "deferredSplitGroupIds">)[];
 }
 
 export interface ReleaseStaleQueuedMessageClaimsArgs {
@@ -645,9 +647,10 @@ function getLastQueuedThreadMessage(
   );
 }
 
-function getPreviousUnclaimedQueuedThreadMessage(
+function getPreviousQueuedThreadMessage(
   db: DbQueryConnection,
   queuedMessage: QueuedThreadMessageRow,
+  includeClaimed = false,
 ): QueuedThreadMessageRow | null {
   return (
     db
@@ -656,7 +659,7 @@ function getPreviousUnclaimedQueuedThreadMessage(
       .where(
         and(
           eq(queuedThreadMessages.threadId, queuedMessage.threadId),
-          liveQueuedThreadMessage(),
+          includeClaimed ? undefined : liveQueuedThreadMessage(),
           or(
             lt(queuedThreadMessages.sortKey, queuedMessage.sortKey),
             and(
@@ -680,9 +683,10 @@ function clearPreviousQueuedMessageGroupEdgeInTransaction(
   queuedMessage: QueuedThreadMessageRow,
   now = Date.now(),
 ): void {
-  const previousQueuedMessage = getPreviousUnclaimedQueuedThreadMessage(
+  const previousQueuedMessage = getPreviousQueuedThreadMessage(
     db,
     queuedMessage,
+    hasClaimedQueuedThreadMessages(db, queuedMessage.threadId, { placementOnly: true }),
   );
   if (!previousQueuedMessage?.groupWithNext) return;
   db.update(queuedThreadMessages)
@@ -731,6 +735,8 @@ function applyQueuedThreadMessageGroupBoundary(
   threadId: string,
   groupBoundaryQueuedMessageId: string,
 ): SetQueuedThreadMessageGroupBoundaryResult {
+  if (hasClaimedQueuedThreadMessages(db, threadId, { placementOnly: true }))
+    return { kind: "claimed" };
   const queuedMessages = listQueuedThreadMessages(db, threadId);
   const boundaryIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === groupBoundaryQueuedMessageId,
@@ -1176,6 +1182,7 @@ export function getQueuedThreadMessage(db: DbQueryConnection, id: string) {
 export function hasClaimedQueuedThreadMessages(
   db: DbQueryConnection,
   threadId: string,
+  options: { placementOnly?: boolean } = {},
 ): boolean {
   return (
     db
@@ -1185,6 +1192,9 @@ export function hasClaimedQueuedThreadMessages(
         and(
           eq(queuedThreadMessages.threadId, threadId),
           eq(queuedThreadMessages.state, "claimed"),
+          options.placementOnly
+            ? isNotNull(queuedThreadMessages.placementOperationId)
+            : undefined,
         ),
       )
       .limit(1)
@@ -1645,8 +1655,21 @@ export function claimQueuedThreadMessageGroup(
       ) {
         return null;
       }
-      if (policy.kind === "explicit-send") policy.assertGroupAllowed?.(tx, group);
+      if (policy.kind === "explicit-send") {
+        policy.assertGroupAllowed?.(tx, group);
+        // The live queue omits claimed rows. Never form a second batch across a managed claim.
+        if (
+          hasClaimedQueuedThreadMessages(tx, existing.threadId, {
+            placementOnly: existing.placementOperationId === null,
+          })
+        ) return null;
+      }
       if (policy.kind === "explicit-send" && group[0]?.id !== id) {
+        if (existing.placementOperationId !== null) {
+          const claimed = claimQueuedThreadMessagesInTransaction(tx, [existing]);
+          if (claimed) claimed[0]!.deferredSplitGroupIds = group.map(row => row.id);
+          return claimed;
+        }
         const now = Date.now();
         clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);
         clearQueuedMessageGroupEdgeInTransaction(tx, existing, now);
@@ -1740,7 +1763,10 @@ export function reorderQueuedThreadMessage({
         if (!movedQueuedMessage || movedQueuedMessage.threadId !== threadId) {
           return { kind: "not_found" };
         }
-        if (isQueuedThreadMessageClaimed(movedQueuedMessage)) {
+        if (
+          isQueuedThreadMessageClaimed(movedQueuedMessage) ||
+          hasClaimedQueuedThreadMessages(tx, threadId, { placementOnly: true })
+        ) {
           return { kind: "claimed" };
         }
 
@@ -2073,6 +2099,28 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
     return false;
   }
 
+  const split = args.queuedMessages[0]!.deferredSplitGroupIds;
+  if (split) {
+    // Deletion below cuts the predecessor edge. Verify that it still belongs
+    // to the group captured by this token, including the temporarily hidden row.
+    if (existingRows.length !== 1) return false;
+    const target = existingRows[0]!;
+    const ordered = db
+      .select()
+      .from(queuedThreadMessages)
+      .where(eq(queuedThreadMessages.threadId, target.threadId))
+      .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+      .all();
+    const group = partitionQueuedMessageGroups(ordered).find(rows =>
+      rows.some(row => row.id === target.id),
+    );
+    if (
+      !group ||
+      !stringArraysEqual(split, group.map(row => row.id)) ||
+      group.some(row => row.id !== target.id && isQueuedThreadMessageClaimed(row))
+    ) return false;
+  }
+
   for (const row of existingRows) {
     if (row.payloadKind === "questionResponse")
       requireQuestionResponseDeliverable(db, row);
@@ -2110,7 +2158,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
   const removingIds = new Set(ids);
   const now = Date.now();
   for (const existing of existingRows) {
-    const previousQueuedMessage = getPreviousUnclaimedQueuedThreadMessage(
+    const previousQueuedMessage = getPreviousQueuedThreadMessage(
       db,
       existing,
     );

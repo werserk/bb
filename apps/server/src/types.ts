@@ -1,6 +1,11 @@
 import type { CustomProviderModel } from "@bb/config/bb-app-managed-config";
 import type { DbConnection } from "@bb/db";
-import type { FeatureFlags, ProviderNativeSkillRoots } from "@bb/domain";
+import type {
+  FeatureFlags,
+  ProviderNativeSkillRoots,
+  WorkspacePurpose,
+  PlacementPermissionProvenance,
+} from "@bb/domain";
 import type { Logger } from "@bb/logger";
 import type { PendingInteractionLifecycle } from "./services/interactions/pending-interactions.js";
 import type { MachineAuthService } from "./services/machine-auth.js";
@@ -43,7 +48,17 @@ export interface ServerRuntimeConfig {
   launchId?: string;
 }
 
+export type PlacementSendScope = Pick<
+  PlacementPermissionProvenance,
+  "identity" | "authority"
+> & {
+  principal: string;
+};
+
 export interface AppDeps {
+  // Supplied only by a server composition with trusted invocation attribution.
+  resolvePlacementSendScope?: (request: Request) => PlacementSendScope | null;
+  placementWorkspacePurpose?: WorkspacePurpose;
   config: ServerRuntimeConfig;
   db: DbConnection;
   hub: NotificationHub;
@@ -74,6 +89,7 @@ export interface ServerAppDeps extends AppDeps {
 export type WorkSessionDeps = Pick<
   AppDeps,
   | "config"
+  | "placementWorkspacePurpose"
   | "db"
   | "hub"
   | "logger"

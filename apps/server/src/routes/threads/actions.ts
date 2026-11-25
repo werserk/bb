@@ -1,4 +1,5 @@
 import { requestQueuedMessageDispatch } from "../../services/threads/queued-message-dispatch.js";
+import { currentQuestionResolutionInvocation } from "../../services/threads/question-resolution-context.js";
 import { PLUGIN_RPC_CALLER_HEADER } from "../../services/plugins/plugin-rpc-caller.js";
 import { refreshProviderRetirement } from "../../services/environments/environment-engine.js";
 import {
@@ -304,6 +305,19 @@ export function registerThreadActionRoutes(
     ensureThreadQueueIsWritable(thread);
     ensureThreadIsNotAwaitingUserInteraction(deps, thread.id);
     const result = await sendQueuedMessageNow(deps, {
+      readPlacementScope: () => {
+        const caller = plugins?.resolveRpcCaller(
+          context.req.header(PLUGIN_RPC_CALLER_HEADER),
+        );
+        if (!caller?.ok || caller.caller.kind !== "client") return null;
+        try {
+          if (currentQuestionResolutionInvocation()) return null;
+        } catch {
+          // An expired runtime invocation cannot acquire local-input parity.
+          return null;
+        }
+        return deps.resolvePlacementSendScope?.(context.req.raw) ?? null;
+      },
       queuedMessageId: context.req.param("queuedMessageId"),
       mode: payload.mode,
       threadId: context.req.param("id"),

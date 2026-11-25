@@ -580,5 +580,6 @@ export * from "./placement-bindings.js";
 export * from "./placement-admission.js";
 export {readPlacementActionReceipt,readPlacementQueueAttempts} from "./placement-action-receipts.js";
 export * from "./placement-dispatch-receipts.js";
+export { placementPreparedGroups } from "./placement-prepared-input.js";
 export * from "./placement-redelivery.js";
 export {reconcileSupersededPlacementRetries,closePlacementRetry} from "./placement-retry.js";

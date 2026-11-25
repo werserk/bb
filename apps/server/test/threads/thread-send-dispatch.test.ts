@@ -1,5 +1,9 @@
+import { eq } from "drizzle-orm";
 import {
   archiveThread,
+  acceptPlacementOperation,
+  registerPlacementOwner,
+  queuedThreadMessages,
   getAppSettings,
   updateHost,
   getQueuedThreadMessage,
@@ -2664,5 +2668,86 @@ describe("pending send admission provenance", () => {
       });
       expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
     });
+  });
+});
+
+it("refuses a claimed placement row whose thread has no managed binding", async () => {
+  await withTestHarness(async (harness) => {
+    const { thread } = seedProviderThreadFixture({ harness, value: 9981 });
+    const queued = seedQueuedMessage(harness.deps, {
+      threadId: thread.id,
+      content: textInput("bound input"),
+    });
+    harness.deps.placementWorkspacePurpose = {
+      kind: "local-fixture",
+      fixtureRunId: "unbound",
+    };
+    harness.deps.resolvePlacementSendScope = () => ({
+      identity: "local-unverified",
+      authority: "local-input-parity",
+      principal: "owner",
+    });
+    registerPlacementOwner(harness.db, {
+      ownerPluginId: "workers",
+      providerId: thread.providerId,
+    });
+    const accepted = acceptPlacementOperation(harness.db, {
+      principalScope: "owner",
+      submissionKey: "send",
+      ownerPluginId: "workers",
+      providerId: thread.providerId,
+      authority: {
+        principal: "owner",
+        actor: "local-unverified",
+        initiator: "user",
+        sender: null,
+        origin: null,
+        plugin: null,
+        requestedBy: null,
+        escalation: "ask",
+        permission: "auto",
+        serviceTurn: null,
+      },
+      request: {
+        schemaVersion: 1,
+        intent: {
+          kind: "independent",
+          selection: { mode: "auto" },
+          request: { input: textInput("bound input") },
+        },
+      },
+    });
+    if (accepted.kind !== "accepted")
+      throw new Error("Fixture acceptance failed");
+    harness.db
+      .update(queuedThreadMessages)
+      .set({
+        placementOperationId: accepted.operation.id,
+        placementFence: 1,
+      })
+      .where(eq(queuedThreadMessages.id, queued.id))
+      .run();
+    const countRequests = () =>
+      listEvents(harness.db, { threadId: thread.id }).filter(
+        (event) => event.type === "client/turn/requested",
+      ).length;
+    const before = countRequests();
+    const response = await harness.app.request(
+      `/api/v1/threads/${thread.id}/queued-messages/${queued.id}/send`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "auto" }),
+      },
+    );
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect((await response.json()).code).toBe("placement_dispatch_unavailable");
+    expect(countRequests()).toBe(before);
+    expect(
+      getQueuedThreadMessage(harness.db, queued.id)?.claimToken,
+    ).toBeNull();
+    expect(
+      listQueuedThreadCommands(harness, "turn.submit", thread.id),
+    ).toHaveLength(0);
   });
 });

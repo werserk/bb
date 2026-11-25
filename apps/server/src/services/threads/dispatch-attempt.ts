@@ -112,6 +112,11 @@ import {
 } from "./dispatch-author.js";
 import type { TurnRequestRetryMarker } from "./thread-events.js";
 import { restoreInterruptedThreadStartupRequest } from "./thread-provisioning.js";
+import {
+  managedOrdinaryClaim,
+  type ManagedQueuePlacement,
+  placementDispatchUnavailable,
+} from "./managed-queue-dispatch.js";
 import { markTurnTraceSpan } from "../system/turn-trace.js";
 
 export const pendingThreadStartContextSchema = z.object({
@@ -239,6 +244,7 @@ export type DispatchAttemptSource =
   | { kind: "inline" }
   | {
       kind: "drain";
+      placement?: ManagedQueuePlacement;
       claimed: ClaimedQueuedThreadMessageRow[];
       respectManualStopPause: boolean;
       /**
@@ -378,6 +384,7 @@ async function runDispatchAttempt(
   run: DispatchAttemptRun,
 ): Promise<DispatchAttemptOutcome> {
   const { thread } = args;
+  const managedClaim = managedOrdinaryClaim(deps, args);
   let { payload } = args;
   if (args.source.kind === "operation") {
     return runOperationDispatch(deps, args, args.source);
@@ -811,11 +818,23 @@ async function runDispatchAttempt(
         : {}),
       ...(systemNotice !== null ? { systemNotice } : {}),
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      ...(managedClaim === null
+        ? {}
+        : {
+            managedClaim: {
+              ...managedClaim,
+              consume: consumeClaimedRows(
+                managedClaim.rows,
+                thread.id,
+                respectManualStopPause,
+              ),
+            },
+          }),
       beforeAppendInTransaction: ({ tx }) => {
         if (getThread(tx, thread.id)?.status !== thread.status) {
           throw new DispatchThreadStatusChangedError();
         }
-        if (claimed !== null) {
+        if (claimed !== null && managedClaim === null) {
           const currentVerdict = classifyLocalQuestionAnswer(tx, claimed);
           if (
             JSON.stringify(currentVerdict) !== JSON.stringify(questionResponse)
@@ -865,6 +884,11 @@ async function reattemptDispatchForThreadChange(
   if (thread === null) {
     throw new ApiError(404, "thread_not_found", "Thread not found");
   }
+  if (
+    args.source.kind === "drain" &&
+    args.source.claimed.some((row) => row.placementOperationId !== null)
+  )
+    placementDispatchUnavailable();
   if (run.reattempted) {
     ensureThreadIsWritable(thread, true);
     const outcome = waitOn({ kind: "thread-busy" }, null);

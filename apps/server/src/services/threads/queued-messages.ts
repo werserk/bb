@@ -1,5 +1,16 @@
 import {
+  retainedManagedSend,
+  managedOrdinaryPresentation,
+  retainGrantedHead,
+  checkManagedQueueGroup,
+  placementDispatchUnavailable,
+  threadRequiresPlacement,
+  type ReadPlacementScope,
+  type ManagedQueuePlacement,
+} from "./managed-queue-dispatch.js";
+import {
   getLatestThreadSequence,
+  PlacementGroupFairnessError,
   listQueuedThreadMessages,
   listStoredEventRowsContaining,
 } from "@bb/db";
@@ -92,6 +103,7 @@ import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 import { ThreadContextClearInProgressError } from "./thread-context-mutation-guard.js";
 
 interface SendQueuedMessageArgs {
+  readPlacementScope?: ReadPlacementScope;
   claimPolicy: QueuedThreadMessageGroupClaimPolicy;
   mode: SendQueuedMessageMode;
   queuedMessageId: string;
@@ -104,6 +116,7 @@ type ClaimedQueuedMessage = Exclude<
 >[number];
 
 interface SendClaimedQueuedMessageArgs {
+  placement?: ManagedQueuePlacement;
   mode: SendQueuedMessageMode;
   queuedMessages: ClaimedQueuedMessage[];
   /** True for an explicit "send now"; false for an ordinary drain. */
@@ -112,6 +125,7 @@ interface SendClaimedQueuedMessageArgs {
 }
 
 interface SendClaimedQueuedMessageForThreadArgs {
+  placement?: ManagedQueuePlacement;
   mode: SendQueuedMessageMode;
   queuedMessages: ClaimedQueuedMessage[];
   sendNow: boolean;
@@ -129,7 +143,9 @@ export function createAutomaticQueuedMessageGroupEligibility(
 ): QueuedThreadMessageGroupEligibility {
   const activeTurnId = getActiveTurnId(deps, args.thread.id);
   return (group) =>
+    !threadRequiresPlacement(deps.db, args.thread) &&
     group.every((member) => {
+      if (member.placementOperationId !== null) return false;
       if (
         args.idleDrain &&
         member.serviceTurn !== null &&
@@ -440,9 +456,10 @@ async function withActiveQueuedMessageClaims<T>(
 }
 
 function claimQueuedThreadMessageForSend(
-  deps: Pick<AppDeps, "db" | "hub">,
+  deps: Pick<AppDeps, "db" | "hub" | "placementWorkspacePurpose">,
   args: SendQueuedMessageArgs,
-): ClaimedQueuedMessage[] {
+): { rows: ClaimedQueuedMessage[]; placement?: ManagedQueuePlacement } {
+  let placement: ManagedQueuePlacement | undefined;
   const existingQueuedMessage = getQueuedThreadMessage(
     deps.db,
     args.queuedMessageId,
@@ -454,16 +471,30 @@ function claimQueuedThreadMessageForSend(
     throw new ApiError(404, "invalid_request", "Queued message not found");
   }
 
+  const policy = args.claimPolicy;
   const claimedQueuedMessages = claimQueuedThreadMessageGroup(
     deps.db,
     deps.hub,
     args.queuedMessageId,
-    args.claimPolicy,
+    policy.kind === "explicit-send"
+      ? {
+          kind: "explicit-send",
+          assertGroupAllowed: (tx, group) => {
+            policy.assertGroupAllowed?.(tx, group);
+            placement = checkManagedQueueGroup(
+              tx,
+              group,
+              deps.placementWorkspacePurpose,
+              args.readPlacementScope,
+            );
+          },
+        }
+      : policy,
   );
   if (claimedQueuedMessages) {
-    return claimedQueuedMessages;
+    return { rows: claimedQueuedMessages, placement };
   }
-  if (args.claimPolicy.kind === "automatic") return [];
+  if (args.claimPolicy.kind === "automatic") return { rows: [] };
 
   const latestQueuedMessage = getQueuedThreadMessage(
     deps.db,
@@ -505,6 +536,7 @@ async function sendClaimedQueuedMessage(
     mode: args.mode,
     queuedMessages: args.queuedMessages,
     sendNow: args.sendNow,
+    placement: args.placement,
     thread,
   });
 }
@@ -549,7 +581,11 @@ async function sendClaimedQueuedMessageForThreadImpl(
     queuedMessages[0]!,
   );
   const queuedMessage = deferred?.message ?? queuedMessages[0]!;
-  const inputGroups = queuedInputGroups(deps.db, queuedMessages);
+  const presentation = args.placement
+    ? managedOrdinaryPresentation(args.placement, queuedMessages)
+    : undefined;
+  const inputGroups =
+    presentation?.inputGroups ?? queuedInputGroups(deps.db, queuedMessages);
   const input = flattenPromptInputGroups(inputGroups);
   const lead = args.queuedMessages[0]!;
   const mode =
@@ -569,10 +605,9 @@ async function sendClaimedQueuedMessageForThreadImpl(
         : { input, mode }),
       ...(systemNotice === null
         ? {
-            clientSubmissions: queuedSubmissionMembership(
-              deps.db,
-              queuedMessages,
-            ),
+            clientSubmissions:
+              presentation?.clientSubmissions ??
+              queuedSubmissionMembership(deps.db, queuedMessages),
             sourceQueuedMessageIds: queuedMessages.map((row) => row.id),
           }
         : {}),
@@ -580,6 +615,7 @@ async function sendClaimedQueuedMessageForThreadImpl(
     },
     source: {
       kind: "drain",
+      placement: args.placement,
       claimed: args.queuedMessages,
       respectManualStopPause: respectsManualStopPause(args),
       sendNow: args.sendNow,
@@ -655,7 +691,10 @@ export async function sendQueuedMessage(
   args: SendQueuedMessageArgs,
 ): Promise<ThreadQueuedMessage> {
   const sendNow = args.claimPolicy.kind === "explicit-send";
-  const queuedMessages = claimQueuedThreadMessageForSend(deps, args);
+  const { rows: queuedMessages, placement } = claimQueuedThreadMessageForSend(
+    deps,
+    args,
+  );
   if (queuedMessages.length === 0) {
     const existing = getQueuedThreadMessage(deps.db, args.queuedMessageId);
     if (!existing)
@@ -674,15 +713,25 @@ export async function sendQueuedMessage(
     releaseQueuedMessageClaims(deps, queuedMessages);
     return toThreadQueuedMessage(queuedMessages[0]!);
   }
+  const dispatch = (rows: ClaimedQueuedMessage[]) =>
+    sendClaimedQueuedMessage(deps, {
+      mode: args.mode,
+      queuedMessages: rows,
+      placement,
+      sendNow,
+      threadId: args.threadId,
+    });
   try {
-    return await withActiveQueuedMessageClaims(queuedMessages, () =>
-      sendClaimedQueuedMessage(deps, {
-        mode: args.mode,
-        queuedMessages,
-        sendNow,
-        threadId: args.threadId,
-      }),
-    );
+    return await withActiveQueuedMessageClaims(queuedMessages, async () => {
+      try {
+        return await dispatch(queuedMessages);
+      } catch (error) {
+        if (!(error instanceof PlacementGroupFairnessError) || !placement)
+          throw error;
+        const head = retainGrantedHead(deps, queuedMessages, placement, error);
+        return dispatch([head]);
+      }
+    });
   } catch (error) {
     releaseQueuedMessageClaims(deps, queuedMessages);
     if (
@@ -698,6 +747,7 @@ export async function sendQueuedMessage(
 export async function sendQueuedMessageNow(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: {
+    readPlacementScope?: ReadPlacementScope;
     mode: SendQueuedMessageMode;
     queuedMessageId: string;
     threadId: string;
@@ -719,9 +769,20 @@ export async function sendQueuedMessageNow(
       submissionIds?: string[];
     }
 > {
-  const before = listQueuedThreadMessages(deps.db, args.threadId).map(
-    toThreadQueuedMessage,
-  );
+  const existing = getQueuedThreadMessage(deps.db, args.queuedMessageId);
+  if (!existing) {
+    const retained = retainedManagedSend(deps.db, args);
+    if (retained) return retained;
+  }
+  const requestThread = getThread(deps.db, args.threadId);
+  const managed =
+    existing?.placementOperationId != null ||
+    (requestThread && threadRequiresPlacement(deps.db, requestThread));
+  const before = managed
+    ? []
+    : listQueuedThreadMessages(deps.db, args.threadId).map(
+        toThreadQueuedMessage,
+      );
   const index = before.findIndex((row) => row.id === args.queuedMessageId);
   const selection: ThreadQueuedMessage[] = [];
   if (index === 0) {
@@ -735,16 +796,34 @@ export async function sendQueuedMessageNow(
     (entry) => entry.id,
   );
   const floor = getLatestThreadSequence(deps.db, { threadId: args.threadId });
-  await sendQueuedMessage(deps, {
-    claimPolicy: { kind: "explicit-send" },
-    mode: args.mode,
-    queuedMessageId: args.queuedMessageId,
-    threadId: args.threadId,
-  });
+  try {
+    await sendQueuedMessage(deps, {
+      claimPolicy: { kind: "explicit-send" },
+      readPlacementScope: args.readPlacementScope,
+      mode: args.mode,
+      queuedMessageId: args.queuedMessageId,
+      threadId: args.threadId,
+    });
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 409 || error.status === 404) &&
+      !getQueuedThreadMessage(deps.db, args.queuedMessageId)
+    ) {
+      const retained = retainedManagedSend(deps.db, args);
+      if (retained) return retained;
+    }
+    throw error;
+  }
   const remainingQueuedMessage = getQueuedThreadMessage(
     deps.db,
     args.queuedMessageId,
   );
+  if (!remainingQueuedMessage) {
+    const retained = retainedManagedSend(deps.db, args);
+    if (retained) return retained;
+  }
+  if (managed) placementDispatchUnavailable();
   if (!remainingQueuedMessage && sourceQueuedMessageIds.length) {
     for (const row of listStoredEventRowsContaining(deps.db, {
       threadId: args.threadId,
