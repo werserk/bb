@@ -20,6 +20,7 @@ type BridgeToolCallContent =
 export type ToolCallForwarder = (
   toolName: string,
   args: Record<string, unknown>,
+  signal: AbortSignal,
 ) => Promise<{
   content: string;
   contentBlocks?: BridgeToolCallContent[];
@@ -46,47 +47,50 @@ export function buildBridgeMcpServer(
         : {}),
     })),
   }));
-  instance.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const def = toolsByName.get(request.params.name);
-    if (def === undefined) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Unknown tool: ${request.params.name}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-    const args = request.params.arguments ?? {};
-    const result = await forwardToolCall(def.name, args);
-    let content = experimental_buildBridgeToolCallContent(result);
-    if (def.name === "bb_update_plan" && !result.isError) {
-      const plan = z
-        .array(
-          z.object({
-            status: z.enum(["pending", "in_progress", "completed"]),
-          }),
-        )
-        .safeParse(args.plan);
-      if (plan.success) {
-        const completed = plan.data.filter(
-          (step) => step.status === "completed",
-        ).length;
-        content = [
-          {
-            type: "text",
-            text: `Plan updated (${completed}/${plan.data.length} steps completed). Ensure you keep using the plan to track your progress and mark it complete when you finish.`,
-          },
-        ];
+  instance.server.setRequestHandler(
+    CallToolRequestSchema,
+    async (request, extra) => {
+      const def = toolsByName.get(request.params.name);
+      if (def === undefined) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Unknown tool: ${request.params.name}`,
+            },
+          ],
+          isError: true,
+        };
       }
-    }
-    return {
-      content,
-      ...(result.isError ? { isError: true } : {}),
-    };
-  });
+      const args = request.params.arguments ?? {};
+      const result = await forwardToolCall(def.name, args, extra.signal);
+      let content = experimental_buildBridgeToolCallContent(result);
+      if (def.name === "bb_update_plan" && !result.isError) {
+        const plan = z
+          .array(
+            z.object({
+              status: z.enum(["pending", "in_progress", "completed"]),
+            }),
+          )
+          .safeParse(args.plan);
+        if (plan.success) {
+          const completed = plan.data.filter(
+            (step) => step.status === "completed",
+          ).length;
+          content = [
+            {
+              type: "text",
+              text: `Plan updated (${completed}/${plan.data.length} steps completed). Ensure you keep using the plan to track your progress and mark it complete when you finish.`,
+            },
+          ];
+        }
+      }
+      return {
+        content,
+        ...(result.isError ? { isError: true } : {}),
+      };
+    },
+  );
   return { type: "sdk", name: BB_BRIDGE_MCP_SERVER_NAME, instance };
 }
 

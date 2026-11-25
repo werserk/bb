@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { getEventListeners } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import type { BridgeToolCallRequest } from "./bridge-tool-calls.js";
 import { createPendingToolCallTracker } from "./pending-tool-call-tracker.js";
 
@@ -161,5 +162,109 @@ describe("createPendingToolCallTracker send failures", () => {
       result: { content: "late" },
     });
     expect(response).toBe(false);
+  });
+});
+
+describe("pending tool call cancellation", () => {
+  const args = {
+    arguments: {},
+    providerThreadId: "provider",
+    scope: {},
+    threadId: "thread",
+    toolName: "tool",
+  };
+
+  it("skips dispatch when aborted beforehand", async () => {
+    const sendToolCall = vi.fn();
+    const sendCancellation = vi.fn();
+    const tracker = createPendingToolCallTracker({
+      sendToolCall,
+      sendCancellation,
+    });
+    await expect(
+      tracker.forwardToolCall({ ...args, signal: AbortSignal.abort() }),
+    ).resolves.toMatchObject({ isError: true });
+    expect(sendToolCall).not.toHaveBeenCalled();
+    expect(sendCancellation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "success",
+    "error",
+    "send failure",
+    "abort",
+    "scope disposal",
+  ] as const)(
+    "removes the listener after %s and ignores later signals and replies",
+    async (end) => {
+      const controller = new AbortController();
+      const sendCancellation = vi.fn();
+      const tracker = createPendingToolCallTracker({
+        sendToolCall() {
+          if (end === "send failure") throw new Error("transport closed");
+        },
+        sendCancellation,
+      });
+      const result = tracker.forwardToolCall({
+        ...args,
+        signal: controller.signal,
+      });
+      const success = {
+        jsonrpc: "2.0",
+        id: 1,
+        result: { success: true, contentItems: [] },
+      } as const;
+      if (end === "success")
+        expect(tracker.handleToolCallResponse(success)).toBe(true);
+      if (end === "error")
+        expect(
+          tracker.handleToolCallResponse({
+            jsonrpc: "2.0",
+            id: 1,
+            error: { code: -1 },
+          }),
+        ).toBe(true);
+      if (end === "abort") controller.abort();
+      if (end === "scope disposal")
+        tracker.resolvePendingToolCalls(args.scope, "session closed");
+      expect((await result).isError).toBe(end !== "success");
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      controller.abort();
+      tracker.resolvePendingToolCalls(args.scope, "closed again");
+      expect(tracker.handleToolCallResponse(success)).toBe(false);
+      if (end === "abort" || end === "scope disposal") {
+        expect(sendCancellation.mock.calls).toEqual([
+          [
+            {
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: { requestId: 1 },
+            },
+          ],
+        ]);
+      } else {
+        expect(sendCancellation).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("settles locally when the cancellation transport has closed", async () => {
+    const controller = new AbortController();
+    const tracker = createPendingToolCallTracker({
+      sendToolCall: vi.fn(),
+      sendCancellation() {
+        throw new Error("transport closed");
+      },
+    });
+    const result = tracker.forwardToolCall({
+      ...args,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(result).resolves.toEqual({
+      content: "transport closed",
+      isError: true,
+    });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 });

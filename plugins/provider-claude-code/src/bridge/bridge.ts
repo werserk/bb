@@ -442,7 +442,10 @@ const { send, sendResult, sendError } = createBridgeIo<
 
 const threadAttachments = new Map<string, ThreadAttachment>();
 const closingSessions = new Map<string, Promise<void>>();
-const toolCallTracker = createPendingToolCallTracker({ sendToolCall: send });
+const toolCallTracker = createPendingToolCallTracker({
+  sendToolCall: send,
+  sendCancellation: send,
+});
 const { forwardToolCall, handleToolCallResponse } = toolCallTracker;
 
 function resolvePendingSessionWork(
@@ -654,7 +657,7 @@ function createForwardToolCall(
   origin: { turnId?: string; retired?: boolean },
   scope: object,
 ): ToolCallForwarder {
-  return (toolName, args) => {
+  return (toolName, args, signal) => {
     if (origin.turnId === undefined || origin.retired) {
       return Promise.resolve({
         content: origin.retired
@@ -665,6 +668,7 @@ function createForwardToolCall(
     }
     return forwardToolCall({
       arguments: args,
+      signal,
       providerThreadId:
         attachment.providerThreadId ?? attachment.threadIdRef.current,
       scope,
