@@ -15,9 +15,11 @@ import {
   readPlacementActionReceipt,
   readPlacementSubmissionContext,
   recordPlacementWait,
+  refuseReservedPlacement,
   registerPlacementOwner,
   reservePlacementWorker,
   resetPlacementOwnerAvailability,
+  type UnusedPlacementReservationGuard,
 } from "@bb/db";
 import {
   placementReasonSchema,
@@ -268,7 +270,8 @@ export function createPlacementService(deps: PlacementDeps) {
   async function wakeProvider(providerId: string): Promise<void> {
     await wakes.run(providerId, async () => {
       const registered = policies.get(providerId);
-      if (!registered || currentEpoch(providerId, registered) === null) {
+      const epoch = registered ? currentEpoch(providerId, registered) : null;
+      if (!registered || epoch === null) {
         recordOwnerUnavailable(providerId);
         return;
       }
@@ -278,7 +281,7 @@ export function createPlacementService(deps: PlacementDeps) {
         ["reserved"],
       )) {
         try {
-          dispatch(record.id);
+          dispatch(record.id, epoch);
         } catch (error) {
           deps.logger.warn(
             `placement dispatch failed for ${record.id}: ${String(error)}`,
@@ -398,7 +401,7 @@ export function createPlacementService(deps: PlacementDeps) {
         purpose,
       });
       if (result.kind === "reserved") {
-        dispatch(operationId);
+        dispatch(operationId, epoch);
         return;
       }
       const parsed = placementReasonSchema.safeParse(
@@ -410,16 +413,66 @@ export function createPlacementService(deps: PlacementDeps) {
     if (latest) persistWait(latest, source, lastReason);
   }
 
-  function dispatch(operationId: string) {
+  function dispatch(operationId: string, ownerRevision: number) {
     const result = dispatchReservedPlacement(deps, operationId);
-    if (result.kind === "retry" || result.kind === "terminal")
+    if (result.kind === "retry")
       deps.logger.warn(
-        `placement dispatch ${result.kind} for ${operationId}: ${
-          result.kind === "retry"
-            ? result.reason
-            : `${result.reason}: ${result.error}`
-        }`,
+        `placement dispatch retry for ${operationId}: ${result.reason}`,
       );
+    if (result.kind !== "terminal") return;
+    const record = readPlacementOperationRecord(deps.db, operationId);
+    const refused =
+      record && record.fence !== null
+        ? refuseReservedPlacement(deps.db, {
+            operationId,
+            expectedRevision: record.revision,
+            fence: record.fence,
+            ownerRevision,
+            reason: result.reason,
+          }).kind
+        : "stale";
+    deps.logger.warn(
+      `placement dispatch ${refused} for ${operationId}: ${result.reason}: ${result.error}`,
+    );
+  }
+
+  function unusedReservationGuards(
+    ownerPluginId: string,
+    reported: readonly WorkerObservation[],
+  ): UnusedPlacementReservationGuard[] {
+    const workerIds = reported.map((worker) => worker.workerId);
+    if (workerIds.length === 0) return [];
+    return deps.db
+      .select()
+      .from(placementWorkers)
+      .where(
+        and(
+          eq(placementWorkers.ownerPluginId, ownerPluginId),
+          inArray(placementWorkers.workerId, workerIds),
+          inArray(placementWorkers.slotState, ["reserved", "active"]),
+        ),
+      )
+      .all()
+      .flatMap((worker) => {
+        const record = worker.ownerOperationId
+          ? readPlacementOperationRecord(deps.db, worker.ownerOperationId)
+          : null;
+        return record &&
+          worker.fence !== null &&
+          record.fence === worker.fence &&
+          (record.cancelRequested ||
+            record.phase === "refused" ||
+            worker.slotState === "active")
+          ? [
+              {
+                workerId: worker.workerId,
+                operationId: record.id,
+                expectedRevision: record.revision,
+                fence: worker.fence,
+              },
+            ]
+          : [];
+      });
   }
 
   function persistWait(
@@ -658,6 +711,10 @@ export function createPlacementService(deps: PlacementDeps) {
         ownerPluginId: args.ownerPluginId,
         expectedOwnerRevision: owner.revision,
         workers: args.workers,
+        unusedReservations: unusedReservationGuards(
+          args.ownerPluginId,
+          args.workers,
+        ),
       });
       if (observed.kind === "observed") await wakeProvider(args.providerId);
       return observed.kind;
