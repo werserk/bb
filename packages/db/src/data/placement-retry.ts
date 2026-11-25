@@ -6,6 +6,8 @@ import {
   turnRequestEventDataSchema,
   placementPermissionProvenanceSchema,
   permissionModeSchema,
+  placementAuthoritySchema,
+  type PlacementAuthority,
   type PlacementPermissionProvenance,
   type TurnRequestEventData,
   type PromptInput,
@@ -32,7 +34,7 @@ import {
   readPlacementActionReceipt,
 } from "./placement-action-receipts.js";
 import { createQueuedThreadMessageInTransaction } from "./queued-thread-messages.js";
-import { PlacementDispatchConflictError } from "./placement-dispatch-receipts.js";
+import { PlacementDispatchConflictError } from "./placement-dispatch-errors.js";
 
 function failure(
   db: DbQueryConnection,
@@ -74,9 +76,13 @@ function failure(
       step: attempts.step,
       attempt: attempts.attempt,
       authority: ids.authority,
+      retryEscalation: sql<
+        PlacementAuthority["escalation"]
+      >`json_extract(${ops.retryDerivation}, '$.executionAuthority.escalation')`,
     })
     .from(attempts)
     .innerJoin(ids, eq(ids.op, attempts.op))
+    .innerJoin(ops, eq(ops.id, attempts.op))
     .where(eq(attempts.request, request))
     .orderBy(asc(attempts.ordinal))
     .all();
@@ -91,7 +97,9 @@ function failure(
         e.binding,
         e.execution,
         body,
-        members,
+        members.map(({ retryEscalation, ...member }) =>
+          retryEscalation === null ? member : { ...member, retryEscalation },
+        ),
       ]),
     ),
   };
@@ -266,7 +274,31 @@ export function grantPlacementRetryConsent(
     { behavior: "immediate" },
   );
 }
-function envelope(f: NonNullable<ReturnType<typeof failure>>) {
+const retryScheduler = "provider-retry";
+function envelope(
+  f: NonNullable<ReturnType<typeof failure>>,
+  grantActor: PlacementAuthority,
+) {
+  const original = placementAuthoritySchema.parse(
+    JSON.parse(f.members[0]!.authority),
+  );
+  const priorEscalation = f.members[0]!.retryEscalation ?? original.escalation;
+  const executionAuthority: PlacementAuthority = {
+    principal: retryScheduler,
+    actor: "system",
+    initiator: "system",
+    sender: null,
+    origin: null,
+    plugin: null,
+    requestedBy: null,
+    serviceTurn: f.body.serviceTurn ?? null,
+    permission: permissionModeSchema.parse(f.body.execution.permissionMode),
+    escalation:
+      priorEscalation === "deny" || grantActor.escalation === "deny"
+        ? "deny"
+        : priorEscalation,
+  };
+
   const accepted = f.effect.state === "failed_accepted";
   const groups: PromptInput[][] = accepted
     ? [
@@ -291,6 +323,7 @@ function envelope(f: NonNullable<ReturnType<typeof failure>>) {
     : f.body.input.map((block) => ({ ...block, visibility: "agent-only" }));
   return {
     input,
+    executionAuthority,
     source: f.effect.request,
     root: f.effect.root,
     groups,
@@ -302,7 +335,7 @@ export function schedulePlacementRetry(
   db: DbConnection,
   args: { operationId: string; sendAt: number; scheduler: string },
 ) {
-  if (args.scheduler !== "provider-retry" || !Number.isSafeInteger(args.sendAt))
+  if (args.scheduler !== retryScheduler || !Number.isSafeInteger(args.sendAt))
     return null;
   return db.transaction(
     (tx) => {
@@ -311,25 +344,43 @@ export function schedulePlacementRetry(
         .from(ops)
         .where(eq(ops.id, args.operationId))
         .get();
-      if (!op?.consentId || !op.threadId || op.cancelRequested) return null;
-      reconcileSupersededPlacementRetries(tx, op.threadId);
-      const f = currentPlacementRetryTarget(tx, op.consentId);
+      if (!op?.consentId || !op.threadId || op.kind !== "retry") return null;
       const consent = tx
         .select()
         .from(consents)
         .where(eq(consents.id, op.consentId))
         .get();
+      const target = tx
+        .select()
+        .from(targets)
+        .where(eq(targets.consent, op.consentId))
+        .get();
       if (
-        !f ||
+        !target ||
         !consent ||
-        consent.revokedAt !== null ||
-        consent.consumedByOperationId !== op.id
+        consent.consumedByOperationId !== op.id ||
+        consent.failedOperationId !== op.failedOperationId ||
+        consent.principalScope !== op.principalScope
       )
         return null;
-      if (f.target.state === "scheduled")
-        return args.sendAt === op.sendAt ? op.queuedMessageId : null;
+      // A committed schedule is a durable receipt. Replaying it never wakes a
+      // row, reopens a spent entitlement or needs the old failed turn to be current.
+      if (target.state === "spent" || target.state === "scheduled") {
+        return op.retryScheduleState === "queued" && op.sendAt === args.sendAt
+          ? op.queuedMessageId
+          : null;
+      }
+      if (
+        target.state !== "held" ||
+        op.cancelRequested ||
+        consent.revokedAt !== null
+      )
+        return null;
+      reconcileSupersededPlacementRetries(tx, op.threadId);
+      const f = currentPlacementRetryTarget(tx, op.consentId);
+      if (!f) return null;
       const action = readPlacementActionReceipt(tx, op.id)!;
-      const env = envelope(f);
+      const env = envelope(f, action.authority);
       const row = createQueuedThreadMessageInTransaction(tx, {
         threadId: op.threadId,
         clientSubmissionId: action.submissionUuid!,
@@ -339,11 +390,11 @@ export function schedulePlacementRetry(
         permissionMode: permissionModeSchema.parse(
           env.execution.permissionMode,
         ),
-        senderThreadId: action.authority.sender,
-        origin: action.authority.origin,
-        originPluginId: action.authority.plugin,
-        requestedBy: action.authority.requestedBy,
-        serviceTurn: action.authority.serviceTurn ?? undefined,
+        senderThreadId: env.executionAuthority.sender,
+        origin: env.executionAuthority.origin,
+        originPluginId: env.executionAuthority.plugin,
+        requestedBy: env.executionAuthority.requestedBy,
+        serviceTurn: env.executionAuthority.serviceTurn ?? undefined,
         waitingOn: { kind: "time" },
         sendAt: args.sendAt,
         payload: {
@@ -425,10 +476,12 @@ export function spendPlacementRetry(
     row.retryOfTurnRequestId !== f.effect.root ||
     row.retryAttempt !== (f.body.retryAttempt ?? 1) + 1 ||
     body.retryAttempt !== row.retryAttempt ||
+    body.initiator !== "system" ||
+    body.senderThreadId !== null ||
     body.retryOfRequestId !== f.effect.root
   )
     throw new PlacementDispatchConflictError("retry target changed or not due");
-  const env = envelope(f);
+  const env = envelope(f, readPlacementActionReceipt(tx, op.id)!.authority);
   if (
     canonicalJsonBytes(env) !== canonicalJsonBytes(op.retryDerivation) ||
     canonicalJsonBytes(env.input) !==

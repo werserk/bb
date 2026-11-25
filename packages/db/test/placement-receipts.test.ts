@@ -1,3 +1,12 @@
+import { placementPreparedGroups } from "../src/data/placement-prepared-input.js";
+import {
+  beginPlacementReclaim,
+  finishPlacementReclaim,
+  reservePlacementWorker,
+  recordPlacementRuntimeState,
+  PlacementGroupFairnessError,
+  releaseQueuedMessageClaim,
+} from "../src/index.js";
 import { reconcileSupersededPlacementRetries } from "../src/data/placement-retry.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +15,8 @@ import { eq } from "drizzle-orm";
 import { it, expect, vi } from "vitest";
 import {
   createStandaloneBuiltinCompactCommandInput,
+  flattenPromptInputGroups,
+  type PromptInput,
   clientSubmissionQueueId,
   threadScope,
   type PlacementAuthority,
@@ -50,6 +61,8 @@ import { recordPlacementSteerRedelivery } from "../src/data/placement-redelivery
 import { appendStoredThreadEventInTransaction } from "../src/data/events.js";
 import {
   setupPlacement,
+  candidate,
+  observation,
   acceptPrepared,
   attachAndQueue,
   fixtureAuthority,
@@ -169,6 +182,14 @@ function group(
 ) {
   const op = resident(db),
     follow = follower(db, op.threadId!, authority);
+  return claimPair(db, op, follow, reverse);
+}
+function claimPair(
+  db: DbConnection,
+  op: ReturnType<typeof resident>,
+  follow: ReturnType<typeof follower>,
+  reverse = false,
+) {
   const [a, b] = reverse ? [follow, op] : [op, follow];
   db.update(queue)
     .set({ sortKey: "A", groupWithNext: true })
@@ -186,6 +207,291 @@ function group(
     claimed: claimFixture(db, a.queueReceipt!.queuedMessageId),
   };
 }
+it("normalizes prepared fork input and refuses malformed groups before transfer", () => {
+  const seed = {
+    type: "text",
+    text: "seed",
+    visibility: "agent-only",
+  } as const;
+  const visible = { type: "text", text: "visible" } as const;
+  expect(
+    placementPreparedGroups(
+      JSON.stringify({ input: [visible], agentContextSeed: [seed] }),
+      "fork",
+    ),
+  ).toEqual([
+    [
+      { ...seed, mentions: [] },
+      { ...visible, mentions: [] },
+    ],
+  ]);
+  for (const bad of [
+    { input: [{}] },
+    { input: [visible], inputGroups: [[{ ...visible, text: "other" }]] },
+    { inputGroups: [[]] },
+    { input: [visible], agentContextSeed: [visible] },
+  ]) {
+    expect(() => placementPreparedGroups(JSON.stringify(bad), "fork")).toThrow(
+      PlacementDispatchConflictError,
+    );
+  }
+});
+it("withholds the one-head fallback when the granted owner is not first", () =>
+  scratch((db) => {
+    const head = resident(db);
+    const earlier = acceptPrepared(db, "older");
+    const later = follower(db, head.threadId!, fixtureAuthority);
+    const { claimed } = claimPair(db, head, later, true);
+    expect(() =>
+      db.transaction((tx) => appendFixture(tx, head.id, claimed, first)),
+    ).toThrow(
+      expect.objectContaining({
+        name: "PlacementGroupFairnessError",
+        retainedHead: null,
+        earlierOperationId: earlier.id,
+        blockedMemberOperationId: later.id,
+      }),
+    );
+    expect(db.select().from(events).all()).toHaveLength(0);
+  }));
+it("anchors first ordinary transfer and native group boundaries to normalized prepared blocks", () =>
+  scratch((db) => {
+    const head = resident(db),
+      threadId = head.threadId!;
+    const file = {
+      type: "localFile",
+      path: "/fixture/spec.txt",
+      hostId: "host",
+      visibility: "agent-only",
+    } as const;
+    const text = { type: "text", text: "original" } as const;
+    const groups: PromptInput[][] = [[{ ...text, mentions: [] }], [file]];
+    const content = flattenPromptInputGroups(groups);
+    const request = { inputGroups: [[text], [file]], input: content };
+    const accepted = acceptPlacementOperation(db, {
+      ...scope,
+      submissionKey: "normalized",
+      request: {
+        schemaVersion: 1,
+        intent: { kind: "continuation", threadId, request },
+      },
+    });
+    if (accepted.kind !== "accepted") throw new Error("accept");
+    const id = accepted.operation.id;
+    expect(
+      preparePlacementOperation(db, {
+        operationId: id,
+        expectedRevision: 1,
+        workspace,
+        preparedExecution: fixtureExecution,
+        preparedRequest: request,
+        attachmentReceipts: [],
+      }).kind,
+    ).toBe("prepared");
+    const uuid = readPlacementActionReceipt(db, id)!.submissionUuid!,
+      qid = clientSubmissionQueueId(uuid);
+    const notify = vi.fn();
+    const transfer = (blocks: PromptInput[]) =>
+      db.transaction(
+        (tx) =>
+          recordPlacementQueueReceipt(tx, {
+            operationId: id,
+            fence: 1,
+            queuedMessageId: qid,
+            onCommitted: notify,
+            insertQueue: (t, placement) => {
+              createQueuedThreadMessageInTransaction(t, {
+                ...fixtureExecution,
+                placement,
+                clientSubmissionId: uuid,
+                threadId,
+                content: blocks,
+                sendAt: null,
+                waitingOn: null,
+                systemNotice: null,
+                payload: { kind: "inline" },
+              });
+            },
+          }),
+        { behavior: "immediate" },
+      );
+    for (const changed of [
+      content.slice().reverse(),
+      [...content.slice(0, -1), { ...file, path: "/other" }],
+      [
+        ...content.slice(0, -1),
+        { type: "localFile" as const, path: file.path, hostId: file.hostId },
+      ],
+    ]) {
+      expect(() => transfer(changed)).toThrow(PlacementDispatchConflictError);
+      expect(readPlacementQueueAttempts(db, qid)).toHaveLength(0);
+      expect(
+        db.select().from(queue).where(eq(queue.id, qid)).get(),
+      ).toBeUndefined();
+      expect(notify).toHaveBeenCalledTimes(0);
+    }
+    expect(() =>
+      db.$client
+        .prepare("UPDATE placement_operation SET prepared_request=? WHERE id=?")
+        .run("{}", id),
+    ).toThrow("immutable prepared");
+    expect(transfer(content).kind).toBe("recorded");
+    expect(notify).toHaveBeenCalledTimes(1);
+    const claimed = claimFixture(db, qid);
+    expect(() =>
+      db.transaction((tx) => appendFixture(tx, head.id, claimed, first)),
+    ).toThrow(PlacementDispatchConflictError);
+    expect(db.select().from(events).all()).toHaveLength(0);
+    const result = db.transaction((tx) =>
+      appendFixture(tx, head.id, claimed, first, {
+        inputGroups: groups,
+        input: content,
+      }),
+    );
+    expect(result.receipt.members.map((m) => m.op)).toEqual([id]);
+  }));
+it.each([true, false])(
+  "uses accepted order across threads at group admission (intervening compatible=%s)",
+  (compatible) =>
+    scratch((db, open) => {
+      const head = resident(db);
+      const earlier = acceptPrepared(
+        db,
+        "intervening",
+        compatible ? {} : { workspaceBindingId: "another-workspace" },
+      );
+      const later = follower(db, head.threadId!, fixtureAuthority);
+      const { claimed } = claimPair(db, head, later);
+      const append = (
+        owner: string,
+        rows: typeof claimed,
+        request: string,
+        fence: number,
+      ) =>
+        db.transaction(
+          (tx) => appendFixture(tx, owner, rows, request, {}, fence),
+          { behavior: "immediate" },
+        );
+      if (!compatible) {
+        expect(
+          append(head.id, claimed, first, 1).receipt.members.map((m) => m.op),
+        ).toEqual([head.id, later.id]);
+        return;
+      }
+      try {
+        append(head.id, claimed, first, 1);
+        throw new Error("group overtook intervening work");
+      } catch (error) {
+        expect(error).toBeInstanceOf(PlacementGroupFairnessError);
+        expect(error).toMatchObject({
+          earlierOperationId: earlier.id,
+          blockedMemberOperationId: later.id,
+          retainedHead: {
+            id: claimed[0]!.id,
+            claimToken: claimed[0]!.claimToken,
+          },
+        });
+      }
+      expect(db.select().from(events).all()).toHaveLength(0);
+      expect(
+        releaseQueuedMessageClaim(db, noopNotifier, claimed[1]!),
+      ).toBeTruthy();
+      const { guard } = append(head.id, [claimed[0]!], first, 1);
+      function releaseTo(
+        source: typeof guard,
+        target: string,
+        revision: number,
+      ) {
+        const command = {
+          ...source,
+          ...fixtureCommand,
+          commandId: source.requestId + "-command",
+          nativeExecutionId: source.requestId + "-execution",
+        };
+        expect(preparePlacementExecutionCommand(db, command).kind).toBe(
+          "prepared",
+        );
+        expect(
+          claimPlacementExecutionCommand(db, {
+            ...command,
+            currentAgentSessionId: command.agentSessionId,
+          }).kind,
+        ).toBe("won");
+        expect(
+          db.transaction((tx) =>
+            settlePlacementExecutionCommand(tx, {
+              ...command,
+              outcome: "succeeded",
+            }),
+          ),
+        ).toBe(true);
+        const free = observation().custody;
+        const worker = { ownerPluginId: "workers", workerId: "worker" };
+        expect(
+          recordPlacementRuntimeState(db, {
+            ...worker,
+            operationId: source.executionOwnerOperationId,
+            fence: source.fence,
+            activity: "idle",
+            backgroundWork: false,
+            pendingInteraction: false,
+            custody: {
+              ...free,
+              revision,
+              status: "held",
+              holder: {
+                threadId: source.threadId,
+                fence: source.fence,
+                bootId: "boot",
+                processStart: "p" + source.fence,
+              },
+            },
+          }),
+        ).toMatchObject({ state: "resident" });
+        expect(
+          beginPlacementReclaim(db, {
+            ...candidate(db, target),
+            expectedSourceFence: source.fence,
+            expectedSourceOperationId: source.executionOwnerOperationId,
+          }),
+        ).toMatchObject({ kind: "reclaiming" });
+        expect(
+          finishPlacementReclaim(db, {
+            ...worker,
+            operationId: target,
+            fence: source.fence,
+            closedSourceOperationId: source.executionOwnerOperationId,
+            processClosed: true,
+            observation: { ...free, revision: revision + 1 },
+          }),
+        ).toEqual({ kind: "released" });
+      }
+      releaseTo(guard, earlier.id, 2);
+      const active = attachAndQueue(db, earlier.id);
+      if (active.kind !== "recorded")
+        throw new Error("intervening launch failed");
+      const next = append(
+        earlier.id,
+        claimFixture(db, active.operation.queueReceipt!.queuedMessageId),
+        second,
+        2,
+      );
+      db.$client.close();
+      db = open();
+      releaseTo(next.guard, later.id, 4);
+      expect(reservePlacementWorker(db, candidate(db, later.id))).toMatchObject(
+        { kind: "reserved", fence: 3 },
+      );
+      const remaining = claimFixture(db, later.queueReceipt!.queuedMessageId);
+      expect(() => append(later.id, remaining, third, 1)).toThrow(
+        PlacementDispatchConflictError,
+      );
+      expect(
+        append(later.id, remaining, third, 3).receipt.members.map((m) => m.op),
+      ).toEqual([later.id]);
+      expect(db.select().from(queue).all()).toHaveLength(0);
+    }),
+);
 it.each([false, true])(
   "rejects different effective escalation with either action first (%s)",
   (reverse) =>
@@ -472,7 +778,6 @@ it.each(["failed_accepted", "refused"] as const)(
       ).toBe("refused");
       const r = acceptPlacementOperation(next, {
         ...scope,
-        authority: { ...fixtureAuthority, initiator: "system" },
         submissionKey: "retry",
         request: {
           schemaVersion: 1,
@@ -514,6 +819,15 @@ it.each(["failed_accepted", "refused"] as const)(
         retryOfRequestId: first,
         retryAttempt: 2,
       };
+      expect(
+        readPlacementActionReceipt(next, r.operation.id)?.authority,
+      ).toEqual(fixtureAuthority);
+      expect(env.executionAuthority).toMatchObject({
+        principal: "provider-retry",
+        actor: "system",
+        initiator: "system",
+        sender: null,
+      });
       expect(patch.clientSubmissions).toEqual(
         body.clientSubmissions!.map((m) => ({
           ...m,
@@ -538,6 +852,23 @@ it.each(["failed_accepted", "refused"] as const)(
       const clock = vi.spyOn(Date, "now").mockReturnValue(deadline + 1);
       try {
         expect(() =>
+          next.transaction((tx) =>
+            appendFixture(tx, op.id, retryClaim, second, {
+              ...patch,
+              initiator: "user",
+            }),
+          ),
+        ).toThrow(PlacementDispatchConflictError);
+        expect(
+          readPlacementDispatchReceipt(next, {
+            threadId: guard.threadId,
+            requestId: second,
+          }),
+        ).toBeNull();
+        expect(next.select().from(placementRetryTargets).get()?.state).toBe(
+          "scheduled",
+        );
+        expect(() =>
           next.transaction((tx) => {
             appendFixture(tx, op.id, retryClaim, second, patch);
             throw new Error("rollback-spend");
@@ -554,6 +885,28 @@ it.each(["failed_accepted", "refused"] as const)(
           "spent",
         );
         expect(revokePlacementRetryConsent(next, grant.consent.id)).toBe(false);
+        next.$client.close();
+        db.$client.close();
+        const reopened = open();
+        const args = {
+          operationId: r.operation.id,
+          sendAt: deadline,
+          scheduler: "provider-retry",
+        };
+        const changes = () =>
+          reopened.$client.prepare("select total_changes()").pluck().get();
+        const before = changes();
+        expect(schedulePlacementRetry(reopened, args)).toBe(qid);
+        for (const changed of [
+          { operationId: op.id },
+          { sendAt: deadline + 1 },
+          { scheduler: "other" },
+        ])
+          expect(
+            schedulePlacementRetry(reopened, { ...args, ...changed }),
+          ).toBeNull();
+        expect(changes()).toBe(before);
+        expect(reopened.select().from(queue).all()).toHaveLength(0);
       } finally {
         clock.mockRestore();
       }

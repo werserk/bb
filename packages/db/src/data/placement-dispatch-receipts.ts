@@ -1,3 +1,8 @@
+import { placementPreparedGroups } from "./placement-prepared-input.js";
+import {
+  PlacementDispatchConflictError,
+  PlacementGroupFairnessError,
+} from "./placement-dispatch-errors.js";
 import {
   reconcileSupersededPlacementRetries,
   spendPlacementRetry,
@@ -8,6 +13,7 @@ import {
   flattenPromptInputGroups,
   canonicalJsonBytes,
   placementBindingSchema,
+  placementAuthoritySchema,
   turnRequestEventDataSchema,
   promptInputSchema,
   isStandaloneBuiltinCompactCommand,
@@ -36,7 +42,10 @@ import {
   readPlacementOwner,
 } from "./placement-workers.js";
 import { readPlacementThreadBinding } from "./placement-bindings.js";
-import { placementMemberIneligible } from "./placement-admission.js";
+import {
+  olderCompatible,
+  placementMemberIneligible,
+} from "./placement-admission.js";
 import {
   readPlacementActionReceipt,
   readPlacementQueueAttempts,
@@ -45,13 +54,10 @@ import {
 import { getLatestTurnRequestEventRow } from "./events.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 
-export class PlacementDispatchConflictError extends Error {
-  readonly code = "placement_dispatch_conflict" as const;
-  constructor(reason: string) {
-    super("Placement dispatch conflict: " + reason);
-    this.name = "PlacementDispatchConflictError";
-  }
-}
+export {
+  PlacementDispatchConflictError,
+  PlacementGroupFairnessError,
+} from "./placement-dispatch-errors.js";
 function requireReceipt(ok: unknown, reason: string): asserts ok {
   if (!ok) throw new PlacementDispatchConflictError(reason);
 }
@@ -370,8 +376,7 @@ export function commitPlacementOrdinaryDispatch(
     );
     const input = promptInputSchema.array().parse(JSON.parse(row.content));
     const offset = groups.length;
-    if (row.payloadKind === "inline" || row.payloadKind === "questionResponse")
-      groups.push(input);
+    if (row.payloadKind === "questionResponse") groups.push(input);
     for (const m of links) {
       const op = readPlacementOperationRecord(tx, m.op);
       const receipt = readPlacementActionReceipt(tx, m.op);
@@ -403,7 +408,48 @@ export function commitPlacementOrdinaryDispatch(
         "incompatible group",
       );
       groupAuthority = auth;
-      validateAuth(receipt.authority, body, row);
+      if (row.payloadKind === "inline") {
+        requireReceipt(
+          links.length === 1 && op.kind !== "retry" && !receipt.protocol,
+          "ordinary membership changed",
+        );
+        if (op.id !== args.executionOwnerOperationId) {
+          const earlier = olderCompatible(
+            tx,
+            op,
+            owner.w,
+            args.purpose,
+            args.threadId,
+          );
+          if (earlier) {
+            const head = rows[0]!;
+            const maySeparate =
+              rows.length > 1 &&
+              head.placementOperationId === args.executionOwnerOperationId &&
+              head.payloadKind === "inline" &&
+              readPlacementQueueAttempts(tx, head.id).length === 1;
+            throw new PlacementGroupFairnessError(
+              maySeparate ? { id: head.id, claimToken: token } : null,
+              op.id,
+              earlier.id,
+            );
+          }
+        }
+        const prepared = placementPreparedGroups(op.preparedRequest, op.kind);
+        requireReceipt(
+          equal(flattenPromptInputGroups(prepared), input),
+          "ordinary input differs from preparation",
+        );
+        groups.push(...prepared);
+      }
+      const authority =
+        row.payloadKind === "retry"
+          ? placementAuthoritySchema.safeParse(
+              op.retryDerivation?.executionAuthority,
+            ).data
+          : receipt.authority;
+      requireReceipt(authority, "missing retry execution authority");
+      validateAuth(authority, body, row);
       if (row.payloadKind === "retry") {
         requireReceipt(
           rows.length === 1 && links.length === 1 && op.consentId,

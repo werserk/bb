@@ -3,9 +3,13 @@ import {
   currentRoute,
   recordCustodyFact,
 } from "./placement-source-facts.js";
+import {
+  readPlacementQueueAttempts,
+  queueMemberDigest,
+} from "./placement-action-receipts.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   assertWorkspaceRoute,
   canonicalJsonBytes,
@@ -29,6 +33,7 @@ import {
   placementWorkspaces as workspaces,
   placementRetryConsents as consents,
   placementEffects as effects,
+  placementAttempts as attempts,
   threads,
   queuedThreadMessages as queue,
 } from "../schema.js";
@@ -181,12 +186,13 @@ export function placementMemberIneligible(
   }
   return null;
 }
-function olderCompatible(
+export function olderCompatible(
   db: DbQueryConnection,
   op: Operation,
   w: Worker,
   purpose: WorkspacePurpose,
-): boolean {
+  otherThanThread?: string,
+) {
   const older = db
     .select()
     .from(operations)
@@ -195,6 +201,9 @@ function olderCompatible(
         eq(operations.ownerPluginId, op.ownerPluginId),
         eq(operations.providerId, op.providerId),
         lt(operations.acceptedSeq, op.acceptedSeq),
+        otherThanThread === undefined
+          ? undefined
+          : sql`${operations.threadId} IS NOT ${otherThanThread}`,
         eq(operations.cancelRequested, false),
         inArray(operations.phase, [
           "pending",
@@ -212,9 +221,10 @@ function olderCompatible(
     )
     .orderBy(asc(operations.acceptedSeq))
     .all();
-  return older.some(
+  return older.find(
     (candidate) =>
       placementMemberIneligible(db, candidate, w, purpose) === null &&
+      queuedCandidateDue(db, candidate) &&
       (candidate.consentId === null ||
         db
           .select({ id: consents.id })
@@ -281,6 +291,79 @@ function validateCandidate(db: DbQueryConnection, args: PlacementCandidate) {
   if (reason) return wait(reason);
   return { kind: "valid" as const, op, w };
 }
+function queuedCandidateDue(db: DbQueryConnection, op: Operation) {
+  if (op.phase !== "queued") return true;
+  const pending = db
+    .select({ row: queue })
+    .from(attempts)
+    .innerJoin(queue, eq(queue.id, attempts.queueId))
+    .where(and(eq(attempts.op, op.id), isNull(attempts.request)))
+    .all();
+  return pending.some(({ row }) => nativeQueueReady(row, true));
+}
+function nativeQueueReady(
+  queued: typeof queue.$inferSelect,
+  includeClaimed = false,
+) {
+  const now = Date.now();
+  if (
+    (queued.sendAt !== null && queued.sendAt > now) ||
+    (queued.editHeldUntil !== null && queued.editHeldUntil > now)
+  )
+    return false;
+  const dueWait = hasTimeWait(queued) && queued.sendAt !== null;
+  if (queued.waitingOn !== null && !dueWait) return false;
+  if (queued.state === "claimed")
+    return (
+      includeClaimed && queued.claimToken !== null && queued.claimedAt !== null
+    );
+  if (queued.claimToken !== null || queued.claimedAt !== null) return false;
+  return (
+    (queued.state === "queued" && queued.waitingOn === null) ||
+    (queued.state === "scheduled" && dueWait)
+  );
+}
+
+// A borrowed continuation can outlive the head's lease. Only its intact,
+// unclaimed initial queue attempt can be carried into a new reservation.
+function waitingContinuation(db: DbQueryConnection, op: Operation) {
+  if (
+    op.kind !== "continuation" ||
+    op.phase !== "queued" ||
+    !op.binding ||
+    !op.threadId ||
+    op.fence !== null ||
+    op.reservationId !== null ||
+    op.clientTurnRequestId !== null ||
+    !op.queuedMessageId
+  )
+    return null;
+  const row = db
+    .select()
+    .from(queue)
+    .where(eq(queue.id, op.queuedMessageId))
+    .get();
+  if (
+    !row ||
+    row.threadId !== op.threadId ||
+    row.payloadKind !== "inline" ||
+    row.placementOperationId !== op.id ||
+    !nativeQueueReady(row)
+  )
+    return null;
+  const links = readPlacementQueueAttempts(db, row.id);
+  const attempt = links[0];
+  if (
+    links.length !== 1 ||
+    !attempt ||
+    attempt.op !== op.id ||
+    attempt.attempt !== 0 ||
+    attempt.request !== null ||
+    attempt.queueDigest !== queueMemberDigest(row)
+  )
+    return null;
+  return row;
+}
 export function reservePlacementWorker(
   db: DbConnection,
   args: PlacementCandidate,
@@ -300,7 +383,8 @@ export function reservePlacementWorker(
           operation: placementOperationProjection(op),
           fence: w.fence,
         };
-      if (!["pending", "accepted"].includes(op.phase))
+      const borrowed = waitingContinuation(tx, op);
+      if (!["pending", "accepted"].includes(op.phase) && !borrowed)
         return wait("reconciliation_required");
       const continuingResident =
         op.kind === "continuation" &&
@@ -360,6 +444,11 @@ export function reservePlacementWorker(
       if (op.kind === "continuation" && !pinned)
         return wait("reconciliation_required");
       const fence = continuingResident ? w.fence : w.fence + 1;
+      if (borrowed)
+        tx.update(queue)
+          .set({ placementFence: fence })
+          .where(eq(queue.id, borrowed.id))
+          .run();
       const counter = tx
         .update(counters)
         .set({ allocationSeq: sql`${counters.allocationSeq}+1` })
@@ -387,7 +476,7 @@ export function reservePlacementWorker(
         .set({
           binding,
           workerId: w.workerId,
-          phase: "reserved",
+          phase: borrowed ? "queued" : "reserved",
           reason: null,
           reservationId: randomUUID(),
           fence,
@@ -455,21 +544,7 @@ export function admitPlacementDispatch(
   const pinned = readPlacementThreadBinding(tx, op.threadId);
   if (!pinned || canonicalJsonBytes(pinned) !== canonicalJsonBytes(op.binding))
     return wait("binding_changed");
-  const now = Date.now();
-  const dueTimeWait =
-    queued.state === "scheduled" &&
-    queued.sendAt !== null &&
-    queued.sendAt <= now &&
-    hasTimeWait(queued);
-  if (
-    (!dueTimeWait &&
-      (queued.state !== "queued" || queued.waitingOn !== null)) ||
-    (queued.sendAt !== null && queued.sendAt > now) ||
-    (queued.editHeldUntil !== null && queued.editHeldUntil > now) ||
-    queued.claimToken !== null ||
-    queued.claimedAt !== null
-  )
-    return wait("native_queue_wait");
+  if (!nativeQueueReady(queued)) return wait("native_queue_wait");
   const row = tx
     .update(operations)
     .set({
@@ -604,7 +679,8 @@ export function beginPlacementReclaim(
         w.ownerOperationId !== args.expectedSourceOperationId ||
         !w.ownerOperationId ||
         !w.threadId ||
-        !["accepted", "pending"].includes(op.phase)
+        (!["accepted", "pending"].includes(op.phase) &&
+          !waitingContinuation(tx, op))
       )
         return wait("selected_busy");
       const source = readPlacementOperationRecord(tx, w.ownerOperationId);

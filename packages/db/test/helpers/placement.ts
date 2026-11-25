@@ -22,6 +22,7 @@ import {
 import {
   acceptPlacementOperation,
   readPlacementOperation,
+  readPlacementOperationRecord,
 } from "../../src/data/placement-operations.js";
 import {
   preparePlacementOperation,
@@ -255,7 +256,13 @@ export function attachAndQueue(
               placementOperationId: identity.operationId,
               placementFence: identity.fence,
               content: JSON.stringify([
-                { type: "text", text: "original bytes", mentions: [] },
+                {
+                  type: "text",
+                  text: JSON.parse(
+                    readPlacementOperationRecord(t, id)!.preparedRequest!,
+                  ).input,
+                  mentions: [],
+                },
               ]),
               model: "model",
               reasoningLevel: "high",

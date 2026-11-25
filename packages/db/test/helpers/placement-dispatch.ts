@@ -50,6 +50,7 @@ export function appendFixture(
   claimed: ReturnType<typeof claimFixture>,
   requestId: string,
   patch: Partial<TurnRequestEventData> = {},
+  fence = 1,
 ) {
   const threadId = claimed[0]!.threadId;
   const inputGroups = claimed.map((q) => JSON.parse(q.content));
@@ -87,7 +88,7 @@ export function appendFixture(
   const guard = {
     threadId,
     requestId,
-    fence: 1,
+    fence,
     purpose,
     executionOwnerOperationId: owner,
   };

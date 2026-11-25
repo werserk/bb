@@ -1,3 +1,5 @@
+import { placementPreparedGroups } from "./placement-prepared-input.js";
+import { PlacementDispatchConflictError } from "./placement-dispatch-errors.js";
 import {
   queueMemberDigest,
   readPlacementActionReceipt,
@@ -6,6 +8,8 @@ import { placementAttempts } from "../schema.js";
 import { clientSubmissionQueueId } from "@bb/domain";
 import { and, eq } from "drizzle-orm";
 import {
+  flattenPromptInputGroups,
+  promptInputSchema,
   canonicalWorkspaceBytes,
   workspaceBindingRef,
   workspaceBindingSchema,
@@ -475,6 +479,23 @@ export function recordPlacementQueueReceipt(
     throw new Error(
       "Placement queue insertion must persist the exact operation/thread/fence",
     );
+  if (!receipt.protocol) {
+    if (op.kind === "retry" || row.payloadKind !== "inline")
+      throw new PlacementDispatchConflictError(
+        "invalid first ordinary transfer",
+      );
+    const prepared = placementPreparedGroups(op.preparedRequest, op.kind);
+    const actualBlocks = promptInputSchema
+      .array()
+      .parse(JSON.parse(row.content));
+    if (
+      canonicalJsonBytes(flattenPromptInputGroups(prepared)) !==
+      canonicalJsonBytes(actualBlocks)
+    )
+      throw new PlacementDispatchConflictError(
+        "ordinary input differs from preparation",
+      );
+  }
   tx.insert(placementAttempts)
     .values({
       op: op.id,

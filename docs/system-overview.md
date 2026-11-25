@@ -600,7 +600,7 @@ principal across grant retransmissions.
 Each action owns a stable submission identity and ordered steps. Attempts link
 the original native queue receipts to one actual requested event in native
 member order. The ordinary dispatch writer validates claimed rows in the
-caller's append-and-consume transaction. Each effect retains its execution
+caller's append-and-consume transaction. Ordinary queue transfer checks the full normalized input against the immutable prepared request. Dispatch checks its group boundaries again. A later continuation yields to older compatible work on another thread. The original head retains its grant. After the slot transfers, an intact unclaimed continuation can reserve the worker and bind its existing queue attempt to the new fence. Each effect retains its execution
 owner, fence, binding and requested event. Command preparation pins the native
 execution, transport command and authenticated Agent connection. Only the
 winner of the durable handoff transition may send. Reopening a possibly-sent
@@ -611,7 +611,7 @@ A retry grant pins an exact failed event and member plus a digest of the
 ordered group. Transport aliases identify one attributed grant. Partial
 unique indexes serialize successors for the failed request and root.
 ProviderRetry schedules an unfenced native row, and due dispatch checks its
-derived agent-only input, current entitlement and binding before spending it.
+derived agent-only input, system execution authority, current entitlement and binding before spending it. The grant actor and original presentation membership stay on their own receipts. An identical scheduler replay returns the retained queue ID after spending.
 A newer native requested event supersedes outstanding targets in the same
 transaction when the native writer calls the reconciliation hook.
 
