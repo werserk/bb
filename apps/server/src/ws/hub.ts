@@ -314,6 +314,9 @@ export class NotificationHub implements DbNotifier {
     HostOnlineRpcWaiter
   >();
   private readonly hostProtocolUpdateRetryRequests = new Set<string>();
+  private readonly daemonSessionRetirementListeners = new Set<
+    (sessionId: string) => void
+  >();
   private readonly changedMessageListeners = new Set<ChangedMessageListener>();
   private readonly pendingDaemonDisconnects = new Map<
     string,
@@ -945,6 +948,13 @@ export class NotificationHub implements DbNotifier {
     return true;
   }
 
+  onDaemonSessionRetired(listener: (sessionId: string) => void): () => void {
+    this.daemonSessionRetirementListeners.add(listener);
+    return () => {
+      this.daemonSessionRetirementListeners.delete(listener);
+    };
+  }
+
   closeDaemonSession(
     sessionId: string,
     reason: HostDaemonSessionCloseReason,
@@ -962,11 +972,14 @@ export class NotificationHub implements DbNotifier {
   ): void {
     this.cancelPendingDaemonDisconnect(sessionId);
     const entry = this.daemonSessions.get(sessionId);
-    if (!entry) {
-      return;
+    if (entry) {
+      entry.socket.close(1000, reason);
+      this.unregisterDaemon(sessionId);
     }
-    entry.socket.close(1000, reason);
-    this.unregisterDaemon(sessionId);
+    // A session can retire before its socket ever opens.
+    for (const listener of this.daemonSessionRetirementListeners) {
+      listener(sessionId);
+    }
   }
 
   scheduleDaemonDisconnect(

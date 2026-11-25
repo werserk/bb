@@ -14,7 +14,7 @@ import type { NotificationHub } from "./hub.js";
 
 interface HostSharedPortCoordinatorDeps {
   db: DbConnection;
-  hub: Pick<NotificationHub, "sendDaemonMessage">;
+  hub: Pick<NotificationHub, "sendDaemonMessage" | "onDaemonSessionRetired">;
 }
 
 interface SharedPortDeclaration {
@@ -87,7 +87,11 @@ export class HostSharedPortCoordinator {
   >();
   private readonly nextTunnelListeners = new Set<() => void>();
 
-  constructor(private readonly deps: HostSharedPortCoordinatorDeps) {}
+  constructor(private readonly deps: HostSharedPortCoordinatorDeps) {
+    deps.hub.onDaemonSessionRetired((sessionId) =>
+      this.clearHostConnectCapability(sessionId),
+    );
+  }
 
   recordHostConnectCapability(args: {
     hostId: string;
