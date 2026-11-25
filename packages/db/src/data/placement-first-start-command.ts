@@ -138,6 +138,8 @@ export function permitsPlacementCommand(
     return true;
   if (
     !proof ||
+    !r.nativeExecutionId ||
+    r.commandId !== r.nativeExecutionId ||
     typeof proof.readCurrentManifest !== "function" ||
     proof.eventId !== event.id ||
     sha256Digest(canonicalJsonBytes(body)) !== proof.requestDigest ||
