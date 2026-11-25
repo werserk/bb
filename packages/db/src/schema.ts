@@ -1,6 +1,17 @@
+import type {
+  PlacementBinding,
+  PlacementPhase,
+  PlacementReason,
+  AgentSelection,
+  WorkerObservation,
+  WorkerCustody,
+  JsonObject,
+  PlacementPermissionProvenance,
+} from "@bb/domain";
 import {
   blob,
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -8,6 +19,11 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import {
+  placementStepKinds,
+  placementEffectStates,
+  placementRetryStates,
+} from "@bb/domain";
 import { sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
@@ -561,6 +577,9 @@ export const environments = sqliteTable(
     teardownMessage: text("teardown_message"),
     resource: text("resource", { mode: "json" }).$type<JsonValue>(),
     ownerThreadId: text("owner_thread_id"),
+    ownerPlacementOperationId: text("owner_placement_operation_id").references(
+      (): AnySQLiteColumn => placementOperations.id,
+    ),
     attempt: integer("attempt").notNull().default(0),
     statusMessage: text("status_message"),
     pendingLog: text("pending_log").notNull().default(""),
@@ -579,6 +598,13 @@ export const environments = sqliteTable(
       table.path,
     ),
     index("environments_host_path_lookup_idx").on(table.hostId, table.path),
+    uniqueIndex("environments_owner_placement_idx")
+      .on(table.ownerPlacementOperationId)
+      .where(sql`${table.ownerPlacementOperationId} IS NOT NULL`),
+    check(
+      "environments_single_owner_check",
+      sql`${table.ownerThreadId} IS NULL OR ${table.ownerPlacementOperationId} IS NULL`,
+    ),
     uniqueIndex("environments_owner_thread_idx")
       .on(table.ownerThreadId)
       .where(sql`${table.ownerThreadId} IS NOT NULL`),
@@ -1001,6 +1027,10 @@ export const queuedThreadMessages = sqliteTable(
   "queued_thread_messages",
   {
     id: text("id").primaryKey(),
+    placementOperationId: text("placement_operation_id").references(
+      (): AnySQLiteColumn => placementOperations.id,
+    ),
+    placementFence: integer("placement_fence"),
     systemNotice: text("system_notice"),
     serviceTurn: text("service_turn", {
       mode: "json",
@@ -1054,6 +1084,13 @@ export const queuedThreadMessages = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
+    uniqueIndex("queued_thread_messages_placement_idx").on(
+      table.placementOperationId,
+    ),
+    check(
+      "queued_thread_messages_placement_check",
+      sql`${table.placementFence} IS NULL OR (${table.placementOperationId} IS NOT NULL AND ${table.placementFence} > 0)`,
+    ),
     index("queued_thread_messages_thread_created_idx").on(
       table.threadId,
       table.createdAt,
@@ -1451,3 +1488,441 @@ export const projectAttachmentBackfills = sqliteTable(
     error: text("error"),
   },
 );
+
+export const placementOwners = sqliteTable(
+  "placement_owner",
+  {
+    providerId: text("provider_id").primaryKey(),
+    ownerPluginId: text("owner_plugin_id").notNull(),
+    mode: text("mode", { enum: ["disabled", "managed"] })
+      .notNull()
+      .default("disabled"),
+    revision: integer("revision").notNull(),
+    available: integer("available", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (t) => [
+    check("placement_owner_mode", sql`${t.mode} IN ('disabled','managed')`),
+    check("placement_owner_revision", sql`${t.revision} > 0`),
+  ],
+);
+export const placementCounters = sqliteTable(
+  "placement_counter",
+  {
+    id: integer("id").primaryKey(),
+    acceptedSeq: integer("accepted_seq").notNull().default(0),
+    allocationSeq: integer("allocation_seq").notNull().default(0),
+  },
+  (t) => [
+    check(
+      "placement_counter_singleton",
+      sql`${t.id} = 1 AND ${t.acceptedSeq} >= 0 AND ${t.allocationSeq} >= 0`,
+    ),
+  ],
+);
+export const placementWorkspaces = sqliteTable(
+  "placement_workspace",
+  {
+    workspaceBindingId: text("workspace_binding_id").notNull(),
+    revision: integer("revision").notNull(),
+    workspaceDigest: text("workspace_digest").notNull(),
+    locationSnapshot: text("location_snapshot").notNull(),
+    canonicalDescriptor: text("canonical_descriptor").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceBindingId, t.revision] }),
+    uniqueIndex("placement_workspace_ref").on(
+      t.workspaceBindingId,
+      t.revision,
+      t.workspaceDigest,
+    ),
+  ],
+);
+export const placementOperations = sqliteTable(
+  "placement_operation",
+  {
+    id: text("id").primaryKey(),
+    principalScope: text("principal_scope").notNull(),
+    submissionKey: text("submission_key").notNull(),
+    acceptedSeq: integer("accepted_seq").notNull().unique(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    ownerPluginId: text("owner_plugin_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    workerId: text("worker_id"),
+    kind: text("kind", {
+      enum: ["independent", "continuation", "fork", "retry"],
+    }).notNull(),
+    requestedSelection: text("requested_selection", {
+      mode: "json",
+    }).$type<AgentSelection>(),
+    canonicalRequest: text("canonical_request").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    preparedRequest: text("prepared_request"),
+    preparedExecution: text("prepared_execution"),
+    attachmentReceipts: text("attachment_receipts"),
+    reservedThreadId: text("reserved_thread_id").unique(),
+    resolvedWorkspaceId: text("resolved_workspace_id"),
+    resolvedWorkspaceRevision: integer("resolved_workspace_revision"),
+    resolvedWorkspaceDigest: text("resolved_workspace_digest"),
+    phase: text("phase").$type<PlacementPhase>().notNull(),
+    revision: integer("revision").notNull().default(1),
+    reason: text("reason").$type<PlacementReason>(),
+    failedStage: text("failed_stage"),
+    binding: text("binding", { mode: "json" }).$type<PlacementBinding>(),
+    threadId: text("thread_id"),
+    reservationId: text("reservation_id"),
+    fence: integer("fence"),
+    queuedMessageId: text("queued_message_id").unique(),
+    clientTurnRequestId: text("client_turn_request_id"),
+    cancelRequested: integer("cancel_requested", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    failedOperationId: text("failed_operation_id"),
+    sourceOperationId: text("source_operation_id"),
+    consentId: text("consent_id"),
+    retryDerivation: text("retry_derivation", {
+      mode: "json",
+    }).$type<JsonObject>(),
+    retryScheduleState: text("retry_schedule_state", {
+      enum: ["awaiting_scheduler", "queued"],
+    }),
+    sendAt: integer("send_at"),
+    schedulerRevision: integer("scheduler_revision"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("placement_operation_latest_request_idx").on(t.clientTurnRequestId),
+    uniqueIndex("placement_operation_submission").on(
+      t.principalScope,
+      t.submissionKey,
+    ),
+    index("placement_operation_pending").on(
+      t.ownerPluginId,
+      t.providerId,
+      t.phase,
+      t.acceptedSeq,
+      t.id,
+    ),
+    index("placement_operation_worker_pending").on(
+      t.workerId,
+      t.phase,
+      t.acceptedSeq,
+      t.id,
+    ),
+    foreignKey({
+      columns: [
+        t.resolvedWorkspaceId,
+        t.resolvedWorkspaceRevision,
+        t.resolvedWorkspaceDigest,
+      ],
+      foreignColumns: [
+        placementWorkspaces.workspaceBindingId,
+        placementWorkspaces.revision,
+        placementWorkspaces.workspaceDigest,
+      ],
+    }),
+    check(
+      "placement_operation_version",
+      sql`${t.schemaVersion} = 1 AND ${t.revision} > 0 AND ${t.acceptedSeq} > 0`,
+    ),
+    check(
+      "placement_operation_kind",
+      sql`${t.kind} IN ('independent','continuation','fork','retry')`,
+    ),
+    check(
+      "placement_operation_phase",
+      sql`${t.phase} IN ('accepted','materializing','pending','reserved','creating','queued','admitted','starting','active','completed','failed','cancel_requested','cancelled','unknown','refused')`,
+    ),
+    check(
+      "placement_operation_retry",
+      sql`(${t.kind} = 'retry' AND ${t.consentId} IS NOT NULL AND ${t.failedOperationId} IS NOT NULL AND ${t.retryScheduleState} IS NOT NULL AND ${t.schedulerRevision} IS NOT NULL AND ${t.retryScheduleState} IN ('awaiting_scheduler','queued') AND ${t.schedulerRevision} >= 0) OR (${t.kind} != 'retry' AND ${t.retryScheduleState} IS NULL AND ${t.schedulerRevision} IS NULL)`,
+    ),
+    check(
+      "placement_operation_reserved_thread",
+      sql`${t.reservedThreadId} IS NULL OR ${t.kind} IN ('independent','fork')`,
+    ),
+    check(
+      "placement_operation_workspace",
+      sql`(${t.resolvedWorkspaceId} IS NULL AND ${t.resolvedWorkspaceRevision} IS NULL AND ${t.resolvedWorkspaceDigest} IS NULL) OR (${t.resolvedWorkspaceId} IS NOT NULL AND ${t.resolvedWorkspaceRevision} IS NOT NULL AND ${t.resolvedWorkspaceDigest} IS NOT NULL)`,
+    ),
+  ],
+);
+export const placementWorkers = sqliteTable(
+  "placement_worker",
+  {
+    ownerPluginId: text("owner_plugin_id").notNull(),
+    workerId: text("worker_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    accountId: text("account_id").notNull(),
+    agentHostId: text("agent_host_id").notNull(),
+    generation: text("generation").notNull(),
+    providerVersion: text("provider_version").notNull(),
+    observationRevision: integer("observation_revision").notNull(),
+    policyRevision: integer("policy_revision").notNull(),
+    observation: text("observation", { mode: "json" })
+      .$type<WorkerObservation>()
+      .notNull(),
+    available: integer("available", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    slotState: text("slot_state", {
+      enum: [
+        "free",
+        "reserved",
+        "resident",
+        "active",
+        "reclaiming",
+        "maintenance",
+        "unknown",
+      ],
+    }).notNull(),
+    ownerOperationId: text("owner_operation_id"),
+    threadId: text("thread_id"),
+    fence: integer("fence").notNull().default(0),
+    lastAssignedSeq: integer("last_assigned_seq"),
+    reclaimOperationId: text("reclaim_operation_id"),
+    reclaimSourceFence: integer("reclaim_source_fence"),
+    fenceLock: text("fence_lock", { mode: "json" }).$type<
+      NonNullable<WorkerCustody["lock"]>
+    >(),
+    nativeCustody: text("native_custody", {
+      mode: "json",
+    }).$type<WorkerCustody>(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.ownerPluginId, t.workerId] }),
+    index("placement_worker_provider").on(t.providerId, t.available),
+    check(
+      "placement_worker_slot",
+      sql`${t.slotState} IN ('free','reserved','resident','active','reclaiming','maintenance','unknown')`,
+    ),
+    check(
+      "placement_worker_owner",
+      sql`(${t.slotState} != 'free' OR (${t.ownerOperationId} IS NULL AND ${t.threadId} IS NULL AND ${t.reclaimOperationId} IS NULL)) AND (${t.slotState} NOT IN ('reserved','resident','active','reclaiming') OR ${t.ownerOperationId} IS NOT NULL) AND (${t.slotState} != 'reclaiming' OR (${t.reclaimOperationId} IS NOT NULL AND ${t.reclaimSourceFence} IS NOT NULL))`,
+    ),
+    check("placement_worker_fence", sql`${t.fence} >= 0`),
+  ],
+);
+export const placementBindings = sqliteTable(
+  "placement_binding",
+  {
+    threadId: text("thread_id")
+      .primaryKey()
+      .references(() => threads.id),
+    ownerPluginId: text("owner_plugin_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    accountId: text("account_id").notNull(),
+    workerId: text("worker_id").notNull(),
+    agentHostId: text("agent_host_id").notNull(),
+    generation: text("generation").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    workspaceRevision: integer("workspace_revision").notNull(),
+    workspaceDigest: text("workspace_digest").notNull(),
+    boundFromOperationId: text("bound_from_operation_id")
+      .notNull()
+      .unique()
+      .references(() => placementOperations.id),
+    sourceProviderThreadId: text("source_provider_thread_id"),
+    sourceCheckpoint: text("source_checkpoint"),
+    runtimeRootKey: text("runtime_root_key").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.workspaceId, t.workspaceRevision, t.workspaceDigest],
+      foreignColumns: [
+        placementWorkspaces.workspaceBindingId,
+        placementWorkspaces.revision,
+        placementWorkspaces.workspaceDigest,
+      ],
+    }),
+  ],
+);
+export const placementRetryConsents = sqliteTable(
+  "placement_retry_consent",
+  {
+    id: text("consent_id").primaryKey(),
+    actionId: text("action_id").notNull(),
+    principalScope: text("principal_scope").notNull(),
+    submissionKey: text("submission_key").notNull(),
+    failedOperationId: text("failed_operation_id")
+      .notNull()
+      .references(() => placementOperations.id),
+    bindingDigest: text("binding_digest").notNull(),
+    failedPayloadDigest: text("failed_payload_digest").notNull(),
+    allowedAttempts: integer("allowed_attempts").notNull().default(1),
+    consumedByOperationId: text("consumed_by_operation_id")
+      .unique()
+      .references(() => placementOperations.id),
+    revokedAt: integer("revoked_at"),
+    permissionProvenance: text("permission_provenance", { mode: "json" })
+      .$type<PlacementPermissionProvenance>()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("placement_consent_action").on(t.principalScope, t.actionId),
+    uniqueIndex("placement_consent_submission").on(
+      t.principalScope,
+      t.submissionKey,
+    ),
+    check("placement_consent_budget", sql`${t.allowedAttempts} = 1`),
+  ],
+);
+
+export const placementActionIdentities = sqliteTable(
+  "placement_action_identity",
+  {
+    op: text("op")
+      .notNull()
+      .primaryKey()
+      .references(() => placementOperations.id),
+    protocol: text("native_protocol"),
+    submissionUuid: text("submission_uuid").unique(),
+    authority: text("authority").notNull(),
+  },
+  (t) => [
+    check(
+      "placement_action_protocol",
+      sql`(${t.protocol} IS NULL)=(${t.submissionUuid} IS NOT NULL)`,
+    ),
+    check(
+      "placement_submission_normalized",
+      sql`${t.submissionUuid} IS NULL OR ${t.submissionUuid}=lower(${t.submissionUuid})`,
+    ),
+    check("placement_authority_json", sql`json_valid(${t.authority})`),
+  ],
+);
+export const placementSteps = sqliteTable(
+  "placement_step",
+  {
+    op: text("op")
+      .notNull()
+      .references(() => placementActionIdentities.op),
+    step: integer("step").notNull(),
+    kind: text("kind", { enum: placementStepKinds }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.op, t.step] }),
+    check("placement_step_number", sql`${t.step}>=0`),
+    check(
+      "placement_step_kind",
+      sql`${t.kind} IN ('compact','input','retry','answer','clear')`,
+    ),
+  ],
+);
+export const placementEffects = sqliteTable(
+  "placement_effect",
+  {
+    request: text("request").notNull().primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .unique()
+      .references(() => events.id),
+    thread: text("thread")
+      .notNull()
+      .references(() => threads.id),
+    root: text("root")
+      .notNull()
+      .references((): AnySQLiteColumn => placementEffects.request),
+    executionOwnerOperationId: text("execution_owner_operation_id")
+      .notNull()
+      .references(() => placementOperations.id),
+    nativeExecutionId: text("native_execution_id").unique(),
+    agentSessionId: text("agent_session_id"),
+    commandId: text("command_id").unique(),
+    binding: text("binding").notNull(),
+    fence: integer("fence").notNull(),
+    execution: text("execution").notNull(),
+    state: text("state", { enum: placementEffectStates }).notNull(),
+  },
+  (t) => [
+    check(
+      "placement_effect_command_tuple",
+      sql`(${t.commandId} IS NULL)=(${t.nativeExecutionId} IS NULL) AND (${t.commandId} IS NULL)=(${t.agentSessionId} IS NULL) AND (${t.commandId} IS NOT NULL OR ${t.state} IN ('prepared','refused_unsent','cancelled'))`,
+    ),
+    check("placement_effect_fence", sql`${t.fence}>0`),
+    check(
+      "placement_effect_state",
+      sql`${t.state} IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled')`,
+    ),
+  ],
+);
+export const placementAttempts = sqliteTable(
+  "placement_attempt",
+  {
+    op: text("op").notNull(),
+    step: integer("step").notNull(),
+    attempt: integer("attempt").notNull(),
+    queueId: text("queue_id"),
+    queueDigest: text("queue_digest"),
+    queueOrdinal: integer("queue_ordinal"),
+    request: text("request").references(() => placementEffects.request),
+    ordinal: integer("ordinal"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.op, t.step, t.attempt] }),
+    foreignKey({
+      columns: [t.op, t.step],
+      foreignColumns: [placementSteps.op, placementSteps.step],
+    }),
+    uniqueIndex("placement_attempt_request_member").on(t.request, t.ordinal),
+    uniqueIndex("placement_attempt_queue_member").on(t.queueId, t.queueOrdinal),
+    index("placement_attempt_queue").on(t.queueId),
+    check(
+      "placement_attempt_numbers",
+      sql`${t.attempt}>=0 AND (${t.queueOrdinal} IS NULL OR ${t.queueOrdinal}>=0) AND (${t.ordinal} IS NULL OR ${t.ordinal}>=0)`,
+    ),
+    check(
+      "placement_attempt_links",
+      sql`(${t.queueId} IS NULL)=(${t.queueDigest} IS NULL) AND (${t.queueId} IS NULL)=(${t.queueOrdinal} IS NULL) AND (${t.request} IS NULL)=(${t.ordinal} IS NULL)`,
+    ),
+  ],
+);
+export const placementRetryTargets = sqliteTable(
+  "placement_retry_target",
+  {
+    consent: text("consent")
+      .notNull()
+      .primaryKey()
+      .references(() => placementRetryConsents.id),
+    failedRequest: text("failed_request")
+      .notNull()
+      .references(() => placementEffects.request),
+    root: text("root")
+      .notNull()
+      .references(() => placementEffects.request),
+    groupDigest: text("group_digest").notNull(),
+    state: text("state", { enum: placementRetryStates }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("placement_one_retry")
+      .on(t.failedRequest)
+      .where(sql`${t.state} IN ('held','scheduled','spent')`),
+    uniqueIndex("placement_one_live_chain_retry")
+      .on(t.root)
+      .where(sql`${t.state} IN ('held','scheduled')`),
+    check(
+      "placement_retry_state",
+      sql`${t.state} IN ('held','scheduled','spent','revoked','expired','superseded')`,
+    ),
+  ],
+);
+export const placementGrantKeys = sqliteTable(
+  "placement_grant_key",
+  {
+    principal: text("principal").notNull(),
+    transportKey: text("transport_key").notNull(),
+    consent: text("consent")
+      .notNull()
+      .references(() => placementRetryConsents.id),
+  },
+  (t) => [primaryKey({ columns: [t.principal, t.transportKey] })],
+);
+
+export const placementSourceFacts = sqliteTable("placement_source_fact", {
+  source: text("source").primaryKey().notNull(),
+  revision: integer("revision").notNull(),
+  bytes: text("bytes").notNull(),
+});

@@ -1,0 +1,14 @@
+{
+  "baseSha": "f4ce7061642bb92aabadf32c3c38cb69a260ac97",
+  "sha256": "72653f0c591a51211bb313b824d3bea9c8d81c5509097bd008b71503350317f9",
+  "synthetic": true,
+  "command": "node --import tsx packages/db/test/fixtures/generate-placement-pre0153.mjs <checkout-at-base-sha>",
+  "tables": [
+    "hosts",
+    "projects",
+    "environments",
+    "threads",
+    "queued_thread_messages"
+  ],
+  "generation": "Baseline createConnection(':memory:') + migrate(), including actual fork DDL; synthetic SQL seed only."
+}
