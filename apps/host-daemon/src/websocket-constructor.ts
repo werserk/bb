@@ -1,7 +1,7 @@
 import { WebSocket as NodeWebSocket } from "ws";
 
 interface NodeWebSocketConstructor {
-  new (address: string | URL, protocols?: string | string[]): object;
+  new (address: string | URL, protocols?: string | string[]): NodeWebSocket;
 }
 
 export function createNodeWebSocketConstructor(
