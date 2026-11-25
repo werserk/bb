@@ -1,8 +1,16 @@
+import { appendStoredThreadEventInTransaction } from "../src/data/events.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { clientSubmissionQueueId, type TurnRequestEventData } from "@bb/domain";
+import {
+  canonicalJsonBytes,
+  sha256Digest,
+  turnRequestEventDataSchema,
+  threadScope,
+  clientSubmissionQueueId,
+  type TurnRequestEventData,
+} from "@bb/domain";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as S from "../src/index.js";
 import {
@@ -15,12 +23,14 @@ import {
   setupPlacement,
   candidate,
   fixtureAuthority,
+  observation,
   workspace,
 } from "./helpers/placement.js";
 import {
   appendFixture,
   claimFixture,
   fixtureExecution,
+  fixtureCommand,
 } from "./helpers/placement-dispatch.js";
 
 let db: S.DbConnection, other: S.DbConnection, dir: string;
@@ -327,5 +337,183 @@ it.each([-1, 0, 1])(
     );
     expect(db.select().from(queue).all()).toHaveLength(0);
     expect(db.select().from(threads).all()).toHaveLength(0);
+  },
+);
+it.each([
+  "valid",
+  "missing",
+  "event",
+  "context",
+  "provider",
+  "started",
+  "status",
+  "archive",
+  "input",
+  "new-digest",
+  "partial",
+  "stripped",
+  "manifest",
+  "profile",
+  "generation",
+  "session",
+  "root",
+  "rotate",
+  "throw",
+  "thenable",
+] as const)(
+  "revalidates committed cold-start facts before a standalone send claim (%s)",
+  (mode) => {
+    const { id, qid, threadId, explicit } = firstFixture(null);
+    const claimed = claimFixture(db, qid);
+    const { guard, receipt } = db.transaction(
+      (tx) =>
+        appendFixture(tx, id, claimed, requestId, nativeFirst, 1, explicit),
+      { behavior: "immediate" },
+    );
+    const command = {
+      ...guard,
+      ...fixtureCommand,
+      currentAgentSessionId: fixtureCommand.agentSessionId,
+    };
+    expect(S.preparePlacementExecutionCommand(db, command).kind).toBe(
+      "prepared",
+    );
+    const readBody = () =>
+      turnRequestEventDataSchema.parse(
+        JSON.parse(
+          other
+            .select()
+            .from(events)
+            .where(eq(events.id, receipt.eventId))
+            .get()!.data,
+        ),
+      );
+    const readDigest = () => sha256Digest(canonicalJsonBytes(readBody()));
+    const expectedDigest = readDigest();
+    const expectedManifest = {
+      launchProfileId: "fixture",
+      runtimeRootKey: "fixture-root",
+      agentSessionId: fixtureCommand.agentSessionId,
+    };
+    const registry = { current: { ...expectedManifest } };
+    const pinned = registry.current;
+    const proof: S.PlacementFirstStartClaim = {
+      eventId: receipt.eventId,
+      requestDigest: expectedDigest,
+      readCurrentManifest: () => {
+        if (mode === "throw") throw Error("fixture registry unavailable");
+        if (mode === "thenable")
+          return Object.assign(Promise.resolve(), expectedManifest);
+        return registry.current === pinned ? registry.current : null;
+      },
+    };
+    if (mode === "rotate") registry.current = { ...pinned };
+    if (mode === "session")
+      registry.current.agentSessionId = "new-registration";
+    if (mode === "root") registry.current.runtimeRootKey = "another-root";
+    if (mode === "manifest")
+      registry.current.launchProfileId = "different-profile";
+    if (mode === "event") proof.eventId = "another-event";
+    if (mode === "archive")
+      other
+        .update(threads)
+        .set({ archivedAt: 1 })
+        .where(eq(threads.id, threadId))
+        .run();
+    if (mode === "status")
+      other
+        .update(threads)
+        .set({ status: "idle" })
+        .where(eq(threads.id, threadId))
+        .run();
+    if (mode === "context") {
+      const context = JSON.parse(S.getThreadStartupContext(other, threadId)!);
+      other
+        .update(threads)
+        .set({
+          startupContext: JSON.stringify({ ...context, providerInput: [] }),
+        })
+        .where(eq(threads.id, threadId))
+        .run();
+    }
+    if (
+      mode === "input" ||
+      mode === "new-digest" ||
+      mode === "partial" ||
+      mode === "stripped"
+    ) {
+      const body = readBody();
+      if (mode === "partial") body.request.method = "turn/start";
+      else if (mode === "stripped") {
+        body.request.method = "turn/start";
+        body.target = { kind: "auto", expectedTurnId: null };
+        body.source = "tell";
+        other
+          .update(threads)
+          .set({ status: "idle", startupContext: null })
+          .where(eq(threads.id, threadId))
+          .run();
+      } else {
+        body.input = [{ type: "text", text: "changed", mentions: [] }];
+        body.inputGroups = [body.input];
+      }
+      other
+        .update(events)
+        .set({ data: JSON.stringify(body) })
+        .where(eq(events.id, receipt.eventId))
+        .run();
+      if (mode === "new-digest" || mode === "partial")
+        proof.requestDigest = readDigest();
+    }
+    if (mode === "profile" || mode === "generation") {
+      const w = observation({
+        revision: 2,
+        launchProfileId: mode === "profile" ? null : "fixture",
+      });
+      if (mode === "generation") {
+        w.generation = "next";
+        w.custody.generation = "next";
+        w.routes[0]!.agent.generation = "next";
+      }
+      expect(
+        S.observePlacementWorkers(other, {
+          ownerPluginId: "workers",
+          providerId: "claude",
+          expectedOwnerRevision: 2,
+          workers: [w],
+        }).kind,
+      ).toBe("observed");
+    }
+    if (mode === "started" || mode === "provider")
+      other.transaction((tx) =>
+        appendStoredThreadEventInTransaction(tx, {
+          threadId,
+          scope: threadScope(),
+          type: "client/thread/start",
+          providerThreadId: mode === "provider" ? "fixture-provider" : null,
+          data: {
+            direction: "outbound",
+            source: "spawn",
+            initiator: "user",
+            request: { method: "thread/start", params: {} },
+          },
+        }),
+      );
+    const args =
+      mode === "missing" || mode === "stripped"
+        ? command
+        : { ...command, firstStart: proof };
+    const first = S.claimPlacementExecutionCommand(db, args);
+    let simulatedTransport = 0;
+    if (first.kind === "won") simulatedTransport++;
+    expect(simulatedTransport).toBe(mode === "valid" ? 1 : 0);
+    expect(S.readPlacementDispatchReceipt(other, guard)?.state).toBe(
+      mode === "valid" ? "possibly_sent" : "prepared",
+    );
+    if (mode === "valid") {
+      db.$client.close();
+      db = S.createConnection(join(dir, "scratch.db"));
+      expect(S.claimPlacementExecutionCommand(db, args).kind).toBe("held");
+    }
   },
 );

@@ -1,4 +1,9 @@
 import {
+  permitsPlacementCommand,
+  type PlacementFirstStartClaim,
+} from "./placement-first-start-command.js";
+export type { PlacementFirstStartClaim } from "./placement-first-start-command.js";
+import {
   capturePlacementRejection,
   placementAttemptHasSource,
 } from "./placement-rejection.js";
@@ -724,7 +729,10 @@ export function preparePlacementExecutionCommand(
 }
 export function claimPlacementExecutionCommand(
   db: DbConnection,
-  args: CommandArgs & { currentAgentSessionId: string },
+  args: CommandArgs & {
+    currentAgentSessionId: string;
+    firstStart?: PlacementFirstStartClaim;
+  },
 ) {
   if (db.$client?.inTransaction !== false) return { kind: "refused" } as const;
   return db.transaction(
@@ -739,7 +747,11 @@ export function claimPlacementExecutionCommand(
       )
         return { kind: "refused" } as const;
       if (r.state === "possibly_sent") return { kind: "held" } as const;
-      if (!validateCommand(tx, args)) return { kind: "refused" } as const;
+      if (
+        !validateCommand(tx, args) ||
+        !permitsPlacementCommand(tx, r, args.firstStart)
+      )
+        return { kind: "refused" } as const;
       const changed = tx
         .update(effects)
         .set({ state: "possibly_sent" })
