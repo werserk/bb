@@ -3,6 +3,10 @@ import {
   getEnvironment,
   getLastStoredProviderThreadId,
   getStoredTurnRequestEventByRequestId,
+  hasStoredTerminalClientTurnRequestEvent,
+  readPlacementDispatchReceipt,
+  readPlacementAdmittedExecution,
+  refusePlacementBeforeHandoff,
   getThread,
   placementWorkspaceMatches,
   placementWorkspaces,
@@ -18,10 +22,13 @@ import {
   workspaceBindingRef,
   workspaceBindingSchema,
   type ClientTurnRequestId,
+  type WorkspacePurpose,
+  threadScope,
 } from "@bb/domain";
 import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
 import { and, eq } from "drizzle-orm";
 import { ApiError } from "../../errors.js";
+import { appendThreadEventInTransaction } from "./thread-events.js";
 import type { WorkSessionDeps } from "../../types.js";
 
 export const MANAGED_EXECUTION_UNSUPPORTED = "managed_execution_unsupported";
@@ -140,24 +147,93 @@ export function assertNativeExecutionCommand(
 }
 
 export async function dispatchManagedOrdinaryTurn(
-  deps: Pick<WorkSessionDeps, "db">,
+  deps: Pick<WorkSessionDeps, "db" | "hub"> & {
+    placementWorkspacePurpose?: WorkspacePurpose;
+  },
   committed: { threadId: string; requestId: ClientTurnRequestId },
 ): Promise<void> {
-  deps.db.transaction((tx) => {
-    if (!readManagedExecutionPlacement(tx, committed.threadId))
-      placementConflict();
-    if (!getStoredTurnRequestEventByRequestId(tx, committed)) {
-      throw new ApiError(
-        409,
-        "managed_request_missing",
-        "Committed native turn request was not found",
-        false,
-      );
-    }
-    // Correction-1 has no admitted dispatch reader or durable command-effect claim.
-    // A native event, even on the current worker, does not establish either fact.
-    throw new ManagedExecutionUnsupported();
+  const { refusal, sequence } = deps.db.transaction(
+    (tx) => {
+      const requested = getStoredTurnRequestEventByRequestId(tx, committed);
+      if (!requested)
+        throw new ApiError(
+          409,
+          "managed_request_missing",
+          "Committed native turn request was not found",
+          false,
+        );
+      const receipt = readPlacementDispatchReceipt(tx, committed);
+      if (!receipt || receipt.requestSequence !== requested.sequence)
+        throw new ApiError(
+          409,
+          "managed_receipt_missing",
+          "Native request has no matching committed dispatch receipt",
+          false,
+        );
+      if (
+        receipt.state !== "prepared" ||
+        hasStoredTerminalClientTurnRequestEvent(tx, committed)
+      ) {
+        throw new ApiError(
+          409,
+          "managed_execution_recorded",
+          "Managed dispatch requires reconciliation with its recorded outcome",
+          {
+            retryable: false,
+            details: { state: receipt.state },
+          },
+        );
+      }
+
+      const admitted =
+        deps.placementWorkspacePurpose &&
+        readPlacementAdmittedExecution(tx, {
+          ...committed,
+          purpose: deps.placementWorkspacePurpose,
+        });
+      const refusal = admitted
+        ? new ManagedExecutionUnsupported()
+        : new ApiError(
+            409,
+            "managed_admission_unavailable",
+            "Current managed execution admission is unavailable",
+            false,
+          );
+
+      // No live RPC on protocol 270. Commit a definite refusal and the matching native event together.
+      // An immediate writer lock orders this transaction with the final send claim.
+      const sequence = appendThreadEventInTransaction(tx, {
+        threadId: committed.threadId,
+        environmentId: getThread(tx, committed.threadId)?.environmentId ?? null,
+        type: "client/turn/rejected",
+        scope: threadScope(),
+        data: {
+          requestId: committed.requestId,
+          reason: refusal.body.code,
+          message: refusal.body.message,
+        },
+      });
+      const changed = refusePlacementBeforeHandoff(tx, {
+        ...committed,
+        executionOwnerOperationId: receipt.executionOwnerOperationId,
+        fence: receipt.fence,
+      });
+      if (!changed)
+        throw new ApiError(
+          409,
+          "managed_execution_recorded",
+          "Managed dispatch changed before refusal",
+          false,
+        );
+      return { refusal, sequence };
+    },
+    { behavior: "immediate" },
+  );
+  deps.hub.notifyThread(committed.threadId, ["events-appended"], {
+    eventTypes: ["client/turn/rejected"],
+    timelineSequence: sequence,
   });
+  throw refusal;
 }
 
 export function assertThreadToolSession(
