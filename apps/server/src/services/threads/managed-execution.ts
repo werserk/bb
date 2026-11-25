@@ -26,6 +26,7 @@ import {
 } from "@bb/domain";
 import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
 import { and, eq } from "drizzle-orm";
+import { readColdDispatchLab } from "./cold-dispatch-lab.js";
 import { ApiError } from "../../errors.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
 import type { WorkSessionDeps } from "../../types.js";
@@ -158,6 +159,16 @@ export async function dispatchManagedOrdinaryTurn(
       "Managed dispatch requires the admission transaction to have committed",
       false,
     );
+  const lab = readColdDispatchLab(deps.db, deps.placementWorkspacePurpose);
+  if (lab && (await lab(committed)) === "recorded") {
+    // The queue reads its own durable disposition. Guest acceptance cannot mark a native turn delivered.
+    throw new ApiError(
+      409,
+      "placement_dispatch_recorded",
+      "The synthetic command requires lifecycle reconciliation",
+      false,
+    );
+  }
   const { refusal, sequence } = deps.db.transaction(
     (tx) => {
       const receipt = readPlacementDispatchReceipt(tx, committed);
