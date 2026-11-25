@@ -1,6 +1,9 @@
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import {
+  createConnection,
   createThread,
+  type DbConnection,
   environments,
   hosts,
   placementBindings,
@@ -21,9 +24,11 @@ import {
 } from "@bb/domain";
 import type { PlacementRequestV1 } from "@bb/server-contract";
 import { describe, expect, it } from "vitest";
+import { createApp } from "../../src/server.js";
 import type {
   PlacementOwnerPolicy,
   PlacementPolicyDecision,
+  PlacementService,
 } from "../../src/services/placement/placement-service.js";
 import { resolvePendingThreadSessionOptions } from "../../src/services/threads/thread-session-options.js";
 import type { AppDeps, PlacementRuntimeRootIdentity } from "../../src/types.js";
@@ -52,17 +57,19 @@ const workspace = normalizeWorkspaceBinding({
   requiredCapabilities: [...workspaceCapabilities],
 });
 
-const identity = { workerId: "worker-a", generation: "gen-a" };
-
-function observation(): WorkerObservation {
+function observation(
+  workerId = "worker-a",
+  revision = 1,
+  custodyRevision = revision,
+): WorkerObservation {
   return {
-    workerId: "worker-a",
+    workerId,
     accountId: "account-a",
     agentHostId: "agent-host-a",
     generation: "gen-a",
     providerId: PROVIDER,
     providerVersion: "fixture",
-    revision: 1,
+    revision,
     admission: "enabled",
     connected: true,
     auth: "authenticated",
@@ -72,13 +79,13 @@ function observation(): WorkerObservation {
       fixtureRunId: RUN,
     },
     custody: {
-      revision: 1,
+      revision: custodyRevision,
       status: "free",
-      workerId: "worker-a",
+      workerId,
       agentHostId: "agent-host-a",
       generation: "gen-a",
       holder: null,
-      lock: { device: "1", inode: "2" },
+      lock: { device: "1", inode: workerId },
     },
     exclusion: { authorityPluginId: OWNER, revision: 1, status: "excluded" },
     quota: { revision: 1, freshness: "unknown", block: null },
@@ -101,7 +108,7 @@ function observation(): WorkerObservation {
         ),
       },
     ],
-    launchProfileId: fixtureLaunchProfileId(identity),
+    launchProfileId: fixtureLaunchProfileId({ workerId, generation: "gen-a" }),
   };
 }
 
@@ -152,6 +159,7 @@ const freeWorkers: PlacementOwnerPolicy = {
 function withAttach<T>(
   run: (harness: TestAppHarness) => Promise<T>,
   rootKey: AppDeps["placementRuntimeRootKey"] = fixtureRootKey,
+  workerIds: readonly string[] = ["worker-a"],
 ) {
   return withTestHarness(
     { placementPurpose: purpose, placementRuntimeRootKey: rootKey },
@@ -178,21 +186,27 @@ function withAttach<T>(
           updatedAt: 1,
         })
         .run();
-      await registerManaged(harness);
+      registerManagedOn(harness.placement, harness.db);
+      expect(
+        await observe(
+          harness.placement,
+          workerIds.map((workerId) => observation(workerId)),
+        ),
+      ).toBe("observed");
       return run(harness);
     },
   );
 }
 
-async function registerManaged(harness: TestAppHarness) {
-  const registration = harness.placement.registerOwner({
+function registerManagedOn(placement: PlacementService, db: DbConnection) {
+  const registration = placement.registerOwner({
     providerId: PROVIDER,
     ownerPluginId: OWNER,
     policy: freeWorkers,
   });
   const scope = { providerId: PROVIDER, ownerPluginId: OWNER };
   const mode = setOwnerMode(
-    harness.db,
+    db,
     {
       ...scope,
       expectedRevision: registration.ownerRevision,
@@ -205,13 +219,23 @@ async function registerManaged(harness: TestAppHarness) {
       ownerRevision: registration.ownerRevision,
     }),
   );
-  expect(mode.kind).toBe("updated");
-  expect(
-    await harness.placement.observeWorkers({
-      ...scope,
-      workers: [observation()],
-    }),
-  ).toBe("observed");
+  expect(["updated", "unchanged"]).toContain(mode.kind);
+}
+
+function observe(placement: PlacementService, workers: WorkerObservation[]) {
+  return placement.observeWorkers({
+    providerId: PROVIDER,
+    ownerPluginId: OWNER,
+    workers,
+  });
+}
+
+function slot(db: DbConnection, workerId: string) {
+  return db
+    .select()
+    .from(placementWorkers)
+    .where(eq(placementWorkers.workerId, workerId))
+    .get()!;
 }
 
 async function post(harness: TestAppHarness, path: string, body?: unknown) {
@@ -426,7 +450,7 @@ describe("placement attach", () => {
     });
   });
 
-  it("keeps the fence held without a thread when attach fails permanently", async () => {
+  it("refuses a permanently failed attach and frees its worker only on fresh free custody", async () => {
     const outage = attachOutage();
     await withAttach(async (harness) => {
       const parent = parentThread(harness);
@@ -443,46 +467,130 @@ describe("placement attach", () => {
         .where(eq(threads.id, parent.id))
         .run();
       await harness.placement.wake(PROVIDER);
-      await harness.placement.wake(PROVIDER);
-      const after = state(harness, id);
-      expect(after.record.phase).toBe("reserved");
-      expect(after.record.fence).not.toBeNull();
-      expect(after.worker).toMatchObject({
+      const refused = state(harness, id);
+      expect(refused.record).toMatchObject({
+        phase: "refused",
+        reason: "binding_changed",
+      });
+      expect(refused.worker).toMatchObject({
         slotState: "reserved",
         ownerOperationId: id,
+        fence: refused.record.fence,
       });
-      expect(after.threads.map((thread) => thread.id)).toEqual([parent.id]);
-      expect(after.queue).toHaveLength(0);
+      expect(refused.threads.map((thread) => thread.id)).toEqual([parent.id]);
+      expect(refused.queue).toHaveLength(0);
+
+      expect(
+        await observe(harness.placement, [observation("worker-a", 2, 1)]),
+      ).toBe("observed");
+      expect(state(harness, id).worker.slotState).toBe("reserved");
+      expect(
+        await observe(harness.placement, [observation("worker-a", 3, 2)]),
+      ).toBe("observed");
+      expect(state(harness, id).worker).toMatchObject({
+        slotState: "free",
+        ownerOperationId: null,
+      });
+
+      const later = await accept(harness, independent("after-refusal"));
+      await harness.placement.wake(PROVIDER);
+      expect(state(harness, later).record.phase).toBe("queued");
     }, outage.resolver);
   });
 
-  it("records cancel after attach without dispatching the bound input", async () => {
-    await withAttach(async (harness) => {
-      const id = await accept(harness, independent("cancel-after-attach"));
-      await harness.placement.wake(PROVIDER);
-      const bound = state(harness, id);
-      expect(bound.record.phase).toBe("queued");
+  it("cancels bound input before admission, holds the lease across reopen until fresh free custody, and leaves a sibling intact", async () => {
+    await withAttach(
+      async (harness) => {
+        const id = await accept(harness, independent("cancel-after-attach"));
+        const sibling = await accept(harness, independent("sibling"));
+        await harness.placement.wake(PROVIDER);
+        const bound = state(harness, id);
+        const siblingBound = state(harness, sibling).record;
+        expect(bound.record.phase).toBe("queued");
+        expect(siblingBound.phase).toBe("queued");
+        expect(bound.record.binding!.workerId).not.toBe(
+          siblingBound.binding!.workerId,
+        );
+        const worker = bound.record.binding!.workerId;
+        const siblingRow = bound.queue.find(
+          (row) => row.placementOperationId === sibling,
+        )!;
 
-      const cancelled = await post(
-        harness,
-        `/placement/operations/${id}/cancel`,
-      );
-      expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
-      await harness.placement.wake(PROVIDER);
-      const after = state(harness, id);
-      expect(after.record).toMatchObject({
-        phase: "cancel_requested",
-        cancelRequested: true,
-        fence: bound.record.fence,
-      });
-      expect(after.threads).toHaveLength(1);
-      expect(after.threads[0]!.status).toBe("pending");
-      expect(after.queue).toHaveLength(1);
-      expect(after.queue[0]!.claimToken).toBeNull();
-      expect(after.worker).toMatchObject({
-        slotState: "reserved",
-        ownerOperationId: id,
-      });
-    });
+        const cancelled = await post(
+          harness,
+          `/placement/operations/${id}/cancel`,
+        );
+        expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+        await harness.placement.wake(PROVIDER);
+        const after = state(harness, id);
+        expect(after.record).toMatchObject({
+          phase: "cancel_requested",
+          cancelRequested: true,
+          fence: bound.record.fence,
+        });
+        expect(after.queue).toEqual([siblingRow]);
+        expect(after.threads).toHaveLength(2);
+        expect(slot(harness.db, worker)).toMatchObject({
+          slotState: "reserved",
+          ownerOperationId: id,
+        });
+
+        const path = join(harness.config.dataDir, "cancel-reopen.sqlite");
+        await harness.db.$client.backup(path);
+        const db = createConnection(path);
+        try {
+          const { placement } = createApp({ ...harness.deps, db });
+          registerManagedOn(placement, db);
+          expect(
+            await observe(placement, [
+              observation("worker-a", 2, 1),
+              observation("worker-b", 2, 1),
+            ]),
+          ).toBe("observed");
+          expect(slot(db, worker)).toMatchObject({
+            slotState: "reserved",
+            ownerOperationId: id,
+          });
+          expect(
+            await observe(placement, [
+              observation("worker-a", 3, 2),
+              observation("worker-b", 3, 2),
+            ]),
+          ).toBe("observed");
+          expect(slot(db, worker)).toMatchObject({
+            slotState: "free",
+            ownerOperationId: null,
+          });
+          expect(readPlacementOperationRecord(db, id)!.phase).toBe("cancelled");
+          expect(readPlacementOperationRecord(db, sibling)).toMatchObject({
+            phase: "queued",
+            fence: siblingBound.fence,
+          });
+          expect(slot(db, siblingBound.binding!.workerId)).toMatchObject({
+            slotState: "reserved",
+            ownerOperationId: sibling,
+          });
+          expect(db.select().from(queuedThreadMessages).all()).toEqual([
+            siblingRow,
+          ]);
+
+          const later = await placement.accept(
+            { kind: "client" },
+            independent("after-cancel"),
+          );
+          await placement.wake(PROVIDER);
+          expect(
+            readPlacementOperationRecord(db, later.operation.id),
+          ).toMatchObject({
+            phase: "queued",
+            binding: { workerId: worker },
+          });
+        } finally {
+          db.$client.close();
+        }
+      },
+      fixtureRootKey,
+      ["worker-a", "worker-b"],
+    );
   });
 });
