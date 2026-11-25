@@ -189,20 +189,23 @@ export function createPlacementService(deps: PlacementDeps) {
   }
 
   function toAcceptance(operation: PlacementOperation): PlacementAcceptance {
-    if (operation.phase === "refused")
-      return { kind: "refused", operation, outcome: "not-created" };
-    if (operation.phase === "cancelled")
-      return { kind: "cancelled", operation };
     const thread =
-      operation.threadId !== null && PLACED_PHASES.has(operation.phase)
-        ? getThread(deps.db, operation.threadId)
-        : null;
-    return thread
-      ? {
+      operation.threadId === null
+        ? null
+        : (getThread(deps.db, operation.threadId) ?? null);
+    const placed = thread
+      ? ({
           kind: "placed",
           operation,
           thread: toThreadResponseFromThread(deps, { thread }),
-        }
+        } as const)
+      : null;
+    if (operation.phase === "refused")
+      return placed ?? { kind: "refused", operation, outcome: "not-created" };
+    if (operation.phase === "cancelled")
+      return { kind: "cancelled", operation };
+    return placed && PLACED_PHASES.has(operation.phase)
+      ? placed
       : { kind: "pending", operation };
   }
 
