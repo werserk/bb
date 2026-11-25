@@ -348,36 +348,46 @@ describe("placement attach", () => {
   });
 
   it("keeps the accepted schedule and session selections on the native thread and queue row", async () => {
-    await withAttach(async (harness) => {
-      const due = Date.now() + 3_600_000;
-      const id = await accept(
-        harness,
-        independent("scheduled", {
+    await withAttach(
+      async (harness) => {
+        const due = Date.now() + 3_600_000;
+        const id = await accept(
+          harness,
+          independent("scheduled", {
+            sendAt: due,
+            sessionOptions: { fixtureOption: "chosen" },
+          }),
+        );
+        await harness.placement.wake(PROVIDER);
+        const after = state(harness, id);
+        expect(after.record.phase).toBe("queued");
+        expect(after.queue).toHaveLength(1);
+        expect(after.queue[0]).toMatchObject({
+          placementOperationId: id,
           sendAt: due,
-          sessionOptions: { fixtureOption: "chosen" },
-        }),
-      );
-      await harness.placement.wake(PROVIDER);
-      const after = state(harness, id);
-      expect(after.record.phase).toBe("queued");
-      expect(after.queue).toHaveLength(1);
-      expect(after.queue[0]).toMatchObject({
-        placementOperationId: id,
-        sendAt: due,
-      });
-      expect(JSON.parse(after.queue[0]!.waitingOn!)).toEqual({ kind: "time" });
-      expect(
-        resolvePendingThreadSessionOptions(harness.db, after.threads[0]!.id),
-      ).toEqual({ fixtureOption: "chosen" });
+        });
+        expect(JSON.parse(after.queue[0]!.waitingOn!)).toEqual({
+          kind: "time",
+        });
+        expect(
+          resolvePendingThreadSessionOptions(harness.db, after.threads[0]!.id),
+        ).toEqual({ fixtureOption: "chosen" });
 
-      const unscheduled = await accept(harness, independent("unscheduled"));
-      await harness.placement.wake(PROVIDER);
-      expect(
-        state(harness, unscheduled).queue.find(
-          (row) => row.placementOperationId === unscheduled,
-        ),
-      ).toBeUndefined();
-    });
+        const elapsed = Date.now() - 1_000;
+        const dueId = await accept(
+          harness,
+          independent("already-due", { sendAt: elapsed }),
+        );
+        await harness.placement.wake(PROVIDER);
+        const dueRow = state(harness, dueId).queue.find(
+          (row) => row.placementOperationId === dueId,
+        )!;
+        expect(dueRow.sendAt).toBe(elapsed);
+        expect(JSON.parse(dueRow.waitingOn!)).toEqual({ kind: "time" });
+      },
+      fixtureRootKey,
+      ["worker-a", "worker-b"],
+    );
   });
 
   it("refuses inputs the native pending mapping does not carry before reserving", async () => {

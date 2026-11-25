@@ -213,8 +213,7 @@ function attachAndQueue(
             reasoningLevel: execution.reasoningLevel,
             permissionMode: execution.permissionMode,
             serviceTier: execution.serviceTier,
-            waitingOn:
-              sendAt !== null && sendAt > Date.now() ? { kind: "time" } : null,
+            waitingOn: sendAt === null ? null : { kind: "time" },
             sendAt,
             payload: { kind: "inline" },
             systemNotice: null,
