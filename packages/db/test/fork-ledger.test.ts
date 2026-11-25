@@ -260,14 +260,18 @@ function expectMigratedLedgers(db: DbConnection): void {
 
 describe("fork migration ledger", () => {
   it("keeps the production ledger identity of the fork migrations", () => {
-    expect(forkJournal.entries.map((entry) => [entry.tag, entry.when])).toEqual(
-      productionForkMigrations,
+    expect(
+      forkJournal.entries
+        .slice(0, productionForkMigrations.length)
+        .map((entry) => [entry.tag, entry.when]),
+    ).toEqual(productionForkMigrations);
+    expect(forkWhens.slice(0, productionForkMigrations.length)).toEqual(
+      productionForkMigrations.map(([, when]) => when),
     );
-    expect(forkWhens).toEqual(productionForkMigrations.map(([, when]) => when));
   });
 
   it("adopts legacy rows from the production shape and migrates its data", () => {
-    const db = legacyDatabase(forkMigrations.length);
+    const db = legacyDatabase(productionForkMigrations.length);
     try {
       migrate(db);
       expectMigratedLedgers(db);
@@ -348,7 +352,7 @@ describe("fork migration ledger", () => {
   });
 
   it("refuses a legacy row whose hash differs and moves nothing", () => {
-    const db = legacyDatabase(forkMigrations.length);
+    const db = legacyDatabase(productionForkMigrations.length);
     try {
       db.$client
         .prepare(
