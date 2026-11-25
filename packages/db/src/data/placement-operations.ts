@@ -4,7 +4,11 @@ import {
 } from "./placement-retry.js";
 import { actionIdentity, insertAction } from "./placement-action-receipts.js";
 import { placementActionIdentities as identities } from "../schema.js";
-import type { PlacementQuestionProtocol, PlacementAuthority } from "@bb/domain";
+import {
+  placementAuthoritySchema,
+  type PlacementQuestionProtocol,
+  type PlacementAuthority,
+} from "@bb/domain";
 import { createThreadId } from "../ids.js";
 import { readPlacementThreadBinding } from "./placement-bindings.js";
 import { randomUUID } from "node:crypto";
@@ -76,15 +80,41 @@ export function readPlacementOperationRecord(
     db.select().from(operations).where(eq(operations.id, id)).get() ?? null
   );
 }
+export function readPlacementSubmissionContext(
+  db: DbQueryConnection,
+  args: { principalScope: string; submissionKey: string },
+) {
+  const row = db
+    .select({
+      providerId: operations.providerId,
+      ownerPluginId: operations.ownerPluginId,
+      permission: sql<string>`json_extract(${identities.authority}, '$.permission')`,
+    })
+    .from(operations)
+    .innerJoin(identities, eq(identities.op, operations.id))
+    .where(
+      and(
+        eq(operations.principalScope, args.principalScope),
+        eq(operations.submissionKey, args.submissionKey),
+      ),
+    )
+    .get();
+  return row
+    ? {
+        ...row,
+        permission: placementAuthoritySchema.shape.permission.parse(
+          row.permission,
+        ),
+      }
+    : null;
+}
 export type PlacementAcceptanceResult =
   | { kind: "accepted"; operation: PlacementOperation }
   | { kind: "conflict" }
   | {
       kind: "refused";
       reason:
-        | "retry_consent_required"
-        | "binding_changed"
-        | "owner_unavailable";
+        "retry_consent_required" | "binding_changed" | "owner_unavailable";
     };
 export function acceptPlacementOperation(
   db: DbConnection,
@@ -147,7 +177,11 @@ export function acceptPlacementOperation(
         .from(owners)
         .where(eq(owners.providerId, args.providerId))
         .get();
-      if (!owner || owner.ownerPluginId !== args.ownerPluginId)
+      if (
+        !owner ||
+        owner.mode !== "managed" ||
+        owner.ownerPluginId !== args.ownerPluginId
+      )
         return { kind: "refused", reason: "owner_unavailable" };
       const intent = request.intent;
       const sourceRequest =
@@ -229,12 +263,11 @@ export function acceptPlacementOperation(
             intent.kind === "retry" || !owner.available
               ? "pending"
               : "accepted",
-          reason:
-            intent.kind === "retry"
+          reason: !owner.available
+            ? "owner_unavailable"
+            : intent.kind === "retry"
               ? "retry_scheduler_required"
-              : !owner.available
-                ? "owner_unavailable"
-                : null,
+              : null,
           reservedThreadId:
             intent.kind === "independent" || intent.kind === "fork"
               ? createThreadId()
