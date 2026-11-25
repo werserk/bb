@@ -1,3 +1,4 @@
+import { createNodeWebSocketConstructor } from "../../../apps/host-daemon/src/websocket-constructor.js";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
@@ -30,7 +31,8 @@ import { createLiveHostCommandExecution } from "../../../apps/server/src/service
 it("pins a claimed request to its original authenticated socket when the logical session reconnects", async () => {
   const server = await startTestServer();
   const hostId = "agent-host",
-    peers: WebSocket[] = [];
+    peers: InstanceType<ReturnType<typeof createNodeWebSocketConstructor>>[] =
+      [];
   try {
     setupPlacement(server.db);
     const op = acceptPrepared(server.db, "socket fixture");
@@ -68,15 +70,15 @@ it("pins a claimed request to its original authenticated socket when the logical
     const url = new URL("/internal/ws", server.baseUrl);
     url.protocol = "ws:";
     url.searchParams.set("sessionId", sessionId);
+    const FixtureSocket = createNodeWebSocketConstructor({
+      authorization: "Bearer " + key,
+    });
     async function connect() {
       const received: string[] = [];
-      const peer = new WebSocket(url, {
-        protocols: buildHostDaemonWebSocketProtocols(),
-        headers: { authorization: "Bearer " + key },
-      });
+      const peer = new FixtureSocket(url, buildHostDaemonWebSocketProtocols());
       peers.push(peer);
-      peer.addEventListener("message", (event) => {
-        const f = JSON.parse(String(event.data));
+      peer.on("message", (data) => {
+        const f = JSON.parse(String(data));
         if (f.type !== "host-rpc.request") return;
         received.push(f.requestId);
         peer.send(
@@ -160,6 +162,12 @@ it("pins a claimed request to its original authenticated socket when the logical
     expect(b.received).toContain(control);
     expect(a.received).not.toContain(suppressed);
     expect(b.received).not.toContain(suppressed);
+    console.info("registration replacement", {
+      sameSession: replacement.sessionId === admitted.sessionId,
+      originalFrames: a.received.length,
+      replacementFrames: b.received.length,
+      staleFrames: b.received.filter((id) => id === suppressed).length,
+    });
     expect(readPlacementDispatchReceipt(server.db, guard)?.state).toBe(
       "possibly_sent",
     );
