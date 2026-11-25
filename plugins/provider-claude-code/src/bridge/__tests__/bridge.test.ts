@@ -6480,6 +6480,83 @@ describe("bridge", () => {
       }
     });
   });
+  it("forwards MCP cancellation only for the outstanding JSON-RPC call", async () => {
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+    const live = createControlledClaudeQuery();
+    queryMock.mockReturnValue(live);
+    const threadId = "thread-cancel-tool";
+    const tool = {
+      name: "probe",
+      description: "Probe",
+      inputSchema: { type: "object" },
+    };
+    const client = new Client({ name: "cancel-test", version: "1" });
+    const controller = new AbortController();
+    try {
+      bridge.sendRequest(1, "thread/start", {
+        threadId,
+        cwd: "/tmp/worktree",
+        instructionMode: "append",
+        options: canonicalOptions({}),
+        dynamicTools: [tool],
+      });
+      await bridge.waitForResponse(1);
+      bridge.sendRequest(
+        12,
+        "turn/start",
+        canonicalTurnParams({
+          threadId,
+          input: [{ type: "text", text: "probe" }],
+        }),
+      );
+      await vi.waitFor(() => expect(queryMock).toHaveBeenCalled());
+      await readNextPrompt(getLatestQueryCall());
+      await bridge.waitForResponse(12);
+      const server = getLatestQueryOptions().mcpServers?.["bb-bridge"];
+      if (server?.type !== "sdk") throw new Error("Expected SDK MCP server");
+      const [local, remote] = InMemoryTransport.createLinkedPair();
+      await server.instance.connect(remote);
+      await client.connect(local);
+
+      const requests = () =>
+        bridge.messages.filter((m) => m.method === "item/tool/call");
+      const cancellations = () =>
+        bridge.messages.filter((m) => m.method === "notifications/cancelled");
+      const cancelled = client.callTool({ name: tool.name }, undefined, {
+        signal: controller.signal,
+      });
+      await vi.waitFor(() => expect(requests()).toHaveLength(1));
+      const ordinary = client.callTool({ name: tool.name });
+      await vi.waitFor(() => expect(requests()).toHaveLength(2));
+      const [first, second] = requests();
+      const rejection = expect(cancelled).rejects.toThrow();
+      controller.abort();
+      await rejection;
+      for (const id of [second.id, first.id]) {
+        handleLine(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              success: true,
+              contentItems: [{ type: "inputText", text: "ordinary result" }],
+            },
+          }),
+        );
+      }
+      expect((await ordinary).content).toEqual([
+        { type: "text", text: "ordinary result" },
+      ]);
+      expect(cancellations().map((m) => m.params)).toEqual([
+        { requestId: first.id },
+      ]);
+      expect(requests()).toHaveLength(2);
+    } finally {
+      await client.close();
+      await stopBridgeThread({ bridge, queries: [live], threadId });
+      bridge.restore();
+    }
+  });
   it.each([true, false])(
     "keeps MCP query origin across rollover (stopped=%s)",
     async (stopped) => {
