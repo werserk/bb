@@ -122,7 +122,23 @@ it("loads the authorized group only after both member checks and commits its ord
     });
     const handoff = vi.spyOn(runtime, "dispatchManagedOrdinaryTurn");
     try {
-      const app = createApp({ ...h.deps, db }).app;
+      const { app, placement } = createApp({ ...h.deps, db });
+      const expectUnavailable = async () => {
+        const changes = () =>
+          db.$client.prepare("SELECT total_changes()").pluck().get();
+        const before = changes();
+        const blocked = await f.send(app);
+        expect(blocked.status).toBe(409);
+        expect((await blocked.json()).code).toBe(
+          "placement_dispatch_unavailable",
+        );
+        expect(changes()).toBe(before);
+        expect(handoff).not.toHaveBeenCalled();
+      };
+      await expectUnavailable();
+      const owner = f.registerReopenedOwner(placement);
+      await expectUnavailable();
+      await owner.observeWorkers();
       statements.length = 0;
       const response = await f.send(app);
       const body = await response.json();
