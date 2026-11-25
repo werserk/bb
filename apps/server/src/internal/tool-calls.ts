@@ -1,3 +1,4 @@
+import { assertThreadToolSession } from "../services/threads/managed-execution.js";
 import {
   BB_ASK_QUESTION_TOOL,
   handleConversationQuestionToolCall,
@@ -83,13 +84,13 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         deps.db,
         payload.threadId,
       );
-      if (environment.hostId !== session.hostId) {
-        throw new ApiError(
-          403,
-          "invalid_request",
-          "Thread does not belong to the session host",
-        );
-      }
+      assertThreadToolSession(deps.db, {
+        threadId: thread.id,
+        environmentHostId: environment.hostId,
+        sessionHostId: session.hostId,
+        providerThreadId: payload.providerThreadId,
+        turnId: payload.turnId,
+      });
 
       if (
         payload.turnId === undefined &&

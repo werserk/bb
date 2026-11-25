@@ -1,3 +1,4 @@
+import { assertNativeThreadExecution } from "./managed-execution.js";
 import {
   environments,
   hasStoredSpawnAgentToolCall,
@@ -305,6 +306,7 @@ export async function buildThreadStartCommand(
   deps: LoggedWorkSessionDeps,
   args: ThreadStartCommandArgs,
 ): Promise<Extract<HostDaemonCommand, { type: "thread.start" }>> {
+  assertNativeThreadExecution(deps.db, args.thread.id);
   await deps.providerRegistry.whenRegistrationsSettled();
   const runtimeContext = await resolveThreadRuntimeCommandConfig(deps, {
     thread: args.thread,
@@ -399,6 +401,7 @@ export async function prepareTurnSubmitCommandPayload(
   deps: LoggedWorkSessionDeps,
   args: PrepareTurnSubmitCommandPayloadArgs,
 ): Promise<PreparedTurnSubmitCommandPayload> {
+  assertNativeThreadExecution(deps.db, args.thread.id);
   await deps.providerRegistry.whenRegistrationsSettled();
   const providerThreadId = requireProviderThreadId(
     args.providerThreadId ??
