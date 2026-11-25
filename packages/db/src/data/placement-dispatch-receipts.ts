@@ -362,6 +362,7 @@ export function commitPlacementOrdinaryDispatch(
       ),
     "partial or wrong claim",
   );
+  const admissionTime = Date.now();
   const head = rows[0]!;
   const firstStart =
     body.target.kind === "thread-start" &&
@@ -423,9 +424,9 @@ export function commitPlacementOrdinaryDispatch(
         row.claimedAt !== null &&
         (!row.waitingOn || (hasTimeWait(row) && row.sendAt !== null)) &&
         (row.sendAt === null ||
-          row.sendAt <= Date.now() ||
+          row.sendAt <= admissionTime ||
           (args.explicitFirstSend && row.id === head.id)) &&
-        (row.editHeldUntil === null || row.editHeldUntil <= Date.now()),
+        (row.editHeldUntil === null || row.editHeldUntil <= admissionTime),
       "row is held or not due",
     );
     requireReceipt(

@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { clientSubmissionQueueId, type TurnRequestEventData } from "@bb/domain";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as S from "../src/index.js";
 import {
+  threads,
   placementEffects,
   queuedThreadMessages as queue,
   events,
@@ -36,7 +37,7 @@ afterEach(() => {
   other.$client.close();
   rmSync(dir, { force: true, recursive: true });
 });
-function firstFixture(sendAt: number | null) {
+function firstFixture(sendAt: number | null, timeWait = sendAt !== null) {
   const input = [{ type: "text" as const, text: "fixture", mentions: [] }];
   const environment = { type: "reuse" as const, environmentId: "env" };
   const request = {
@@ -117,7 +118,7 @@ function firstFixture(sendAt: number | null) {
             requestedBy: null,
             systemNotice: null,
             sendAt,
-            waitingOn: sendAt === null ? null : { kind: "time" },
+            waitingOn: timeWait ? { kind: "time" } : null,
             payload: { kind: "inline" },
           });
         },
@@ -279,5 +280,52 @@ it.each(["due", "future", "cleared"] as const)(
         mode === "future" ? sendAt : null,
       );
     }
+  },
+);
+it.each([
+  { offset: -1, timeWait: true, early: false, allowed: true },
+
+  { offset: 0, timeWait: true, early: false, allowed: true },
+  { offset: 1, timeWait: true, early: false, allowed: false },
+
+  { offset: 1, timeWait: true, early: true, allowed: true },
+])(
+  "applies the trusted admission clock to offset $offset, timeWait=$timeWait, explicit=$early",
+  ({ offset, timeWait, early, allowed }) => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      const { id, qid, explicit } = firstFixture(now + offset, timeWait);
+      expect(S.getQueuedThreadMessage(db, qid)?.sendAt).toBe(now + offset);
+      const claims = claimFixture(db, qid);
+      const commit = () =>
+        db.transaction((tx) =>
+          appendFixture(
+            tx,
+            id,
+            claims,
+            requestId,
+            nativeFirst,
+            1,
+            early ? explicit : undefined,
+          ),
+        );
+      if (allowed) expect(commit().receipt.request).toBe(requestId);
+      else expect(commit).toThrow(S.PlacementDispatchConflictError);
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);
+
+it.each([-1, 0, 1])(
+  "native insertion preserves the SQL time marker for every non-null schedule (%i)",
+  (offset) => {
+    const now = Date.now();
+    expect(() => firstFixture(now + offset, false)).toThrow(
+      /queued_thread_messages_schedule_check/,
+    );
+    expect(db.select().from(queue).all()).toHaveLength(0);
+    expect(db.select().from(threads).all()).toHaveLength(0);
   },
 );
