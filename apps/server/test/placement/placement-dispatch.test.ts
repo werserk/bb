@@ -761,11 +761,19 @@ describe("placement dispatch", () => {
           }).kind,
         ).toBe("updated");
         if (cleared) {
-          h.db
-            .update(queuedThreadMessages)
-            .set({ sendAt: null, waitingOn: null })
-            .where(eq(queuedThreadMessages.id, future.id))
-            .run();
+          const edited = await h.app.request(
+            "/api/v1/threads/" + threadId + "/queued-messages/" + future.id,
+            {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                sendAt: null,
+                expectedUpdatedAt: getQueuedThreadMessage(h.db, future.id)!
+                  .updatedAt,
+              }),
+            },
+          );
+          expect(edited.status).toBe(200);
         }
         const suffix = [future.id, tail.id].map((id) =>
           getQueuedThreadMessage(h.db, id),
@@ -896,6 +904,79 @@ describe("placement dispatch", () => {
         expect(
           listQueuedThreadCommands(h, "thread.start", threadId),
         ).toHaveLength(0);
+      });
+    },
+  );
+
+  it.each(["at deadline", "after deadline", "other wait"] as const)(
+    "admits a schedule already due when the pending thread attaches (%s)",
+    async (variant) => {
+      await withDispatch(async (h, send) => {
+        const acceptedAt = Date.now(),
+          sendAt = acceptedAt + 60000;
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(acceptedAt);
+          let ready = false;
+          const available = freeWorkers();
+          await registerManaged(h, {
+            evaluate: (ctx) => (ready ? available : waiting).evaluate(ctx),
+          });
+          const id = await accept(h, "delayed attach", "due", { sendAt });
+          await h.placement.wake(PROVIDER);
+          expect(placed(h, id).record.threadId).toBeNull();
+          vi.setSystemTime(sendAt + (variant === "at deadline" ? 0 : 1));
+          ready = true;
+          await h.placement.wake(PROVIDER);
+          const record = placed(h, id).record;
+          const threadId = record.threadId!,
+            head = record.queuedMessageId!;
+          expect(getQueuedThreadMessage(h.db, head)).toMatchObject({
+            sendAt,
+            waitingOn: null,
+          });
+          if (variant === "other wait") {
+            h.db
+              .update(queuedThreadMessages)
+              .set({ waitingOn: JSON.stringify({ kind: "interaction" }) })
+              .where(eq(queuedThreadMessages.id, head))
+              .run();
+          }
+          await runQueuedMessageDispatch(h.deps, {
+            kind: "time-reached",
+            now: Date.now(),
+          });
+          expect(listEvents(h.db, { threadId })).toHaveLength(0);
+          const response = await send(threadId, head, "local");
+          if (variant === "other wait") {
+            expect(response.body.code).toBe("placement_dispatch_unavailable");
+            expect(getQueuedThreadMessage(h.db, head)).toMatchObject({
+              sendAt,
+              claimToken: null,
+              waitingOn: JSON.stringify({ kind: "interaction" }),
+            });
+            expect(listEvents(h.db, { threadId })).toHaveLength(0);
+            expect(h.db.select().from(placementEffects).all()).toHaveLength(0);
+          } else {
+            expect(response.body).toMatchObject({
+              code: "managed_execution_unsupported",
+              details: {
+                state: "refused_unsent",
+                sourceQueuedMessageIds: [head],
+              },
+            });
+            expect(listEvents(h.db, { threadId }).map((e) => e.type)).toEqual([
+              "client/turn/requested",
+              "client/turn/rejected",
+            ]);
+            expect(getQueuedThreadMessage(h.db, head)).toBeNull();
+          }
+          expect(
+            listQueuedThreadCommands(h, "thread.start", threadId),
+          ).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
       });
     },
   );
