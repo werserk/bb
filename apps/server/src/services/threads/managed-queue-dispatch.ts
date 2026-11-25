@@ -4,6 +4,9 @@ import {
   placementPreparedGroups,
   noopNotifier,
   queuedThreadMessages,
+  placementActionIdentities,
+  placementAttempts,
+  placementOperations,
   readPlacementOperationRecord,
   releaseQueuedMessageClaim,
   type PlacementGroupFairnessError,
@@ -37,7 +40,7 @@ import {
   type WorkspacePurpose,
   type PermissionEscalation,
 } from "@bb/domain";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { MANAGED_EXECUTION_UNSUPPORTED } from "./managed-execution.js";
 import type { AppDeps, PlacementSendScope } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -55,25 +58,74 @@ function missingQueueEntry(): never {
   throw new ApiError(404, "invalid_request", "Queued message not found");
 }
 
-function assertMemberScope(
+// Request and queue keys identify the entire group, including siblings reached
+// only through a consumed qsub. Only ownership metadata leaves this query.
+function readQueueMemberOwners(
   db: DbQueryConnection,
-  op: string | null,
+  queueId: string,
+  marker?: string,
+) {
+  const requests = db
+    .select({ request: placementAttempts.request })
+    .from(placementAttempts)
+    .where(eq(placementAttempts.queueId, queueId));
+  const members = db
+    .select({ op: placementAttempts.op })
+    .from(placementAttempts)
+    .where(
+      or(
+        eq(placementAttempts.queueId, queueId),
+        inArray(placementAttempts.request, requests),
+      ),
+    );
+  return db
+    .select({
+      op: placementActionIdentities.op,
+      threadId: placementOperations.threadId,
+      principal: sql<string>`json_extract(${placementActionIdentities.authority}, '$.principal')`,
+      actor: sql<string>`json_extract(${placementActionIdentities.authority}, '$.actor')`,
+    })
+    .from(placementActionIdentities)
+    .innerJoin(
+      placementOperations,
+      eq(placementOperations.id, placementActionIdentities.op),
+    )
+    .where(
+      or(
+        inArray(placementActionIdentities.op, members),
+        marker === undefined
+          ? undefined
+          : eq(placementActionIdentities.op, marker),
+      ),
+    )
+    .all();
+}
+
+function assertQueueOwners(
+  owners: ReturnType<typeof readQueueMemberOwners>,
   scope: PlacementSendScope | null,
+  threadId: string,
+  marker?: string,
 ) {
   if (
-    !op ||
     !scope?.principal ||
     scope.identity !== "local-unverified" ||
-    scope.authority !== "local-input-parity"
+    scope.authority !== "local-input-parity" ||
+    !owners.length ||
+    (marker !== undefined && !owners.some((owner) => owner.op === marker))
   )
     missingQueueEntry();
-  const action = readPlacementActionReceipt(db, op);
-  if (
-    action?.authority.principal !== scope.principal ||
-    action.authority.actor !== scope.identity
-  )
-    missingQueueEntry();
-  return action;
+  for (const owner of owners) {
+    // An accepted action can be marked before a thread binding exists. The
+    // resident admission check below handles that live queue entry.
+    const unboundMarker = owner.threadId === null && owner.op === marker;
+    if (
+      (owner.threadId !== threadId && !unboundMarker) ||
+      owner.principal !== scope.principal ||
+      owner.actor !== scope.identity
+    )
+      missingQueueEntry();
+  }
 }
 
 // The native claim writer supplies the partition before changing any group edge or token.
@@ -90,9 +142,9 @@ export function checkManagedQueueGroup(
   if (!marked && (!thread || !threadRequiresPlacement(db, thread))) return;
   const scope = readScope?.() ?? null;
   for (const row of rows) {
-    assertMemberScope(db, row.placementOperationId, scope);
-    for (const member of readPlacementQueueAttempts(db, row.id))
-      assertMemberScope(db, member.op, scope);
+    if (!row.placementOperationId) missingQueueEntry();
+    const owners = readQueueMemberOwners(db, row.id, row.placementOperationId);
+    assertQueueOwners(owners, scope, first.threadId, row.placementOperationId);
   }
   if (!thread || !purpose || !readScope) placementDispatchUnavailable();
   const guard = readPlacementResidentGuard(db, thread.id, purpose);
@@ -282,11 +334,18 @@ export function managedOrdinaryRequest(
   readScope?: ReadPlacementScope,
 ) {
   const scope = readScope?.() ?? null;
+  for (const claim of args.claimed)
+    assertQueueOwners(
+      readQueueMemberOwners(tx, claim.id),
+      scope,
+      args.threadId,
+    );
   for (const claim of args.claimed) {
     const members = readPlacementQueueAttempts(tx, claim.id);
     for (const member of members) {
-      const action = assertMemberScope(tx, member.op, scope);
+      const action = readPlacementActionReceipt(tx, member.op);
       if (
+        !action ||
         action.authority.escalation !== escalation ||
         action.steps.length !== 1 ||
         action.steps[0]?.kind !== "input"
@@ -307,17 +366,14 @@ export function retainedManagedSend(
 ) {
   return db.transaction(
     (tx) => {
+      const owners = readQueueMemberOwners(tx, args.queuedMessageId);
+      if (!owners.length) return null;
+      assertQueueOwners(
+        owners,
+        args.readPlacementScope?.() ?? null,
+        args.threadId,
+      );
       const attempts = readPlacementQueueAttempts(tx, args.queuedMessageId);
-      if (!attempts.length) return null;
-      const scope = args.readPlacementScope?.() ?? null;
-      for (const member of attempts) {
-        if (
-          readPlacementOperationRecord(tx, member.op)?.threadId !==
-          args.threadId
-        )
-          missingQueueEntry();
-        assertMemberScope(tx, member.op, scope);
-      }
       const requestIds = new Set(attempts.map((member) => member.request));
       const id = attempts[0]?.request;
       if (!id || requestIds.size !== 1) placementDispatchUnavailable();
@@ -327,8 +383,6 @@ export function retainedManagedSend(
       };
       const receipt = readPlacementDispatchReceipt(tx, key);
       if (!receipt) missingQueueEntry();
-      for (const member of receipt.members)
-        assertMemberScope(tx, member.op, scope);
       if (receipt.liveEventId !== receipt.eventId)
         placementDispatchUnavailable();
       const stored = tx
