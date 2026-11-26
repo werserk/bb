@@ -25,6 +25,7 @@ export type ReleaseOutcome =
 export class Releaser {
   private timer: { cancel(): void } | null = null;
   private sweeping: Promise<void> | null = null;
+  private rerun = false;
 
   constructor(private readonly deps: ReleaseDeps) {}
 
@@ -65,13 +66,23 @@ export class Releaser {
   }
 
   sweep(): Promise<void> {
-    if (this.sweeping !== null) return this.sweeping;
-    const run = this.releasePending().finally(() => {
+    if (this.sweeping !== null) {
+      this.rerun = true;
+      return this.sweeping;
+    }
+    const run = this.releaseUntilSettled().finally(() => {
       this.sweeping = null;
       this.schedule();
     });
     this.sweeping = run;
     return run;
+  }
+
+  private async releaseUntilSettled(): Promise<void> {
+    do {
+      this.rerun = false;
+      await this.releasePending();
+    } while (this.rerun);
   }
 
   private async releasePending(): Promise<void> {

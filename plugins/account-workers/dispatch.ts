@@ -1,5 +1,5 @@
 import type { MessageDispatchHookContext, MessageDispatchHookDecision } from "@get-bb/plugin-sdk";
-import type { Binding } from "./bindings.js";
+import { isReleased, type Binding } from "./bindings.js";
 import { profileById } from "./profiles/index.js";
 
 export const READY_DEADLINE_MS = 60_000;
@@ -29,7 +29,7 @@ export function decideDispatch(
     if (now - thread.createdAt > READY_DEADLINE_MS) return reject("account-workers: this thread never got its workspace binding; spawn a new thread.");
     return wait("waiting for the workspace binding");
   }
-  if (record.releasedAt !== null) return reject(RELEASED_MESSAGE);
+  if (isReleased(record)) return reject(RELEASED_MESSAGE);
   const providerId = context.requestedExecution.providerId;
   if (!profileById(record.profile)?.providerIds.includes(providerId)) {
     return reject(`account-workers: this thread is bound for profile ${record.profile}; provider ${providerId} would run without its guards. Spawn a new thread for another provider.`);

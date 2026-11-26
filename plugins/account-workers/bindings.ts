@@ -82,6 +82,10 @@ export function canonicalPath(value: string): string {
   return path.resolve(value);
 }
 
+export function isReleased(binding: Binding): boolean {
+  return binding.releasedAt !== null || binding.cleanedAt !== null;
+}
+
 export class BindingStore {
   constructor(
     private readonly db: Database.Database,
@@ -142,7 +146,7 @@ export class BindingStore {
 
   byThread(threadId: string): Binding | null {
     const binding = this.recordByThread(threadId);
-    return binding !== null && binding.releasedAt === null ? binding : null;
+    return binding !== null && !isReleased(binding) ? binding : null;
   }
 
   recordByThread(threadId: string): Binding | null {
@@ -176,7 +180,7 @@ export class BindingStore {
     this.db
       .prepare(
         `UPDATE bindings SET workspace_host_id = ?, workspace_host_name = ?, root = ?,
-           instructions = ?, broken_reason = NULL, updated_at = ? WHERE thread_id = ? AND released_at IS NULL`,
+           instructions = ?, broken_reason = NULL, updated_at = ? WHERE thread_id = ? AND released_at IS NULL AND cleaned_at IS NULL`,
       )
       .run(
         target.workspaceHostId,
@@ -216,9 +220,9 @@ export class BindingStore {
       this.db
         .prepare(
           `UPDATE bindings SET released_at = NULL, release_due = NULL, release_reason = NULL, release_error = NULL,
-             updated_at = ? WHERE id = ? AND release_reason = 'archive' AND cleaned_at IS NULL`,
+             updated_at = ? WHERE id = ? AND release_reason = 'archive' AND cleaned_at IS NULL AND release_due > ?`,
         )
-        .run(this.now(), id).changes > 0
+        .run(this.now(), id, this.now()).changes > 0
     );
   }
 
@@ -227,7 +231,10 @@ export class BindingStore {
   }
 
   markCleaned(id: string): void {
-    this.set(id, "cleaned_at = ?, release_error = NULL", this.now());
+    const at = this.now();
+    this.db
+      .prepare("UPDATE bindings SET cleaned_at = ?, release_error = NULL, updated_at = ? WHERE id = ? AND released_at IS NOT NULL")
+      .run(at, at, id);
   }
 
   setReleaseError(id: string, error: string): void {

@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
+import { makeMessageDispatchHookContext } from "@get-bb/plugin-sdk/testing";
 import { BindingStore, type Binding } from "./bindings.js";
+import { decideDispatch } from "./dispatch.js";
 import { Releaser, type ThreadState } from "./release.js";
 
 let now: number;
@@ -119,6 +121,72 @@ describe("release", () => {
     releaser.retire(d, now + 30_000, "delete");
     expect(releaser.restore(d)).toBe(false);
     expect(store.byId(d.id)?.releaseReason).toBe("delete");
+  });
+
+  it("an unarchive while the worker deletes the scratch cannot revive the binding", async () => {
+    const b = bound("aw_0123456789abcdef", "t1");
+    let entered!: () => void;
+    const inFlight = new Promise<void>((resolve) => (entered = resolve));
+    let finish!: () => void;
+    hostAnswer = () => {
+      entered();
+      return new Promise((resolve) => (finish = () => resolve({ ok: true })));
+    };
+    releaser.retire(b, now + 30_000, "archive");
+    now += 30_001;
+    const sweep = releaser.sweep();
+    await inFlight;
+    expect(releaser.restore(b)).toBe(false);
+    finish();
+    await sweep;
+    const row = store.recordByThread("t1")!;
+    expect(row.releasedAt).not.toBeNull();
+    expect(row.cleanedAt).toBe(now);
+    expect(store.byThread("t1")).toBeNull();
+    const context = makeMessageDispatchHookContext({
+      thread: { id: "t1", originPluginId: "account-workers", createdAt: 0 },
+      requestedExecution: { providerId: "codex", model: null, reasoningLevel: null, serviceTier: null, permissionMode: null },
+    });
+    expect(decideDispatch("account-workers", context, row, now).decision.action).toBe("reject");
+  });
+
+  it("an unarchive at or after the due time leaves the binding released", async () => {
+    const b = bound();
+    releaser.retire(b, now + 30_000, "archive");
+    now += 30_000;
+    expect(releaser.restore(b)).toBe(false);
+    expect(store.byThread("t1")).toBeNull();
+    await releaser.sweep();
+    expect(store.byId(b.id)?.cleanedAt).toBe(now);
+  });
+
+  it("a sweep requested during a pass runs once more and releases a binding retired meanwhile", async () => {
+    const a = bound("aw_000000000000000a", "ta");
+    const late = bound("aw_000000000000000b", "tb");
+    let finish!: () => void;
+    let entered!: () => void;
+    const inFlight = new Promise<void>((resolve) => (entered = resolve));
+    hostAnswer = () => {
+      entered();
+      hostAnswer = () => ({ ok: true });
+      return new Promise((resolve) => (finish = () => resolve({ ok: true })));
+    };
+    releaser.retire(a, now, "unbind");
+    const first = releaser.sweep();
+    await inFlight;
+    releaser.retire(late, now, "abandoned");
+    const second = releaser.sweep();
+    finish();
+    await Promise.all([first, second]);
+    expect(store.byId(a.id)?.cleanedAt).toBe(now);
+    expect(store.byId(late.id)?.cleanedAt).toBe(now);
+  });
+
+  it("marking a binding cleaned needs a tombstone", () => {
+    const b = bound();
+    store.markCleaned(b.id);
+    expect(store.byId(b.id)?.cleanedAt).toBeNull();
+    expect(store.byThread("t1")?.id).toBe(b.id);
   });
 
   it("a failed release keeps the row with the error; the sweep leaves it for an explicit retry", async () => {

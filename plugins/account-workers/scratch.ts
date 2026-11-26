@@ -70,6 +70,9 @@ export async function releaseScratch(
   signal: AbortSignal = new AbortController().signal,
 ) {
   if (!BINDING_ID.test(input.bindingId)) throw new WorkspaceRefusal(`invalid binding id ${input.bindingId}`);
+  if (path.basename(input.scratchPath) !== input.bindingId) {
+    throw new WorkspaceRefusal(`scratch path does not belong to binding ${input.bindingId}`);
+  }
   const profile = knownProfile(input.profile);
   const { release } = profile;
   if (release !== undefined) {

@@ -71,7 +71,7 @@ A `message.dispatch` hook (`dispatch.ts`) decides every turn before it reaches a
 | Binding not ready | wait; after 60 s refuse, stop the thread and release the binding |
 | Ready binding | proceed |
 
-So the first session never starts before `spawn` has claimed the binding, and a released or provider-switched thread cannot start a turn. The user's **Send now** on a queued message skips hooks by BB design, and a disabled plugin runs no hook; both are owner overrides.
+So the first session never starts before `spawn` has claimed the binding, and a released or provider-switched thread cannot start a dispatched turn. Four paths skip the hook by BB design: the user's **Send now** on a queued message, the re-send of an **edited message**, **compaction** (both work on the existing conversation), and a **disabled plugin**, which runs no hook. On those paths `configure` still gives a released or provider-switched thread no workspace tools.
 
 ### Release
 
@@ -84,12 +84,12 @@ A binding ends in two steps (`release.ts`):
 |---|---|---|
 | `unbind` | now; refused while the thread runs ("stop it first") | at once |
 | `thread.archived` | now, reason `archive` | after BB's 30 s archive undo window |
-| `thread.unarchived` before the release | removed (undo keeps the binding) | none |
+| `thread.unarchived` before the tombstone is due | removed (undo keeps the binding) | none |
 | `thread.deleted` | now, reason `delete` (an unarchive cannot undo it) | after 30 s |
 | `threads.spawn` fails | now, reason `spawn-failed` | at once |
 | Binding never readied (hook, 60 s) | now, reason `abandoned`; the thread is stopped | when it is quiet |
 
-A timer for the next due tombstone, plus sweeps on plugin start, `list` and every `thread.idle`, run due releases. A failed release keeps the row with `release_error`; `list` shows it and `unbind` retries it (sweeps do not). An unarchived thread whose release already ran stays released.
+A timer for the next due tombstone, plus sweeps on plugin start, `list`, every `thread.idle` and every `thread.failed`, run due releases. A failed release keeps the row with `release_error`; `list` shows it and `unbind` retries it (sweeps do not). An unarchive at or after the due time leaves the thread released, so the undo and the worker release never overlap; a binding with `cleaned_at` counts as released even without a tombstone. A sweep asked for during a pass runs once more after it. `releaseScratch` refuses a scratch path whose last segment is not the binding id.
 
 ### Instructions
 
@@ -233,7 +233,7 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
 - **G5. Instruction refresh.** Workspace instructions are read at `spawn`/`rebind` and refresh in the agent at the next session.
 - **G6. Scratch cleanup.** Built in block 4 ([release](#release)): `unbind`, archive, delete and a failed spawn remove the scratch directory and the profile's writes outside it. Not built: a sweep of scratch directories that have no binding row (left by earlier blocks), and an automatic retry of a failed release. Binding ids stay fresh, so a scratch path is never reused (OpenCode keeps a per-directory instance).
 - **G7. Worker context reaches the workspace.** The agent runs with the worker user's instructions, memory and skill list in context (G2), and the workspace's `AGENTS.md` is quoted into its instructions. A workspace the owner does not control can ask the agent to write that context into a workspace file or pass it to `workspace_exec`, and so read it. The guard does not stop this: the workspace tools are the allowed path. Like G1, this is a precondition for foreign workspaces; options are a worker profile with no personal instructions or memory, or treating workspace instructions as untrusted and not loading them.
-- **G8. Provider switch.** Closed for dispatched turns in block 4: the dispatch hook refuses a turn whose provider is not one its binding's profile guards, so the new provider never starts in the scratch directory. `configure` also drops the tools. Left open: the user's Send now on a queued message skips hooks, and a disabled plugin runs none; either lets the new provider start with its own native tools in an empty directory on the worker. Supporting a switch would need a re-prepare.
+- **G8. Provider switch.** Closed for dispatched turns in block 4: the dispatch hook refuses a turn whose provider is not one its binding's profile guards, so the new provider never starts in the scratch directory. `configure` also drops the tools. Left open: the user's Send now on a queued message, the re-send of an edited message and compaction skip hooks, and a disabled plugin runs none; each lets the new provider start with its own native tools in an empty directory on the worker. Supporting a switch would need a re-prepare.
 - **G9. Codex hook trust lives in the worker's user config.** The trust entry is written outside the scratch directory. Codex writes the same file without a lock, so a Codex write between the profile's read and its rename is lost. The edit re-reads before the rename and retries; that narrows the window but does not close it. A later `provider-codex` seam that passes hook trust through `thread/start` (the session-flag layer) would remove the write, but that is a provider change. Release removes a binding's trust entry with the same edit ([release](#release)).
 - **G10. Codex gate scope.**
   - The canary runs at spawn only. It does not run on resume, or after a Codex update while a binding lives.

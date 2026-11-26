@@ -166,9 +166,13 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     );
     const abandoned = verdict.abandoned;
     if (abandoned !== undefined) {
-      releaser.retire(abandoned, Date.now(), "abandoned");
-      if (abandoned.threadId !== null) {
-        bb.sdk.threads.stop({ threadId: abandoned.threadId }).catch(() => undefined).finally(sweep);
+      try {
+        releaser.retire(abandoned, Date.now(), "abandoned");
+        if (abandoned.threadId !== null) {
+          bb.sdk.threads.stop({ threadId: abandoned.threadId }).catch(() => undefined).finally(sweep);
+        }
+      } catch (error) {
+        bb.log.error(`account-workers: retiring abandoned binding ${abandoned.id} failed: ${String(error)}`);
       }
     }
     return verdict.decision;
@@ -187,6 +191,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     if (record !== null && record.cleanedAt === null) releaser.retire(record, Date.now() + ARCHIVE_UNDO_MS, "delete");
   });
   bb.events.on("thread.idle", sweep);
+  bb.events.on("thread.failed", sweep);
 
   async function resolveMachine(idOrName: string, signal?: AbortSignal) {
     const hosts = await bb.sdk.hosts.list({ signal });

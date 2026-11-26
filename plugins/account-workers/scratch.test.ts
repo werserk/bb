@@ -151,8 +151,8 @@ describe("release", () => {
     try {
       await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
       await writeFile(path.join(base(), ID, "file"), "x");
-      expect(await releaseScratch({ bindingId: ID, profile: "probe", scratchPath: "/stored/path" })).toEqual({});
-      expect(seen).toEqual([`release /stored/path ${ID}`]);
+      expect(await releaseScratch({ bindingId: ID, profile: "probe", scratchPath: `/stored/${ID}` })).toEqual({});
+      expect(seen).toEqual([`release /stored/${ID} ${ID}`]);
       expect(await readdir(base())).toEqual([]);
     } finally {
       undo();
@@ -160,7 +160,7 @@ describe("release", () => {
   });
 
   it("is a no-op for a scratch entry that is already gone", async () => {
-    await expect(releaseScratch({ bindingId: ID, profile: "claude", scratchPath: "/gone" })).resolves.toEqual({});
+    await expect(releaseScratch({ bindingId: ID, profile: "claude", scratchPath: `/gone/${ID}` })).resolves.toEqual({});
   });
 
   it("refuses an id the server would not mint, before touching anything", async () => {
@@ -169,6 +169,28 @@ describe("release", () => {
       await expect(releaseScratch({ bindingId, profile: "claude", scratchPath: "/s" })).rejects.toThrow(WorkspaceRefusal);
     }
     expect(await readdir(base())).toEqual(["keep"]);
+  });
+
+  it("refuses a scratch path that does not end in the binding id, before touching anything", async () => {
+    const seen: string[] = [];
+    const undo = withProfile({
+      id: "probe",
+      providerIds: ["probe-provider"],
+      async prepare() {},
+      async release(ctx) {
+        seen.push(ctx.scratchDir);
+      },
+    });
+    try {
+      await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
+      for (const scratchPath of ["/home/user/project", `/s/${ID}/..`, `/s/${ID}x`]) {
+        await expect(releaseScratch({ bindingId: ID, profile: "probe", scratchPath })).rejects.toThrow(WorkspaceRefusal);
+      }
+      expect(seen).toEqual([]);
+      expect(await readdir(base())).toEqual([ID]);
+    } finally {
+      undo();
+    }
   });
 
   it("a symlinked entry loses only the link", async () => {
@@ -193,7 +215,7 @@ describe("release", () => {
     });
     try {
       await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
-      await expect(releaseScratch({ bindingId: ID, profile: "probe", scratchPath: "/s" })).rejects.toThrow("profile probe release failed: config locked");
+      await expect(releaseScratch({ bindingId: ID, profile: "probe", scratchPath: `/s/${ID}` })).rejects.toThrow("profile probe release failed: config locked");
       expect(await readdir(base())).toEqual([ID]);
     } finally {
       undo();
