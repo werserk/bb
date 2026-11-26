@@ -2120,6 +2120,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
