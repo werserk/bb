@@ -29,7 +29,7 @@ Several isolated accounts of a provider on one worker host; each thread gets one
 ## Later
 
 - Hardening: failure modes, reconnects, limits, audit.
-- Workspace hosts the owner does not control: close [G1](architecture.md#open-points) first (the BB API trusts whoever can reach it).
+- Workspace hosts the owner does not control: close [G1 and G7](architecture.md#open-points) first (the BB API trusts whoever can reach it; worker context can be read back through the workspace).
 - Cloud mode without the owner's PC: the BB server runs elsewhere.
 - Workspace switch UX mid-conversation (the mechanism is rebinding, block 1).
 - Central key store.
