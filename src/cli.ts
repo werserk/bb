@@ -1,5 +1,3 @@
-import { createNativeCommands } from "./native-surface.js";
-import type { NativePool } from "./native-pool.js";
 import {
   createHostExclusionCommands,
   type HostExclusions,
@@ -259,7 +257,6 @@ export function registerPoolCli(
   config: AccountPoolConfigController,
   projectPriority: ProjectPriority,
   hostExclusions: HostExclusions,
-  nativePool?: NativePool,
 ): void {
   bb.cli.register(
     defineCli({
@@ -268,7 +265,6 @@ export function registerPoolCli(
         "Manage Claude and Codex accounts and inspect the Account Pooler hub",
       description: DESCRIPTION,
       commands: {
-        ...(nativePool ? createNativeCommands(nativePool) : {}),
         ...createProjectPriorityCommands(projectPriority),
         ...createHostExclusionCommands(hostExclusions),
         ping: cliCommand({

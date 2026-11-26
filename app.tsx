@@ -1,4 +1,3 @@
-import { NativeWorkers } from "./src/native-workers.js";
 import type { HostExclusionSummary } from "./src/host-exclusion.js";
 import { ACCOUNT_POOL_HOST_EXCLUSIONS_CHANGED } from "./src/realtime.js";
 import {
@@ -1393,7 +1392,6 @@ function AccountPoolSettings() {
                   }}
                 />
               </ConfigFieldRow>
-              <NativeWorkers />
               <div className="py-2.5">
                 <div className="text-sm text-foreground">Machine routing</div>
                 <p className="text-xs text-muted-foreground">

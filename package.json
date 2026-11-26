@@ -15,8 +15,7 @@
       "icon": "Layers"
     },
     "server": "./src/server.ts",
-    "app": "./app.tsx",
-    "host": "./src/native-host.ts"
+    "app": "./app.tsx"
   },
   "scripts": {
     "typecheck": "tsrs --noEmit",

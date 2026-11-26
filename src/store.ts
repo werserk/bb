@@ -1,4 +1,3 @@
-import { NATIVE_POOL_MIGRATION } from "./native-pool.js";
 import { HostExcludedError } from "./host-exclusion.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
@@ -784,6 +783,22 @@ export class PoolAffinityStore {
       .run(provider, accountId);
   }
 }
+
+// Retired native-cell tables (block C1, 2026-11-27). The cell code is gone, but this
+// statement stays byte-identical at its index: the SDK checks each applied migration by
+// index and hash, and keeping the tables lets the previous build open this store.
+// Never edit, drop or reuse it; append new migrations after it.
+export const NATIVE_POOL_MIGRATION = `
+CREATE TABLE native_policy (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, qualified INTEGER NOT NULL DEFAULT 0, qualification TEXT);
+INSERT INTO native_policy(id) VALUES(1);
+CREATE TABLE native_cell (id TEXT PRIMARY KEY, hostId TEXT NOT NULL UNIQUE, generation TEXT NOT NULL, label TEXT NOT NULL, workspace TEXT NOT NULL, sshTarget TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, qualified INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE native_intent (id TEXT PRIMARY KEY, submissionKey TEXT NOT NULL UNIQUE, projectId TEXT NOT NULL, input TEXT, digest TEXT NOT NULL, requestedCell TEXT, cellId TEXT, threadId TEXT, queueId TEXT, phase TEXT NOT NULL, detail TEXT);
+CREATE TABLE native_binding (threadId TEXT PRIMARY KEY, cellId TEXT NOT NULL REFERENCES native_cell(id), generation TEXT NOT NULL, intentId TEXT NOT NULL UNIQUE REFERENCES native_intent(id));
+CREATE TABLE native_slot (cellId TEXT PRIMARY KEY REFERENCES native_cell(id), intentId TEXT, threadId TEXT, phase TEXT NOT NULL DEFAULT 'free', epoch TEXT, observedAt INTEGER);
+CREATE TRIGGER native_binding_immutable_update BEFORE UPDATE ON native_binding BEGIN SELECT RAISE(ABORT,'Native binding is immutable'); END;
+CREATE TRIGGER native_binding_immutable_delete BEFORE DELETE ON native_binding BEGIN SELECT RAISE(ABORT,'Native binding is immutable'); END;
+CREATE TRIGGER native_cell_identity_immutable BEFORE UPDATE OF id,hostId,generation,workspace ON native_cell BEGIN SELECT RAISE(ABORT,'Native cell identity is immutable'); END;
+`;
 
 export const QUOTA_MIGRATIONS = [
   `CREATE TABLE account_quota (

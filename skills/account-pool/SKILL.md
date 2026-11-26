@@ -27,11 +27,3 @@ Inspect `bb provider-retry explain <thread-id> --json` for the last decision
 and `bb provider-retry status <thread-id> --json` for pending retries.
 
 For a tiny request through one specified local Claude account, use `bb pool ping <account-uuid> [--diagnostic] [--json]`; see the targeted ping section in the routing reference. It consumes quota and never fails over.
-
-## Native pool candidate
-
-The local native controller is disabled/unqualified by default. See
-`../../docs/NATIVE_POOL.md` for exact commands, local SDK provenance and remaining
-qualification gates. `bb pool native status|submit|reconcile|stop` share the UI's
-controller operations. Never reinterpret an unknown delivery as permission to
-resubmit or free a resident slot. No quota probes or provider login are involved.
