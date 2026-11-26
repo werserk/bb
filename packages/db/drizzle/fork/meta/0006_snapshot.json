@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
-  "prevId": "52fc633d-d1e3-4f3d-a0ee-26e8bda3269b",
+  "id": "ad56753c-8957-4bc4-8670-e1e4cd84bf35",
+  "prevId": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -919,6 +919,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "owner_placement_operation_id": {
+          "name": "owner_placement_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "attempt": {
           "name": "attempt",
           "type": "integer",
@@ -989,6 +996,14 @@
             "path"
           ],
           "isUnique": false
+        },
+        "environments_owner_placement_idx": {
+          "name": "environments_owner_placement_idx",
+          "columns": [
+            "owner_placement_operation_id"
+          ],
+          "isUnique": true,
+          "where": "\"environments\".\"owner_placement_operation_id\" IS NOT NULL"
         },
         "environments_owner_thread_idx": {
           "name": "environments_owner_thread_idx",
@@ -1063,11 +1078,29 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "environments_owner_placement_operation_id_placement_operation_id_fk": {
+          "name": "environments_owner_placement_operation_id_placement_operation_id_fk",
+          "tableFrom": "environments",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "owner_placement_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "environments_single_owner_check": {
+          "name": "environments_single_owner_check",
+          "value": "\"environments\".\"owner_thread_id\" IS NULL OR \"environments\".\"owner_placement_operation_id\" IS NULL"
+        }
+      }
     },
     "events": {
       "name": "events",
@@ -2258,6 +2291,1815 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "placement_action_identity": {
+      "name": "placement_action_identity",
+      "columns": {
+        "op": {
+          "name": "op",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "native_protocol": {
+          "name": "native_protocol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "submission_uuid": {
+          "name": "submission_uuid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "authority": {
+          "name": "authority",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_action_identity_submission_uuid_unique": {
+          "name": "placement_action_identity_submission_uuid_unique",
+          "columns": [
+            "submission_uuid"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "placement_action_identity_op_placement_operation_id_fk": {
+          "name": "placement_action_identity_op_placement_operation_id_fk",
+          "tableFrom": "placement_action_identity",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "op"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_action_protocol": {
+          "name": "placement_action_protocol",
+          "value": "(\"placement_action_identity\".\"native_protocol\" IS NULL)=(\"placement_action_identity\".\"submission_uuid\" IS NOT NULL)"
+        },
+        "placement_submission_normalized": {
+          "name": "placement_submission_normalized",
+          "value": "\"placement_action_identity\".\"submission_uuid\" IS NULL OR \"placement_action_identity\".\"submission_uuid\"=lower(\"placement_action_identity\".\"submission_uuid\")"
+        },
+        "placement_authority_json": {
+          "name": "placement_authority_json",
+          "value": "json_valid(\"placement_action_identity\".\"authority\")"
+        }
+      }
+    },
+    "placement_attempt": {
+      "name": "placement_attempt",
+      "columns": {
+        "op": {
+          "name": "op",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step": {
+          "name": "step",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "queue_id": {
+          "name": "queue_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "queue_digest": {
+          "name": "queue_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "queue_ordinal": {
+          "name": "queue_ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request": {
+          "name": "request",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_attempt_request_member": {
+          "name": "placement_attempt_request_member",
+          "columns": [
+            "request",
+            "ordinal"
+          ],
+          "isUnique": true
+        },
+        "placement_attempt_queue_member": {
+          "name": "placement_attempt_queue_member",
+          "columns": [
+            "queue_id",
+            "queue_ordinal"
+          ],
+          "isUnique": true
+        },
+        "placement_attempt_queue": {
+          "name": "placement_attempt_queue",
+          "columns": [
+            "queue_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "placement_attempt_request_placement_effect_request_fk": {
+          "name": "placement_attempt_request_placement_effect_request_fk",
+          "tableFrom": "placement_attempt",
+          "tableTo": "placement_effect",
+          "columnsFrom": [
+            "request"
+          ],
+          "columnsTo": [
+            "request"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_attempt_op_step_placement_step_op_step_fk": {
+          "name": "placement_attempt_op_step_placement_step_op_step_fk",
+          "tableFrom": "placement_attempt",
+          "tableTo": "placement_step",
+          "columnsFrom": [
+            "op",
+            "step"
+          ],
+          "columnsTo": [
+            "op",
+            "step"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "placement_attempt_op_step_attempt_pk": {
+          "columns": [
+            "op",
+            "step",
+            "attempt"
+          ],
+          "name": "placement_attempt_op_step_attempt_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_attempt_numbers": {
+          "name": "placement_attempt_numbers",
+          "value": "\"placement_attempt\".\"attempt\">=0 AND (\"placement_attempt\".\"queue_ordinal\" IS NULL OR \"placement_attempt\".\"queue_ordinal\">=0) AND (\"placement_attempt\".\"ordinal\" IS NULL OR \"placement_attempt\".\"ordinal\">=0)"
+        },
+        "placement_attempt_links": {
+          "name": "placement_attempt_links",
+          "value": "(\"placement_attempt\".\"queue_id\" IS NULL)=(\"placement_attempt\".\"queue_digest\" IS NULL) AND (\"placement_attempt\".\"queue_id\" IS NULL)=(\"placement_attempt\".\"queue_ordinal\" IS NULL) AND (\"placement_attempt\".\"request\" IS NULL)=(\"placement_attempt\".\"ordinal\" IS NULL)"
+        }
+      }
+    },
+    "placement_binding": {
+      "name": "placement_binding",
+      "columns": {
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_plugin_id": {
+          "name": "owner_plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_host_id": {
+          "name": "agent_host_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_revision": {
+          "name": "workspace_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_digest": {
+          "name": "workspace_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bound_from_operation_id": {
+          "name": "bound_from_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_provider_thread_id": {
+          "name": "source_provider_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_checkpoint": {
+          "name": "source_checkpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtime_root_key": {
+          "name": "runtime_root_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_binding_bound_from_operation_id_unique": {
+          "name": "placement_binding_bound_from_operation_id_unique",
+          "columns": [
+            "bound_from_operation_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "placement_binding_thread_id_threads_id_fk": {
+          "name": "placement_binding_thread_id_threads_id_fk",
+          "tableFrom": "placement_binding",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_binding_bound_from_operation_id_placement_operation_id_fk": {
+          "name": "placement_binding_bound_from_operation_id_placement_operation_id_fk",
+          "tableFrom": "placement_binding",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "bound_from_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_binding_workspace_id_workspace_revision_workspace_digest_placement_workspace_workspace_binding_id_revision_workspace_digest_fk": {
+          "name": "placement_binding_workspace_id_workspace_revision_workspace_digest_placement_workspace_workspace_binding_id_revision_workspace_digest_fk",
+          "tableFrom": "placement_binding",
+          "tableTo": "placement_workspace",
+          "columnsFrom": [
+            "workspace_id",
+            "workspace_revision",
+            "workspace_digest"
+          ],
+          "columnsTo": [
+            "workspace_binding_id",
+            "revision",
+            "workspace_digest"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "placement_counter": {
+      "name": "placement_counter",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_seq": {
+          "name": "accepted_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "allocation_seq": {
+          "name": "allocation_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_counter_singleton": {
+          "name": "placement_counter_singleton",
+          "value": "\"placement_counter\".\"id\" = 1 AND \"placement_counter\".\"accepted_seq\" >= 0 AND \"placement_counter\".\"allocation_seq\" >= 0"
+        }
+      }
+    },
+    "placement_effect": {
+      "name": "placement_effect",
+      "columns": {
+        "request": {
+          "name": "request",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_sequence": {
+          "name": "request_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "live_event_id": {
+          "name": "live_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rejection_event_id": {
+          "name": "rejection_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "live_rejection_event_id": {
+          "name": "live_rejection_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rejection_reason": {
+          "name": "rejection_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "thread": {
+          "name": "thread",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root": {
+          "name": "root",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "execution_owner_operation_id": {
+          "name": "execution_owner_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "native_execution_id": {
+          "name": "native_execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agent_session_id": {
+          "name": "agent_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "command_id": {
+          "name": "command_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "binding": {
+          "name": "binding",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fence": {
+          "name": "fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "execution": {
+          "name": "execution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_effect_event_id_unique": {
+          "name": "placement_effect_event_id_unique",
+          "columns": [
+            "event_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_live_event_id_unique": {
+          "name": "placement_effect_live_event_id_unique",
+          "columns": [
+            "live_event_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_rejection_event_id_unique": {
+          "name": "placement_effect_rejection_event_id_unique",
+          "columns": [
+            "rejection_event_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_live_rejection_event_id_unique": {
+          "name": "placement_effect_live_rejection_event_id_unique",
+          "columns": [
+            "live_rejection_event_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_native_execution_id_unique": {
+          "name": "placement_effect_native_execution_id_unique",
+          "columns": [
+            "native_execution_id"
+          ],
+          "isUnique": true
+        },
+        "placement_effect_command_id_unique": {
+          "name": "placement_effect_command_id_unique",
+          "columns": [
+            "command_id"
+          ],
+          "isUnique": true
+        },
+        "placement_active_effect_owner_fence": {
+          "name": "placement_active_effect_owner_fence",
+          "columns": [
+            "execution_owner_operation_id",
+            "fence"
+          ],
+          "isUnique": false,
+          "where": "\"placement_effect\".\"state\" IN ('possibly_sent','prepared')"
+        }
+      },
+      "foreignKeys": {
+        "placement_effect_live_event_id_events_id_fk": {
+          "name": "placement_effect_live_event_id_events_id_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "events",
+          "columnsFrom": [
+            "live_event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "placement_effect_live_rejection_event_id_events_id_fk": {
+          "name": "placement_effect_live_rejection_event_id_events_id_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "events",
+          "columnsFrom": [
+            "live_rejection_event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "placement_effect_thread_threads_id_fk": {
+          "name": "placement_effect_thread_threads_id_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_effect_root_placement_effect_request_fk": {
+          "name": "placement_effect_root_placement_effect_request_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "placement_effect",
+          "columnsFrom": [
+            "root"
+          ],
+          "columnsTo": [
+            "request"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_effect_execution_owner_operation_id_placement_operation_id_fk": {
+          "name": "placement_effect_execution_owner_operation_id_placement_operation_id_fk",
+          "tableFrom": "placement_effect",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "execution_owner_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_effect_live_identity": {
+          "name": "placement_effect_live_identity",
+          "value": "\"placement_effect\".\"live_event_id\" IS NULL OR \"placement_effect\".\"live_event_id\"=\"placement_effect\".\"event_id\""
+        },
+        "placement_effect_rejection": {
+          "name": "placement_effect_rejection",
+          "value": "(\"placement_effect\".\"rejection_event_id\" IS NULL AND \"placement_effect\".\"live_rejection_event_id\" IS NULL AND \"placement_effect\".\"rejection_reason\" IS NULL) OR (\"placement_effect\".\"state\" IN ('refused','refused_unsent') AND \"placement_effect\".\"rejection_event_id\" IS NOT NULL AND (\"placement_effect\".\"live_rejection_event_id\" IS NULL OR \"placement_effect\".\"live_rejection_event_id\" IS \"placement_effect\".\"rejection_event_id\") AND (\"placement_effect\".\"rejection_reason\" IS NULL OR \"placement_effect\".\"rejection_reason\" IN ('managed_execution_unsupported','managed_admission_unavailable')))"
+        },
+        "placement_effect_command_tuple": {
+          "name": "placement_effect_command_tuple",
+          "value": "(\"placement_effect\".\"command_id\" IS NULL)=(\"placement_effect\".\"native_execution_id\" IS NULL) AND (\"placement_effect\".\"command_id\" IS NULL)=(\"placement_effect\".\"agent_session_id\" IS NULL) AND (\"placement_effect\".\"command_id\" IS NOT NULL OR \"placement_effect\".\"state\" IN ('prepared','refused_unsent','cancelled'))"
+        },
+        "placement_effect_fence": {
+          "name": "placement_effect_fence",
+          "value": "\"placement_effect\".\"fence\">0"
+        },
+        "placement_effect_state": {
+          "name": "placement_effect_state",
+          "value": "\"placement_effect\".\"state\" IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled')"
+        }
+      }
+    },
+    "placement_grant_key": {
+      "name": "placement_grant_key",
+      "columns": {
+        "principal": {
+          "name": "principal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "transport_key": {
+          "name": "transport_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "consent": {
+          "name": "consent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "placement_grant_key_consent_placement_retry_consent_consent_id_fk": {
+          "name": "placement_grant_key_consent_placement_retry_consent_consent_id_fk",
+          "tableFrom": "placement_grant_key",
+          "tableTo": "placement_retry_consent",
+          "columnsFrom": [
+            "consent"
+          ],
+          "columnsTo": [
+            "consent_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "placement_grant_key_principal_transport_key_pk": {
+          "columns": [
+            "principal",
+            "transport_key"
+          ],
+          "name": "placement_grant_key_principal_transport_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "placement_operation": {
+      "name": "placement_operation",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "principal_scope": {
+          "name": "principal_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_key": {
+          "name": "submission_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_seq": {
+          "name": "accepted_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "owner_plugin_id": {
+          "name": "owner_plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requested_selection": {
+          "name": "requested_selection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "canonical_request": {
+          "name": "canonical_request",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_digest": {
+          "name": "payload_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prepared_request": {
+          "name": "prepared_request",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "prepared_execution": {
+          "name": "prepared_execution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attachment_receipts": {
+          "name": "attachment_receipts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reserved_thread_id": {
+          "name": "reserved_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_workspace_id": {
+          "name": "resolved_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_workspace_revision": {
+          "name": "resolved_workspace_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_workspace_digest": {
+          "name": "resolved_workspace_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "failed_stage": {
+          "name": "failed_stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "binding": {
+          "name": "binding",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reservation_id": {
+          "name": "reservation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fence": {
+          "name": "fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "queued_message_id": {
+          "name": "queued_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "client_turn_request_id": {
+          "name": "client_turn_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cancel_requested": {
+          "name": "cancel_requested",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "failed_operation_id": {
+          "name": "failed_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_operation_id": {
+          "name": "source_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "consent_id": {
+          "name": "consent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retry_derivation": {
+          "name": "retry_derivation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retry_schedule_state": {
+          "name": "retry_schedule_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "send_at": {
+          "name": "send_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "scheduler_revision": {
+          "name": "scheduler_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_operation_accepted_seq_unique": {
+          "name": "placement_operation_accepted_seq_unique",
+          "columns": [
+            "accepted_seq"
+          ],
+          "isUnique": true
+        },
+        "placement_operation_reserved_thread_id_unique": {
+          "name": "placement_operation_reserved_thread_id_unique",
+          "columns": [
+            "reserved_thread_id"
+          ],
+          "isUnique": true
+        },
+        "placement_operation_queued_message_id_unique": {
+          "name": "placement_operation_queued_message_id_unique",
+          "columns": [
+            "queued_message_id"
+          ],
+          "isUnique": true
+        },
+        "placement_operation_latest_request_idx": {
+          "name": "placement_operation_latest_request_idx",
+          "columns": [
+            "client_turn_request_id"
+          ],
+          "isUnique": false
+        },
+        "placement_operation_submission": {
+          "name": "placement_operation_submission",
+          "columns": [
+            "principal_scope",
+            "submission_key"
+          ],
+          "isUnique": true
+        },
+        "placement_operation_pending": {
+          "name": "placement_operation_pending",
+          "columns": [
+            "owner_plugin_id",
+            "provider_id",
+            "phase",
+            "accepted_seq",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "placement_operation_worker_pending": {
+          "name": "placement_operation_worker_pending",
+          "columns": [
+            "worker_id",
+            "phase",
+            "accepted_seq",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "placement_operation_resolved_workspace_id_resolved_workspace_revision_resolved_workspace_digest_placement_workspace_workspace_binding_id_revision_workspace_digest_fk": {
+          "name": "placement_operation_resolved_workspace_id_resolved_workspace_revision_resolved_workspace_digest_placement_workspace_workspace_binding_id_revision_workspace_digest_fk",
+          "tableFrom": "placement_operation",
+          "tableTo": "placement_workspace",
+          "columnsFrom": [
+            "resolved_workspace_id",
+            "resolved_workspace_revision",
+            "resolved_workspace_digest"
+          ],
+          "columnsTo": [
+            "workspace_binding_id",
+            "revision",
+            "workspace_digest"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_operation_version": {
+          "name": "placement_operation_version",
+          "value": "\"placement_operation\".\"schema_version\" = 1 AND \"placement_operation\".\"revision\" > 0 AND \"placement_operation\".\"accepted_seq\" > 0"
+        },
+        "placement_operation_kind": {
+          "name": "placement_operation_kind",
+          "value": "\"placement_operation\".\"kind\" IN ('independent','continuation','fork','retry')"
+        },
+        "placement_operation_phase": {
+          "name": "placement_operation_phase",
+          "value": "\"placement_operation\".\"phase\" IN ('accepted','materializing','pending','reserved','creating','queued','admitted','starting','active','completed','failed','cancel_requested','cancelled','unknown','refused')"
+        },
+        "placement_operation_retry": {
+          "name": "placement_operation_retry",
+          "value": "(\"placement_operation\".\"kind\" = 'retry' AND \"placement_operation\".\"consent_id\" IS NOT NULL AND \"placement_operation\".\"failed_operation_id\" IS NOT NULL AND \"placement_operation\".\"retry_schedule_state\" IS NOT NULL AND \"placement_operation\".\"scheduler_revision\" IS NOT NULL AND \"placement_operation\".\"retry_schedule_state\" IN ('awaiting_scheduler','queued') AND \"placement_operation\".\"scheduler_revision\" >= 0) OR (\"placement_operation\".\"kind\" != 'retry' AND \"placement_operation\".\"retry_schedule_state\" IS NULL AND \"placement_operation\".\"scheduler_revision\" IS NULL)"
+        },
+        "placement_operation_reserved_thread": {
+          "name": "placement_operation_reserved_thread",
+          "value": "\"placement_operation\".\"reserved_thread_id\" IS NULL OR \"placement_operation\".\"kind\" IN ('independent','fork')"
+        },
+        "placement_operation_workspace": {
+          "name": "placement_operation_workspace",
+          "value": "(\"placement_operation\".\"resolved_workspace_id\" IS NULL AND \"placement_operation\".\"resolved_workspace_revision\" IS NULL AND \"placement_operation\".\"resolved_workspace_digest\" IS NULL) OR (\"placement_operation\".\"resolved_workspace_id\" IS NOT NULL AND \"placement_operation\".\"resolved_workspace_revision\" IS NOT NULL AND \"placement_operation\".\"resolved_workspace_digest\" IS NOT NULL)"
+        }
+      }
+    },
+    "placement_owner": {
+      "name": "placement_owner",
+      "columns": {
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_plugin_id": {
+          "name": "owner_plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'disabled'"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available": {
+          "name": "available",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_owner_mode": {
+          "name": "placement_owner_mode",
+          "value": "\"placement_owner\".\"mode\" IN ('disabled','managed')"
+        },
+        "placement_owner_revision": {
+          "name": "placement_owner_revision",
+          "value": "\"placement_owner\".\"revision\" > 0"
+        }
+      }
+    },
+    "placement_retry_consent": {
+      "name": "placement_retry_consent",
+      "columns": {
+        "consent_id": {
+          "name": "consent_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "action_id": {
+          "name": "action_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "principal_scope": {
+          "name": "principal_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_key": {
+          "name": "submission_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failed_operation_id": {
+          "name": "failed_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "binding_digest": {
+          "name": "binding_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failed_payload_digest": {
+          "name": "failed_payload_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "allowed_attempts": {
+          "name": "allowed_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "consumed_by_operation_id": {
+          "name": "consumed_by_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "permission_provenance": {
+          "name": "permission_provenance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_retry_consent_consumed_by_operation_id_unique": {
+          "name": "placement_retry_consent_consumed_by_operation_id_unique",
+          "columns": [
+            "consumed_by_operation_id"
+          ],
+          "isUnique": true
+        },
+        "placement_consent_action": {
+          "name": "placement_consent_action",
+          "columns": [
+            "principal_scope",
+            "action_id"
+          ],
+          "isUnique": true
+        },
+        "placement_consent_submission": {
+          "name": "placement_consent_submission",
+          "columns": [
+            "principal_scope",
+            "submission_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "placement_retry_consent_failed_operation_id_placement_operation_id_fk": {
+          "name": "placement_retry_consent_failed_operation_id_placement_operation_id_fk",
+          "tableFrom": "placement_retry_consent",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "failed_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_retry_consent_consumed_by_operation_id_placement_operation_id_fk": {
+          "name": "placement_retry_consent_consumed_by_operation_id_placement_operation_id_fk",
+          "tableFrom": "placement_retry_consent",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "consumed_by_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_consent_budget": {
+          "name": "placement_consent_budget",
+          "value": "\"placement_retry_consent\".\"allowed_attempts\" = 1"
+        }
+      }
+    },
+    "placement_retry_target": {
+      "name": "placement_retry_target",
+      "columns": {
+        "consent": {
+          "name": "consent",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failed_request": {
+          "name": "failed_request",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root": {
+          "name": "root",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "group_digest": {
+          "name": "group_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_one_retry": {
+          "name": "placement_one_retry",
+          "columns": [
+            "failed_request"
+          ],
+          "isUnique": true,
+          "where": "\"placement_retry_target\".\"state\" IN ('held','scheduled','spent')"
+        },
+        "placement_one_live_chain_retry": {
+          "name": "placement_one_live_chain_retry",
+          "columns": [
+            "root"
+          ],
+          "isUnique": true,
+          "where": "\"placement_retry_target\".\"state\" IN ('held','scheduled')"
+        }
+      },
+      "foreignKeys": {
+        "placement_retry_target_consent_placement_retry_consent_consent_id_fk": {
+          "name": "placement_retry_target_consent_placement_retry_consent_consent_id_fk",
+          "tableFrom": "placement_retry_target",
+          "tableTo": "placement_retry_consent",
+          "columnsFrom": [
+            "consent"
+          ],
+          "columnsTo": [
+            "consent_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_retry_target_failed_request_placement_effect_request_fk": {
+          "name": "placement_retry_target_failed_request_placement_effect_request_fk",
+          "tableFrom": "placement_retry_target",
+          "tableTo": "placement_effect",
+          "columnsFrom": [
+            "failed_request"
+          ],
+          "columnsTo": [
+            "request"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "placement_retry_target_root_placement_effect_request_fk": {
+          "name": "placement_retry_target_root_placement_effect_request_fk",
+          "tableFrom": "placement_retry_target",
+          "tableTo": "placement_effect",
+          "columnsFrom": [
+            "root"
+          ],
+          "columnsTo": [
+            "request"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_retry_state": {
+          "name": "placement_retry_state",
+          "value": "\"placement_retry_target\".\"state\" IN ('held','scheduled','spent','revoked','expired','superseded')"
+        }
+      }
+    },
+    "placement_source_fact": {
+      "name": "placement_source_fact",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blocked_lock": {
+          "name": "blocked_lock",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_source_blocked_lock": {
+          "name": "placement_source_blocked_lock",
+          "columns": [
+            "blocked_lock"
+          ],
+          "isUnique": false,
+          "where": "\"placement_source_fact\".\"blocked_lock\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "placement_step": {
+      "name": "placement_step",
+      "columns": {
+        "op": {
+          "name": "op",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step": {
+          "name": "step",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "placement_step_op_placement_action_identity_op_fk": {
+          "name": "placement_step_op_placement_action_identity_op_fk",
+          "tableFrom": "placement_step",
+          "tableTo": "placement_action_identity",
+          "columnsFrom": [
+            "op"
+          ],
+          "columnsTo": [
+            "op"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "placement_step_op_step_pk": {
+          "columns": [
+            "op",
+            "step"
+          ],
+          "name": "placement_step_op_step_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_step_number": {
+          "name": "placement_step_number",
+          "value": "\"placement_step\".\"step\">=0"
+        },
+        "placement_step_kind": {
+          "name": "placement_step_kind",
+          "value": "\"placement_step\".\"kind\" IN ('compact','input','retry','answer','clear')"
+        }
+      }
+    },
+    "placement_worker": {
+      "name": "placement_worker",
+      "columns": {
+        "owner_plugin_id": {
+          "name": "owner_plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_host_id": {
+          "name": "agent_host_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_version": {
+          "name": "provider_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observation_revision": {
+          "name": "observation_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policy_revision": {
+          "name": "policy_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observation": {
+          "name": "observation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available": {
+          "name": "available",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "slot_state": {
+          "name": "slot_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_operation_id": {
+          "name": "owner_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fence": {
+          "name": "fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_assigned_seq": {
+          "name": "last_assigned_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reclaim_operation_id": {
+          "name": "reclaim_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reclaim_source_fence": {
+          "name": "reclaim_source_fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reclaim_holder": {
+          "name": "reclaim_holder",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "physical_lock": {
+          "name": "physical_lock",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fence_lock": {
+          "name": "fence_lock",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "native_custody": {
+          "name": "native_custody",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_worker_physical_lock_unique": {
+          "name": "placement_worker_physical_lock_unique",
+          "columns": [
+            "physical_lock"
+          ],
+          "isUnique": true
+        },
+        "placement_worker_provider": {
+          "name": "placement_worker_provider",
+          "columns": [
+            "provider_id",
+            "available"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "placement_worker_owner_plugin_id_worker_id_pk": {
+          "columns": [
+            "owner_plugin_id",
+            "worker_id"
+          ],
+          "name": "placement_worker_owner_plugin_id_worker_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "placement_worker_slot": {
+          "name": "placement_worker_slot",
+          "value": "\"placement_worker\".\"slot_state\" IN ('free','reserved','resident','active','reclaiming','maintenance','unknown')"
+        },
+        "placement_worker_owner": {
+          "name": "placement_worker_owner",
+          "value": "(\"placement_worker\".\"slot_state\" != 'free' OR (\"placement_worker\".\"owner_operation_id\" IS NULL AND \"placement_worker\".\"thread_id\" IS NULL AND \"placement_worker\".\"reclaim_operation_id\" IS NULL)) AND (\"placement_worker\".\"slot_state\" NOT IN ('reserved','resident','active','reclaiming') OR \"placement_worker\".\"owner_operation_id\" IS NOT NULL) AND (\"placement_worker\".\"slot_state\" != 'reclaiming' OR (\"placement_worker\".\"reclaim_operation_id\" IS NOT NULL AND \"placement_worker\".\"reclaim_source_fence\" IS NOT NULL))"
+        },
+        "placement_worker_lock_pin": {
+          "name": "placement_worker_lock_pin",
+          "value": "(\"placement_worker\".\"owner_operation_id\" IS NULL AND \"placement_worker\".\"physical_lock\" IS NULL AND \"placement_worker\".\"fence_lock\" IS NULL) OR (\"placement_worker\".\"owner_operation_id\" IS NOT NULL AND \"placement_worker\".\"physical_lock\" IS NOT NULL AND json_type(\"placement_worker\".\"physical_lock\",'$[0]') IS 'text' AND json_type(\"placement_worker\".\"fence_lock\",'$.device') IS 'text' AND json_type(\"placement_worker\".\"fence_lock\",'$.inode') IS 'text' AND NOT(json_extract(\"placement_worker\".\"fence_lock\",'$.device') GLOB '0[0-9]*' AND json_extract(\"placement_worker\".\"fence_lock\",'$.device') NOT GLOB '*[^0-9]*') AND NOT(json_extract(\"placement_worker\".\"fence_lock\",'$.inode') GLOB '0[0-9]*' AND json_extract(\"placement_worker\".\"fence_lock\",'$.inode') NOT GLOB '*[^0-9]*') AND \"placement_worker\".\"physical_lock\"=json_array(json_extract(\"placement_worker\".\"physical_lock\",'$[0]'),json_extract(\"placement_worker\".\"fence_lock\",'$.device'),json_extract(\"placement_worker\".\"fence_lock\",'$.inode')))"
+        },
+        "placement_worker_fence": {
+          "name": "placement_worker_fence",
+          "value": "\"placement_worker\".\"fence\" >= 0"
+        }
+      }
+    },
+    "placement_workspace": {
+      "name": "placement_workspace",
+      "columns": {
+        "workspace_binding_id": {
+          "name": "workspace_binding_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_digest": {
+          "name": "workspace_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "location_snapshot": {
+          "name": "location_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_descriptor": {
+          "name": "canonical_descriptor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "placement_workspace_ref": {
+          "name": "placement_workspace_ref",
+          "columns": [
+            "workspace_binding_id",
+            "revision",
+            "workspace_digest"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "placement_workspace_workspace_binding_id_revision_pk": {
+          "columns": [
+            "workspace_binding_id",
+            "revision"
+          ],
+          "name": "placement_workspace_workspace_binding_id_revision_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -3813,6 +5655,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "placement_operation_id": {
+          "name": "placement_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "placement_fence": {
+          "name": "placement_fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "system_notice": {
           "name": "system_notice",
           "type": "text",
@@ -3991,6 +5847,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "delivery_mode": {
+          "name": "delivery_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'steer'"
+        },
+        "coalesce_key": {
+          "name": "coalesce_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "coalesce_state": {
+          "name": "coalesce_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "question_id": {
           "name": "question_id",
           "type": "text",
@@ -4046,31 +5924,16 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "delivery_mode": {
-          "name": "delivery_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'steer'"
-        },
-        "coalesce_key": {
-          "name": "coalesce_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "coalesce_state": {
-          "name": "coalesce_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
+        "queued_thread_messages_placement_idx": {
+          "name": "queued_thread_messages_placement_idx",
+          "columns": [
+            "placement_operation_id"
+          ],
+          "isUnique": true
+        },
         "queued_thread_messages_thread_created_idx": {
           "name": "queued_thread_messages_thread_created_idx",
           "columns": [
@@ -4127,6 +5990,19 @@
         }
       },
       "foreignKeys": {
+        "queued_thread_messages_placement_operation_id_placement_operation_id_fk": {
+          "name": "queued_thread_messages_placement_operation_id_placement_operation_id_fk",
+          "tableFrom": "queued_thread_messages",
+          "tableTo": "placement_operation",
+          "columnsFrom": [
+            "placement_operation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "queued_thread_messages_thread_id_threads_id_fk": {
           "name": "queued_thread_messages_thread_id_threads_id_fk",
           "tableFrom": "queued_thread_messages",
@@ -4144,6 +6020,10 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
+        "queued_thread_messages_placement_check": {
+          "name": "queued_thread_messages_placement_check",
+          "value": "\"queued_thread_messages\".\"placement_fence\" IS NULL OR (\"queued_thread_messages\".\"placement_operation_id\" IS NOT NULL AND \"queued_thread_messages\".\"placement_fence\" > 0)"
+        },
         "queued_thread_messages_state_check": {
           "name": "queued_thread_messages_state_check",
           "value": "CASE \"queued_thread_messages\".\"state\"\n        WHEN 'claimed' THEN \"queued_thread_messages\".\"claimed_at\" IS NOT NULL\n        WHEN 'failed_retrying' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NOT NULL AND \"queued_thread_messages\".\"next_attempt_at\" IS NOT NULL\n        WHEN 'failed_exhausted' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NOT NULL AND \"queued_thread_messages\".\"next_attempt_at\" IS NULL\n        WHEN 'scheduled' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NOT NULL\n        WHEN 'waiting' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NULL AND \"queued_thread_messages\".\"waiting_on\" IS NOT NULL\n        WHEN 'queued' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NULL AND \"queued_thread_messages\".\"waiting_on\" IS NULL\n        ELSE 0\n      END"
