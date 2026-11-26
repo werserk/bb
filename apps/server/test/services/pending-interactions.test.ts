@@ -1272,6 +1272,7 @@ describe("pending interaction lifecycle", () => {
       await handleHostSessionOpened(harness.deps, {
         activeThreads: [],
         undeliveredEventThreadIds: [],
+        openThreadWork: [],
         hostId: host.id,
         openedSession: replacement,
         previousSession: session,
@@ -1316,6 +1317,7 @@ describe("pending interaction lifecycle", () => {
       await handleHostSessionOpened(harness.deps, {
         activeThreads: [],
         undeliveredEventThreadIds: [],
+        openThreadWork: [],
         hostId: host.id,
         openedSession: again,
         previousSession: replacement,
