@@ -7,8 +7,6 @@ bb pool account add --provider claude --login
 printf '%s\n' "$CLAUDE_AUTH_CODE" | bb pool account login-complete --session <id> --code-stdin
 bb pool account add --provider codex --login
 bb pool account login-poll --session <id>
-bb pool account add --provider claude --import
-bb pool account add --provider codex --import
 printf '%s\n' "$ANTHROPIC_API_KEY" | bb pool account add --provider claude --api-key-stdin [--label <text>] [--priority <n>]
 bb pool account add --provider claude --api-key <key> [--label <text>] [--priority <n>]
 bb pool account list [--json]
@@ -21,7 +19,7 @@ bb pool account refresh <id>
 bb pool status [--json]
 bb pool routing <claude|codex> [--off]
 bb pool config
-bb pool config set <anthropicUpstreamBaseUrl|codexUpstreamBaseUrl|switchThreshold|parentMode> <value>
+bb pool config set <switchThreshold|parentMode> <value>
 bb pool parent [proxy|isolate]
 bb pool token rotate --machine <id-or-name>
 bb pool bypass <thread-id> [--off]
@@ -57,9 +55,11 @@ local Claude login before the pool can be disabled safely. Rotation keeps the
 prior token valid for ten minutes. Agents should pipe API keys to
 `--api-key-stdin`;
 `--api-key <key>` is an unsafe compatibility form that exposes the key in
-process arguments, shell history, and agent transcripts. Prefer `--import` for
-an existing Claude Code login. The CLI Codex import path reads
-`~/.codex/auth.json` on the bb server host. OAuth quota refreshes on add or
+process arguments, shell history, and agent transcripts. OAuth accounts are
+added only with `--login`, so the hub is each account's only refresh owner.
+The pool never imports a CLI's existing login (`~/.claude`, `~/.codex`, a
+keychain): the CLI would keep refreshing the same refresh token, and rotation
+would force re-logins. OAuth quota refreshes on add or
 enable and every five minutes while an account is idle. When a request finds no
 eligible account, the pool first refreshes the OAuth accounts it considers
 exhausted, at most once every 30 seconds per account, so a plan upgrade or an
@@ -80,8 +80,10 @@ exposes their utilization, reset, status, observation time, and source under
 while retaining it for other families. A present `metadata.user_id` account
 UUID is aligned with the selected OAuth account. Use `bb pool config` to
 inspect the full routing configuration and
-`bb pool config set <key> <value>` to update one value. The upstream URL keys
-are QA-only overrides; `switchThreshold` must be greater than 0 and at most 1.
+`bb pool config set <key> <value>` to update one value; `switchThreshold` must
+be greater than 0 and at most 1. Provider upstreams (api.anthropic.com,
+chatgpt.com/backend-api/codex, api.openai.com) are fixed in code and cannot be
+configured.
 
 Accounts run sequentially per provider: lower priority numbers first, with ties
 following the order accounts were added. New conversations use the current

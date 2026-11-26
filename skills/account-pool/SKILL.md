@@ -13,11 +13,11 @@ inspect `bb pool machine list --json`; see the machine routing section in the
 routing reference before `machine exclude <host-id>` or `machine include <host-id>`.
 An exclusion is policy, not native-account readiness.
 
-For account login/import, secret handling, quota refresh, routing settings,
+For account login, secret handling, quota refresh, routing settings,
 ordering, or failover, read
 [references/accounts-and-routing.md](references/accounts-and-routing.md).
 
-Use stdin or supported login/import flows for credentials; never put secret values
+Use stdin or the supported login flows for credentials; never put secret values
 in command arguments or chat. Confirm the resulting account and routing state.
 Do not enable the plugin or change accounts unless the requested task calls for it.
 

@@ -192,8 +192,6 @@ function formatStatus(status: PoolStatusReport): string {
 
 function formatConfig(config: AccountPoolConfig): string {
   return [
-    `anthropicUpstreamBaseUrl: ${config.anthropicUpstreamBaseUrl}`,
-    `codexUpstreamBaseUrl: ${config.codexUpstreamBaseUrl}`,
     `switchThreshold: ${config.switchThreshold}`,
     `parentMode: ${config.parentMode}`,
   ].join("\n");
@@ -215,15 +213,11 @@ function parseConfigUpdate(
   key: string,
   value: string,
 ): AccountPoolConfigSetInput {
-  if (key === "anthropicUpstreamBaseUrl") {
-    return accountPoolConfigSetInputSchema.parse({
-      anthropicUpstreamBaseUrl: value,
-    });
-  }
-  if (key === "codexUpstreamBaseUrl") {
-    return accountPoolConfigSetInputSchema.parse({
-      codexUpstreamBaseUrl: value,
-    });
+  if (key === "anthropicUpstreamBaseUrl" || key === "codexUpstreamBaseUrl") {
+    throw new PluginCliError(
+      `${key} was removed: provider upstreams are fixed in code.`,
+      { code: "invalid_value" },
+    );
   }
   if (key === "switchThreshold") {
     return accountPoolConfigSetInputSchema.parse({
@@ -234,7 +228,7 @@ function parseConfigUpdate(
     return accountPoolConfigSetInputSchema.parse({ parentMode: value });
   }
   throw new PluginCliError(
-    "Config key must be anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, or parentMode.",
+    "Config key must be switchThreshold or parentMode.",
     { code: "invalid_value" },
   );
 }
@@ -310,9 +304,9 @@ export function registerPoolCli(
         }),
         "account add": cliCommand({
           summary:
-            "Sign in to Claude or Codex, import credentials, or add an Anthropic or OpenAI API key",
+            "Sign in to Claude or Codex, or add an Anthropic or OpenAI API key",
           description:
-            "--login prints the browser or device step and exits; finish it with `bb pool account login-complete` (Claude) or `bb pool account login-poll` (Codex).\n--import reads the provider's existing login on this bb server host (~/.claude or ~/.codex).",
+            "--login prints the browser or device step and exits; finish it with `bb pool account login-complete` (Claude) or `bb pool account login-poll` (Codex). The pool never imports a CLI's existing login: the account would get two refresh owners and need re-logins.",
           unexpectedPositionalHint:
             "the provider belongs in --provider <claude|codex>, not a bare argument",
           options: {
@@ -322,12 +316,6 @@ export function registerPoolCli(
               aliases: ["signin", "sign-in"],
               description:
                 "Start a browser (Claude) or device-code (Codex) login and print the next command",
-            },
-            import: {
-              type: "boolean",
-              aliases: ["import-local", "local"],
-              description:
-                "Import the provider's existing login from this bb server host",
             },
             "api-key": {
               type: "string",
@@ -357,7 +345,7 @@ export function registerPoolCli(
             json: JSON_OPTION,
           },
           constraints: [
-            { kind: "exactly-one", options: ["login", "import", "api-key"] },
+            { kind: "exactly-one", options: ["login", "api-key"] },
             { kind: "at-most-one", options: ["login", "label"] },
             { kind: "at-most-one", options: ["login", "priority"] },
           ],
@@ -399,12 +387,9 @@ export function registerPoolCli(
                       ].join("\n")}\n`,
                 };
               }
-              const imported = input.options.import;
               const parsed = accountAddInputSchema.parse({
                 provider,
-                source: imported
-                  ? { kind: "import" }
-                  : { kind: "api-key", apiKey: input.options["api-key"] },
+                source: { kind: "api-key", apiKey: input.options["api-key"] },
                 label: input.options.label ?? null,
                 priority: input.options.priority,
               });
@@ -771,13 +756,13 @@ export function registerPoolCli(
             {
               name: "key",
               description:
-                "anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, switchThreshold, or parentMode",
+                "switchThreshold or parentMode",
               required: true,
             },
             {
               name: "value",
               description:
-                "HTTP(S) URL for the upstream keys, a number above 0 and at most 1 for switchThreshold, proxy or isolate for parentMode",
+                "A number above 0 and at most 1 for switchThreshold, proxy or isolate for parentMode",
               required: true,
             },
           ],
