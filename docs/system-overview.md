@@ -549,6 +549,7 @@ network loss preserves pending sends. Unknown identity disables journal restorat
 The pending owner fences old reads and mutation receipts by scope generation and
 keeps account identity in the journal key. See [pending send overlay](pending-send-overlay.md)
 for causal legacy handoff, lock ownership and review dispositions.
+
 ## Owner-attention pre-completion candidate
 
 `apps/server/src/services/threads/pre-completion.ts` owns the opted-in policy,
