@@ -128,6 +128,7 @@ export interface IntegrationHarness {
 }
 
 interface CreateHarnessOptions {
+  fakeProvidersOnly?: boolean;
   serverPort?: number;
   bindHost?: "127.0.0.1" | "0.0.0.0";
   staticDir?: string;
@@ -189,7 +190,7 @@ export async function loadProjectEnvFile(): Promise<string | null> {
   return loadedProjectEnvPath;
 }
 
-async function startIntegrationServer(
+export async function startIntegrationServer(
   tmpRoot: string,
   options: CreateHarnessOptions,
 ): Promise<RunningTestServer> {
@@ -246,10 +247,10 @@ async function startIntegrationServer(
   const telemetry = createNoopTelemetryService();
   const skillTreeRegistry = new SkillTreeRegistry();
   const providerRegistry = createProviderRegistryService({});
-  await registerFirstPartyProviders(providerRegistry);
+  if (!options.fakeProvidersOnly) await registerFirstPartyProviders(providerRegistry);
   const pluginHostArtifacts = new PluginHostArtifactRegistry();
   await registerFakeProviders(providerRegistry, pluginHostArtifacts);
-  await recordFirstPartyProviderBridgeArtifacts(pluginHostArtifacts);
+  if (!options.fakeProvidersOnly) await recordFirstPartyProviderBridgeArtifacts(pluginHostArtifacts);
   const aiServices = createAiServiceRegistry();
   const pendingInteractions = new PendingInteractionLifecycle({
     config,
