@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import {
   cliCommand,
   defineCli,
-  experimental_BbHttpError,
   PluginCliError,
   type BbPluginApi,
   type PluginAgentConfiguration,
@@ -57,6 +56,11 @@ export const MOVED_INSTRUCTIONS =
 
 export const OTHER_PROVIDER_INSTRUCTIONS =
   "## account-workers\nWorkspace tools are disabled: this thread now runs on a provider its workspace binding was not prepared for.";
+
+export function httpStatus(error: unknown): number | null {
+  const status = typeof error === "object" && error !== null ? (error as { status?: unknown }).status : undefined;
+  return typeof status === "number" ? status : null;
+}
 
 export function state(b: Binding): string {
   if (b.cleanedAt !== null) return `  RELEASED (${b.releaseReason})`;
@@ -117,7 +121,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     try {
       return isLive((await bb.sdk.threads.get({ threadId })).status) ? { kind: "live" } : { kind: "quiet" };
     } catch (error) {
-      if (error instanceof experimental_BbHttpError && error.status === 404) return { kind: "quiet" };
+      if (httpStatus(error) === 404) return { kind: "quiet" };
       throw error;
     }
   };

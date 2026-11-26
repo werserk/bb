@@ -215,6 +215,16 @@ describe("spawn and configure", () => {
     expect(releaseCalls(host)).toHaveLength(1);
   });
 
+  it("unbind treats a thread BB no longer has as stopped", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    host.harness.sdk.stub("threads.get", async () => {
+      throw Object.assign(new Error("HTTP 404: not found"), { status: 404 });
+    });
+    expect((await host.harness.behavior.runCli(["unbind", "--thread", threadId])).exitCode).toBe(0);
+    expect(releaseCalls(host)).toHaveLength(1);
+  });
+
   it("a failed worker cleanup stays listed and unbind retries it", async () => {
     let fail = true;
     const host = await load(defaultRpc({ releaseScratch: () => (fail ? { ok: false, error: "profile codex release failed: locked" } : { ok: true }) }));
