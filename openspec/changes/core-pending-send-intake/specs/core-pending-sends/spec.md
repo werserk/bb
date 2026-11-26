@@ -55,14 +55,13 @@ The core SHALL enforce these conditions:
 
 Pre-seal edit/cancel use revision CAS. After seal, 409 means no edit/cancel and custody/content stays canonical. Retained failures are visible, never expire silently or imply successful handoff. Restart recovers staging/pending and expired claims across all thread statuses; stale claims cannot commit at any of the six effect seams.
 
-A `message.dispatch` hook pass is not an effect seal: only mention/model/clear/compact/startup effects and the provider request seal a row. A row interrupted (stop, crash, expired lease) before its first seal is resent once with its hooks re-run (a hook may run twice per message; documented for plugin authors). If the resent attempt is interrupted or fails again, the row is abandoned: terminal `rejected` with an `intake_abandoned` receipt and a clear `last_error`, and the thread is unblocked.
-
 #### Scenario: Interrupted hook pass is resent once, then abandoned
 
+- **GIVEN** a `message.dispatch` hook pass is not an effect seal: only mention/model/clear/compact/startup effects and the provider request seal a row, and a hook may run twice per message (documented for plugin authors)
 - **WHEN** the server stops mid-hook, restarts, and the resent attempt succeeds
 - **THEN** the provider receives the message once, in order
 - **WHEN** the resent attempt is interrupted again
-- **THEN** the row is rejected as `intake_abandoned` and the next send on the thread is accepted
+- **THEN** the row is rejected as `intake_abandoned` with a clear `last_error` and the next send on the thread is accepted
 
 #### Scenario: Sealed revision conflict
 
