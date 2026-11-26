@@ -26,6 +26,8 @@ export const CODEX_FEATURES_OFF = [
 
 export const CODEX_EXTRA_ALLOWED = ["bb_update_plan", "update_plan"] as const;
 
+export const CODEX_MACHINE_ENV = ["CODEX_HOME", "BB_CODEX_BRIDGE_APP_SERVER_COMMAND", "BB_CODEX_BRIDGE_APP_SERVER_ARGS"] as const;
+
 export function unsupportedLayers(home: string): string[] {
   return [
     "/etc/codex/config.toml",
@@ -340,6 +342,7 @@ export function createCodexProfile(env: NodeJS.ProcessEnv = process.env): Provid
   return {
     id: "codex",
     providerIds: ["codex"],
+    refusedMachineEnv: CODEX_MACHINE_ENV,
     async prepare(ctx: ProfileContext) {
       await assertSupportedLayers(home());
       const config = await readUserConfig(home());

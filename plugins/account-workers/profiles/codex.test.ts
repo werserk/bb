@@ -9,6 +9,7 @@ import {
   addTrust,
   codexFiles,
   CODEX_FEATURES_OFF,
+  codexProfile,
   expectedTrustKey,
   hasTrust,
   heartbeatFile,
@@ -36,6 +37,10 @@ describe("scratch config", () => {
     expect(config.web_search).toBe("disabled");
     for (const feature of CODEX_FEATURES_OFF) expect(config.features[feature]).toBe(false);
     expect(config.mcp_servers).toEqual({ "playwright-extension": { enabled: false }, node_repl: { enabled: false } });
+  });
+
+  it("refuses a spawn when a BB machine variable would move the Codex home or binary away from what the gate checked", () => {
+    expect(codexProfile.refusedMachineEnv).toEqual(["CODEX_HOME", "BB_CODEX_BRIDGE_APP_SERVER_COMMAND", "BB_CODEX_BRIDGE_APP_SERVER_ARGS"]);
   });
 
   it("refuses MCP server names it cannot quote safely", () => {

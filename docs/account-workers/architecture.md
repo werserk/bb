@@ -140,6 +140,7 @@ Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin too
   - The write is one atomic, verified edit: a fresh read, the addition, then a parse that must show both values. The result goes to a temp file with the same mode and replaces the config by `rename`. The edit retries if the file changed meanwhile.
   - If `check` fails, the same edit removes the entry.
   - The profile refuses to run when a system or managed Codex config layer exists.
+  - `spawn` refuses when `CODEX_HOME` or `BB_CODEX_BRIDGE_APP_SERVER_COMMAND`/`_ARGS` is a BB machine variable (`refusedMachineEnv`). The thread would read those, but the host entry would not, so the trust and the gate would apply to another Codex home or binary.
 - **No-fallback gate.** `check` runs the canary from [probe-3](probe-3.md#the-no-fallback-test) before the spawn and refuses the spawn on any failure. The canary uses the same Codex binary, model, model cache, `thread/start` config and sandbox as the thread, but a temporary Codex home with no credentials and a mock model.
 - **Live check per call.** On every allowed call the guard appends `tool_name`, the raw `tool_input` and `tool_use_id` to `.aw/heartbeat.jsonl`. `verify` consumes one fresh heartbeat, under 5 minutes old, that matches the call's tool and its parsed input on the parsed keys. With no match the call is refused and the binding is marked broken. A refusal therefore means the guard hook did not see a workspace call: it was skipped, untrusted or replaced. This is the only check on the real thread rather than on a copy.
 
@@ -179,7 +180,7 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
   - The canary runs at spawn only. It does not run on resume, or after a Codex update while a binding lives.
   - The heartbeat check covers only `workspace_*` calls on the live thread; the hook's block is what stops the other calls.
   - What Codex does on a hook timeout or a missing `sh` was not checked.
-  - The canary assumes the host daemon sees the same `BB_CODEX_BRIDGE_APP_SERVER_*` environment as the bridge.
+  - The canary assumes the host daemon's own process environment (`CODEX_HOME`, `BB_CODEX_BRIDGE_APP_SERVER_*`) is the bridge's. BB machine variables with those names refuse the spawn.
   - An MCP server removed from the worker's config while a binding lives makes the thread fail to load its config; this fails closed.
   - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).
