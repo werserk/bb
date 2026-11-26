@@ -12,7 +12,7 @@ Each block is one issue, one branch and one PR (see [README](README.md#how-to-wo
 
 ## 1. Plugin probe + Claude end to end
 
-First answer the open points in [architecture](architecture.md#open-points-for-the-block-1-probe) with evidence, then build the plugin: workspace tools, server routing to the host entry, per-thread binding, workspace instructions. Done when a Claude thread on the worker host edits and runs code on a workspace host, with native Claude tools off and Stop ending the remote process group.
+Build the plugin: workspace tools, server routing to the host entry, per-thread binding, workspace instructions ([architecture](architecture.md)). Done when a Claude thread on the worker host edits and runs code on a workspace host, with native Claude tools off and Stop ending the remote process group.
 
 ## 2. OpenCode profile
 
@@ -29,6 +29,7 @@ Several isolated accounts of a provider on one worker host; each thread gets one
 ## Later
 
 - Hardening: failure modes, reconnects, limits, audit.
+- Workspace hosts the owner does not control: close [G1 and G7](architecture.md#open-points) first (the BB API trusts whoever can reach it; worker context can be read back through the workspace).
 - Cloud mode without the owner's PC: the BB server runs elsewhere.
 - Workspace switch UX mid-conversation (the mechanism is rebinding, block 1).
 - Central key store.

@@ -3,7 +3,7 @@
 Account Workers lets an agent run on one machine while it works on files on another.
 
 - A **worker host** holds the provider accounts (Claude, OpenCode, Codex): login, API keys and agent init live only there. Threads run on it in an empty scratch directory.
-- A **workspace host** holds the code. It never holds provider keys; it only executes tool calls (read, write, edit, glob, grep, exec, stop) through the BB daemon already running on it.
+- A **workspace host** holds the code. It never holds provider keys; it only executes tool calls (read, write, edit, glob, grep, exec, diff) through the BB daemon already running on it.
 - The **BB server** connects both: it runs the plugin's server entry and routes each tool call to the workspace host bound to the thread.
 
 ```
@@ -20,9 +20,10 @@ It is built as a BB plugin, `plugins/account-workers`, with no core changes (see
 
 | Document | What it holds |
 |---|---|
-| [architecture.md](architecture.md) | Target design, per-provider profile, built vs planned, open points |
+| [architecture.md](architecture.md) | Design as built, per-provider profile, built vs planned, open points |
 | [decisions.md](decisions.md) | Dated owner decisions with reasons |
 | [roadmap.md](roadmap.md) | Blocks and their issues |
+| [probe-1.md](probe-1.md) | Block 1 probe answers and acceptance results |
 
 ## How to work here
 

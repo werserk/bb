@@ -2,6 +2,11 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-26 — Block 1 design as built (plan approved after independent review)
+
+- **Decision.** Instructions and the per-thread tool set come from `bb.agents.configure`, not `contributeInstructions`. There is no `stop` tool and no background jobs: Stop is the tool call's abort signal, and `exec` is bounded by its timeout (default 120 s, max 600 s). Native Claude tools are off through settings in the thread's scratch directory, a deny list plus a `PreToolUse` allowlist hook, with no change to `provider-claude-code`. The scratch directory lives outside BB's data directory.
+- **Why.** `configure` is the SDK's per-thread seam and can drop the tools when a thread leaves its scratch directory. The abort signal already reaches the host entry. The plan review showed BB refuses thread paths inside its managed storage, and that a plain deny list misses tools added by other plugins and MCP servers; an allowlist does not. G1 (the BB API trusts whoever can reach it) is accepted on the owner's machines and documented as a precondition for foreign workspaces ([architecture](architecture.md#open-points)).
+
 ## 2026-11-26 — Build as a BB plugin on upstream main
 
 - **Decision.** Account Workers is a BB plugin (`plugins/account-workers`) with no core changes. Core is touched only if a probe proves a gap the plugin SDK cannot cover, and then only after an owner decision.

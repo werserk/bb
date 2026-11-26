@@ -1,0 +1,41 @@
+{
+  "name": "bb-plugin-account-workers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run an agent on a worker host while its file and shell tools act on a workspace on another host",
+  "engines": {
+    "bb": ">=0.0",
+    "bbPluginSdk": ">=0.6.132"
+  },
+  "bb": {
+    "name": "Account Workers",
+    "description": "Run an agent on a worker host while its file and shell tools act on a workspace on another host",
+    "branding": {
+      "icon": "ComputerCloud"
+    },
+    "server": "./server.ts",
+    "host": "./host.ts"
+  },
+  "keywords": [
+    "bb-plugin"
+  ],
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsrs --noEmit",
+    "lint:type-aware": "oxlint -c ../../.oxlintrc.type-aware.json",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist ."
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.20.5",
+    "better-sqlite3": "12.11.1",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.12"
+  }
+}
