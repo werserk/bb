@@ -80,7 +80,12 @@ function QueuedMessagesCardFrame({
   return (
     <PromptStackCard
       ariaLabel="Queued messages"
-      context={{ label: "Queue", icon: "ListView", group: "queue" }}
+      context={{
+        label: "Queue",
+        icon: "ListView",
+        group: "queue",
+        kind: "queue",
+      }}
       contextSummary={queuedMessageCount}
       style={{ height }}
       className={cn(

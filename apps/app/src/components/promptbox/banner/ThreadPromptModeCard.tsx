@@ -1,5 +1,5 @@
 import type { ThreadTimelineActivePromptMode } from "@bb/domain";
-import { CollapsibleStackCard } from "@/components/promptbox/banner/CollapsibleStackCard";
+import { CoreCollapsibleStackCard } from "@/components/promptbox/banner/CollapsibleStackCard";
 
 interface ThreadPromptModeCardProps {
   activePromptMode: ThreadTimelineActivePromptMode | null;
@@ -17,7 +17,7 @@ export function ThreadPromptModeCard({
   const hasPrompt = promptText.length > 0;
 
   return (
-    <CollapsibleStackCard
+    <CoreCollapsibleStackCard
       label="Plan"
       title="Plan"
       icon="ListTodo"
@@ -40,6 +40,6 @@ export function ThreadPromptModeCard({
           {hasPrompt ? promptText : "No prompt text."}
         </p>
       </div>
-    </CollapsibleStackCard>
+    </CoreCollapsibleStackCard>
   );
 }

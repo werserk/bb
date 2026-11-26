@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import {
   QuestionResponseBody,
   questionResponseClass,
@@ -1827,9 +1827,11 @@ export function QueuedMessagesList({
             sendAction === "steer-when-ready" ||
             isQueuedMessageSendNowAllowed(message);
           return (
-            <ComposerContextRow
+            <ContextRow
+              as="div"
               key={message.id}
-              icon="ListView"
+              glyph={<ContextRowIcon name="ListView" />}
+              actionInteractive
               title={
                 <QueuedMessagePreview
                   compact
@@ -1895,7 +1897,12 @@ export function QueuedMessagesList({
     <PromptStackCard
       rootRef={surfaceRef}
       ariaLabel="Queued messages"
-      context={{ label: "Queue", icon: "ListView", group: "queue" }}
+      context={{
+        label: "Queue",
+        icon: "ListView",
+        group: "queue",
+        kind: "queue",
+      }}
       contextSummary={queuedMessages.length}
       onContextReveal={() => onExpandedChange(true)}
       style={{ height: surfaceHeight }}

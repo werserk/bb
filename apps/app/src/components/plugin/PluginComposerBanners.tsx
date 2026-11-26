@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "@/components/promptbox/context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import {
   ComposerContextItem,
   useComposerContextSource,
@@ -116,8 +116,10 @@ function ComposerBannerContribution({
       group="context"
       contentRef={contentRef}
     >
-      <ComposerContextRow
-        icon="Blocks"
+      <ContextRow
+        as="div"
+        glyph={<ContextRowIcon name="Blocks" />}
+        actionInteractive
         title={pluginId}
         action={
           <button

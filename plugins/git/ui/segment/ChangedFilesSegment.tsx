@@ -5,21 +5,18 @@ import {
   type ExperimentalThreadContextSegmentProps,
 } from "@get-bb/plugin-sdk/app";
 import { BranchPicker } from "@bb/shared-ui/branch-picker";
+import { ContextRow } from "@bb/shared-ui/context-row";
 import { Icon } from "@bb/shared-ui/icon";
-import {
-  getMergeBaseBranchCandidateGroups,
-} from "../merge-base-branch-candidates";
+import { getMergeBaseBranchCandidateGroups } from "../merge-base-branch-candidates";
 import { BannerActionSlot } from "@bb/shared-ui/prompt-banner-actions";
-import {
-  AnimatedDisclosureBody,
-  SectionToggleButton,
-} from "@bb/shared-ui/prompt-stack-disclosure";
+import { AnimatedDisclosureBody } from "@bb/shared-ui/prompt-stack-disclosure";
 import {
   CHANGED_FILES_KIND_PREFIX,
   formatChangeSummary,
   renderChangeSummary,
   selectWorkspaceChangedFilesSection,
   toChangeTally,
+  toReportedLineTally,
   type WorkspaceChangedFilesSection,
 } from "../workspace-change-summary.js";
 import { WorkspaceChangesList } from "../workspace-changes-list.js";
@@ -130,9 +127,14 @@ export function ChangedFilesSegmentView({
   section,
   action,
   onFileClick,
+  internal_DO_NOT_USE_reportChangeTally,
 }: Pick<
   ExperimentalThreadContextSegmentProps,
-  "threadId" | "segments" | "isExpanded" | "onToggle"
+  | "threadId"
+  | "segments"
+  | "isExpanded"
+  | "onToggle"
+  | "internal_DO_NOT_USE_reportChangeTally"
 > & {
   part: SegmentPart;
   section: WorkspaceChangedFilesSection<WorkspaceFileStatus>;
@@ -141,36 +143,68 @@ export function ChangedFilesSegmentView({
 }) {
   const focusTarget = part === "summary" ? "trigger" : "collapse";
   const focusRef = useFocusHandoff(threadId, focusTarget, isExpanded);
+  const reported =
+    part === "summary"
+      ? toReportedLineTally(toChangeTally(section.stats))
+      : null;
+  const reportedAdded = reported?.added;
+  const reportedRemoved = reported?.removed;
+  useEffect(() => {
+    if (part !== "summary" || !internal_DO_NOT_USE_reportChangeTally) return;
+    internal_DO_NOT_USE_reportChangeTally(
+      reportedAdded === undefined || reportedRemoved === undefined
+        ? null
+        : { added: reportedAdded, removed: reportedRemoved },
+    );
+    return () => internal_DO_NOT_USE_reportChangeTally(null);
+  }, [
+    part,
+    internal_DO_NOT_USE_reportChangeTally,
+    reportedAdded,
+    reportedRemoved,
+  ]);
   if (part === "summary") {
     const tally = toChangeTally(section.stats);
     const prefix = CHANGED_FILES_KIND_PREFIX[section.kind];
+    const firstFile = section.files[0];
     return (
-      <SectionToggleButton
-        buttonRef={focusRef}
-        fillRow
-        id={TOGGLE_ID}
-        controlsId={BODY_ID}
-        icon={
-          <Icon
-            name="FileDiff"
-            className="size-3.5 shrink-0"
-            aria-hidden="true"
-          />
-        }
-        label={
-          <>
-            {prefix} · {renderChangeSummary(tally)}
-          </>
-        }
-        compactLabel={renderChangeSummary(tally)}
-        hideLabelInCompact={segments.length > 2}
-        ariaLabel={`Changed files: ${prefix}, ${formatChangeSummary(tally)}`}
-        isExpanded={isExpanded}
-        onToggle={() => {
-          if (!isExpanded) pendingFocus.set(threadId, "collapse");
-          onToggle();
-        }}
-      />
+      <div className="min-w-0 flex-1">
+        <ContextRow
+          ref={focusRef}
+          id={TOGGLE_ID}
+          aria-controls={BODY_ID}
+          aria-expanded={isExpanded}
+          aria-label={`Changed files: ${prefix}, ${formatChangeSummary(tally)}`}
+          glyph={
+            <Icon
+              name="FileDiff"
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+          }
+          title={prefix}
+          meta={renderChangeSummary(tally)}
+          action={
+            firstFile ? (
+              <button
+                type="button"
+                className="inline-flex min-w-16 items-center justify-center rounded-md border border-border px-2 py-0.5 text-xs text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFileClick(firstFile);
+                }}
+              >
+                Diff ↗
+              </button>
+            ) : null
+          }
+          actionInteractive
+          onClick={() => {
+            if (!isExpanded) pendingFocus.set(threadId, "collapse");
+            onToggle();
+          }}
+        />
+      </div>
     );
   }
   if (part === "action") return segments.length === 1 ? action : null;
@@ -214,7 +248,10 @@ function SegmentContent({
       section={section}
       action={
         props.part === "action" ? (
-          <MergeBaseAction environmentId={environmentId} workspace={workspace} />
+          <MergeBaseAction
+            environmentId={environmentId}
+            workspace={workspace}
+          />
         ) : null
       }
       onFileClick={(file) => actions.onChangedFileClick({ file, section })}

@@ -66,7 +66,12 @@ export function ThreadWorkflowStack({
       <PromptStackPeekLayers hiddenCount={running.length - 1}>
         <PromptStackCard
           ariaLabel="Workflows"
-          context={{ label: "Workflows", icon: "Workflow", group: "work" }}
+          context={{
+            label: "Workflows",
+            icon: "Workflow",
+            group: "work",
+            kind: "working",
+          }}
           contextSummary={running.length}
           onContextReveal={onToggleStack}
           className="overflow-hidden"

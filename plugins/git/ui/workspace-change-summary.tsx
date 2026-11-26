@@ -81,6 +81,14 @@ function formatChangeSummaryWithoutLineStats(
   return null;
 }
 
+export function toReportedLineTally(
+  tally: ChangeTally,
+): { added: number; removed: number } | null {
+  return formatChangeSummaryWithoutLineStats(tally) === null
+    ? { added: tally.insertions, removed: tally.deletions }
+    : null;
+}
+
 export function formatChangeSummary(tally: ChangeTally): string {
   return (
     formatChangeSummaryWithoutLineStats(tally) ??
@@ -170,7 +178,9 @@ export function selectWorkspaceChangedFilesSections<
 }
 
 export function selectWorkspaceAheadCommits<Commit>(
-  workspaceStatus: WorkspaceChangesStatus<WorkspaceChangedFileStatus, Commit> | undefined,
+  workspaceStatus:
+    | WorkspaceChangesStatus<WorkspaceChangedFileStatus, Commit>
+    | undefined,
 ): Commit[] {
   const commits = workspaceStatus?.mergeBase?.commits;
   if (!commits || commits.length === 0) return [];

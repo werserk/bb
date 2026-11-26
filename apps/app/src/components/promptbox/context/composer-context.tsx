@@ -12,15 +12,31 @@ import {
 import { createPortal } from "react-dom";
 import type { IconName } from "@bb/shared-ui/icon";
 
+export type ComposerContextKind =
+  | "needs-you"
+  | "working"
+  | "plan"
+  | "changes"
+  | "queue";
+export interface ComposerContextProgress {
+  done: number;
+  total: number;
+}
+export interface ComposerContextTally {
+  added: number;
+  removed: number;
+}
 export interface ComposerContextFact {
   id: string;
   label: string;
   summary?: string | number;
   icon: IconName;
   group: "work" | "attention" | "queue" | "context";
+  kind?: ComposerContextKind;
+  progress?: ComposerContextProgress;
+  tally?: ComposerContextTally;
   tone?: "attention" | "error";
   onReveal?: () => void;
-  overview?: boolean;
 }
 export interface ComposerContextEntry extends ComposerContextFact {
   element: HTMLDivElement;
@@ -132,10 +148,16 @@ export function ComposerContextItem({
     summary,
     icon,
     group,
+    kind,
+    progress,
+    tally,
     tone,
     onReveal,
-    overview,
   } = fact;
+  const progressDone = progress?.done;
+  const progressTotal = progress?.total;
+  const tallyAdded = tally?.added;
+  const tallyRemoved = tally?.removed;
   const id = `${sourceId}/${instanceId}`;
   const [element] = useState(() =>
     typeof document === "undefined" ? null : document.createElement("div"),
@@ -154,9 +176,17 @@ export function ComposerContextItem({
           summary,
           icon,
           group,
+          kind,
+          progress:
+            progressDone === undefined || progressTotal === undefined
+              ? undefined
+              : { done: progressDone, total: progressTotal },
+          tally:
+            tallyAdded === undefined || tallyRemoved === undefined
+              ? undefined
+              : { added: tallyAdded, removed: tallyRemoved },
           tone,
           onReveal,
-          overview,
         });
       else store.remove(id);
     };
@@ -180,9 +210,13 @@ export function ComposerContextItem({
     summary,
     icon,
     group,
+    kind,
+    progressDone,
+    progressTotal,
+    tallyAdded,
+    tallyRemoved,
     tone,
     onReveal,
-    overview,
   ]);
   useLayoutEffect(
     () => () => {

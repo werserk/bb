@@ -34,7 +34,10 @@ export interface PromptStackCardProps {
   rootRef?: Ref<HTMLElement>;
   style?: CSSProperties;
   onKeyDown?: KeyboardEventHandler<HTMLElement>;
-  context?: Pick<ComposerContextFact, "label" | "icon" | "group" | "tone">;
+  context?: Pick<
+    ComposerContextFact,
+    "label" | "icon" | "group" | "tone" | "kind" | "progress" | "tally"
+  >;
   contextSummary?: string | number;
   onContextReveal?: () => void;
 }

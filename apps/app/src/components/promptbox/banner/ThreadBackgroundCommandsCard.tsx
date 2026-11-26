@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { useComposerContextSource } from "../context/composer-context";
 import { useRef, useState } from "react";
 import { isBackgroundAgentTaskType } from "@bb/domain";
@@ -206,10 +206,16 @@ export function ThreadBackgroundCommandsCard({
         contextSummary={commands.length}
       >
         {commands.map((row) => (
-          <ComposerContextRow
+          <ContextRow
+            as="div"
             key={row.id}
-            icon={backgroundActivityDisplay(row).icon}
-            tone="working"
+            glyph={
+              <ContextRowIcon
+                name={backgroundActivityDisplay(row).icon}
+                tone="working"
+              />
+            }
+            actionInteractive
             title={row.description}
             mono
             subline={backgroundActivityModel(row)}
@@ -226,7 +232,12 @@ export function ThreadBackgroundCommandsCard({
     <PromptStackCard
       rootRef={cardRef}
       ariaLabel={groupLabel}
-      context={{ label: groupLabel, icon: "Terminal", group: "work" }}
+      context={{
+        label: groupLabel,
+        icon: "Terminal",
+        group: "work",
+        kind: "working",
+      }}
       contextSummary={commands.length}
       onContextReveal={() => {
         if (!isExpanded) onToggle();

@@ -61,6 +61,7 @@ import { PageShell } from "@/components/ui/page-shell.js";
 import { appToast } from "@/components/ui/app-toast";
 import { SelectionAddToChatContext } from "@/components/thread/SelectionAddToChatContext";
 import {
+  childThreadOutcome,
   isThreadDisplayStatusBannerActive,
   type ThreadPromptChildThreadsSection,
 } from "@/components/promptbox/banner/ThreadPromptContextBanner";
@@ -206,6 +207,8 @@ export function useThreadComposerAddToChat(thread: {
   );
 }
 
+const FINISHED_CHILD_THREAD_LIMIT = 12;
+
 function useChildThreadsSection(
   threadId: string,
   enabled: boolean,
@@ -215,13 +218,26 @@ function useChildThreadsSection(
     parentThreadId: threadId,
   });
   return useMemo(() => {
-    const list = enabled ? (childThreadSubsetQuery.data ?? []) : [];
+    const list = (enabled ? (childThreadSubsetQuery.data ?? []) : []).filter(
+      (entry) => entry.originKind === null,
+    );
+    const toItem = (entry: (typeof list)[number], finished: boolean) => ({
+      outcome: childThreadOutcome(entry.runtime.displayStatus),
+      id: entry.id,
+      title: getThreadDisplayTitle(entry),
+      href: getThreadRoutePath({
+        projectId: entry.projectId,
+        threadId: entry.id,
+      }),
+      needsOwnerAttention: threadNeedsOwnerAttention(entry),
+      finished,
+      updatedAt: entry.latestAttentionAt,
+    });
     const activeItems = list
       .filter(
         (entry) =>
-          entry.originKind === null &&
-          (isThreadDisplayStatusBannerActive(entry.runtime.displayStatus) ||
-            threadNeedsOwnerAttention(entry)),
+          isThreadDisplayStatusBannerActive(entry.runtime.displayStatus) ||
+          threadNeedsOwnerAttention(entry),
       )
       .sort((left, right) =>
         threadNeedsOwnerAttention(left) === threadNeedsOwnerAttention(right)
@@ -230,17 +246,15 @@ function useChildThreadsSection(
             ? -1
             : 1,
       )
-      .map((entry) => ({
-        id: entry.id,
-        title: getThreadDisplayTitle(entry),
-        href: getThreadRoutePath({
-          projectId: entry.projectId,
-          threadId: entry.id,
-        }),
-        needsOwnerAttention: threadNeedsOwnerAttention(entry),
-      }));
+      .map((entry) => toItem(entry, false));
     if (activeItems.length === 0) return null;
-    return { items: activeItems };
+    const activeIds = new Set(activeItems.map((item) => item.id));
+    const finishedItems = list
+      .filter((entry) => !activeIds.has(entry.id))
+      .sort((left, right) => right.latestAttentionAt - left.latestAttentionAt)
+      .slice(0, FINISHED_CHILD_THREAD_LIMIT)
+      .map((entry) => toItem(entry, true));
+    return { items: [...activeItems, ...finishedItems] };
   }, [childThreadSubsetQuery.data, enabled]);
 }
 

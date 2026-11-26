@@ -78,7 +78,7 @@ it("navigates directly for one publication even if that publication has multiple
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  fireEvent.click(await screen.findByRole("button", { name: /Question · 1/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Voice choice" }));
   expect(api.navigate).toHaveBeenCalledWith("Voice choice", "question");
 });
 it("lists multiple publications in creation order", async () => {
@@ -86,7 +86,6 @@ it("lists multiple publications in creation order", async () => {
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  fireEvent.click(await screen.findByRole("button", { name: /Questions · 2/ }));
   const old = await screen.findByRole("button", { name: "Oldest" });
   expect(
     old.compareDocumentPosition(
@@ -150,16 +149,14 @@ it("uses the same short label as the destination card for direct and list naviga
   const first = render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  expect(
-    await screen.findByRole("button", { name: /Question · 1 Decision/ }),
-  ).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Decision" })).toBeTruthy();
   first.unmount();
   api.list.mockResolvedValue([labeled, q("Other", 2)]);
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  fireEvent.click(await screen.findByRole("button", { name: /Questions · 2/ }));
   expect(await screen.findByRole("button", { name: "Decision" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Other" })).toBeTruthy();
 });
 
 it("loads an older open question through canonical pages and shows server total", async () => {
@@ -182,9 +179,6 @@ it("loads an older open question through canonical pages and shows server total"
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Questions · 201/ }),
-  );
   expect(await screen.findByText("Showing 1 of 201")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
   fireEvent.click(await screen.findByRole("button", { name: "Oldest" }));
@@ -244,9 +238,6 @@ it("shows Retry after two changing cursor snapshots instead of mixing question l
   render(<QuestionNavigator threadId="thr_test" />, {
     wrapper: createQueryClientTestHarness().wrapper,
   });
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Questions · 201/ }),
-  );
   fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
   expect(await screen.findByText(/The list keeps changing/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Discarded" })).toBeNull();
@@ -271,7 +262,7 @@ it("does not treat an unrelated client error as legacy coverage", async () => {
   expect(api.list).not.toHaveBeenCalled();
 });
 
-it("shows each open question as a flat Answer row without a second picker in composer context", async () => {
+it("shows each open question as one Answer row in composer context and closes the panel when it is used", async () => {
   const { ComposerContextProvider, ComposerContextSources } =
     await import("@/components/promptbox/context/composer-context");
   const { ComposerContextDock } =
@@ -289,14 +280,30 @@ it("shows each open question as a flat Answer row without a second picker in com
     { wrapper: createQueryClientTestHarness().wrapper },
   );
   fireEvent.click(await screen.findByRole("button", { name: "Needs you: 2" }));
-  const rows = [...document.querySelectorAll(".composer-context-row")];
+  const rows = [...document.querySelectorAll("[data-context-row]")];
   expect(
-    rows.map(
-      (row) => row.querySelector(".composer-context-row-title")?.textContent,
-    ),
+    rows.map((row) => row.querySelector("button")?.getAttribute("aria-label")),
   ).toEqual(["Oldest", "Newest"]);
-  expect(screen.getAllByText("Answer ↑")).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: "Question · 1 Oldest" }));
+  expect(
+    document.querySelectorAll('[data-context-row-action="primary"]'),
+  ).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Oldest" }));
   expect(api.navigate).toHaveBeenCalledWith("Oldest", "question");
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+});
+
+it("renders each open question as a row with the only filled Answer action", async () => {
+  api.list.mockResolvedValue([q("Newest", 2), q("Oldest", 1)]);
+  render(<QuestionNavigator threadId="thr_test" />, {
+    wrapper: createQueryClientTestHarness().wrapper,
+  });
+  const row = await screen.findByRole("button", { name: "Oldest" });
+  const action = row
+    .closest("[data-context-row]")
+    ?.querySelector("[data-context-row-action]");
+  expect(action?.getAttribute("data-context-row-action")).toBe("primary");
+  expect(action?.textContent).toBe("Answer");
+  expect(
+    document.querySelectorAll('[data-context-row-action="primary"]'),
+  ).toHaveLength(2);
 });

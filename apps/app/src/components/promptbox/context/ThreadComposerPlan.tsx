@@ -1,10 +1,10 @@
-import { ComposerContextRow } from "./ComposerContextRow";
 import { useEffect, useRef, useState } from "react";
 import { useEnvironment } from "@/hooks/queries/environment-queries";
 import { useThreadPendingInteractions } from "@/hooks/queries/thread-queries";
 import { useThreadPlanFocus } from "@/views/thread-detail/useThreadPlanFocus";
 import { useOptionalPaneContext } from "@/views/thread-detail/PaneContext";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon, type IconName } from "@bb/shared-ui/icon";
+import { cn } from "@bb/shared-ui/lib/utils";
 import type { PlanSnapshotView } from "@bb/domain";
 import { useThreadPlans } from "@/hooks/queries/thread-plans";
 import { useThread } from "@/hooks/queries/thread-queries";
@@ -19,6 +19,111 @@ import {
   useComposerContextSource,
 } from "./composer-context";
 
+type PlanStep = PlanSnapshotView["items"][number];
+
+function planStepIcon(step: PlanStep, executing: boolean): IconName {
+  if (step.status === "completed") return "Check";
+  if (step.status === "failed") return "CircleX";
+  if (step.status === "needs_input") return "CircleQuestion";
+  return step.status === "in_progress" && executing ? "Spinner" : "Circle";
+}
+
+function PlanStepRow({
+  step,
+  executing,
+  current,
+  onQuestion,
+}: {
+  step: PlanStep;
+  executing: boolean;
+  current: boolean;
+  onQuestion: (id: string) => void;
+}) {
+  return (
+    <div
+      data-context-row=""
+      data-current={current || undefined}
+      className={cn(
+        "flex items-start gap-2.5 rounded-md px-1.5 py-1.5 text-xs",
+        current && "bg-foreground/5",
+      )}
+      tabIndex={-1}
+      data-plan-step={step.id}
+      data-plan-step-status={step.status}
+      aria-label={`${step.status}: ${step.text}`}
+      aria-current={current ? "step" : undefined}
+    >
+      <Icon
+        name={planStepIcon(step, executing)}
+        className={cn(
+          "mt-0.5 size-3.5 shrink-0 text-muted-foreground",
+          step.status === "completed" && "text-success",
+          step.status === "failed" && "text-destructive-text",
+          step.status === "needs_input" && "text-attention",
+          current && step.status === "in_progress" && "text-foreground",
+          step.status === "in_progress" &&
+            executing &&
+            "motion-safe:animate-spin",
+        )}
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <p
+          className={cn(
+            current ? "font-medium text-foreground" : "text-foreground",
+            step.status === "completed" && "font-normal text-muted-foreground",
+          )}
+        >
+          {step.text}
+        </p>
+        {step.actor && <p className="text-muted-foreground">{step.actor}</p>}
+        {step.note && (
+          <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">
+            {step.note}
+          </p>
+        )}
+      </div>
+      {step.interactionIds.map((id) => (
+        <button
+          key={id}
+          type="button"
+          className="shrink-0 rounded-md bg-attention px-2 py-0.5 font-medium text-attention-foreground"
+          onClick={() => onQuestion(id)}
+        >
+          Answer
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PlanDisclosure({
+  label,
+  open,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-context-fit=""
+      aria-expanded={open}
+      onClick={onToggle}
+      className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-foreground/5"
+    >
+      <span>{label}</span>
+      <Icon
+        name="ChevronRight"
+        aria-hidden
+        className={cn("size-3 transition-transform", open && "rotate-90")}
+      />
+    </button>
+  );
+}
+
 export function ComposerPlanSteps({
   snapshot,
   executing,
@@ -28,90 +133,46 @@ export function ComposerPlanSteps({
   executing: boolean;
   onQuestion: (id: string) => void;
 }) {
-  const [doneOpen, setDoneOpen] = useState(false);
-  const done = snapshot.items.filter(
-    (step) => step.status === "completed",
-  ).length;
+  const [showDone, setShowDone] = useState(false);
+  const done = snapshot.items.filter((step) => step.status === "completed");
+  const remaining = snapshot.items.filter(
+    (step) => step.status !== "completed",
+  );
+  const currentId = (
+    remaining.find((step) => step.status !== "pending") ?? remaining[0]
+  )?.id;
+  const row = (step: PlanStep) => (
+    <PlanStepRow
+      key={step.id}
+      step={step}
+      executing={executing}
+      current={step.id === currentId}
+      onQuestion={onQuestion}
+    />
+  );
   return (
-    <div className="composer-context-plan space-y-2">
+    <div className="composer-context-plan">
       {snapshot.staleSince !== undefined && (
-        <p className="text-xs text-muted-foreground">
+        <p
+          data-context-fit=""
+          className="px-1.5 pb-1 text-xs text-muted-foreground"
+        >
           Plan from an earlier turn
         </p>
       )}
-      <div
-        role="progressbar"
-        aria-label="Completed plan steps"
-        aria-valuenow={done}
-        aria-valuemin={0}
-        aria-valuemax={snapshot.items.length}
-        className="composer-plan-segments"
-      >
-        {snapshot.items.map((step) => (
-          <span key={step.id} data-status={step.status} />
-        ))}
-      </div>
-      {done > 0 && (
-        <button
-          type="button"
-          className="composer-plan-done"
-          aria-expanded={doneOpen}
-          onClick={() => setDoneOpen(!doneOpen)}
-        >
-          ✓ {done} done {doneOpen ? "▾" : "▸"}
-        </button>
+      {done.length > 0 && (
+        <PlanDisclosure
+          label={`${done.length} ${done.length === 1 ? "step" : "steps"} done`}
+          open={showDone}
+          onToggle={() => setShowDone((value) => !value)}
+        />
       )}
-      {snapshot.items
-        .filter((step) => doneOpen || step.status !== "completed")
-        .map((step) => (
-          <div
-            key={step.id}
-            className="composer-plan-step text-xs"
-            tabIndex={-1}
-            data-plan-step={step.id}
-            data-plan-step-status={step.status}
-            aria-label={`${step.status}: ${step.text}`}
-          >
-            <ComposerContextRow
-              icon={
-                step.status === "completed"
-                  ? "Check"
-                  : step.status === "failed"
-                    ? "CircleX"
-                    : step.status === "needs_input"
-                      ? "CircleQuestion"
-                      : step.status === "in_progress" && executing
-                        ? "Spinner"
-                        : "Circle"
-              }
-              tone={
-                step.status === "needs_input"
-                  ? "attention"
-                  : step.status === "in_progress"
-                    ? "working"
-                    : undefined
-              }
-              title={step.text}
-              subline={[step.actor, step.note].filter(Boolean).join(" · ")}
-              action={
-                step.interactionIds.length > 0
-                  ? step.interactionIds.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => onQuestion(id)}
-                      >
-                        Answer
-                      </button>
-                    ))
-                  : undefined
-              }
-            />
-          </div>
-        ))}
+      {showDone ? done.map(row) : null}
+      {remaining.map(row)}
     </div>
   );
 }
+
 export function ThreadComposerPlan({ threadId }: { threadId: string }) {
   const result = useThreadPlans({ threadIds: [threadId] });
   const thread = useThread(threadId).data;
@@ -122,6 +183,7 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
   const current = plan?.current;
   const environment = useEnvironment(thread?.environmentId).data;
   const pending = useThreadPendingInteractions(threadId);
+  const [showEarlier, setShowEarlier] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const request = useThreadPlanFocus({
@@ -192,7 +254,6 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
   return (
     <ComposerContextItem
       id="plan"
-      overview
       label={
         result.status === "error"
           ? "Plan unavailable"
@@ -203,6 +264,8 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
               : "Plan"
       }
       summary={current ? `${done}/${current.items.length}` : undefined}
+      progress={current ? { done, total: current.items.length } : undefined}
+      kind="plan"
       icon="ListTodo"
       group="work"
       tone={
@@ -233,19 +296,29 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
             onQuestion={onQuestion}
           />
         )}
-        {plan?.previousPlans.map((snapshot) => (
-          <section
-            key={snapshot.planId ?? snapshot.sourceSeq}
-            className="mt-3 border-t border-border pt-2"
-          >
-            <h4 className="mb-2 text-xs text-muted-foreground">Earlier plan</h4>
-            <ComposerPlanSteps
-              snapshot={displayed(snapshot)}
-              executing={false}
-              onQuestion={onQuestion}
+        {plan && plan.previousPlans.length > 0 && (
+          <div data-context-earlier-plans="">
+            <PlanDisclosure
+              label={`Earlier plans · ${plan.previousPlans.length}`}
+              open={showEarlier}
+              onToggle={() => setShowEarlier((value) => !value)}
             />
-          </section>
-        ))}
+            {showEarlier
+              ? plan.previousPlans.map((snapshot) => (
+                  <section
+                    key={snapshot.planId ?? snapshot.sourceSeq}
+                    className="mt-1 border-t border-border pt-1"
+                  >
+                    <ComposerPlanSteps
+                      snapshot={displayed(snapshot)}
+                      executing={false}
+                      onQuestion={onQuestion}
+                    />
+                  </section>
+                ))
+              : null}
+          </div>
+        )}
         {pendingQuestions
           .filter(
             (question) =>
@@ -266,11 +339,6 @@ export function ThreadComposerPlan({ threadId }: { threadId: string }) {
               Question above
             </button>
           ))}
-        {plan?.historyTruncated && (
-          <p className="mt-2 text-2xs text-subtle-foreground">
-            Earlier plan history truncated
-          </p>
-        )}
       </div>
     </ComposerContextItem>
   );

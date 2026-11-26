@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ExperimentalThreadContextSegmentProps } from "@get-bb/plugin-sdk";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetAllCrashedPluginSlotsForTest } from "@/components/plugin/PluginSlotMount";
@@ -22,6 +22,11 @@ import {
   gitSegmentFixtureMergeBase,
   type GitSegmentFixture,
 } from "@/test/fixtures/git-segment-plugin";
+import { ComposerContextDock } from "@/components/promptbox/context/ComposerContextDock";
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+} from "@/components/promptbox/context/composer-context";
 import {
   ThreadPromptContextBanner,
   type CoreThreadContext,
@@ -159,10 +164,55 @@ function renderBanner({
   );
 }
 
+function renderBannerWithDock(value: GitSegmentFixture) {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1600);
+  const tree = (fixture: GitSegmentFixture | null) => (
+    <MemoryRouter>
+      <GitSegmentFixtureProvider value={fixture}>
+        <ComposerContextProvider>
+          <ComposerContextSources>
+            <ThreadPromptContextBanner
+              input={{
+                threadId: "thr_1",
+                projectId: "proj_1",
+                environment: { id: "env_1" },
+              }}
+              core={EMPTY_CORE}
+              archivedSection={null}
+              environmentGoneSection={null}
+              expandedSegment={null}
+              onToggleSegment={() => {}}
+            />
+          </ComposerContextSources>
+          <ComposerContextDock>
+            <textarea aria-label="Draft" />
+          </ComposerContextDock>
+        </ComposerContextProvider>
+      </GitSegmentFixtureProvider>
+    </MemoryRouter>
+  );
+  const view = render(tree(value));
+  return {
+    rerender: (next: GitSegmentFixture | null) => view.rerender(tree(next)),
+  };
+}
+
+function withLineStats(
+  insertions: number,
+  deletions: number,
+  lineStatsComplete = true,
+): GitSegmentFixture {
+  return {
+    ...git,
+    section: {
+      ...git.section,
+      stats: { ...git.section.stats, insertions, deletions, lineStatsComplete },
+    },
+  };
+}
+
 function rowText(): string {
-  const card = screen.getByRole("region", {
-    name: "Thread context before sending",
-  });
+  const card = screen.getByRole("region", { name: "Thread changes" });
   return card.firstElementChild?.textContent ?? "";
 }
 
@@ -184,7 +234,7 @@ describe("thread context segments", () => {
     });
 
     expect(
-      screen.queryByRole("button", { name: "Parent Plan the release" }),
+      screen.queryByRole("link", { name: "Parent Plan the release" }),
     ).toBeNull();
     expect(screen.getByText(/Plugin summary demo\/status/)).toBeTruthy();
   });
@@ -196,8 +246,13 @@ describe("thread context segments", () => {
     const row = rowText();
     expect(row.indexOf("Plugin summary")).toBeGreaterThan(-1);
     expect(
-      screen.getByRole("button", { name: "Parent Plan the release" }),
+      screen.getByRole("link", { name: "Parent Plan the release" }),
     ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("region", { name: "Thread context before sending" })
+        .getAttribute("aria-label"),
+    ).toBe("Thread context before sending");
     expect(row.indexOf("Plugin summary")).toBeLessThan(
       row.indexOf("Uncommitted"),
     );
@@ -205,9 +260,7 @@ describe("thread context segments", () => {
       row.indexOf("Plugin action"),
     );
     expect(
-      screen.getByText(
-        "Plugin summary bb--core/parent-thread,demo/status,bb--git/changed-files",
-      ),
+      screen.getByText("Plugin summary demo/status,bb--git/changed-files"),
     ).toBeTruthy();
     expect(seenProps.at(-1)).toMatchObject({
       threadId: "thr_1",
@@ -223,9 +276,7 @@ describe("thread context segments", () => {
     renderBanner({ core: { ...EMPTY_CORE, parentThread }, git });
 
     expect(
-      screen.getByText(
-        "Plugin summary bb--core/parent-thread,bb--git/changed-files,demo/status",
-      ),
+      screen.getByText("Plugin summary bb--git/changed-files,demo/status"),
     ).toBeTruthy();
   });
 
@@ -305,5 +356,98 @@ describe("thread context segments", () => {
 
     expect(screen.getByText("Thread is archived")).toBeTruthy();
     expect(screen.queryByText(/Plugin summary/)).toBeNull();
+  });
+
+  it("hands the git segment's tally to the Changes chip and follows it", () => {
+    const { rerender } = renderBannerWithDock(withLineStats(12, 3));
+    expect(
+      screen
+        .getByRole("button", { name: /^Changes/ })
+        .getAttribute("aria-label"),
+    ).toBe("Changes: +12 −3");
+
+    rerender(withLineStats(20, 0));
+    expect(
+      screen
+        .getByRole("button", { name: /^Changes/ })
+        .getAttribute("aria-label"),
+    ).toBe("Changes: +20 −0");
+
+    rerender(withLineStats(0, 0));
+    expect(
+      screen
+        .getByRole("button", { name: /^Changes/ })
+        .getAttribute("aria-label"),
+    ).toBe("Changes");
+  });
+
+  it("shows no tally while line stats are incomplete", () => {
+    renderBannerWithDock(withLineStats(12, 3, false));
+    expect(
+      screen
+        .getByRole("button", { name: /^Changes/ })
+        .getAttribute("aria-label"),
+    ).toBe("Changes");
+  });
+
+  it("lets only the git segment report a tally and calls a non-git segment a Context chip", () => {
+    const reports: unknown[] = [];
+    registerPluginSegment({
+      summary: (props) => {
+        reports.push(props.internal_DO_NOT_USE_reportChangeTally);
+        return <span>Plugin summary</span>;
+      },
+    });
+    const { rerender } = renderBannerWithDock(withLineStats(12, 3));
+    expect(reports.every((report) => report === undefined)).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: /^Changes/ })
+        .getAttribute("aria-label"),
+    ).toBe("Changes: +12 −3");
+
+    rerender(null);
+    expect(screen.queryByRole("button", { name: /^Changes/ })).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Context" })
+        .getAttribute("aria-label"),
+    ).toBe("Context");
+  });
+
+  it("returns focus to the changed files row after collapsing them", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1600);
+    function Harness() {
+      const [expanded, setExpanded] = useState<string | null>(null);
+      return (
+        <MemoryRouter>
+          <GitSegmentFixtureProvider value={git}>
+            <ThreadPromptContextBanner
+              input={{
+                threadId: "thr_1",
+                projectId: "proj_1",
+                environment: { id: "env_1" },
+              }}
+              core={EMPTY_CORE}
+              archivedSection={null}
+              environmentGoneSection={null}
+              expandedSegment={expanded}
+              onToggleSegment={(key) =>
+                setExpanded((current) => (current === key ? null : key))
+              }
+            />
+          </GitSegmentFixtureProvider>
+        </MemoryRouter>
+      );
+    }
+    render(<Harness />);
+    const row = screen.getByRole("button", { name: /Changed files/ });
+    fireEvent.click(row);
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse changed files" }),
+    );
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(row);
   });
 });

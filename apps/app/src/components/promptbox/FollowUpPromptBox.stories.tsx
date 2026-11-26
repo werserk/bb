@@ -1,8 +1,10 @@
+import { QuestionNavigator } from "@/components/thread/user-questions/QuestionNavigator";
 import {
   ComposerContextProvider,
   ComposerContextSources,
   ComposerContextItem,
 } from "./context/composer-context";
+import { BottomAnchoredScrollBody } from "@/components/ui/bottom-anchored-scroll-body";
 import { ComposerPlanSteps } from "./context/ThreadComposerPlan";
 import { ThreadTodoCard } from "./banner/ThreadTodoCard";
 import { ThreadChildThreadsBanner } from "./banner/ThreadPromptContextBanner";
@@ -1135,7 +1137,6 @@ function ContextFixtureScene({ after }: { after: boolean }) {
         <ComposerContextSources>
           <ComposerContextItem
             id="plan"
-            overview
             label="Plan"
             summary="2/6"
             group="work"
@@ -1149,7 +1150,6 @@ function ContextFixtureScene({ after }: { after: boolean }) {
           </ComposerContextItem>
           <ComposerContextItem
             id="questions"
-            overview
             label="Questions unavailable"
             group="attention"
             tone="error"
@@ -1234,5 +1234,280 @@ export function ComposerContextAfter() {
     <ModelPickerStoryQueryProvider>
       <ContextFixtureScene after />
     </ModelPickerStoryQueryProvider>
+  );
+}
+
+interface StoryOpenQuestion {
+  id: string;
+  title: string;
+  createdAt: number;
+}
+const storyOpenQuestions: { current: readonly StoryOpenQuestion[] } = {
+  current: [],
+};
+let storyFetchInstalled = false;
+function installStoryQuestionFetch() {
+  if (storyFetchInstalled || typeof window === "undefined") return;
+  storyFetchInstalled = true;
+  const original = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (!url.includes("/questions/open"))
+      return original(input as RequestInfo, init);
+    const questions = storyOpenQuestions.current.map((question) => ({
+      id: question.id,
+      threadId: "thr_story",
+      status: "open",
+      createdAt: question.createdAt,
+      publication: { questions: [{ prompt: question.title }] },
+    }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          questions,
+          total: questions.length,
+          nextCursor: null,
+          readRevision: "r1",
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+  };
+}
+
+const SCENE_CHILD_TITLES = [
+  "«Недавние» в сайдбаре: миниатюры обложек",
+  "Реестр призов, городов и глоссарий",
+  "CI на своём раннере",
+  "Каталог: полки по времени",
+  "Страница внешнего соревнования",
+  "SEO и GEO OrangeHack: стратегия, домены, воронки",
+  "Ускорение CI и деплоя на stage",
+  "Трассировка этапов CI и деплоя",
+  "Выпуск каталога и витрины на stage",
+];
+
+interface ContextSceneConfig {
+  plan?: boolean;
+  questions?: number;
+  children?: { total: number; waiting: number; finished?: number };
+  changes?: boolean;
+  parent?: boolean;
+  error?: boolean;
+  width?: number;
+  timeline?: boolean;
+}
+
+function ContextScene({
+  plan = false,
+  questions = 0,
+  children,
+  changes = false,
+  parent = false,
+  error = false,
+  width,
+  timeline = false,
+}: ContextSceneConfig) {
+  storyOpenQuestions.current = Array.from({ length: questions }, (_, i) => ({
+    id: `question-${i}`,
+    title: [
+      "Принять видимые изменения #949 по превью?",
+      "Какой домен оставить для внешнего соревнования?",
+      "Включить автослияние после зелёного CI?",
+    ][i % 3]!,
+    createdAt: STORY_NOW - (i + 1) * 3_600_000,
+  }));
+  installStoryQuestionFetch();
+  const bannerKey = `${changes}-${parent}`;
+  const composer = (
+    <>
+      <ComposerContextSources>
+        {plan ? (
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            summary="3/6"
+            progress={{ done: 3, total: 6 }}
+            kind="plan"
+            group="work"
+            icon="ListTodo"
+          >
+            <ComposerPlanSteps
+              snapshot={contextPlanFixture}
+              executing
+              onQuestion={noop}
+            />
+          </ComposerContextItem>
+        ) : null}
+        {questions > 0 ? <QuestionNavigator threadId="thr_story" /> : null}
+        {error ? (
+          <ComposerContextItem
+            id="machine"
+            label="pc2 offline"
+            group="attention"
+            tone="error"
+            icon="AlertCircle"
+          >
+            <p className="text-xs text-destructive-text">
+              Machine pc2 is offline. Messages will wait until it returns.
+            </p>
+          </ComposerContextItem>
+        ) : null}
+      </ComposerContextSources>
+      <Row
+        contextHost
+        submitMode={{ kind: "ready" }}
+        initialMessage=""
+        stack={
+          <>
+            {children ? (
+              <ThreadChildThreadsBanner
+                childThreads={{
+                  items: Array.from(
+                    { length: children.total + (children.finished ?? 0) },
+                    (_, i) => ({
+                      id: `child-${i}`,
+                      title: SCENE_CHILD_TITLES[i % SCENE_CHILD_TITLES.length]!,
+                      href: `/threads/child-${i}`,
+                      needsOwnerAttention: i < children.waiting,
+                      finished: i >= children.total,
+                      updatedAt: Date.now() - (i + 1) * 420_000,
+                    }),
+                  ),
+                }}
+                isExpanded={false}
+                onExpandedChange={noop}
+              />
+            ) : null}
+            {changes || parent ? (
+              <GitSegmentFixtureProvider
+                key={bannerKey}
+                value={{
+                  section: dirtyContextBannerSection!,
+                  mergeBase: gitSegmentFixtureMergeBase(),
+                }}
+              >
+                <ThreadPromptContextBanner
+                  input={{
+                    threadId: "thr_story",
+                    projectId: "proj_story",
+                    environment: null,
+                  }}
+                  core={{
+                    parentThread: parent
+                      ? {
+                          parentThreadTitle: "OrangeHack",
+                          href: "/threads/parent",
+                          relationship: "parent",
+                        }
+                      : null,
+                  }}
+                  archivedSection={null}
+                  environmentGoneSection={null}
+                  expandedSegment={null}
+                  onToggleSegment={noop}
+                />
+              </GitSegmentFixtureProvider>
+            ) : null}
+          </>
+        }
+      />
+    </>
+  );
+  return (
+    <ModelPickerStoryQueryProvider>
+      <ComposerContextProvider>
+        <div
+          className="@container/thread-chat mx-auto flex w-full flex-col justify-end bg-background p-4"
+          style={{ height: 760, maxWidth: width ?? 768 }}
+        >
+          {timeline ? null : (
+            <div className="min-h-0 flex-1 overflow-hidden py-3 text-sm">
+              <p className="ml-12 rounded-xl bg-muted p-3">
+                Проверяю общий overlay и геометрию полосы контекста на плотной
+                сцене.
+              </p>
+            </div>
+          )}
+          {timeline ? (
+            <BottomAnchoredScrollBody
+              footer={composer}
+              maxWidthClassName="max-w-3xl"
+              contentClassName="!pb-3 !pt-4"
+            >
+              <div className="space-y-3 text-sm">
+                {SCENE_TIMELINE.map((line, i) => (
+                  <p
+                    key={line}
+                    className={
+                      i % 3 === 0
+                        ? "ml-12 rounded-xl bg-muted p-3"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
+            </BottomAnchoredScrollBody>
+          ) : (
+            composer
+          )}
+        </div>
+      </ComposerContextProvider>
+    </ModelPickerStoryQueryProvider>
+  );
+}
+const SCENE_TIMELINE = Array.from(
+  { length: 16 },
+  (_, i) => `Сообщение ${i + 1}: проверяю, как лента сдвигается вверх.`,
+);
+
+export function ContextTimelineShift() {
+  return (
+    <ContextScene
+      timeline
+      plan
+      questions={1}
+      children={{ total: 2, waiting: 2 }}
+      changes
+      parent
+    />
+  );
+}
+export function ContextPlanOnly() {
+  return <ContextScene plan />;
+}
+export function ContextNeedsYouChangesPlan() {
+  return (
+    <ContextScene
+      plan
+      questions={1}
+      children={{ total: 2, waiting: 2 }}
+      changes
+      parent
+    />
+  );
+}
+export function ContextNineChildren() {
+  return <ContextScene children={{ total: 9, waiting: 6, finished: 3 }} />;
+}
+export function ContextErrorTone() {
+  return <ContextScene plan error children={{ total: 1, waiting: 0 }} />;
+}
+export function ContextNarrow() {
+  return (
+    <ContextScene
+      width={380}
+      plan
+      questions={1}
+      children={{ total: 2, waiting: 2 }}
+      changes
+    />
   );
 }

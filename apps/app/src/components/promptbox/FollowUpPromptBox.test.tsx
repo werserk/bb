@@ -1639,7 +1639,7 @@ it("retains the narrow editor while focus moves through the attached context and
   );
   const input = screen.getByRole("textbox", { name: "Follow-up prompt" });
   act(() => input.focus());
-  const toggle = screen.getByRole("button", { name: "Toggle thread context" });
+  const toggle = screen.getByRole("button", { name: "Plan" });
   act(() => toggle.focus());
   fireEvent.click(toggle);
   const detail = screen.getByRole("button", { name: "Inspect plan step" });

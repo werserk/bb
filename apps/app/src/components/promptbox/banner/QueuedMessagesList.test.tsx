@@ -2531,7 +2531,7 @@ it("keeps the context queue as preview rows and opens full controls only on Edit
   );
   fireEvent.click(screen.getByRole("button", { name: "Queue: 1" }));
   expect(
-    screen.getByText("Then inspect PayPal").closest(".composer-context-row"),
+    screen.getByText("Then inspect PayPal").closest("[data-context-row]"),
   ).toBeTruthy();
   expect(screen.getByText("Sends when the agent finishes")).toBeTruthy();
   expect(
