@@ -1066,6 +1066,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         title: "Data & platform",
         surfaceIds: [
           "storage",
+          "pre-completion-policy",
           "bb-sdk",
           "thread-plugin-metadata",
           "thread-plan-steps",
@@ -1643,13 +1644,12 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         tagline: "Experimental native Stop policy",
         title: "Pre-completion policy",
         summary:
-          "Opt in managed threads to a bounded native Stop check. Source support requires matching Claude or Codex bridges. Codex 0.166 uses session-local trusted Stop hooks with private Unix IPC; verify installed host coverage separately.",
+          "Use a bounded native Stop check on opted-in managed threads. With this, a plugin can:",
         bullets: [
-          "Register a policy per thread and remove it with null; re-register after restart",
-          "Read trusted bb turn identity, capped final text and native user-question IDs",
-          "Allow completion or request one short same-turn continuation; core reserves the attempt durably",
-          "Timeout, unavailable facts and unsupported providers allow completion with coverage gaps",
-          "Source capability is not installed-runtime proof; unsupported stops remain in the denominator",
+          "Register a policy per thread; remove it with null and re-register after restart",
+          "Read bb turn identity, capped final text and pending question IDs",
+          "Allow completion or request one short same-turn continuation",
+          "Expect coverage gaps on timeouts and providers without a matching bridge",
         ],
         apiSymbols: [
           "PluginPreCompletionContext",
