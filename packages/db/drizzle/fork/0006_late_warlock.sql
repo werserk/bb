@@ -12,6 +12,7 @@ CREATE TABLE `thread_send_intakes` (
 	`claim_epoch` integer DEFAULT 0 NOT NULL,
 	`lease_expires_at` integer,
 	`sealed_at` integer,
+	`resend_count` integer DEFAULT 0 NOT NULL,
 	`admission_receipt` text,
 	`native_receipt` text,
 	`native_handoff` text,

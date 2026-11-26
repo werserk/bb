@@ -1468,6 +1468,7 @@ export const threadSendIntakes = sqliteTable(
     claimEpoch: integer("claim_epoch").notNull().default(0),
     leaseExpiresAt: integer("lease_expires_at"),
     sealedAt: integer("sealed_at"),
+    resendCount: integer("resend_count").notNull().default(0),
     admissionReceipt: text("admission_receipt"),
     nativeReceipt: text("native_receipt"),
     nativeHandoff: text("native_handoff"),

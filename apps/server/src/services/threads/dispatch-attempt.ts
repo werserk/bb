@@ -1,4 +1,4 @@
-import { assertSendIntake, sealSendIntake, commitSendIntake, stableSendIntakeOperation, compactSendIntakeComplete, type SendIntakeAuthority } from "./send-intake-authority.js";
+import { assertSendIntake, commitSendIntake, stableSendIntakeOperation, compactSendIntakeComplete, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   classifyLocalQuestionAnswer,
   QuestionResponseNotDeliverableError,
@@ -706,7 +706,6 @@ async function runDispatchAttempt(
 
   if (!sendNow && hasMessageDispatchHooks()) {
     const outcome = await runMessageDispatchHookPass(deps, {
-      beforeHooks: () => sealSendIntake(deps.db, args.intake, "hook"),
       thread,
       threadResponse: toThreadResponseFromThread(deps, { thread }),
       serviceTurn: payload.serviceTurn,

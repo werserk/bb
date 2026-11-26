@@ -770,6 +770,14 @@ export interface MessageDispatchHookContext {
  * `turn.submit` pair, whose split was an accident of where the code happened to
  * branch rather than a difference a plugin needed to see — the attempt's own
  * `attempt` kind carries what actually differs.
+ *
+ * Hooks must be idempotent. With the durable send intake on, a hook pass is not
+ * a delivery effect: if the server stops or crashes while a send's hooks are
+ * running, recovery runs the hooks again and resends the message, so a hook can
+ * run twice for one message. If that second attempt is interrupted too, the
+ * send is abandoned (a terminal `intake_abandoned` error) and later sends on
+ * the thread proceed. Only the provider dispatch itself is never resent
+ * automatically.
  */
 export interface PluginHookSignatures {
   "message.dispatch": {

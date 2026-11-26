@@ -1,6 +1,7 @@
 import { ApiError } from "../../errors.js";
 import { randomUUID } from "node:crypto";
 import {
+  abandonResentThreadSendIntake,
   claimThreadSendIntake,
   failThreadSendIntake,
   getThreadSendIntake,
@@ -229,10 +230,12 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
             waitForGuard(threadId, claim.id);
           } else if (!(rejection && !(error instanceof ThreadContextMutationBusyError) &&
             rejectClaimedThreadSendIntake(deps.db, claim, encodeIntakeErrorOutcome(rejection), rejection.message, Date.now()))) {
+            if (!abandonResentThreadSendIntake(deps.db, claim, Date.now())) {
             const row = getThreadSendIntake(deps.db, claim.id);
             const sealed = row !== null && row.sealedAt !== null;
             failThreadSendIntake(deps.db, claim, error instanceof Error ? error.message : "Preparation failed", Date.now(),
               rejection && sealed && !(error instanceof ThreadContextMutationBusyError) ? encodeIntakeErrorOutcome(rejection, claim.id) : null);
+            }
           }
         }
         if (id) changed(threadId, id, error instanceof Error ? error : new Error("Preparation failed"));

@@ -208,6 +208,14 @@ Queued messages:
   `threads.queuedMessages.update`, with or without `input`; a time that has
   passed is rejected.
 
+Plugin authors: with the durable send intake on, a `message.dispatch` hook pass
+is not a delivery effect. If the server stops or crashes while a send's hooks
+are running, recovery runs the hooks again and resends the message, so a hook
+can run twice for one message; keep hooks idempotent. If the second attempt is
+interrupted as well, the send is abandoned with an `intake_abandoned` error and
+the thread is unblocked. Only the provider dispatch itself is never resent
+automatically.
+
   `queue update --model`, `--reasoning-level`, `--permission-mode`, and
   `--service-tier` change what the row will run with; flags you leave out keep
   the row's current values, the same checks as a send apply (the machine's

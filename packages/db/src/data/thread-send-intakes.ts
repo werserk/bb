@@ -106,6 +106,41 @@ export function rejectThreadSendIntake(db: DbConnection, id: string, error: stri
   }).where(and(eq(threadSendIntakes.id, id), eq(threadSendIntakes.state, "staging"))).run();
 }
 
+/** Automatic resends allowed for an unsealed row interrupted mid-attempt (hooks may re-run once). */
+export const THREAD_SEND_INTAKE_MAX_RESENDS = 1;
+const ABANDONED_MESSAGE = "Send abandoned: preparation was interrupted again after an automatic resend; nothing reached the provider";
+const abandonedReceipt = JSON.stringify({ kind: "error", status: 409,
+  body: { code: "intake_abandoned", message: ABANDONED_MESSAGE } });
+
+/** Terminal state for an unsealed row whose resend also failed; frees the thread. Caller holds a transaction or claim check. */
+function interruptUnsealed(tx: DbTransaction, row: ThreadSendIntakeRow, now: number): "pending" | "rejected" {
+  if (row.resendCount >= THREAD_SEND_INTAKE_MAX_RESENDS) {
+    abandonUnsealedRow(tx, row, now);
+    return "rejected";
+  }
+  tx.update(threadSendIntakes).set({ state: "pending", claimToken: null, leaseExpiresAt: null,
+    resendCount: row.resendCount + 1, revision: row.revision + 1, updatedAt: now,
+  }).where(eq(threadSendIntakes.id, row.id)).run();
+  return "pending";
+}
+
+function abandonUnsealedRow(tx: DbTransaction, row: ThreadSendIntakeRow, now: number): void {
+  tx.update(threadSendIntakes).set({ state: "rejected", originalEnvelope: null, currentEnvelope: null,
+    nativeReceipt: abandonedReceipt, lastError: ABANDONED_MESSAGE, claimToken: null, leaseExpiresAt: null,
+    revision: row.revision + 1, updatedAt: now,
+  }).where(eq(threadSendIntakes.id, row.id)).run();
+}
+
+/** In-process failure of an attempt that already was a resend: abandon instead of parking in failed. */
+export function abandonResentThreadSendIntake(db: DbConnection, claim: ThreadSendIntakeClaim, now: number): boolean {
+  return db.transaction(tx => {
+    const row = tx.select().from(threadSendIntakes).where(claimWhere(claim, now)).get();
+    if (!row || row.sealedAt !== null || row.resendCount < THREAD_SEND_INTAKE_MAX_RESENDS) return false;
+    abandonUnsealedRow(tx, row, now);
+    return true;
+  }, { behavior: "immediate" });
+}
+
 export function claimThreadSendIntake(db: DbConnection, args: {
   threadId: string; token: string; now: number; leaseMs: number;
 }): ThreadSendIntakeClaim | null {
@@ -120,9 +155,11 @@ export function claimThreadSendIntake(db: DbConnection, args: {
         }).where(eq(threadSendIntakes.id, row.id)).run();
         return null;
       }
+      // Unsealed expired claim (crash mid-hook/preparation): resend once, then abandon so the thread unblocks.
+      if (row.resendCount >= THREAD_SEND_INTAKE_MAX_RESENDS) { abandonUnsealedRow(tx, row, args.now); return null; }
     }
     const claimed = tx.update(threadSendIntakes).set({ state: "preparing", claimToken: args.token,
-      claimEpoch: row.claimEpoch + 1, leaseExpiresAt: args.now + args.leaseMs,
+      claimEpoch: row.claimEpoch + 1, resendCount: row.state === "preparing" ? row.resendCount + 1 : row.resendCount, leaseExpiresAt: args.now + args.leaseMs,
       revision: row.revision + 1, lastError: null, updatedAt: args.now,
     }).where(and(eq(threadSendIntakes.id, row.id), eq(threadSendIntakes.revision, row.revision))).returning().get();
     return claimed?.claimToken !== null && claimed?.leaseExpiresAt !== null && claimed !== undefined
@@ -270,9 +307,9 @@ export function releaseThreadSendIntakeForStop(db: DbConnection, claim: ThreadSe
   db.transaction(tx => {
     const row = getThreadSendIntake(tx, claim.id);
     if (!row || row.state !== "preparing" || row.claimToken !== claim.claimToken || row.claimEpoch !== claim.claimEpoch) return;
-    tx.update(threadSendIntakes).set({ state: row.sealedAt === null ? "pending" : "failed",
-      claimToken: null, leaseExpiresAt: null, revision: row.revision + 1, updatedAt: now,
-      lastError: row.sealedAt === null ? null : "Server stopped after effect seal; recovery required",
+    if (row.sealedAt === null) { interruptUnsealed(tx, row, now); return; }
+    tx.update(threadSendIntakes).set({ state: "failed", claimToken: null, leaseExpiresAt: null,
+      revision: row.revision + 1, updatedAt: now, lastError: "Server stopped after effect seal; recovery required",
     }).where(eq(threadSendIntakes.id, row.id)).run();
   }, { behavior: "immediate" });
 }

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dcbe712c-95f7-479a-ac6d-bf35be0dbb2d",
+  "id": "ecb33b90-ca3e-4be8-8165-5031bb56866d",
   "prevId": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
   "tables": {
     "app_settings": {
@@ -5139,6 +5139,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "resend_count": {
+          "name": "resend_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "admission_receipt": {
           "name": "admission_receipt",

@@ -420,3 +420,81 @@ describe("send intake worker", () => {
     held.resolve(); await vi.advanceTimersByTimeAsync(1);
   });
 });
+
+describe("C1: a hook pass is not an effect (resend, then abandon)", () => {
+  type Execute = Parameters<typeof createSendIntakeWorker>[0]["execute"];
+  /** A message.dispatch hook pass still running when the process dies; nothing reached the provider. */
+  const hanging = (calls: string[]): Execute => async row => { calls.push(`hook:${row.id}`); await new Promise(() => {}); return sent; };
+  function restart(db: ReturnType<typeof fixture>["db"], execute: Execute) {
+    const worker = createSendIntakeWorker({ db, isReady: () => true, execute, prepare: async () => {}, notify: vi.fn(), report: vi.fn() });
+    cleanups.push(worker.stop);
+    return worker;
+  }
+  const delivering = (db: ReturnType<typeof fixture>["db"], provider: string[], calls: string[]): Execute => async (row, auth) => {
+    calls.push(`hook:${row.id}`);
+    db.transaction(tx => commitSendIntake(tx, auth, { kind: "queue", id: row.id }));
+    provider.push(row.id);
+    return sent;
+  };
+
+  it("stop mid-hook, restart: the row is resent and reaches the provider once, in order", async () => {
+    const calls: string[] = [];
+    const f = fixture(hanging(calls));
+    f.add("head"); f.add("next");
+    f.worker.wake(f.thread.id); await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toEqual(["hook:head"]);
+    f.worker.stop();
+    expect(getThreadSendIntake(f.db, "head")).toMatchObject({ state: "pending", sealedAt: null, resendCount: 1, claimToken: null });
+    const provider: string[] = [];
+    const second = restart(f.db, delivering(f.db, provider, calls));
+    second.recover(); await vi.advanceTimersByTimeAsync(5);
+    expect(provider).toEqual(["head", "next"]);
+    expect(calls).toEqual(["hook:head", "hook:head", "hook:next"]);
+    expect(getThreadSendIntake(f.db, "head")?.state).toBe("transferred");
+    expect(getThreadSendIntake(f.db, "next")?.state).toBe("transferred");
+  });
+
+  it("crash mid-hook (lease expires, no stop): the row is reclaimed and resent once", async () => {
+    const provider: string[] = []; const calls: string[] = [];
+    const f = fixture(async () => sent);
+    f.worker.stop();
+    f.add("head");
+    expect(claimThreadSendIntake(f.db, { threadId: f.thread.id, token: "dead-process", now: Date.now(), leaseMs: 30_000 })).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(30_001);
+    const second = restart(f.db, delivering(f.db, provider, calls));
+    second.recover(); await vi.advanceTimersByTimeAsync(5);
+    expect(provider).toEqual(["head"]);
+    expect(getThreadSendIntake(f.db, "head")).toMatchObject({ state: "transferred", resendCount: 1 });
+  });
+
+  it("a second interruption abandons the row with a clear error and unblocks the thread", async () => {
+    const calls: string[] = [];
+    const f = fixture(hanging(calls));
+    f.add("head"); f.add("next");
+    f.worker.wake(f.thread.id); await vi.advanceTimersByTimeAsync(1);
+    f.worker.stop();
+    const second = restart(f.db, hanging(calls));
+    second.recover(); await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toEqual(["hook:head", "hook:head"]);
+    second.stop();
+    expect(getThreadSendIntake(f.db, "head")).toMatchObject({
+      state: "rejected", sealedAt: null, currentEnvelope: null, claimToken: null, lastError: expect.stringContaining("abandoned"),
+    });
+    const provider: string[] = [];
+    const third = restart(f.db, delivering(f.db, provider, calls));
+    f.add("later");
+    third.recover(); await vi.advanceTimersByTimeAsync(5);
+    expect(provider).toEqual(["next", "later"]);
+    await expect(third.wait("head")).rejects.toMatchObject({ status: 409, body: { code: "intake_abandoned" } });
+  });
+
+  it("an in-process failure of the resent attempt also abandons instead of parking in failed", async () => {
+    const f = fixture(hanging([]));
+    f.add("head");
+    f.worker.wake(f.thread.id); await vi.advanceTimersByTimeAsync(1);
+    f.worker.stop();
+    const second = restart(f.db, async () => { throw new Error("hook crashed"); });
+    second.recover(); await vi.advanceTimersByTimeAsync(5);
+    expect(getThreadSendIntake(f.db, "head")).toMatchObject({ state: "rejected", lastError: expect.stringContaining("abandoned") });
+  });
+});

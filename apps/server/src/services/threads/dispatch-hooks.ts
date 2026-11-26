@@ -106,7 +106,6 @@ export interface MessageDispatchHookPassRequest {
   queuedMessages: ThreadQueuedMessage[];
   pluginSubmission: MessageDispatchHookContext["experimental_submission"];
   continueAfterHooks?: () => Promise<void>;
-  beforeHooks?: () => void;
 }
 
 /**
@@ -409,7 +408,6 @@ export async function runMessageDispatchHookPass(
   return withEvaluationLock(async () => {
     const context = buildHookContext(deps, request);
     const waits: MessageDispatchWaitDecision[] = [];
-    request.beforeHooks?.();
 
     for (const hook of hooks) {
       const invocation = await provider.invokeHook(
