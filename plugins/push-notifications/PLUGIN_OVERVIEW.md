@@ -25,12 +25,4 @@ Channel switches apply to this server and save immediately. Browser permission i
 
 ## CLI and SDK
 
-`bb push-notifications` manages mobile devices, shows status, sends and tests notifications, and reads or sets a thread's level; `bb plugin config push-notifications` changes the settings above. The bundled `push-notifications` skill documents every command and RPC method. Plugins and agents send notifications with the discoverable `notifications.send` RPC; `bb plugin rpc inspect push-notifications notifications.send` prints its schemas. Permission requests still require a click in the target client.
-
-Root threads expose **Notifications for new threads**. It stores a separate
-`childNotifications: { level }` metadata key; `inherit` removes that key.
-Descendants start from their own level, then the nearest ancestor child level,
-then the global child default, then the global default. Ancestor own-level caps
-still only lower the result. A thread's child level never affects itself.
-`bb push-notifications thread <id> --child-level <inherit|all|input-only|questions-only|muted>`
-uses the same writer as the menu and `threadNotifications.setChildLevel` RPC.
+`bb push-notifications` manages mobile devices, shows status, sends and tests notifications, and reads or sets a thread's level or its `--child-level` for new descendants; `bb plugin config push-notifications` changes the settings above. The bundled `push-notifications` skill documents every command and RPC method. Plugins and agents send notifications with the discoverable `notifications.send` RPC; `bb plugin rpc inspect push-notifications notifications.send` prints its schemas. Permission requests still require a click in the target client.
