@@ -2,6 +2,8 @@ import type Database from "better-sqlite3";
 import path from "node:path";
 import type { InstructionFile } from "./contract.js";
 
+export type ReleaseReason = "unbind" | "archive" | "delete" | "spawn-failed" | "abandoned";
+
 export interface Binding {
   id: string;
   threadId: string | null;
@@ -13,6 +15,12 @@ export interface Binding {
   instructions: InstructionFile[];
   profile: string;
   brokenReason: string | null;
+  ready: boolean;
+  releasedAt: number | null;
+  releaseReason: ReleaseReason | null;
+  releaseDue: number | null;
+  cleanedAt: number | null;
+  releaseError: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -28,6 +36,12 @@ interface Row {
   instructions: string;
   profile: string;
   broken_reason: string | null;
+  ready: number;
+  released_at: number | null;
+  release_reason: ReleaseReason | null;
+  release_due: number | null;
+  cleaned_at: number | null;
+  release_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -44,10 +58,25 @@ function toBinding(row: Row): Binding {
     instructions: JSON.parse(row.instructions) as InstructionFile[],
     profile: row.profile,
     brokenReason: row.broken_reason,
+    ready: row.ready === 1,
+    releasedAt: row.released_at,
+    releaseReason: row.release_reason,
+    releaseDue: row.release_due,
+    cleanedAt: row.cleaned_at,
+    releaseError: row.release_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+const ADDED_COLUMNS: readonly (readonly [string, string])[] = [
+  ["ready", "INTEGER NOT NULL DEFAULT 1"],
+  ["released_at", "INTEGER"],
+  ["release_reason", "TEXT"],
+  ["release_due", "INTEGER"],
+  ["cleaned_at", "INTEGER"],
+  ["release_error", "TEXT"],
+];
 
 export function canonicalPath(value: string): string {
   return path.resolve(value);
@@ -79,19 +108,26 @@ export class BindingStore {
       db.exec("ALTER TABLE bindings ADD COLUMN profile TEXT NOT NULL DEFAULT 'claude'");
     }
     if (!columns.has("broken_reason")) db.exec("ALTER TABLE bindings ADD COLUMN broken_reason TEXT");
+    for (const [name, type] of ADDED_COLUMNS) {
+      if (!columns.has(name)) db.exec(`ALTER TABLE bindings ADD COLUMN ${name} ${type}`);
+    }
   }
 
-  create(binding: Omit<Binding, "threadId" | "brokenReason" | "createdAt" | "updatedAt">): Binding {
+  create(
+    binding: Pick<Binding, "id" | "workerHostId" | "scratchPath" | "workspaceHostId" | "workspaceHostName" | "root" | "instructions" | "profile">
+      & Partial<Pick<Binding, "ready">>,
+  ): Binding {
     const at = this.now();
     this.db
       .prepare(
         `INSERT INTO bindings (id, thread_id, worker_host_id, scratch_path, workspace_host_id,
-          workspace_host_name, root, instructions, profile, broken_reason, created_at, updated_at)
+          workspace_host_name, root, instructions, profile, broken_reason, ready, created_at, updated_at)
          VALUES (@id, NULL, @workerHostId, @scratchPath, @workspaceHostId,
-          @workspaceHostName, @root, @instructions, @profile, NULL, @at, @at)`,
+          @workspaceHostName, @root, @instructions, @profile, NULL, @ready, @at, @at)`,
       )
       .run({
         ...binding,
+        ready: binding.ready === false ? 0 : 1,
         scratchPath: canonicalPath(binding.scratchPath),
         instructions: JSON.stringify(binding.instructions),
         at,
@@ -105,6 +141,11 @@ export class BindingStore {
   }
 
   byThread(threadId: string): Binding | null {
+    const binding = this.recordByThread(threadId);
+    return binding !== null && binding.releasedAt === null ? binding : null;
+  }
+
+  recordByThread(threadId: string): Binding | null {
     const row = this.db
       .prepare("SELECT * FROM bindings WHERE thread_id = ?")
       .get(threadId) as Row | undefined;
@@ -135,7 +176,7 @@ export class BindingStore {
     this.db
       .prepare(
         `UPDATE bindings SET workspace_host_id = ?, workspace_host_name = ?, root = ?,
-           instructions = ?, broken_reason = NULL, updated_at = ? WHERE thread_id = ?`,
+           instructions = ?, broken_reason = NULL, updated_at = ? WHERE thread_id = ? AND released_at IS NULL`,
       )
       .run(
         target.workspaceHostId,
@@ -152,6 +193,57 @@ export class BindingStore {
     this.db
       .prepare("UPDATE bindings SET broken_reason = ?, updated_at = ? WHERE id = ?")
       .run(reason, this.now(), id);
+  }
+
+  markReady(id: string): void {
+    this.set(id, "ready = 1");
+  }
+
+  tombstone(id: string, due: number, reason: ReleaseReason): Binding | null {
+    const at = this.now();
+    this.db
+      .prepare(
+        `UPDATE bindings SET released_at = ?, release_due = ?, release_reason = ?, updated_at = ?
+         WHERE id = ? AND released_at IS NULL`,
+      )
+      .run(at, due, reason, at, id);
+    if (reason === "delete") this.set(id, "release_reason = 'delete'");
+    return this.byId(id);
+  }
+
+  untombstone(id: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE bindings SET released_at = NULL, release_due = NULL, release_reason = NULL, release_error = NULL,
+             updated_at = ? WHERE id = ? AND release_reason = 'archive' AND cleaned_at IS NULL`,
+        )
+        .run(this.now(), id).changes > 0
+    );
+  }
+
+  dueNow(id: string): void {
+    this.set(id, "release_due = ?", this.now());
+  }
+
+  markCleaned(id: string): void {
+    this.set(id, "cleaned_at = ?, release_error = NULL", this.now());
+  }
+
+  setReleaseError(id: string, error: string): void {
+    this.set(id, "release_error = ?", error);
+  }
+
+  pendingRelease(): Binding[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM bindings WHERE released_at IS NOT NULL AND cleaned_at IS NULL ORDER BY release_due")
+        .all() as Row[]
+    ).map(toBinding);
+  }
+
+  private set(id: string, assignment: string, ...values: unknown[]): void {
+    this.db.prepare(`UPDATE bindings SET ${assignment}, updated_at = ? WHERE id = ?`).run(...values, this.now(), id);
   }
 
   remove(id: string): boolean {

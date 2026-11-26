@@ -2,6 +2,11 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-27 — Block 4: binding lifecycle first, account choice on hold
+
+- **Decision.** Block 4 ships the binding lifecycle: a `message.dispatch` hold that keeps a thread's turns back until its binding is ready and refuses released bindings and unguarded providers, and a two-step release (tombstone, then worker cleanup) on `unbind`, archive and delete. Account choice waits for the owner: per-worker account homes versus the pool as the central key keeper with a pin seam.
+- **Why.** The owner asked whether one sign-in in BB could serve every worker, to avoid many sign-ins and the ban risk they carry; that favours the pool and changes the account design. The lifecycle is needed by either direction, and it closes G6 and G8 for dispatched turns ([architecture](architecture.md#release)).
+
 ## 2026-11-26 — Codex hook trust in the worker's user config (block 3, D2)
 
 - **Decision.** The Codex profile writes one trust entry per binding into the worker's `~/.codex/config.toml`: the scratch project's trust and its guard hook's trusted hash. Two conditions from the plan review apply:

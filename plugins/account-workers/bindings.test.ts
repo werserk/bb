@@ -23,7 +23,7 @@ describe("binding store", () => {
     db.exec(BLOCK1_SCHEMA);
     db.prepare("INSERT INTO bindings VALUES ('aw_old', 't1', 'h1', '/s/aw_old', 'h2', 'ws', '/r', '[]', 1, 1)").run();
     const store = new BindingStore(db);
-    expect(store.byThread("t1")).toMatchObject({ id: "aw_old", profile: "claude", brokenReason: null, root: "/r" });
+    expect(store.byThread("t1")).toMatchObject({ id: "aw_old", profile: "claude", brokenReason: null, root: "/r", ready: true, releasedAt: null, cleanedAt: null });
     new BindingStore(db);
     const created = store.create({ id: "aw_new", workerHostId: "h1", scratchPath: "/s/aw_new", workspaceHostId: "h2", workspaceHostName: "ws", root: "/r", instructions: [], profile: "opencode" });
     expect(created).toMatchObject({ profile: "opencode", brokenReason: null, threadId: null });
@@ -36,5 +36,18 @@ describe("binding store", () => {
     store.markBroken("aw_b", "no heartbeat");
     expect(store.byThread("t")?.brokenReason).toBe("no heartbeat");
     expect(store.rebind("t", target)).toMatchObject({ brokenReason: null, root: "/r2" });
+  });
+
+  it("a tombstoned binding is gone for tools and rebind but its record stays", () => {
+    const store = new BindingStore(new Database(":memory:"), () => 5);
+    store.create({ id: "aw_t", workerHostId: "h1", scratchPath: "/s/aw_t", workspaceHostId: "h2", workspaceHostName: "ws", root: "/r", instructions: [], profile: "claude" });
+    store.claimById("aw_t", "t");
+    store.tombstone("aw_t", 10, "unbind");
+    expect(store.byThread("t")).toBeNull();
+    expect(store.rebind("t", target)).toBeNull();
+    expect(store.recordByThread("t")).toMatchObject({ releasedAt: 5, releaseDue: 10, releaseReason: "unbind", root: "/r" });
+    expect(store.claim("t2", "h1", "/s/aw_t")).toBeNull();
+    store.tombstone("aw_t", 99, "archive");
+    expect(store.recordByThread("t")).toMatchObject({ releaseDue: 10, releaseReason: "unbind" });
   });
 });

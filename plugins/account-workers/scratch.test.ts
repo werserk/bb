@@ -1,11 +1,11 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceRefusal } from "./confine.js";
 import { PROFILES } from "./profiles/index.js";
 import type { ProviderProfile } from "./profiles/types.js";
-import { prepareScratch, scratchBase, verifyProfile } from "./scratch.js";
+import { prepareScratch, releaseScratch, scratchBase, verifyProfile } from "./scratch.js";
 import { TOOL_NAMES } from "./tools.js";
 
 let state: string;
@@ -128,6 +128,73 @@ describe("scratch directory", () => {
       await expect(verifyProfile({ bindingId: "aw_v", profile: "verifying", toolName: "workspace_exec", input: {} })).rejects.toThrow("no heartbeat");
       expect(calls[0]).toMatchObject({ scratchDir: path.join(base(), "aw_v"), bindingId: "aw_v", toolName: "workspace_read", input: { path: "a" } });
       await expect(verifyProfile({ bindingId: "aw_none", profile: "claude", toolName: "workspace_read", input: {} })).resolves.toEqual({});
+    } finally {
+      undo();
+    }
+  });
+});
+
+describe("release", () => {
+  const ID = "aw_0123456789abcdef";
+
+  it("runs the profile release with the stored path, then removes the scratch entry", async () => {
+    const seen: string[] = [];
+    const undo = withProfile({
+      id: "probe",
+      providerIds: ["probe-provider"],
+      async prepare() {},
+      async release(ctx) {
+        seen.push(`release ${ctx.scratchDir} ${ctx.bindingId}`);
+        expect((await stat(path.join(base(), ID))).isDirectory()).toBe(true);
+      },
+    });
+    try {
+      await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
+      await writeFile(path.join(base(), ID, "file"), "x");
+      expect(await releaseScratch({ bindingId: ID, profile: "probe", scratchPath: "/stored/path" })).toEqual({});
+      expect(seen).toEqual([`release /stored/path ${ID}`]);
+      expect(await readdir(base())).toEqual([]);
+    } finally {
+      undo();
+    }
+  });
+
+  it("is a no-op for a scratch entry that is already gone", async () => {
+    await expect(releaseScratch({ bindingId: ID, profile: "claude", scratchPath: "/gone" })).resolves.toEqual({});
+  });
+
+  it("refuses an id the server would not mint, before touching anything", async () => {
+    await mkdir(path.join(base(), "keep"), { recursive: true });
+    for (const bindingId of ["keep", "aw_x", "../aw_0123456789abcdef", "aw_0123456789ABCDEF"]) {
+      await expect(releaseScratch({ bindingId, profile: "claude", scratchPath: "/s" })).rejects.toThrow(WorkspaceRefusal);
+    }
+    expect(await readdir(base())).toEqual(["keep"]);
+  });
+
+  it("a symlinked entry loses only the link", async () => {
+    const outside = path.join(state, "outside");
+    await mkdir(outside);
+    await writeFile(path.join(outside, "precious"), "x");
+    await mkdir(base(), { recursive: true });
+    await symlink(outside, path.join(base(), ID));
+    await releaseScratch({ bindingId: ID, profile: "claude", scratchPath: path.join(base(), ID) });
+    expect(await readdir(base())).toEqual([]);
+    expect(await readdir(outside)).toEqual(["precious"]);
+  });
+
+  it("keeps the scratch entry and reports a refusal when the profile release fails", async () => {
+    const undo = withProfile({
+      id: "probe",
+      providerIds: ["probe-provider"],
+      async prepare() {},
+      async release() {
+        throw new Error("config locked");
+      },
+    });
+    try {
+      await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
+      await expect(releaseScratch({ bindingId: ID, profile: "probe", scratchPath: "/s" })).rejects.toThrow("profile probe release failed: config locked");
+      expect(await readdir(base())).toEqual([ID]);
     } finally {
       undo();
     }

@@ -12,11 +12,13 @@ import {
   CODEX_FEATURES_ON,
   codexProfile,
   expectedTrustKey,
+  hasAnyTrust,
   hasTrust,
   HEARTBEAT_MAX_AGE_MS,
   heartbeatDir,
   mcpServerNames,
   overlayToml,
+  releaseTrust,
   removeTrust,
   removeTrustText,
   sameCall,
@@ -278,5 +280,34 @@ describe("canary gate", () => {
     expect(resolveCodexLaunch({ BB_CODEX_BRIDGE_APP_SERVER_COMMAND: "/x/codex", BB_CODEX_BRIDGE_APP_SERVER_ARGS: '["app-server","-c","a=1"]' }))
       .toEqual({ command: "/x/codex", args: ["app-server", "-c", "a=1"] });
     expect(() => resolveCodexLaunch({ BB_CODEX_BRIDGE_APP_SERVER_COMMAND: "/x", BB_CODEX_BRIDGE_APP_SERVER_ARGS: "[1]" })).toThrow(/array of strings/);
+  });
+});
+
+describe("trust release", () => {
+  const original = '# owner comment\nmodel = "m"\n\n[projects."/other"]\ntrust_level = "trusted"\n';
+
+  it("removes both keys built from the stored scratch path and keeps the rest", async () => {
+    const file = path.join(dir, "config.toml");
+    await writeFile(file, original);
+    await addTrust(dir, "/s/aw_1", { key: expectedTrustKey("/s/aw_1"), hash: "sha256:abc" });
+    await addTrust(dir, "/s/aw_2", { key: expectedTrustKey("/s/aw_2"), hash: "sha256:def" });
+    await releaseTrust(dir, "/s/aw_1");
+    const after = parse(await readFile(file, "utf8"));
+    expect(hasAnyTrust(after, "/s/aw_1", expectedTrustKey("/s/aw_1"))).toBe(false);
+    expect(hasAnyTrust(after, "/s/aw_2", expectedTrustKey("/s/aw_2"))).toBe(true);
+    await releaseTrust(dir, "/s/aw_2");
+    expect(await readFile(file, "utf8")).toBe(original);
+  });
+
+  it("is a no-op without a home, a config or its keys, and writes nothing", async () => {
+    await releaseTrust(path.join(dir, "missing-home"), "/s/aw_1");
+    await releaseTrust(dir, "/s/aw_1");
+    expect(await readdir(dir)).toEqual([]);
+    const file = path.join(dir, "config.toml");
+    await writeFile(file, original);
+    const before = (await stat(file)).mtimeMs;
+    await releaseTrust(dir, "/s/aw_1");
+    expect(await readFile(file, "utf8")).toBe(original);
+    expect((await stat(file)).mtimeMs).toBe(before);
   });
 });

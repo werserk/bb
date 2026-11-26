@@ -24,7 +24,7 @@ Codex with file and shell work only on the workspace host: plugin tools with nat
 
 ## 4. Account selection
 
-Several isolated accounts of a provider on one worker host; each thread gets one by a documented rule. Reuse the existing `account-pool` plugin where it fits.
+Several isolated accounts of a provider on one worker host; each thread gets one by a documented rule. Reuse the existing `account-pool` plugin where it fits. **Built so far**: the binding lifecycle it needs, a dispatch hold and release on `unbind`, archive and delete ([architecture](architecture.md#release)). **On hold**: account choice itself, until the owner picks per-worker account homes or the pool as the central key keeper ([architecture](architecture.md#accounts)).
 
 ## Later
 
