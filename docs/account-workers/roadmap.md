@@ -16,7 +16,7 @@ Build the plugin: workspace tools, server routing to the host entry, per-thread 
 
 ## 2. OpenCode profile
 
-OpenCode over ACP with native tools denied by permission, using the same plugin tools.
+OpenCode over ACP with native tools off, using the same plugin tools. **Built**: the provider profile seam and the OpenCode profile ([architecture](architecture.md#provider-profiles), [probe-2](probe-2.md)).
 
 ## 3. Codex profile
 
