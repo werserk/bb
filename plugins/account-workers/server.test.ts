@@ -1,8 +1,9 @@
-import { createFakePluginHost, makeHostResponse, makePluginAgentConfigurationContext, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost, makeHostResponse, makeMessageDispatchHookContext, makePluginAgentConfigurationContext, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import type { ExperimentalFakeHostRpcCall } from "@get-bb/plugin-sdk/testing";
 import type { PluginAgentToolResult } from "@get-bb/plugin-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import plugin, { MOVED_INSTRUCTIONS, OTHER_PROVIDER_INSTRUCTIONS } from "./server.js";
+import { RELEASED_MESSAGE } from "./dispatch.js";
 import { PROFILES } from "./profiles/index.js";
 import type { ProviderProfile } from "./profiles/types.js";
 import type { Binding } from "./bindings.js";
@@ -20,6 +21,21 @@ function text(result: PluginAgentToolResult): string {
 
 type HostRpc = (call: ExperimentalFakeHostRpcCall) => unknown;
 
+let threadStatus: "idle" | "active" = "idle";
+afterEach(() => {
+  threadStatus = "idle";
+});
+
+async function dispatch(host: Awaited<ReturnType<typeof load>>, threadId: string, providerId = "claude-code") {
+  const handler = host.harness.inspection.registrations.hooks["message.dispatch"]!;
+  return handler(makeMessageDispatchHookContext({
+    thread: { id: threadId, originPluginId: "account-workers", createdAt: Date.now() },
+    requestedExecution: { providerId, model: null, reasoningLevel: null, serviceTier: null, permissionMode: null },
+  }));
+}
+
+const releaseCalls = (host: Awaited<ReturnType<typeof load>>) => host.harness.experimental_hostRpcCalls.filter((c) => c.method === "releaseScratch");
+
 async function load(hostRpc: HostRpc) {
   const host = createFakePluginHost({ pluginId: "account-workers", experimental_callHostRpc: hostRpc });
   await plugin(host.bb);
@@ -29,6 +45,8 @@ async function load(hostRpc: HostRpc) {
     makeHostResponse({ id: OTHER, name: "other", status: "connected" }),
   ]);
   stubMachineEnv(host, [], []);
+  host.harness.sdk.stub("threads.get", async (args: { threadId: string }) => makeThreadResponse({ id: args.threadId, status: threadStatus }));
+  host.harness.sdk.stub("threads.stop", async () => ({}) as never);
   return host;
 }
 
@@ -53,6 +71,8 @@ function defaultRpc(overrides: Record<string, unknown> = {}): HostRpc {
         return { ok: true, root: "/work/repo", hostname: "ws", instructions: [{ file: "AGENTS.md", text: "MARKER ```x```", truncated: false }] };
       case "prepareScratch":
         return { ok: true, path: SCRATCH };
+      case "releaseScratch":
+        return { ok: true };
       default:
         throw new Error(`unexpected ${call.method}`);
     }
@@ -95,7 +115,7 @@ describe("spawn and configure", () => {
     expect(config.instructions).toContain("Local file and shell tools are disabled");
   });
 
-  it("removes the binding when spawn fails", async () => {
+  it("releases the scratch on the worker when spawn fails", async () => {
     const host = await load(defaultRpc());
     host.harness.sdk.stub("threads.spawn", async () => {
       throw new Error("409 managed path");
@@ -104,7 +124,26 @@ describe("spawn and configure", () => {
       ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1"],
     );
     expect(result.exitCode).not.toBe(0);
+    expect(releaseCalls(host).map((c) => c.hostId)).toEqual([WORKER]);
     expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+    expect((await host.harness.behavior.runCli(["list", "--all"])).stdout).toContain("RELEASED (spawn-failed)");
+  });
+
+  it("holds the first turn until spawn has claimed and readied the binding, then asks core to re-ask", async () => {
+    const host = await load(defaultRpc());
+    const seen: string[] = [];
+    host.harness.sdk.stub("threads.spawn", async () => {
+      seen.push((await dispatch(host, "thread-new")).action);
+      return makeThreadResponse({ id: "thread-new" });
+    });
+    const result = await host.harness.behavior.runCli(
+      ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1"],
+    );
+    expect(result.exitCode).toBe(0);
+    expect(seen).toEqual(["wait"]);
+    expect(host.harness.inspection.recheckCount).toBe(1);
+    expect(await dispatch(host, "thread-new")).toEqual({ action: "proceed" });
+    expect((await dispatch(host, "thread-new", "codex")).action).toBe("reject");
   });
 
   it("a thread configured in the scratch directory before spawn returns claims the binding; a fork does not", async () => {
@@ -123,10 +162,79 @@ describe("spawn and configure", () => {
     expect(fork.tools).toEqual([]);
   });
 
-  it("drops the binding when its thread is deleted", async () => {
+  it("a deleted thread's binding is tombstoned at once and cleaned on the worker only after the undo window", async () => {
     const host = await load(defaultRpc());
     const { threadId } = await spawnBound(host);
     await host.harness.behavior.emitThreadEvent("thread.deleted", { thread: makeThreadResponse({ id: threadId }) });
+    expect(await dispatch(host, threadId)).toEqual({ action: "reject", message: RELEASED_MESSAGE });
+    const result = await host.harness.behavior.callAgentTool("workspace_read", { path: "a" }, { threadId });
+    expect(result).toMatchObject({ isError: true, content: [{ text: NO_BINDING }] });
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toContain("RELEASING (delete)");
+    expect(releaseCalls(host)).toEqual([]);
+  });
+
+  it("archive tombstones the binding; unarchive inside the undo window restores it", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    await host.harness.behavior.emitThreadEvent("thread.archived", { thread: makeThreadResponse({ id: threadId, archivedAt: Date.now() }) });
+    expect((await dispatch(host, threadId)).action).toBe("reject");
+    await host.harness.behavior.emitThreadEvent("thread.unarchived", { thread: makeThreadResponse({ id: threadId }) });
+    expect(await dispatch(host, threadId)).toEqual({ action: "proceed" });
+    expect((await host.harness.behavior.resolveAgentConfiguration(context(threadId, WORKER, SCRATCH))).tools).toHaveLength(TOOL_NAMES.length);
+    expect(releaseCalls(host)).toEqual([]);
+  });
+
+  it("an archived thread past the undo window is cleaned on the worker by the next sweep", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    await host.harness.behavior.emitThreadEvent("thread.archived", { thread: makeThreadResponse({ id: threadId, archivedAt: Date.now() - 31_000 }) });
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+    expect(releaseCalls(host).map((c) => c.input)).toEqual([{ bindingId: expect.stringMatching(/^aw_/), profile: "claude", scratchPath: SCRATCH }]);
+  });
+
+  it("unbind refuses a running thread and leaves the binding and the worker alone", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    threadStatus = "active";
+    const result = await host.harness.behavior.runCli(["unbind", "--thread", threadId]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("is running; stop it first");
+    expect(releaseCalls(host)).toEqual([]);
+    expect(await dispatch(host, threadId)).toEqual({ action: "proceed" });
+  });
+
+  it("unbind on a stopped thread refuses its turns and tools, then cleans the worker; a second unbind says so", async () => {
+    const host = await load(defaultRpc());
+    const { threadId, bindingId } = await spawnBound(host);
+    const result = await host.harness.behavior.runCli(["unbind", "--thread", threadId]);
+    expect(result.stdout).toContain(`released binding ${bindingId} on the worker (scratch removed)`);
+    expect(releaseCalls(host)).toEqual([expect.objectContaining({ hostId: WORKER, input: { bindingId, profile: "claude", scratchPath: SCRATCH } })]);
+    expect(await dispatch(host, threadId)).toEqual({ action: "reject", message: RELEASED_MESSAGE });
+    expect((await host.harness.behavior.resolveAgentConfiguration(context(threadId, WORKER, SCRATCH))).tools).toEqual([]);
+    expect((await host.harness.behavior.runCli(["unbind", "--thread", threadId])).stdout).toContain("already released");
+    expect(releaseCalls(host)).toHaveLength(1);
+  });
+
+  it("unbind treats a thread BB no longer has as stopped", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    host.harness.sdk.stub("threads.get", async () => {
+      throw Object.assign(new Error("HTTP 404: not found"), { status: 404 });
+    });
+    expect((await host.harness.behavior.runCli(["unbind", "--thread", threadId])).exitCode).toBe(0);
+    expect(releaseCalls(host)).toHaveLength(1);
+  });
+
+  it("a failed worker cleanup stays listed and unbind retries it", async () => {
+    let fail = true;
+    const host = await load(defaultRpc({ releaseScratch: () => (fail ? { ok: false, error: "profile codex release failed: locked" } : { ok: true }) }));
+    const { threadId } = await spawnBound(host);
+    const first = await host.harness.behavior.runCli(["unbind", "--thread", threadId]);
+    expect(first.exitCode).not.toBe(0);
+    expect(first.stderr).toContain("Run unbind again to retry");
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toContain("RELEASE FAILED (unbind): profile codex release failed: locked");
+    fail = false;
+    expect((await host.harness.behavior.runCli(["unbind", "--thread", threadId])).exitCode).toBe(0);
     expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
   });
 

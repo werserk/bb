@@ -12,7 +12,7 @@ import {
   resolveRoot,
   writeOp,
 } from "./ops.js";
-import { prepareScratch, verifyProfile } from "./scratch.js";
+import { prepareScratch, releaseScratch, verifyProfile } from "./scratch.js";
 
 export default experimental_defineHostEntry({
   contract: accountWorkersHostContract,
@@ -20,6 +20,7 @@ export default experimental_defineHostEntry({
     resolveRoot: (input) => guarded(() => resolveRoot(input)),
     prepareScratch: (input, ctx) => guarded(() => prepareScratch(input, ctx.signal)),
     verifyProfile: (input, ctx) => guarded(() => verifyProfile(input, ctx.signal)),
+    releaseScratch: (input, ctx) => guarded(() => releaseScratch(input, ctx.signal)),
     read: (input) => guarded(() => readOp(input)),
     write: (input) => guarded(() => writeOp(input)),
     edit: (input) => guarded(() => editOp(input)),

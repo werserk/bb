@@ -9,6 +9,8 @@ import {
 } from "@get-bb/plugin-sdk";
 import { BindingStore, canonicalPath, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
+import { safeDecide } from "./dispatch.js";
+import { ARCHIVE_UNDO_MS, isLive, Releaser, type ReleaseOutcome, type ThreadState } from "./release.js";
 import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
 import type { ProviderProfile } from "./profiles/types.js";
 import {
@@ -55,6 +57,32 @@ export const MOVED_INSTRUCTIONS =
 export const OTHER_PROVIDER_INSTRUCTIONS =
   "## account-workers\nWorkspace tools are disabled: this thread now runs on a provider its workspace binding was not prepared for.";
 
+export function httpStatus(error: unknown): number | null {
+  const status = typeof error === "object" && error !== null ? (error as { status?: unknown }).status : undefined;
+  return typeof status === "number" ? status : null;
+}
+
+export function state(b: Binding): string {
+  if (b.cleanedAt !== null) return `  RELEASED (${b.releaseReason})`;
+  if (b.releaseError !== null) return `  RELEASE FAILED (${b.releaseReason}): ${b.releaseError}; run unbind to retry`;
+  if (b.releasedAt !== null) return `  RELEASING (${b.releaseReason})`;
+  if (b.brokenReason !== null) return "  BROKEN";
+  return b.ready ? "" : "  NOT READY";
+}
+
+export function releaseText(threadId: string, b: Binding, outcome: ReleaseOutcome): { exitCode: number; stdout?: string; stderr?: string } {
+  switch (outcome.kind) {
+    case "cleaned":
+      return { exitCode: 0, stdout: `Unbound ${threadId}; released binding ${b.id} on the worker (scratch removed${b.profile === "codex" ? ", Codex trust removed" : ""})` };
+    case "live":
+      return { exitCode: 1, stderr: `Binding ${b.id} is released but its thread is running; the worker cleanup runs when it stops` };
+    case "not-due":
+      return { exitCode: 1, stderr: `Binding ${b.id} is released; the worker cleanup is not due yet` };
+    case "failed":
+      return { exitCode: 1, stderr: `Binding ${b.id} is released, but the worker cleanup failed: ${outcome.error}. Run unbind again to retry.` };
+  }
+}
+
 export function configureThread(
   store: BindingStore,
   context: PluginAgentConfigurationContext,
@@ -89,6 +117,30 @@ interface ResolvedWorkspace {
 export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<void> {
   const store = new BindingStore(bb.storage.database());
   const host: HostClient = bb.hosts.experimental_client({ contract: accountWorkersHostContract });
+  const threadState = async (threadId: string): Promise<ThreadState> => {
+    try {
+      return isLive((await bb.sdk.threads.get({ threadId })).status) ? { kind: "live" } : { kind: "quiet" };
+    } catch (error) {
+      if (httpStatus(error) === 404) return { kind: "quiet" };
+      throw error;
+    }
+  };
+  const releaser = new Releaser({
+    store,
+    host,
+    threadState,
+    now: Date.now,
+    log: (message) => bb.log.warn(message),
+    setTimer: (run, ms) => {
+      const timer = setTimeout(run, Math.max(0, ms));
+      return { cancel: () => clearTimeout(timer) };
+    },
+  });
+  bb.onDispose(() => releaser.dispose());
+  const sweep = () => {
+    releaser.sweep().catch((error: unknown) => bb.log.error(`account-workers: release sweep failed: ${String(error)}`));
+  };
+  setTimeout(sweep, 0);
   const deps = {
     host,
     bindingFor: (threadId: string) => store.byThread(threadId),
@@ -108,10 +160,38 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
 
   bb.agents.configure((context) => configureThread(store, context));
 
-  bb.events.on("thread.deleted", ({ thread }) => {
-    const binding = store.byThread(thread.id);
-    if (binding !== null) store.remove(binding.id);
+  bb.experimental_hooks.on("message.dispatch", (context) => {
+    const verdict = safeDecide(bb.pluginId, context, (id) => store.recordByThread(id), Date.now(), (error) =>
+      bb.log.error(`account-workers: dispatch check failed: ${String(error)}`),
+    );
+    const abandoned = verdict.abandoned;
+    if (abandoned !== undefined) {
+      try {
+        releaser.retire(abandoned, Date.now(), "abandoned");
+        if (abandoned.threadId !== null) {
+          bb.sdk.threads.stop({ threadId: abandoned.threadId }).catch(() => undefined).finally(sweep);
+        }
+      } catch (error) {
+        bb.log.error(`account-workers: retiring abandoned binding ${abandoned.id} failed: ${String(error)}`);
+      }
+    }
+    return verdict.decision;
   });
+
+  bb.events.on("thread.archived", ({ thread }) => {
+    const binding = store.byThread(thread.id);
+    if (binding !== null) releaser.retire(binding, (thread.archivedAt ?? Date.now()) + ARCHIVE_UNDO_MS, "archive");
+  });
+  bb.events.on("thread.unarchived", ({ thread }) => {
+    const record = store.recordByThread(thread.id);
+    if (record !== null) releaser.restore(record);
+  });
+  bb.events.on("thread.deleted", ({ thread }) => {
+    const record = store.recordByThread(thread.id);
+    if (record !== null && record.cleanedAt === null) releaser.retire(record, Date.now() + ARCHIVE_UNDO_MS, "delete");
+  });
+  bb.events.on("thread.idle", sweep);
+  bb.events.on("thread.failed", sweep);
 
   async function resolveMachine(idOrName: string, signal?: AbortSignal) {
     const hosts = await bb.sdk.hosts.list({ signal });
@@ -159,7 +239,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
   }
 
   const describe = (b: Binding) =>
-    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${b.brokenReason !== null ? "  BROKEN" : ""}`;
+    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${state(b)}`;
 
   bb.cli.register(
     defineCli({
@@ -218,6 +298,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               root: workspace.root,
               instructions: workspace.instructions,
               profile: profile.id,
+              ready: false,
             });
             let threadId: string;
             try {
@@ -236,13 +317,19 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               });
               threadId = thread.id;
             } catch (error) {
-              store.remove(bindingId);
+              const created = store.byId(bindingId);
+              if (created !== null) {
+                releaser.retire(created, Date.now(), "spawn-failed");
+                await releaser.release(created);
+              }
               throw error;
             }
             const binding = store.claimById(bindingId, threadId);
             if (binding?.threadId !== threadId) {
               throw new PluginCliError(`Binding ${bindingId} was claimed by ${binding?.threadId}, not ${threadId}`);
             }
+            store.markReady(bindingId);
+            void bb.experimental_hooks.recheck("message.dispatch").catch(() => undefined);
             return {
               exitCode: 0,
               stdout: o.json
@@ -272,19 +359,33 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           },
         }),
         unbind: cliCommand({
-          summary: "Remove a thread's workspace binding (its workspace tools then refuse)",
+          summary: "Release a thread's workspace binding: refuse its turns and tools, then remove its scratch directory and provider trust on the worker. Refused while the thread runs; rerun to retry a failed cleanup.",
           options: { thread: { type: "string", required: true, description: "Thread id" } },
-          run(input) {
-            const binding = bindingOrFail(input.options.thread as string);
-            store.remove(binding.id);
-            return { exitCode: 0, stdout: `Unbound ${binding.threadId}` };
+          async run(input) {
+            const threadId = input.options.thread as string;
+            const record = store.recordByThread(threadId);
+            if (record === null) throw new PluginCliError(`Thread ${threadId} has no workspace binding`, { code: "not_bound" });
+            if (record.cleanedAt !== null) return { exitCode: 0, stdout: `Binding ${record.id} was already released` };
+            if (record.releasedAt === null) {
+              if ((await threadState(threadId)).kind === "live") {
+                throw new PluginCliError(`Thread ${threadId} is running; stop it first, then unbind`, { code: "thread_active" });
+              }
+              releaser.retire(record, Date.now(), "unbind");
+            } else {
+              store.dueNow(record.id);
+            }
+            return releaseText(threadId, record, await releaser.release(record));
           },
         }),
         list: cliCommand({
-          summary: "List workspace bindings",
-          options: { json: { type: "boolean", description: "Print JSON" } },
-          run(input) {
-            const all = store.list();
+          summary: "List workspace bindings (released ones only with --all)",
+          options: {
+            json: { type: "boolean", description: "Print JSON" },
+            all: { type: "boolean", description: "Include released bindings" },
+          },
+          async run(input) {
+            await releaser.sweep();
+            const all = store.list().filter((b) => input.options.all || b.cleanedAt === null);
             if (input.options.json) {
               return { exitCode: 0, stdout: JSON.stringify(all.map(({ instructions, ...rest }) => ({ ...rest, instructionFiles: instructions.map((f) => f.file) }))) };
             }

@@ -2,6 +2,11 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-27 — Block 4: binding lifecycle; accounts through the pool
+
+- **Decision.** Block 4 ships the binding lifecycle: a `message.dispatch` hold that keeps a thread's turns back until its binding is ready and refuses released bindings and unguarded providers, and a two-step release (tombstone, then worker cleanup) on `unbind`, archive and delete. Account choice moves to the pool as the central key keeper: one sign-in per account in BB, a per-thread pass, a per-thread account policy and switching mid-thread. Per-worker account homes and the pool bypass are dropped; #4 is re-scoped to that design.
+- **Why.** The owner wants one sign-in per account in one place, since many sign-ins carry a ban risk, and wants to switch the account mid-thread. Per-worker homes need a sign-in per worker and lose session history on a switch. The lifecycle is needed either way, and it closes G6 and G8 for dispatched turns ([architecture](architecture.md#release)).
+
 ## 2026-11-26 — Codex hook trust in the worker's user config (block 3, D2)
 
 - **Decision.** The Codex profile writes one trust entry per binding into the worker's `~/.codex/config.toml`: the scratch project's trust and its guard hook's trusted hash. Two conditions from the plan review apply:

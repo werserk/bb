@@ -46,17 +46,50 @@ A binding maps a thread to `(worker host, scratch path)` and `(workspace host, r
 1. picks the provider profile for `--provider` (default `claude-code`, passed to BB explicitly); a provider with no profile is refused before any host call;
 2. resolves the workspace root on its host (`resolveRoot`: realpath, `AGENTS.md`/`CLAUDE.md`);
 3. creates the scratch directory on the worker through the profile (`prepareScratch`, see [provider profiles](#provider-profiles)); a refusal leaves no binding;
-4. stores an unclaimed binding (`thread_id` NULL) for that scratch path, with the profile id;
-5. spawns the thread on the worker with the scratch directory as an unmanaged workspace and the chosen provider and model;
-6. stamps the thread id on the binding.
+4. stores an unclaimed, not-ready binding (`thread_id` NULL, `ready` 0) for that scratch path, with the profile id;
+5. spawns the thread on the worker with the scratch directory as an unmanaged workspace and the chosen provider and model; if that fails, the binding is released (below);
+6. stamps the thread id on the binding, marks it ready and asks core to re-ask the dispatch hook.
 
 `bb.agents.configure` can run before step 6 returns. It then claims the binding whose `(worker host, scratch path)` matches the thread's environment, but only while `thread_id` is NULL, so a fork or side chat that shares the directory never gets one. Bindings are looked up by thread id only.
 
 The workspace host is never the worker host: `spawn` and `rebind` refuse it before calling either host, and every tool call refuses a binding where the two match.
 
-`rebind` points a bound thread at another workspace: the next tool call goes there. It also clears a broken mark (see [provider profiles](#provider-profiles)). Deleting the thread drops its binding. `unbind` and `list` manage bindings; `exec --thread <id> -- <cmd>` runs a command through the same server path as `workspace_exec`, for testing Stop and connection loss without a model.
+`rebind` points a bound thread at another workspace: the next tool call goes there. It also clears a broken mark (see [provider profiles](#provider-profiles)). `unbind` and `list` manage bindings (`list --all` includes released ones); `exec --thread <id> -- <cmd>` runs a command through the same server path as `workspace_exec`, for testing Stop and connection loss without a model.
 
 Two threads bound to one root, or parallel calls on one file, have no locking; `expected_sha256` is check-then-write, not atomic.
+
+### Dispatch hold
+
+A `message.dispatch` hook (`dispatch.ts`) decides every turn before it reaches a provider. It reads only the plugin's SQLite rows, so it answers in milliseconds and never throws: on an error, a thread this plugin created waits and any other thread proceeds.
+
+| Thread and binding | Decision |
+|---|---|
+| Not created by account-workers, no binding | proceed |
+| Created by account-workers, no binding yet | wait (re-asked every 2 s); refused 60 s after the thread was created |
+| Binding released (tombstone) | refuse: "spawn a new thread" |
+| Provider not in the profile's `providerIds` | refuse (G8) |
+| Binding not ready | wait; after 60 s refuse, stop the thread and release the binding |
+| Ready binding | proceed |
+
+So the first session never starts before `spawn` has claimed the binding, and a released or provider-switched thread cannot start a dispatched turn. Four paths skip the hook by BB design: the user's **Send now** on a queued message, the re-send of an **edited message**, **compaction** (both work on the existing conversation), and a **disabled plugin**, which runs no hook. On those paths `configure` still gives a released or provider-switched thread no workspace tools.
+
+### Release
+
+A binding ends in two steps (`release.ts`):
+
+1. **Tombstone** (`released_at`, with a reason). From then on the hook refuses turns, `configure` gives no tools and tool calls refuse. Nothing on the worker changes yet.
+2. **Release on the worker**, once the tombstone is due and the thread has no live turn (`starting`, `active` or `stopping`). The host method `releaseScratch { bindingId, profile, scratchPath }` runs the profile's `release` (Codex: remove its trust keys, built from the stored scratch path), then removes `scratch/<bindingId>`. It accepts only ids the server mints (`aw_<16 hex>`), builds the path from the id and removes it without realpath, so a symlinked entry loses only the link. The row stays with `cleaned_at` as the record.
+
+| Trigger | Tombstone | Worker release |
+|---|---|---|
+| `unbind` | now; refused while the thread runs ("stop it first") | at once |
+| `thread.archived` | now, reason `archive` | after BB's 30 s archive undo window |
+| `thread.unarchived` before the tombstone is due | removed (undo keeps the binding) | none |
+| `thread.deleted` | now, reason `delete` (an unarchive cannot undo it) | after 30 s |
+| `threads.spawn` fails | now, reason `spawn-failed` | at once |
+| Binding never readied (hook, 60 s) | now, reason `abandoned`; the thread is stopped | when it is quiet |
+
+A timer for the next due tombstone, plus sweeps on plugin start, `list`, every `thread.idle` and every `thread.failed`, run due releases. A failed release keeps the row with `release_error`; `list` shows it and `unbind` retries it (sweeps do not). An unarchive at or after the due time leaves the thread released, so the undo and the worker release never overlap; a binding with `cleaned_at` counts as released even without a tombstone. A sweep asked for during a pass runs once more after it. `releaseScratch` refuses a scratch path whose last segment is not the binding id.
 
 ### Instructions
 
@@ -94,16 +127,19 @@ interface ProviderProfile {
   prepare(ctx: ProfileContext): Promise<void>;  // write scratch files (or worker config)
   check?(ctx: ProfileContext): Promise<void>;   // gate after prepare; throw to refuse the spawn
   verify?(ctx: VerifyContext): Promise<void>;   // before every workspace call; throw to refuse it
+  release?(ctx: ReleaseContext): Promise<void>; // undo writes outside the scratch dir; no-op when nothing is there
 }
 // ProfileContext: scratchDir (realpath, empty), bindingId, toolNames (unprefixed), providerId, model | null, signal
 // VerifyContext:  scratchDir, bindingId, toolName (unprefixed), input (the zod-parsed tool args), signal
+// ReleaseContext: scratchDir (the stored path; may no longer exist), bindingId, signal
 ```
 
 - **All hooks run in the host entry on the worker.** `prepareScratch { bindingId, profile, providerId, model }` looks the profile up, creates and resolves `scratch/<bindingId>`, then runs `prepare` and `check`. Any throw removes the scratch directory and refuses the spawn; a profile that writes outside the scratch directory undoes its own writes. Any error a hook throws reaches the server as a refusal naming the profile and hook, so a plain `Error` in `verify` also marks the binding broken.
 - **Machine variables.** The host entry's environment does not include the project's BB machine variables, which do reach the thread. Before any host call, `spawn` reads the names (never the values) of the project's and the global machine variables and refuses when one is in the profile's `refusedMachineEnv`.
 - **Per-call verify.** For a profile with `verify`, every workspace tool call first goes to `verifyProfile` on the worker, then to the workspace. A refusal marks the binding broken (`broken_reason`): later calls refuse with no host call and `configure` drops the tools, until `rebind` clears it. A failed call to the worker refuses that call only, so a short disconnect does not disable a healthy binding. Profiles without `verify` cost nothing per call.
 - **Provider check.** `configure` gives the tools only while the thread's provider is one of its profile's `providerIds`; otherwise it serves a short notice instead.
-- **Storage.** The binding has `profile` (rows from block 1 read as `claude`) and nullable `broken_reason`, added in place to an existing database.
+- **Release.** `releaseScratch` runs `release` on the worker before it removes the scratch entry; a throw keeps the entry and is recorded as `release_error` ([release](#release)).
+- **Storage.** The binding has `profile` (rows from block 1 read as `claude`), nullable `broken_reason`, and from block 4 `ready`, `released_at`, `release_reason`, `release_due`, `cleaned_at` and `release_error`, all added in place to an existing database. Older rows read as ready and live.
 
 ### OpenCode
 
@@ -149,7 +185,26 @@ Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin too
 
 ## Accounts
 
-Several isolated accounts per worker host, one chosen per thread (block 4). The upstream `account-pool` plugin already routes Claude and Codex API traffic across account pools; block 4 reuses it where it fits and documents what is new.
+Several accounts per worker, one chosen per thread. **Direction chosen** (owner, 2026-11-27): the pool is the central key keeper. Each account signs in once, in BB; a worker holds agent CLIs and scratch directories but no credentials, and a workspace host gets neither.
+
+What the pool gives a thread today, checked in `plugins/account-pool` and the live `account-pool-prewarm` variant:
+
+| Question | Answer |
+|---|---|
+| Which account | Chosen per HTTP request in the pool's hub on the BB server. The pin key is `(provider, host, provider session id)` and moves on exhaustion or failover. Project order (variant only) is an order, not a pin. |
+| Pin a thread, show its account | Not possible: no CLI, RPC, header or env, and `status.routedThreads` has no account field. |
+| Where keys live | One file per account in the BB server's data directory (0600 in a 0700 dir). A thread gets the hub URL and a per-machine hub token through `contributeEnv`. |
+| Per-thread opt-out | `bypass.set {threadId, bypassed}` RPC: private, not published or versioned. |
+| Providers | `claude-code`, `codex`; no OpenCode. |
+| Native cells (variant only) | `bb pool native …` (`docs/NATIVE_POOL.md` there): one labelled Claude account per enrolled, centrally excluded host under its own Unix user, with thread→cell bindings. Out of repo, one whole host per account. |
+
+Next step (new blocks, not built):
+
+- **Pool:** a per-thread pass issued through `contributeEnv` in place of the per-machine hub token; the hub maps pass → thread → account policy (`auto`, or one named account with a per-thread limit action: ask, fall back to auto, or stop) and revokes the pass on archive and delete; a versioned contract to get and set a thread's policy and read its current account; machine roles so a workspace host gets no pass.
+- **account-workers:** `spawn --account` through that contract, and the account shown in `list`.
+- **Switching mid-thread:** the next model request goes to the new account without a new provider session, as the pool's failover does today. That this holds for each CLI is inferred, not checked.
+
+Dropped: per-worker account homes and a pool bypass for them (each home needed its own sign-in on each worker). Homes may return for a worker with no hub.
 
 ## Built vs planned
 
@@ -160,7 +215,8 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
 | `plugins/account-workers`: tools, routing, binding, instructions, Claude scratch profile | Built, block 1 |
 | Provider profile seam, OpenCode profile | Built, block 2 |
 | Codex profile | Built, block 3 |
-| Account selection | Planned, block 4 |
+| Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4 |
+| Account selection | Planned: pool as key keeper with per-thread passes ([accounts](#accounts)); block 4 built the binding lifecycle it needs |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
 ## Open points
@@ -175,10 +231,10 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
 - **G3. Process escapes.** `setsid` or a double fork leaves the process group, and Stop does not reach it.
 - **G4. Diff panel.** BB's native diff panel shows the thread's environment, which is the worker's scratch directory. `workspace_diff` shows the workspace in the chat; a panel view is not built.
 - **G5. Instruction refresh.** Workspace instructions are read at `spawn`/`rebind` and refresh in the agent at the next session.
-- **G6. Scratch cleanup.** Deleting a thread or `unbind` drops the binding but leaves the scratch directory (profile files only, no workspace data) on the worker. OpenCode's background service keeps a per-directory instance, so a scratch path is never reused: binding ids are fresh. If `threads.spawn` fails after `prepareScratch`, the binding is removed but nothing undoes a profile's writes outside the scratch directory (none for Claude and OpenCode; block 3's Codex trust entry would stay); a `release` hook can be added when a profile needs it. A cleanup on delete, or a sweep of directories with no binding, is not built.
+- **G6. Scratch cleanup.** Built in block 4 ([release](#release)): `unbind`, archive, delete and a failed spawn remove the scratch directory and the profile's writes outside it. Not built: a sweep of scratch directories that have no binding row (left by earlier blocks), and an automatic retry of a failed release. Binding ids stay fresh, so a scratch path is never reused (OpenCode keeps a per-directory instance).
 - **G7. Worker context reaches the workspace.** The agent runs with the worker user's instructions, memory and skill list in context (G2), and the workspace's `AGENTS.md` is quoted into its instructions. A workspace the owner does not control can ask the agent to write that context into a workspace file or pass it to `workspace_exec`, and so read it. The guard does not stop this: the workspace tools are the allowed path. Like G1, this is a precondition for foreign workspaces; options are a worker profile with no personal instructions or memory, or treating workspace instructions as untrusted and not loading them.
-- **G8. Provider switch.** A bound thread that changes provider in BB loses the workspace tools at the next session (`configure` checks the provider against the profile), but its scratch directory holds only the old provider's guard. The new provider then runs with its own native tools in an empty directory on the worker. BB's CLI has no provider switch for a thread today; a UI switch would need a re-prepare, or a profile that guards every provider.
-- **G9. Codex hook trust lives in the worker's user config.** The trust entry is written outside the scratch directory. Codex writes the same file without a lock, so a Codex write between the profile's read and its rename is lost. The edit re-reads before the rename and retries; that narrows the window but does not close it. A later `provider-codex` seam that passes hook trust through `thread/start` (the session-flag layer) would remove the write, but that is a provider change. Trust entries of deleted bindings stay until cleanup (G6).
+- **G8. Provider switch.** Closed for dispatched turns in block 4: the dispatch hook refuses a turn whose provider is not one its binding's profile guards, so the new provider never starts in the scratch directory. `configure` also drops the tools. Left open: the user's Send now on a queued message, the re-send of an edited message and compaction skip hooks, and a disabled plugin runs none; each lets the new provider start with its own native tools in an empty directory on the worker. Supporting a switch would need a re-prepare.
+- **G9. Codex hook trust lives in the worker's user config.** The trust entry is written outside the scratch directory. Codex writes the same file without a lock, so a Codex write between the profile's read and its rename is lost. The edit re-reads before the rename and retries; that narrows the window but does not close it. A later `provider-codex` seam that passes hook trust through `thread/start` (the session-flag layer) would remove the write, but that is a provider change. Release removes a binding's trust entry with the same edit ([release](#release)).
 - **G10. Codex gate scope.**
   - The canary runs at spawn only. It does not run on resume, or after a Codex update while a binding lives.
   - The heartbeat check covers only `workspace_*` calls on the live thread; the hook's block is what stops the other calls.

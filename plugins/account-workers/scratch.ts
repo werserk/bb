@@ -2,6 +2,7 @@ import { mkdir, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { WorkspaceRefusal } from "./confine.js";
+import { BINDING_ID } from "./ids.js";
 import { profileById } from "./profiles/index.js";
 import type { ProviderProfile } from "./profiles/types.js";
 import { TOOL_NAMES } from "./tools.js";
@@ -61,5 +62,24 @@ export async function verifyProfile(
   if (verify === undefined) return {};
   const scratchDir = await realpath(path.join(scratchBase(), input.bindingId));
   await runHook(profile, "verify", () => verify.call(profile, { scratchDir, bindingId: input.bindingId, toolName: input.toolName, input: input.input, signal }));
+  return {};
+}
+
+export async function releaseScratch(
+  input: { bindingId: string; profile: string; scratchPath: string },
+  signal: AbortSignal = new AbortController().signal,
+) {
+  if (!BINDING_ID.test(input.bindingId)) throw new WorkspaceRefusal(`invalid binding id ${input.bindingId}`);
+  if (path.basename(input.scratchPath) !== input.bindingId) {
+    throw new WorkspaceRefusal(`scratch path does not belong to binding ${input.bindingId}`);
+  }
+  const profile = knownProfile(input.profile);
+  const { release } = profile;
+  if (release !== undefined) {
+    await runHook(profile, "release", () =>
+      release.call(profile, { scratchDir: input.scratchPath, bindingId: input.bindingId, signal }),
+    );
+  }
+  await rm(path.join(scratchBase(), input.bindingId), { recursive: true, force: true });
   return {};
 }

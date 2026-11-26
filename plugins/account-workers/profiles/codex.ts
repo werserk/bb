@@ -8,7 +8,7 @@ import { EXEC_MAX_TIMEOUT_MS } from "../tools.js";
 import { guardLauncher } from "./claude.js";
 import { type CanaryReport, discoverHookTrust, resolveCodexLaunch, runCanary } from "./codex-canary.js";
 import { writeProfileFiles } from "./files.js";
-import type { ProfileContext, ProviderProfile, VerifyContext } from "./types.js";
+import type { ProfileContext, ProviderProfile, ReleaseContext, VerifyContext } from "./types.js";
 
 export type TomlTable = Record<string, unknown>;
 
@@ -309,6 +309,18 @@ export function addTrust(home: string, scratchDir: string, trust: HookTrust): Pr
   return editCodexConfig(home, (before) => addTrustText(before, scratchDir, trust), (config) => hasTrust(config, scratchDir, trust));
 }
 
+export function hasAnyTrust(config: TomlTable, scratchDir: string, key: string): boolean {
+  const project = table(table(config.projects)[scratchDir]);
+  const hook = table(table(table(config.hooks).state)[key]);
+  return project.trust_level !== undefined || hook.trusted_hash !== undefined;
+}
+
+export async function releaseTrust(home: string, scratchDir: string): Promise<void> {
+  const key = expectedTrustKey(scratchDir);
+  if (!hasAnyTrust(await readUserConfig(home), scratchDir, key)) return;
+  await removeTrust(home, scratchDir, { key, hash: "" });
+}
+
 export function removeTrust(home: string, scratchDir: string, trust: HookTrust): Promise<void> {
   return editCodexConfig(
     home,
@@ -469,6 +481,7 @@ export function createCodexProfile(env: NodeJS.ProcessEnv = process.env): Provid
       }
     },
     verify: (ctx: VerifyContext) => verifyHeartbeat(ctx),
+    release: (ctx: ReleaseContext) => releaseTrust(home(), ctx.scratchDir),
   };
 }
 

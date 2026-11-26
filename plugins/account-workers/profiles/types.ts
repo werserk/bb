@@ -15,6 +15,12 @@ export interface VerifyContext {
   signal: AbortSignal;
 }
 
+export interface ReleaseContext {
+  scratchDir: string;
+  bindingId: string;
+  signal: AbortSignal;
+}
+
 export interface ProviderProfile {
   id: string;
   providerIds: readonly string[];
@@ -22,6 +28,7 @@ export interface ProviderProfile {
   prepare(ctx: ProfileContext): Promise<void>;
   check?(ctx: ProfileContext): Promise<void>;
   verify?(ctx: VerifyContext): Promise<void>;
+  release?(ctx: ReleaseContext): Promise<void>;
 }
 
 export const PROFILE_ID = /^[a-z0-9-]{1,32}$/;

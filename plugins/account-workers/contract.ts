@@ -1,5 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { BINDING_ID } from "./ids.js";
 import { PROFILE_ID } from "./profiles/types.js";
 
 function outcome<T extends z.ZodRawShape>(shape: T) {
@@ -13,6 +14,7 @@ const root = z.string().min(1);
 const relPath = z.string().min(1).max(4096);
 const bindingId = z.string().regex(/^[a-z0-9_-]{1,64}$/);
 const profileId = z.string().regex(PROFILE_ID);
+const mintedBindingId = z.string().regex(BINDING_ID);
 
 export const instructionFileSchema = z
   .object({ file: z.string(), text: z.string(), truncated: z.boolean() })
@@ -39,6 +41,16 @@ export const accountWorkersHostContract = defineRpcContract({
       })
       .strict(),
     output: outcome({ path: z.string() }),
+  },
+  releaseScratch: {
+    input: z
+      .object({
+        bindingId: mintedBindingId,
+        profile: profileId,
+        scratchPath: z.string().min(1).max(4096),
+      })
+      .strict(),
+    output: outcome({}),
   },
   verifyProfile: {
     input: z
