@@ -35,9 +35,7 @@ import {
   type ProviderRegistryService,
 } from "../../../apps/server/src/services/providers/provider-registry.js";
 import {
-  recordFirstPartyProviderBridgeArtifacts,
   registerFakeProviders,
-  registerFirstPartyProviders,
 } from "../../../apps/server/test/helpers/provider-registry.js";
 import {
   copyBuiltinSkills,
@@ -189,7 +187,7 @@ export async function loadProjectEnvFile(): Promise<string | null> {
   return loadedProjectEnvPath;
 }
 
-async function startIntegrationServer(
+export async function startIntegrationServer(
   tmpRoot: string,
   options: CreateHarnessOptions,
 ): Promise<RunningTestServer> {
@@ -246,10 +244,8 @@ async function startIntegrationServer(
   const telemetry = createNoopTelemetryService();
   const skillTreeRegistry = new SkillTreeRegistry();
   const providerRegistry = createProviderRegistryService({});
-  await registerFirstPartyProviders(providerRegistry);
   const pluginHostArtifacts = new PluginHostArtifactRegistry();
   await registerFakeProviders(providerRegistry, pluginHostArtifacts);
-  await recordFirstPartyProviderBridgeArtifacts(pluginHostArtifacts);
   const aiServices = createAiServiceRegistry();
   const pendingInteractions = new PendingInteractionLifecycle({
     config,
