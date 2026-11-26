@@ -54,6 +54,9 @@ describe("confine", () => {
     await symlink(path.join(root, "src"), path.join(root, "alias"));
     await expect(confine(root, "alias/a.txt")).resolves.toBe(path.join(root, "alias/a.txt"));
   });
+  it("treats the filesystem root as a root like any other", async () => {
+    await expect(confine("/", "etc")).resolves.toBe("/etc");
+  });
 });
 
 describe("checkRoot", () => {

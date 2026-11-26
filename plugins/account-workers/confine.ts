@@ -6,7 +6,8 @@ export class WorkspaceRefusal extends Error {
 }
 
 function isInside(root: string, candidate: string): boolean {
-  return candidate === root || candidate.startsWith(root + path.sep);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  return candidate === root || candidate.startsWith(prefix);
 }
 
 function errorCode(error: unknown): string | undefined {
