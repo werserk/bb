@@ -41,5 +41,7 @@ The background service caches an instance per directory: re-creating a deleted d
 
 - OpenCode 2 ignores `OPENCODE_PERMISSION`, the only setting the running BB passes; the permission rules come from config and from upstream BB's session patch.
 - A plugin that fails to load is skipped, so the guard fails open; removal and the deny rules do not depend on it.
+- The host entry runs with the daemon's environment, not the project's BB machine variables, which do reach the thread. A machine variable such as `OPENCODE_DISABLE_PROJECT_CONFIG` would make OpenCode skip the scratch config entirely, so `spawn` also checks the project's and the global machine variable names (found in the diff review; unit-tested, not run live).
+- The workspace host keeps a Codex CLI and Codex's MCP OAuth token store, which `workspace_exec` can reach. It is not a provider login; it is accepted for the owner's own machine.
 - An OpenCode Console integration source (providers only) sometimes appears in `debug config`; it carries no tools or permission rules.
 - What still runs on the worker without a tool call is listed under G2, and the provider-switch gap under G8, in [architecture](architecture.md#open-points).

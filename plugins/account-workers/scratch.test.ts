@@ -76,6 +76,36 @@ describe("scratch directory", () => {
     }
   });
 
+  it("turns any hook error into a refusal that names the profile and hook", async () => {
+    const undo = withProfile({
+      id: "plain",
+      providerIds: [],
+      async prepare(ctx) {
+        if (ctx.bindingId === "aw_p1") throw new Error("disk full");
+      },
+      async check(ctx) {
+        if (ctx.bindingId === "aw_p2") throw new TypeError("bad config");
+      },
+      async verify() {
+        throw new Error("trust entry missing");
+      },
+    });
+    try {
+      const prepared = await prepareScratch({ bindingId: "aw_p1", profile: "plain", providerId: "x", model: null }).catch((e: unknown) => e);
+      expect(prepared).toBeInstanceOf(WorkspaceRefusal);
+      expect((prepared as Error).message).toBe("profile plain prepare failed: disk full");
+      const checked = await prepareScratch({ bindingId: "aw_p2", profile: "plain", providerId: "x", model: null }).catch((e: unknown) => e);
+      expect(checked).toBeInstanceOf(WorkspaceRefusal);
+      expect((checked as Error).message).toBe("profile plain check failed: bad config");
+      await prepareScratch({ bindingId: "aw_p3", profile: "plain", providerId: "x", model: null });
+      const verified = await verifyProfile({ bindingId: "aw_p3", profile: "plain", toolName: "workspace_read", input: {} }).catch((e: unknown) => e);
+      expect(verified).toBeInstanceOf(WorkspaceRefusal);
+      expect((verified as Error).message).toBe("profile plain verify failed: trust entry missing");
+    } finally {
+      undo();
+    }
+  });
+
   it("refuses an unknown profile before touching the disk", async () => {
     await expect(prepareScratch({ bindingId: "aw_u", profile: "nope", providerId: "x", model: null })).rejects.toThrow("unknown provider profile nope");
     await expect(readdir(base())).rejects.toThrow();

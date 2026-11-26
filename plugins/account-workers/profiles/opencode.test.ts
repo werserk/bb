@@ -11,7 +11,7 @@ import {
   openCodeFiles,
   openCodeProfile,
   OVERRIDING_ENV,
-  parseMajor,
+  parseVersion,
   REMOVED_PLUGINS,
   type OpenCodeCheckDeps,
 } from "./opencode.js";
@@ -110,19 +110,23 @@ describe("opencode check", () => {
   });
 
   it("parses the version line", () => {
-    expect(parseMajor("opencode v2.2.7\n")).toBe(2);
-    expect(parseMajor("2.10.0")).toBe(2);
-    expect(parseMajor("v1.4.3")).toBe(1);
-    expect(parseMajor("garbage")).toBeNull();
+    expect(parseVersion("opencode v2.2.7\n")).toEqual({ major: 2, minor: 2 });
+    expect(parseVersion("2.10.0")).toEqual({ major: 2, minor: 10 });
+    expect(parseVersion("v1.4.3")).toEqual({ major: 1, minor: 4 });
+    expect(parseVersion("garbage")).toBeNull();
   });
 
   it("accepts OpenCode 2 with no overriding sources", async () => {
     await expect(checkOpenCode(signal, deps())).resolves.toBeUndefined();
   });
 
-  it("refuses another major", async () => {
-    for (const v of ["opencode v1.4.3", "opencode v3.0.0", "", "nonsense"]) {
-      await expect(checkOpenCode(signal, deps({ version: async () => v })), v).rejects.toThrow("supports major 2 only");
+  it("accepts later 2.x minors", async () => {
+    await expect(checkOpenCode(signal, deps({ version: async () => "2.10.0" }))).resolves.toBeUndefined();
+  });
+
+  it("refuses another major and 2.x older than the probed 2.2", async () => {
+    for (const v of ["opencode v1.4.3", "opencode v2.0.0", "2.1.9", "opencode v3.0.0", "", "nonsense"]) {
+      await expect(checkOpenCode(signal, deps({ version: async () => v })), v).rejects.toThrow("supports 2.2 and later 2.x only");
     }
   });
 

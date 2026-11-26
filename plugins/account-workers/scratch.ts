@@ -13,6 +13,19 @@ export function scratchBase(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(state, "bb-account-workers", "scratch");
 }
 
+function asRefusal(profile: ProviderProfile, hook: string, error: unknown): WorkspaceRefusal {
+  if (error instanceof WorkspaceRefusal) return error;
+  return new WorkspaceRefusal(`profile ${profile.id} ${hook} failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+async function runHook(profile: ProviderProfile, hook: string, run: () => Promise<void> | undefined): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    throw asRefusal(profile, hook, error);
+  }
+}
+
 function knownProfile(id: string): ProviderProfile {
   const profile = profileById(id);
   if (profile === undefined) throw new WorkspaceRefusal(`unknown provider profile ${id}`);
@@ -30,8 +43,8 @@ export async function prepareScratch(
   try {
     const scratchDir = await realpath(dir);
     const ctx = { scratchDir, bindingId: input.bindingId, toolNames, providerId: input.providerId, model: input.model, signal };
-    await profile.prepare(ctx);
-    await profile.check?.(ctx);
+    await runHook(profile, "prepare", () => profile.prepare(ctx));
+    await runHook(profile, "check", () => profile.check?.(ctx));
     return { path: scratchDir };
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
@@ -44,8 +57,9 @@ export async function verifyProfile(
   signal: AbortSignal = new AbortController().signal,
 ) {
   const profile = knownProfile(input.profile);
-  if (profile.verify === undefined) return {};
+  const { verify } = profile;
+  if (verify === undefined) return {};
   const scratchDir = await realpath(path.join(scratchBase(), input.bindingId));
-  await profile.verify({ scratchDir, bindingId: input.bindingId, toolName: input.toolName, input: input.input, signal });
+  await runHook(profile, "verify", () => verify.call(profile, { scratchDir, bindingId: input.bindingId, toolName: input.toolName, input: input.input, signal }));
   return {};
 }

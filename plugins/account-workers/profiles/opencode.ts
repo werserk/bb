@@ -29,6 +29,7 @@ export const OVERRIDING_ENV = [
 export const MANAGED_CONFIG_DIR = "/etc/opencode";
 
 export const SUPPORTED_MAJOR = 2;
+export const MIN_MINOR = 2;
 
 export function allowedOpenCodeTools(toolNames: readonly string[]): string[] {
   return [...toolNames, ...ALLOWED_BB_TOOLS].map(openCodeToolName);
@@ -77,9 +78,9 @@ export function openCodeFiles(toolNames: readonly string[]): ProfileFile[] {
   ];
 }
 
-export function parseMajor(versionOutput: string): number | null {
-  const match = /(?:^|\s)v?(\d+)\.\d+/.exec(versionOutput.trim());
-  return match ? Number(match[1]) : null;
+export function parseVersion(versionOutput: string): { major: number; minor: number } | null {
+  const match = /(?:^|\s)v?(\d+)\.(\d+)/.exec(versionOutput.trim());
+  return match ? { major: Number(match[1]), minor: Number(match[2]) } : null;
 }
 
 function openCodeVersion(signal: AbortSignal): Promise<string> {
@@ -112,15 +113,16 @@ export async function checkOpenCode(signal: AbortSignal, deps: OpenCodeCheckDeps
     throw new WorkspaceRefusal(`${MANAGED_CONFIG_DIR} exists on the worker; managed OpenCode config loads after the scratch config`);
   }
   const output = await deps.version(signal);
-  const major = parseMajor(output);
-  if (major !== SUPPORTED_MAJOR) {
-    throw new WorkspaceRefusal(`OpenCode ${output.trim() || "(no version)"} on the worker; the account-workers profile supports major ${SUPPORTED_MAJOR} only`);
+  const version = parseVersion(output);
+  if (version === null || version.major !== SUPPORTED_MAJOR || version.minor < MIN_MINOR) {
+    throw new WorkspaceRefusal(`OpenCode ${output.trim() || "(no version)"} on the worker; the account-workers profile supports ${SUPPORTED_MAJOR}.${MIN_MINOR} and later ${SUPPORTED_MAJOR}.x only`);
   }
 }
 
 export const openCodeProfile: ProviderProfile = {
   id: "opencode",
   providerIds: ["acp-opencode"],
+  refusedMachineEnv: OVERRIDING_ENV,
   async prepare(ctx: ProfileContext) {
     await writeProfileFiles(ctx.scratchDir, openCodeFiles(ctx.toolNames));
   },

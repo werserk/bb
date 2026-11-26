@@ -28,7 +28,17 @@ async function load(hostRpc: HostRpc) {
     makeHostResponse({ id: WORKSPACE, name: "workspace", status: "connected" }),
     makeHostResponse({ id: OTHER, name: "other", status: "connected" }),
   ]);
+  stubMachineEnv(host, [], []);
   return host;
+}
+
+function stubMachineEnv(host: { harness: { sdk: { stub: (method: string, fn: (...args: never[]) => unknown) => void } } }, project: string[], global: string[]) {
+  const vars = (names: string[]) => names.map((name) => ({ name, value: null, secret: true as const, note: null }));
+  host.harness.sdk.stub("projects.machineEnvironment", async () => ({
+    builtInGit: { status: "disabled" as const, statusMessage: "" },
+    variables: vars(project),
+    inheritedVariables: vars(global),
+  }));
 }
 
 function defaultRpc(overrides: Record<string, unknown> = {}): HostRpc {
@@ -266,6 +276,29 @@ describe("provider profiles", () => {
     expect(result.stderr).toContain("OpenCode 1.4.0");
     expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
     expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+  });
+
+  it("spawn refuses when a project or global BB machine variable overrides the profile's config, before any host call", async () => {
+    for (const [project, global, name] of [[["OPENCODE_DISABLE_PROJECT_CONFIG"], [], "OPENCODE_DISABLE_PROJECT_CONFIG"], [["OTHER"], ["OPENCODE_CONFIG_CONTENT"], "OPENCODE_CONFIG_CONTENT"]] as const) {
+      const host = await load(defaultRpc());
+      stubMachineEnv(host, [...project], [...global]);
+      host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "never" }));
+      const result = await host.harness.behavior.runCli(
+        ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--provider", "acp-opencode"],
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(`BB machine variables ${name} are set for project p1`);
+      expect(host.harness.sdk.callsTo("projects.machineEnvironment")[0]).toEqual([{ projectId: "p1" }]);
+      expect(host.harness.experimental_hostRpcCalls).toEqual([]);
+      expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    }
+  });
+
+  it("a profile with no refused variables does not read the machine environment", async () => {
+    const host = await load(defaultRpc());
+    stubMachineEnv(host, ["OPENCODE_CONFIG_CONTENT"], []);
+    await spawnBound(host);
+    expect(host.harness.sdk.callsTo("projects.machineEnvironment")).toEqual([]);
   });
 
   it("a thread on a provider its profile does not guard loses the tools", async () => {

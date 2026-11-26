@@ -18,6 +18,7 @@ export interface VerifyContext {
 export interface ProviderProfile {
   id: string;
   providerIds: readonly string[];
+  refusedMachineEnv?: readonly string[];
   prepare(ctx: ProfileContext): Promise<void>;
   check?(ctx: ProfileContext): Promise<void>;
   verify?(ctx: VerifyContext): Promise<void>;

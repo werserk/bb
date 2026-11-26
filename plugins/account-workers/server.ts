@@ -10,6 +10,7 @@ import {
 import { BindingStore, canonicalPath, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
 import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
+import type { ProviderProfile } from "./profiles/types.js";
 import {
   execCallTimeout,
   execTimeout,
@@ -149,6 +150,14 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     return binding;
   }
 
+  async function refusedMachineEnv(profile: ProviderProfile, projectId: string): Promise<string[]> {
+    const names = profile.refusedMachineEnv ?? [];
+    if (names.length === 0) return [];
+    const env = await bb.sdk.projects.machineEnvironment({ projectId });
+    const set = new Set([...env.variables, ...env.inheritedVariables].map((v) => v.name));
+    return names.filter((name) => set.has(name));
+  }
+
   const describe = (b: Binding) =>
     `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${b.brokenReason !== null ? "  BROKEN" : ""}`;
 
@@ -181,6 +190,13 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               throw new PluginCliError(
                 `Provider ${providerId} has no account-workers profile; supported: ${PROFILES.flatMap((p) => p.providerIds).join(", ")}`,
                 { code: "unsupported_provider" },
+              );
+            }
+            const refused = await refusedMachineEnv(profile, projectId);
+            if (refused.length > 0) {
+              throw new PluginCliError(
+                `BB machine variables ${refused.join(", ")} are set for project ${projectId}; they override or disable the scratch ${profile.id} config, so the worker's native tools would stay on. Remove them first.`,
+                { code: "overriding_env" },
               );
             }
             const model = (o.model as string | undefined) || null;
