@@ -9,7 +9,8 @@ the originating BB thread storage.
 
 server.ts registers CLI/RPC/HTTP and constructs hub.ts. Hub owns authenticated
 machine access, account selection, quotas, affinity, refresh, streaming and
-parent delegation. Provider adapters own upstream credentials and wire format.
+parent delegation. Provider adapters own upstream credentials and wire format;
+upstreams.ts fixes the provider hosts they send to.
 GET /models selects Claude and maps to upstream /v1/models. GET /v1/models
 selects Codex. Parent forwarding retains the public alias; only the final adapter
 maps it. Queries and upstream errors are preserved. The adapter supplies the
@@ -22,6 +23,36 @@ bb plugin reload account-pool-prewarm reloads it. Tests run with no inherited BB
 routing; test-isolation.mjs enforces this boundary. Logs/secrets/data.db live in
 the bb data directory under
 plugins/account-pool-prewarm. Tokens never enter code or test artifacts.
+
+## Security decisions (P0, 2026-11-27)
+
+- **Provider upstreams are code.** `src/upstreams.ts` holds api.anthropic.com,
+  chatgpt.com/backend-api/codex and api.openai.com/v1. Earlier builds let a
+  config setting change the Anthropic and ChatGPT upstreams, so a config write
+  could redirect account tokens. Adapters no longer see config when they build
+  a URL, and `mountedUpstreamUrl` refuses a request path that would change the
+  origin. The only override is the test-only
+  `createAccountPoolPlugin({ upstreams })` option; the shipped default export
+  passes no options, and no RPC, CLI, plugin env or stored config reaches it.
+  A stored config that still has `anthropicUpstreamBaseUrl` or
+  `codexUpstreamBaseUrl` loads; the keys are dropped and logged once, naming
+  (never printing) a stored value that differed from the old default. The host
+  is fixed in code; the network path still follows the daemon's proxy and TLS
+  environment (`HTTP(S)_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`), which is the
+  operator's trust boundary.
+- **No import of a CLI login.** Accounts are added only by the hub's own login
+  (Claude OAuth, Codex device code) or as API keys. Importing a live CLI login
+  gave an account two refresh owners; with refresh-token rotation one side
+  invalidates the other and forces re-logins. Accounts imported by earlier
+  builds are ordinary OAuth records and keep working unchanged; while their
+  source CLI stays logged in and in use, it is still a second refresh owner.
+- **Stop keeps refreshes.** `hub.stop()` waits (bounded) for in-flight token
+  refreshes before the transport closes, so a reload or reinstall does not lose
+  a rotated refresh token.
+- **Caller identity is still open.** Plugin RPC carries no caller identity, so
+  every administrative call is trusted. Host exclusions and any future roles
+  or thread policies guard against mistakes, not against a hostile caller.
+  Closing this needs a core change and is tracked outside this repository.
 
 ## Rationale
 

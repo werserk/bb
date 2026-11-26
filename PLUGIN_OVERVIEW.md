@@ -2,7 +2,7 @@ Keep a Claude Code or Codex thread running when one account hits its limit. The 
 
 ## What you get
 
-- A pool of Claude and Codex accounts, added by importing the login already on the machine, signing in through the browser, or pasting an Anthropic or OpenAI API key.
+- A pool of Claude and Codex accounts, added by signing in through the browser (Claude) or a device code (Codex), or by pasting an Anthropic or OpenAI API key. A CLI's existing login is never imported.
 - Accounts run one after another in priority order, with ties following the order added. New conversations stay on the current fallback even when an earlier account recovers. Existing conversations keep their own account until it becomes unavailable.
 - Drag handles set the account order within each provider in settings (keyboard: Space to pick up, arrow keys to move, Space to drop, Escape to cancel), with the same operation available through `bb pool account reorder <claude|codex> <id>...`.
 - Live limit windows per account and model family in the plugin's settings page, and the same numbers from `bb pool status`.
