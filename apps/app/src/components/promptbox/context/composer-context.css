@@ -23,8 +23,7 @@
   overflow-x: clip;
   overflow-y: visible;
 }
-.composer-context-tabs > button,
-.composer-context-disclosure {
+.composer-context-tabs > button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -50,8 +49,7 @@
   font-size: var(--text-2xs);
   opacity: 0.8;
 }
-.composer-context-tabs > button:hover,
-.composer-context-disclosure:hover {
+.composer-context-tabs > button:hover {
   background: var(--accent);
 }
 .composer-context-tabs > button[data-context-tone="attention"]:hover {
@@ -79,21 +77,9 @@
   display: none;
 }
 .composer-context-tabs > button:focus-visible,
-.composer-context-disclosure:focus-visible,
 .composer-context-panel button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-.composer-context-disclosure {
-  margin-left: auto;
-  flex-shrink: 0;
-  padding: 0 6px;
-  justify-content: center;
-  color: var(--muted-foreground);
-}
-.composer-context-disclosure[aria-expanded="true"] {
-  background: var(--accent);
-  color: var(--foreground);
 }
 .composer-context-dock[data-context-present]
   :where([data-follow-up-composer-anchor] [data-promptbox]) {

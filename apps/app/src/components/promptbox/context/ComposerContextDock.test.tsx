@@ -71,6 +71,12 @@ function Fixture() {
   );
 }
 
+function sectionKinds(region: HTMLElement) {
+  return [...region.querySelectorAll("[data-context-section]")].map(
+    (section) => (section as HTMLElement).dataset.contextKind,
+  );
+}
+
 function chipNames() {
   return within(screen.getByRole("toolbar"))
     .getAllByRole("button")
@@ -244,48 +250,21 @@ describe("composer context strip", () => {
     expect(chip.getAttribute("aria-label")).toBe("Changes: +12 −3");
   });
 
-  it("offers All only with two or more entries", () => {
-    const { unmount } = render(<Fixture />);
-    expect(
-      screen.getByRole("button", { name: "All thread context" }),
-    ).toBeTruthy();
-    unmount();
-    render(
-      <ComposerContextProvider>
-        <ComposerContextSources>
-          <ComposerContextItem
-            id="plan"
-            label="Plan"
-            icon="ListTodo"
-            group="work"
-            kind="plan"
-          >
-            <p>Only plan</p>
-          </ComposerContextItem>
-        </ComposerContextSources>
-        <ComposerContextDock>
-          <textarea aria-label="Draft" />
-        </ComposerContextDock>
-      </ComposerContextProvider>,
-    );
-    expect(
-      screen.queryByRole("button", { name: "All thread context" }),
-    ).toBeNull();
-  });
-
-  it("stacks every section in one sheet", () => {
+  it("opens only the section of the clicked chip", () => {
     render(<Fixture />);
-    fireEvent.click(screen.getByRole("button", { name: "Plan: 2/6" }));
+    const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+    fireEvent.click(plan);
     const region = screen.getByRole("region", REGION);
-    expect(
-      [...region.querySelectorAll("[data-context-section]")].map(
-        (section) => (section as HTMLElement).dataset.contextKind,
-      ),
-    ).toEqual(["error", "plan", "queue"]);
+    expect(sectionKinds(region)).toEqual(["plan"]);
     expect(within(region).getByText("Current work")).toBeTruthy();
     expect(
-      within(region).getByRole("button", { name: "Retry questions" }),
-    ).toBeTruthy();
+      within(region).queryByRole("button", { name: "Retry questions" }),
+    ).toBeNull();
+    expect(
+      within(region).queryByRole("button", { name: "Remove queued messages" }),
+    ).toBeNull();
+    expect(plan.getAttribute("aria-expanded")).toBe("true");
+    expect(plan.getAttribute("aria-controls")).toBe(region.id);
   });
 });
 
@@ -314,8 +293,16 @@ describe("composer context sheet open and close", () => {
     fireEvent.click(plan);
     fireEvent.click(queue);
     expect(screen.getByRole("region", REGION)).toBeTruthy();
+    const region = screen.getByRole("region", REGION);
+    expect(sectionKinds(region)).toEqual(["queue"]);
+    expect(within(region).queryByText("Current work")).toBeNull();
     expect(queue.getAttribute("aria-expanded")).toBe("true");
+    expect(queue.getAttribute("aria-controls")).toBe(region.id);
     expect(plan.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(queue);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(queue.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(draft);
     expect(screen.getByRole("textbox", { name: "Draft" })).toBe(draft);
     expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
   });
@@ -373,17 +360,6 @@ describe("composer context sheet open and close", () => {
     expect((draft as HTMLTextAreaElement).value).toBe("Typing on");
   });
 
-  it("toggles All and closes it again", () => {
-    render(<Fixture />);
-    const all = screen.getByRole("button", { name: "All thread context" });
-    fireEvent.click(all);
-    expect(all.getAttribute("aria-expanded")).toBe("true");
-    const region = screen.getByRole("region", REGION);
-    expect(region.querySelectorAll("[data-context-section]")).toHaveLength(3);
-    fireEvent.click(all);
-    expect(screen.queryByRole("region", REGION)).toBeNull();
-  });
-
   it("leaves Escape in the editor alone when the sheet is closed", () => {
     render(<Fixture />);
     const draft = screen.getByRole("textbox", { name: "Draft" });
@@ -425,6 +401,137 @@ describe("composer context sheet open and close", () => {
     });
     fireEvent.click(plan);
     expect(screen.queryByRole("region", REGION)).toBeNull();
+  });
+});
+
+describe("composer context selection", () => {
+  function Toggle({
+    present,
+    kind,
+    preview,
+    onDismiss,
+  }: {
+    present: boolean;
+    kind?: "queue";
+    preview?: boolean;
+    onDismiss?: () => void;
+  }) {
+    return (
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          {present && (
+            <ComposerContextItem
+              id="q"
+              label="Queue"
+              summary="1"
+              icon="ListView"
+              group="queue"
+              kind={kind}
+            >
+              <p>Queued body</p>
+            </ComposerContextItem>
+          )}
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            icon="ListTodo"
+            group="work"
+            kind="plan"
+          >
+            <p>Plan body</p>
+          </ComposerContextItem>
+        </ComposerContextSources>
+        <ComposerContextDock>
+          {preview && (
+            <ComposerContextStrip onDismiss={onDismiss ?? (() => {})}>
+              <span>Snapshot proposal</span>
+            </ComposerContextStrip>
+          )}
+          <textarea aria-label="Draft" />
+        </ComposerContextDock>
+      </ComposerContextProvider>
+    );
+  }
+
+  it("does not reopen when a vanished section returns", () => {
+    const { rerender } = render(<Toggle present />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    expect(screen.getByRole("region", REGION)).toBeTruthy();
+    rerender(<Toggle present={false} />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    rerender(<Toggle present />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: /^Queue/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("does not reopen when a vanished preview returns", () => {
+    const { rerender } = render(<Toggle present preview />);
+    fireEvent.click(screen.getByText("Snapshot proposal"));
+    expect(screen.getByRole("region", REGION)).toBeTruthy();
+    rerender(<Toggle present preview={false} />);
+    rerender(<Toggle present preview />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+  });
+
+  it("keeps the shown section when its group key is renamed", () => {
+    const { rerender } = render(<Toggle present />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    const before = document.querySelector("[data-context-section]")!;
+    const oldKey = (before as HTMLElement).dataset.contextSection;
+    rerender(<Toggle present kind="queue" />);
+    const after = document.querySelector<HTMLElement>("[data-context-section]");
+    expect(after?.dataset.contextSection).not.toBe(oldKey);
+    expect(screen.getByText("Queued body")).toBeTruthy();
+    const chip = screen.getByRole("button", { name: /^Queue/ });
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    // a later rename back still follows the sources
+    rerender(<Toggle present />);
+    expect(screen.getByText("Queued body")).toBeTruthy();
+  });
+
+  it("returns focus to the remounted chip on Escape without an input", () => {
+    function NoInput() {
+      return (
+        <ComposerContextProvider>
+          <ComposerContextSources>
+            <ComposerContextItem
+              id="plan"
+              label="Plan"
+              icon="ListTodo"
+              group="work"
+              kind="plan"
+            >
+              <p>Plan body</p>
+            </ComposerContextItem>
+          </ComposerContextSources>
+          <ComposerContextDock>
+            <span>no input</span>
+          </ComposerContextDock>
+        </ComposerContextProvider>
+      );
+    }
+    render(<NoInput />);
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+    fireEvent.keyDown(screen.getByRole("region", REGION), { key: "Escape" });
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Plan" }),
+    );
+  });
+
+  it("keeps the visible preview when Escape closes a chip section", () => {
+    const dismiss = vi.fn();
+    render(<Toggle present preview onDismiss={dismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    expect(screen.getByText("Snapshot proposal")).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("region", REGION), { key: "Escape" });
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(screen.getByText("Snapshot proposal")).toBeTruthy();
   });
 });
 
@@ -582,9 +689,7 @@ describe("composer context toolbar keyboard", () => {
       screen.getByRole("button", { name: "Questions unavailable" }),
     );
     fireEvent.keyDown(document.activeElement!, { key: "End" });
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "All thread context" }),
-    );
+    expect(document.activeElement).toBe(queue);
   });
 });
 
@@ -623,7 +728,7 @@ describe("composer context preview", () => {
     expect(document.activeElement).toBe(screen.getByRole("textbox"));
   });
 
-  it("keeps the preview out of the chips and shows it above the sections when expanded", () => {
+  it("keeps the preview out of the chips and shows it alone when expanded", () => {
     render(
       <ComposerContextProvider>
         <ComposerContextSources>
@@ -649,11 +754,7 @@ describe("composer context preview", () => {
     expect(chipNames()).toEqual(["Plan: 1/2"]);
     fireEvent.click(screen.getByText("Snapshot proposal"));
     const region = screen.getByRole("region", REGION);
-    const order = [
-      ...region.querySelectorAll("p, span, [data-context-section]"),
-    ].map((node) => node.textContent);
-    expect(order.indexOf("Snapshot proposal")).toBeLessThan(
-      order.indexOf("Plan body"),
-    );
+    expect(within(region).getByText("Snapshot proposal")).toBeTruthy();
+    expect(within(region).queryByText("Plan body")).toBeNull();
   });
 });

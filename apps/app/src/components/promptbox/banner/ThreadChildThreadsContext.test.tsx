@@ -77,8 +77,10 @@ it("splits child threads into Needs you, Working and a collapsed Finished list",
   expect(finished.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(finished);
   expect(within(region).getByRole("link", { name: /Thread f1/ })).toBeTruthy();
+  expect(within(region).queryByRole("link", { name: /Thread w1/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Needs you: 2" }));
   expect(
-    within(region)
+    within(screen.getByRole("region", { name: "Thread context" }))
       .getByRole("link", { name: /Thread w1/ })
       .closest("[data-context-section]")
       ?.getAttribute("data-context-kind"),
