@@ -1,6 +1,6 @@
 import { experimental_spawnHostProcess as spawnHostProcess } from "@get-bb/plugin-sdk/process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -109,9 +109,10 @@ async function startMock(reply: (request: MockRequest) => Json[]) {
   return { url: `http://127.0.0.1:${port}/v1`, requests, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
-function mockProviderArgs(url: string, model: string | null): string[] {
+function mockProviderArgs(url: string, model: string | null, catalog: string | null): string[] {
   return [
     ...(model ? ["-c", `model=${JSON.stringify(model)}`] : []),
+    ...(catalog ? ["-c", `model_catalog_json=${JSON.stringify(catalog)}`] : []),
     "-c", 'model_provider="aw_canary"',
     "-c", 'model_providers.aw_canary.name="aw_canary"',
     "-c", `model_providers.aw_canary.base_url=${JSON.stringify(url)}`,
@@ -226,9 +227,9 @@ interface StartedThread {
 }
 
 async function startThread(
-  opts: { launch: CodexLaunch; home: string; temp: string; scratchDir: string; url: string; model: string | null; signal: AbortSignal; toolNames: readonly string[] },
+  opts: { launch: CodexLaunch; home: string; temp: string; scratchDir: string; url: string; model: string | null; catalog?: string | null; signal: AbortSignal; toolNames: readonly string[] },
 ): Promise<StartedThread> {
-  const server = new AppServer(opts.launch, mockProviderArgs(opts.url, opts.model), canaryEnv(opts.home, opts.temp), opts.temp, opts.signal);
+  const server = new AppServer(opts.launch, mockProviderArgs(opts.url, opts.model, opts.catalog ?? null), canaryEnv(opts.home, opts.temp), opts.temp, opts.signal);
   try {
     const userAgent = await server.initialize();
     const schema = { type: "object", properties: { command: { type: "string" } }, additionalProperties: true };
@@ -405,6 +406,9 @@ export function sweepCalls(offered: readonly OfferedTool[], allowed: readonly st
 
 
 export interface CanaryObservation {
+  model: string | null;
+  catalogModels: string[];
+  toolMode: string | null;
   turnCompleted: boolean;
   hookTrust: string | undefined;
   markers: string[];
@@ -415,6 +419,10 @@ export interface CanaryObservation {
 
 export function evaluateGate(obs: CanaryObservation, allowed: readonly string[]): string[] {
   const failures: string[] = [];
+  if (obs.model !== null && !obs.catalogModels.includes(obs.model)) failures.push(`the canary's model catalog has no model ${obs.model}`);
+  if (obs.toolMode === "code_mode_only" && !obs.offered.some((tool) => tool.name === "exec" && tool.type === "custom")) {
+    failures.push(`the catalog marks ${String(obs.model)} code_mode_only, but the canary was not offered exec`);
+  }
   if (!obs.turnCompleted) failures.push("the canary turn did not complete");
   if (obs.hookTrust !== "trusted") failures.push(`the guard hook is ${obs.hookTrust ?? "missing"}, not trusted`);
   if (obs.markers.length > 0) failures.push(`acted on the worker: ${obs.markers.sort().join(", ")}`);
@@ -467,6 +475,8 @@ export interface CanaryReport {
   userAgent: string;
   command: string;
   model: string | null;
+  catalog: "models_cache" | "bundled";
+  toolMode: string | null;
   offered: string[];
   calls: number;
 }
@@ -490,7 +500,6 @@ export function canaryConfig(input: Pick<CanaryInput, "config" | "mcpNames" | "s
   const project = ((config.projects ?? {}) as Json)[input.scratchDir];
   const hook = ((((config.hooks ?? {}) as Json).state ?? {}) as Json)[input.trustKey];
   return {
-    ...pick("model"),
     ...pick("web_search"),
     features: booleans(config.features),
     memories: booleans(config.memories),
@@ -500,6 +509,33 @@ export function canaryConfig(input: Pick<CanaryInput, "config" | "mcpNames" | "s
     ...(hook ? { hooks: { state: { [input.trustKey]: hook } } } : {}),
     mcp_servers: Object.fromEntries(input.mcpNames.map((name) => [name, { command: nodePath, args: [fakeMcp], env: { AW_MARK_DIR: marks, AW_MCP_NAME: name } }])),
   };
+}
+
+async function cachedModels(home: string): Promise<Json[] | null> {
+  let text: string;
+  try {
+    text = await readFile(path.join(home, "models_cache.json"), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const models = (JSON.parse(text) as Json).models;
+    return Array.isArray(models) && models.length > 0 ? (models as Json[]) : null;
+  } catch {
+    throw new WorkspaceRefusal("the worker's Codex models_cache.json is not valid JSON");
+  }
+}
+
+async function listModels(server: AppServer): Promise<string[]> {
+  const slugs: string[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const result = await server.request("model/list", { includeHidden: true, limit: 100, cursor });
+    for (const m of (result.data as Json[] | undefined) ?? []) slugs.push(String(m.model ?? m.id));
+    cursor = typeof result.nextCursor === "string" ? result.nextCursor : null;
+    if (cursor === null) break;
+  }
+  return slugs;
 }
 
 export function runCanary(input: CanaryInput): Promise<CanaryReport> {
@@ -513,8 +549,12 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
     await writeFile(path.join(marks, "worker-image.png"), Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex"));
     const nodePath = input.nodePath ?? process.execPath;
     await writeFile(path.join(home, "config.toml"), stringify(canaryConfig(input, fakeMcp, marks, nodePath)));
-    await copyFile(path.join(input.home, "models_cache.json"), path.join(home, "models_cache.json")).catch(() => {});
-    const model = input.model ?? (typeof input.config.model === "string" ? input.config.model : null);
+    const cached = await cachedModels(input.home);
+    const catalog = cached === null ? null : path.join(temp, "model-catalog.json");
+    if (catalog !== null) await writeFile(catalog, JSON.stringify({ models: cached }), { mode: 0o600 });
+    const model = input.model;
+    const entry = cached?.find((m) => m.slug === model);
+    const toolMode = typeof entry?.tool_mode === "string" ? entry.tool_mode : null;
 
     const planned: PlannedCall[] = [];
     let offered: OfferedTool[] = [];
@@ -527,8 +567,9 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
       return planned.map((call, i) => ({ ...call.item, call_id: `aw_${i}` }));
     });
     try {
-      const { server, threadId, userAgent } = await startThread({ ...input, home, temp, url: mock.url, model });
+      const { server, threadId, userAgent } = await startThread({ ...input, home, temp, url: mock.url, model, catalog });
       try {
+        const catalogModels = await listModels(server);
         const hookTrust = (await projectHooks(server, threadId, input.scratchDir)).find((hook) => hook.key === input.trustKey)?.trustStatus;
         await server.request("turn/start", { threadId, input: [{ type: "text", text: "canary", text_elements: [] }] });
         let timer: NodeJS.Timeout | undefined;
@@ -540,6 +581,9 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
         const outputs = new Map<string, string>();
         for (const request of mock.requests) for (const [id, text] of request.outputs) outputs.set(id, text);
         const observation: CanaryObservation = {
+          model,
+          catalogModels,
+          toolMode,
           turnCompleted,
           hookTrust,
           markers: (await readdir(marks)).filter((name) => name !== "worker-image.png"),
@@ -552,6 +596,8 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
           userAgent,
           command: [input.launch.command, ...input.launch.args].join(" "),
           model,
+          catalog: catalog === null ? "bundled" : "models_cache",
+          toolMode,
           offered: offered.map((tool) => (tool.namespace ? `${tool.namespace}${tool.name}` : tool.name)),
           calls: planned.length,
         };
