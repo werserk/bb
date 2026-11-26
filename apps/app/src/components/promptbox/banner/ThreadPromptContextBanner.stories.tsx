@@ -1,4 +1,9 @@
 import { useState, type ReactNode } from "react";
+import {
+  ComposerContextProvider,
+  ComposerContextSources,
+} from "../context/composer-context";
+import { ComposerContextDock } from "../context/ComposerContextDock";
 import { PROMPT_STACK_TRACK_CLASS } from "@/components/promptbox/banner/PromptStackCard";
 import type { MergeBaseState } from "../../../../../../plugins/git/ui/merge-base";
 import {
@@ -720,3 +725,74 @@ export const MachineRemovalHistory = () => (
     </StoryRow>
   </StoryCard>
 );
+
+const SHEET_NOW = Date.now();
+
+const sheetChildThreadsFixture: ThreadPromptChildThreadsSection = {
+  items: [
+    ...Array.from({ length: 3 }, (_, i) => ({
+      id: `thr_sheet_wait_${i}`,
+      title: `Child waiting for a decision ${i + 1}`,
+      href: `/projects/proj-1/threads/thr_sheet_wait_${i}`,
+      needsOwnerAttention: true,
+      updatedAt: SHEET_NOW - i * 600_000,
+    })),
+    ...Array.from({ length: 3 }, (_, i) => ({
+      id: `thr_sheet_work_${i}`,
+      title: `Child still working on part ${i + 1}`,
+      href: `/projects/proj-1/threads/thr_sheet_work_${i}`,
+      needsOwnerAttention: false,
+      updatedAt: SHEET_NOW - i * 900_000,
+    })),
+    ...Array.from({ length: 4 }, (_, i) => ({
+      id: `thr_sheet_done_${i}`,
+      title: `Finished child ${i + 1}`,
+      href: `/projects/proj-1/threads/thr_sheet_done_${i}`,
+      needsOwnerAttention: false,
+      finished: true,
+      updatedAt: SHEET_NOW - i * 3_600_000,
+    })),
+  ],
+};
+
+export function ContextSheetRows() {
+  return (
+    <ComposerContextProvider>
+      <div className="mx-auto flex h-[560px] w-full max-w-3xl flex-col justify-end bg-background p-4">
+        <ComposerContextSources>
+          <GitSegmentFixtureProvider
+            value={{
+              section: committedSection,
+              mergeBase: featureBranchMergeBase,
+            }}
+          >
+            <ThreadChildThreadsBanner
+              childThreads={sheetChildThreadsFixture}
+              isExpanded={false}
+              onExpandedChange={noop}
+            />
+            <ThreadPromptContextBanner
+              input={{
+                threadId: "thr_story",
+                projectId: "proj_story",
+                environment: null,
+              }}
+              core={{ parentThread: parentThreadFixture }}
+              archivedSection={null}
+              environmentGoneSection={null}
+              expandedSegment={null}
+              onToggleSegment={noop}
+            />
+          </GitSegmentFixtureProvider>
+        </ComposerContextSources>
+        <ComposerContextDock>
+          <textarea
+            aria-label="Draft"
+            className="w-full rounded-b-xl border border-border bg-background p-3 text-sm"
+            placeholder="Follow up…"
+          />
+        </ComposerContextDock>
+      </div>
+    </ComposerContextProvider>
+  );
+}

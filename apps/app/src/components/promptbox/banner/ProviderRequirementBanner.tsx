@@ -1,6 +1,6 @@
 import { Icon } from "@bb/shared-ui/icon";
 import type { ReactNode } from "react";
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { useComposerContextSource } from "../context/composer-context";
 import { PromptStackCard } from "./PromptStackCard";
 
@@ -27,9 +27,10 @@ export function ProviderRequirementBanner({
     >
       {compact ? (
         <div role="alert">
-          <ComposerContextRow
-            icon="AlertTriangle"
-            tone="attention"
+          <ContextRow
+            as="div"
+            glyph={<ContextRowIcon name="AlertTriangle" tone="attention" />}
+            actionInteractive
             title={title}
             subline={description}
             action={action}

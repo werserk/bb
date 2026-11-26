@@ -167,36 +167,44 @@ it("does not present a running spinner while the agent is idle and removes archi
   });
   expect(screen.queryByRole("button", { name: "Plan: 0/1" })).toBeNull();
 });
-
-it("segments every plan step, collapses done steps and keeps the current step visible", () => {
+it("collapses done steps and earlier plans, highlights the current step and drops the truncation note", () => {
+  const step = (id: string, status: string) => ({
+    id,
+    text: `Step ${id}`,
+    status,
+    interactionIds: [],
+  });
   facts.view!.current!.items = [
-    {
-      id: "done",
-      text: "Captured snapshot",
-      status: "completed",
-      interactionIds: [],
-    },
-    {
-      id: "current",
-      text: "Inspect layout",
-      status: "in_progress",
-      interactionIds: [],
-    },
-    { id: "next", text: "Verify", status: "pending", interactionIds: [] },
-  ];
+    step("a", "completed"),
+    step("b", "completed"),
+    step("c", "completed"),
+    step("d", "in_progress"),
+    step("e", "pending"),
+  ] as unknown as NonNullable<ThreadPlanView["current"]>["items"];
+  facts.view!.previousPlans = [1, 2].map((seq) => ({
+    sourceSeq: seq,
+    updatedAt: seq,
+    items: [step(`old${seq}`, "completed")],
+  })) as unknown as ThreadPlanView["previousPlans"];
+  facts.view!.historyTruncated = true;
   render(<Fixture />);
-  fireEvent.click(screen.getByRole("button", { name: "Plan: 1/3" }));
-  expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
-    "1",
-  );
-  expect(screen.getByRole("progressbar").children.length).toBe(3);
-  expect(screen.queryByLabelText("completed: Captured snapshot")).toBeNull();
-  expect(screen.getByLabelText("in_progress: Inspect layout")).toBeTruthy();
-  const done = screen.getByRole("button", { name: "✓ 1 done ▸" });
+  fireEvent.click(screen.getByRole("button", { name: "Plan: 3/5" }));
+  expect(screen.queryByLabelText("completed: Step a")).toBeNull();
+  expect(
+    screen.getByLabelText("in_progress: Step d").getAttribute("aria-current"),
+  ).toBe("step");
+  expect(
+    screen.getByLabelText("pending: Step e").getAttribute("aria-current"),
+  ).toBeNull();
+  const done = screen.getByRole("button", { name: /3 steps done/ });
   expect(done.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(done);
-  expect(done.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByLabelText("completed: Captured snapshot")).toBeTruthy();
-  fireEvent.click(done);
-  expect(screen.queryByLabelText("completed: Captured snapshot")).toBeNull();
+  expect(screen.getByLabelText("completed: Step a")).toBeTruthy();
+  expect(screen.queryByLabelText("completed: Step old1")).toBeNull();
+  const earlier = screen.getByRole("button", { name: /Earlier plans · 2/ });
+  fireEvent.click(earlier);
+  expect(screen.getAllByRole("button", { name: /1 step done/ })).toHaveLength(
+    2,
+  );
+  expect(screen.queryByText(/Earlier plan history truncated/)).toBeNull();
 });

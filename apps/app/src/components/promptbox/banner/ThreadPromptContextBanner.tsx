@@ -1,8 +1,8 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
 import {
   experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
   type ExperimentalThreadContextSegmentInput,
   type ExperimentalThreadContextSegmentProps,
+  type InternalDoNotUseThreadContextChangeTally,
 } from "@get-bb/plugin-sdk";
 import {
   CORE_THREAD_CONTEXT_OWNER,
@@ -25,12 +25,19 @@ import {
 } from "@/lib/machine-removal-display";
 import {
   createContext,
+  useCallback,
   useContext,
+  useState,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from "react";
 import { NavLink } from "react-router-dom";
-import type { EnvironmentStatus, ThreadRuntimeDisplayStatus } from "@bb/domain";
+import {
+  GIT_PLUGIN_ID,
+  type EnvironmentStatus,
+  type ThreadRuntimeDisplayStatus,
+} from "@bb/domain";
 import {
   PromptStackCard,
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
@@ -65,6 +72,13 @@ import {
   useThreadTitleDisplayText,
 } from "@/components/thread/ThreadTitleMentions";
 import { useComposerContextSource } from "../context/composer-context";
+import {
+  ContextRow,
+  ContextRowAction,
+  ContextRowGlyph,
+  ContextRowIcon,
+} from "@bb/shared-ui/context-row";
+import { formatRelativeTime } from "@/lib/relative-time";
 import { childThreadNoun } from "@/lib/child-thread-copy";
 import { SIDEBAR_WORKING_STATUS_COLOR_CLASS } from "@bb/shared-ui/sidebar-row-classes";
 
@@ -79,6 +93,9 @@ interface ThreadPromptChildThreadItem {
   title: string;
   href: string;
   needsOwnerAttention: boolean;
+  finished?: boolean;
+  outcome?: ThreadPromptChildOutcome;
+  updatedAt?: number;
 }
 
 export interface ThreadPromptChildThreadsSection {
@@ -99,6 +116,26 @@ export interface ThreadPromptEnvironmentGoneSection {
 
 const THREAD_BANNER_ACTIVE_CHILD_RUNTIME_STATUSES: ReadonlySet<ThreadRuntimeDisplayStatus> =
   new Set(["active", "provisioning", "starting", "waiting-for-host"]);
+
+export type ThreadPromptChildOutcome = "done" | "error" | "idle";
+
+export function childThreadOutcome(
+  status: ThreadRuntimeDisplayStatus,
+): ThreadPromptChildOutcome {
+  switch (status) {
+    case "idle":
+      return "done";
+    case "error":
+      return "error";
+    case "pending":
+    case "stopping":
+    case "starting":
+    case "active":
+    case "provisioning":
+    case "waiting-for-host":
+      return "idle";
+  }
+}
 
 export function isThreadDisplayStatusBannerActive(
   status: ThreadRuntimeDisplayStatus,
@@ -201,28 +238,28 @@ function ParentThreadInlineSegment({
 }) {
   const ariaLabel = useParentSectionAriaLabel(section);
   return (
-    <div
-      className={cn(
-        "flex min-w-0 items-center gap-1.5 text-xs",
-        PROMPT_STACK_INLAY_SEGMENT_CLASS,
-      )}
-      title={ariaLabel}
-    >
-      <Icon
-        name={PARENT_SECTION_ICON[section.relationship]}
-        className="size-3.5 shrink-0"
-        aria-hidden="true"
-      />
-      <span className="min-w-0 truncate">
-        {PARENT_SECTION_COPY[section.relationship].verb}{" "}
-        <NavLink to={section.href}>
-          <ThreadTitle
-            title={section.parentThreadTitle}
-            className={PARENT_THREAD_TITLE_CLASS}
-            inline
+    <div className="min-w-0 flex-1">
+      <ContextRow
+        as={NavLink}
+        to={section.href}
+        aria-label={ariaLabel}
+        glyph={
+          <Icon
+            name={PARENT_SECTION_ICON[section.relationship]}
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden="true"
           />
-        </NavLink>
-      </span>
+        }
+        title={
+          <>
+            <span className="font-normal text-muted-foreground">
+              {PARENT_SECTION_COPY[section.relationship].verb}
+            </span>{" "}
+            <ThreadTitle title={section.parentThreadTitle} inline />
+          </>
+        }
+        action={<ContextRowAction>Open ↗</ContextRowAction>}
+      />
     </div>
   );
 }
@@ -299,6 +336,128 @@ function ParentThreadSectionBody({
 const CHILD_THREAD_ROW_CLASS =
   "flex w-full min-w-0 items-center gap-2 py-0.5 text-left text-foreground/90 underline-offset-2 hover:underline";
 
+function ChildThreadContextRow({
+  item,
+  finished,
+}: {
+  item: ThreadPromptChildThreadItem;
+  finished: boolean;
+}) {
+  return (
+    <ContextRow
+      as={NavLink}
+      to={item.href}
+      glyph={
+        <ContextRowGlyph
+          kind={
+            finished
+              ? (item.outcome ?? "done")
+              : item.needsOwnerAttention
+                ? "needs-you"
+                : "working"
+          }
+        />
+      }
+      title={<ThreadTitle title={item.title} />}
+      muted={finished}
+      age={
+        item.updatedAt === undefined
+          ? undefined
+          : formatRelativeTime({ timestamp: item.updatedAt, now: Date.now() })
+      }
+      action={<ContextRowAction>Open ↗</ContextRowAction>}
+    />
+  );
+}
+
+function ChildThreadFinishedList({
+  items,
+}: {
+  items: readonly ThreadPromptChildThreadItem[];
+}) {
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <div data-context-finished="">
+      <button
+        type="button"
+        data-context-fit=""
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-foreground/5"
+      >
+        <span>Finished · {items.length}</span>
+        <Icon
+          name="ChevronRight"
+          aria-hidden
+          className={cn("size-3 transition-transform", open && "rotate-90")}
+        />
+      </button>
+      {open
+        ? items.map((item) => (
+            <ChildThreadContextRow key={item.id} item={item} finished />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function CompactChildThreadsCards({
+  items,
+}: {
+  items: readonly ThreadPromptChildThreadItem[];
+}) {
+  const waiting = items.filter(
+    (item) => !item.finished && item.needsOwnerAttention,
+  );
+  const working = items.filter(
+    (item) => !item.finished && !item.needsOwnerAttention,
+  );
+  const finished = items.filter((item) => item.finished);
+  const finishedOwner = working.length > 0 ? "working" : "waiting";
+  return (
+    <>
+      {waiting.length > 0 ? (
+        <PromptStackCard
+          ariaLabel="Child threads needing you"
+          context={{
+            label: "Needs you",
+            icon: "CircleQuestion",
+            group: "attention",
+            tone: "attention",
+            kind: "needs-you",
+          }}
+          contextSummary={waiting.length}
+        >
+          {waiting.map((item) => (
+            <ChildThreadContextRow key={item.id} item={item} finished={false} />
+          ))}
+          {finishedOwner === "waiting" ? (
+            <ChildThreadFinishedList items={finished} />
+          ) : null}
+        </PromptStackCard>
+      ) : null}
+      {working.length > 0 ? (
+        <PromptStackCard
+          ariaLabel="Child threads working"
+          context={{
+            label: "Working",
+            icon: "Loading",
+            group: "work",
+            kind: "working",
+          }}
+          contextSummary={working.length}
+        >
+          {working.map((item) => (
+            <ChildThreadContextRow key={item.id} item={item} finished={false} />
+          ))}
+          <ChildThreadFinishedList items={finished} />
+        </PromptStackCard>
+      ) : null}
+    </>
+  );
+}
+
 function ActiveChildThreadsCard({
   childThreadsSection,
   isExpanded,
@@ -310,19 +469,15 @@ function ActiveChildThreadsCard({
 }) {
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
   const compact = useComposerContextSource() !== null;
-  const items = childThreadsSection.items;
+  const allItems = childThreadsSection.items;
+  const items = allItems.filter((item) => !item.finished);
   const waiting = items.filter((item) => item.needsOwnerAttention).length;
   const working = items.filter((item) => !item.needsOwnerAttention);
   const summary = `${waiting} needs you · ${working.length} working`;
   if (items.length === 0) return null;
+  if (compact) return <CompactChildThreadsCards items={allItems} />;
   const list = (
-    <ul
-      className={
-        compact
-          ? "space-y-1"
-          : "max-h-40 space-y-0.5 overflow-y-auto px-3 pt-1.5"
-      }
-    >
+    <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pt-1.5">
       {items.map((item) => (
         <li key={item.id} className="text-xs">
           <NavLink to={item.href} className={CHILD_THREAD_ROW_CLASS}>
@@ -360,17 +515,13 @@ function ActiveChildThreadsCard({
         aria-controls={SECTION_IDS.childThreads.body}
         aria-label={`${items.length} active ${childThreadNoun(items.length)} · ${waiting} needs you`}
         onClick={focus.onTriggerClick}
-        className={
-          compact
-            ? "hidden"
-            : activityRowClass(
-                "active",
-                cn(
-                  PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-                  PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-                ),
-              )
-        }
+        className={activityRowClass(
+          "active",
+          cn(
+            PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
+            PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
+          ),
+        )}
       >
         <Icon
           name={waiting > 0 ? "CircleQuestion" : "ChildThread"}
@@ -387,38 +538,21 @@ function ActiveChildThreadsCard({
         </span>
         <PromptStackCountSlot count={items.length} />
       </button>
-      {compact ? (
-        <>
-          {items.map((item) => (
-            <ComposerContextRow
-              key={item.id}
-              icon={item.needsOwnerAttention ? "CircleQuestion" : "Circle"}
-              tone={item.needsOwnerAttention ? "attention" : "working"}
-              title={<ThreadTitle title={item.title} inline tooltip />}
-              subline={
-                item.needsOwnerAttention ? "Waiting for your answer" : "Working"
-              }
-              action={<NavLink to={item.href}>Open</NavLink>}
-            />
-          ))}
-        </>
-      ) : (
-        <AnimatedBody
-          collapsedBorder="reserve"
-          id={SECTION_IDS.childThreads.body}
-          labelledBy={SECTION_IDS.childThreads.toggle}
-          isExpanded={isExpanded}
-        >
-          {list}
-          <PromptStackCollapseRow
-            buttonRef={focus.collapseRef}
-            className="rounded-none"
-            controlsId={SECTION_IDS.childThreads.body}
-            label={`Collapse ${items.length} ${childThreadNoun(items.length)}`}
-            onCollapse={focus.onCollapseClick}
-          />
-        </AnimatedBody>
-      )}
+      <AnimatedBody
+        collapsedBorder="reserve"
+        id={SECTION_IDS.childThreads.body}
+        labelledBy={SECTION_IDS.childThreads.toggle}
+        isExpanded={isExpanded}
+      >
+        {list}
+        <PromptStackCollapseRow
+          buttonRef={focus.collapseRef}
+          className="rounded-none"
+          controlsId={SECTION_IDS.childThreads.body}
+          label={`Collapse ${items.length} ${childThreadNoun(items.length)}`}
+          onCollapse={focus.onCollapseClick}
+        />
+      </AnimatedBody>
     </PromptStackCard>
   );
 }
@@ -468,16 +602,7 @@ function ParentThreadSummary({
 }: ExperimentalThreadContextSegmentProps) {
   const { parentThread, parentFocus, compact } = useCoreThreadContext();
   if (parentThread === null) return null;
-  if (compact)
-    return (
-      <ComposerContextRow
-        icon={PARENT_SECTION_ICON[parentThread.relationship]}
-        title={<ThreadTitle title={parentThread.parentThreadTitle} inline />}
-        subline={PARENT_SECTION_COPY[parentThread.relationship].verb}
-        action={<NavLink to={parentThread.href}>Open</NavLink>}
-      />
-    );
-  return segments.length === 1 ? (
+  return compact || segments.length === 1 ? (
     <ParentThreadInlineSegment section={parentThread} />
   ) : (
     <ParentThreadSectionToggle
@@ -623,11 +748,12 @@ function ReadOnlyContextBanner({
         }}
       >
         {parentSegment("summary")}
-        <ComposerContextRow
-          icon={iconName}
-          tone="attention"
+        <ContextRow
+          as="div"
+          glyph={<ContextRowIcon name={iconName} tone="attention" />}
           title={statusLabel}
-          subline={description}
+          subline={description ?? undefined}
+          actionInteractive
           action={statusAction}
         />
       </PromptStackCard>
@@ -716,13 +842,26 @@ function WritableContextBanner({
     input,
     coreThreadContextSegments,
   );
-  const segments = entries.map(({ slot }) => ({
-    key: threadContextSegmentKey(slot),
-    pluginId: slot.pluginId,
-  }));
+  const toSegments = (list: readonly ThreadContextSegmentEntry[]) =>
+    list.map(({ slot }) => ({
+      key: threadContextSegmentKey(slot),
+      pluginId: slot.pluginId,
+    }));
+  const [tally, setTally] =
+    useState<InternalDoNotUseThreadContextChangeTally | null>(null);
+  const reportChangeTally = useCallback(
+    (next: InternalDoNotUseThreadContextChangeTally | null) =>
+      setTally((current) =>
+        current?.added === next?.added && current?.removed === next?.removed
+          ? current
+          : next,
+      ),
+    [],
+  );
   const mount = (
     entry: ThreadContextSegmentEntry,
     part: ThreadContextSegmentPart,
+    segments: ReturnType<typeof toSegments>,
   ) => {
     const key = threadContextSegmentKey(entry.slot);
     return (
@@ -732,57 +871,92 @@ function WritableContextBanner({
         part={part}
         {...input}
         segments={segments}
+        {...(entry.slot.pluginId === GIT_PLUGIN_ID
+          ? { internal_DO_NOT_USE_reportChangeTally: reportChangeTally }
+          : {})}
         isExpanded={expandedSegment === key}
         onToggle={() => onToggleSegment(key)}
       />
     );
   };
+  const parentEntries = entries.filter((entry) => entry.owner === "core");
+  const changeEntries = entries.filter((entry) => entry.owner !== "core");
+  const hasGitEntry = changeEntries.some(
+    (entry) => entry.slot.pluginId === GIT_PLUGIN_ID,
+  );
+  const renderCard = (
+    list: readonly ThreadContextSegmentEntry[],
+    ariaLabel: string,
+    context: NonNullable<ComponentProps<typeof PromptStackCard>["context"]>,
+  ) => {
+    const segments = toSegments(list);
+    return (
+      <PromptStackCard
+        ariaLabel={ariaLabel}
+        context={context}
+        className="overflow-hidden"
+        style={{ minHeight: PROMPT_CONTEXT_BANNER_COLLAPSED_HEIGHT }}
+      >
+        {compact ? (
+          list.map((entry) =>
+            entry.owner === "core" && entry.slot.id === "parent-thread" ? (
+              mount(entry, "summary", segments)
+            ) : (
+              <ContextRow
+                as="div"
+                key={threadContextSegmentKey(entry.slot)}
+                glyph={<ContextRowIcon name="GitBranch" />}
+                title={mount(entry, "summary", segments)}
+                actionInteractive
+                action={mount(entry, "action", segments)}
+                subline={
+                  expandedSegment === threadContextSegmentKey(entry.slot)
+                    ? mount(entry, "details", segments)
+                    : undefined
+                }
+              />
+            ),
+          )
+        ) : (
+          <div
+            className={cn(
+              "flex items-center gap-0.5 text-xs text-muted-foreground",
+              PROMPT_STACK_INLAY_INSET_CLASS,
+            )}
+          >
+            {list.map((entry) => mount(entry, "summary", segments))}
+            {list.map((entry) => mount(entry, "action", segments))}
+          </div>
+        )}
+        {!compact && list.map((entry) => mount(entry, "details", segments))}
+      </PromptStackCard>
+    );
+  };
   return (
     <>
       {observers}
-      {entries.length > 0 ? (
-        <PromptStackCard
-          ariaLabel="Thread context before sending"
-          context={{
-            label: "Changes & context",
-            icon: "GitBranch",
+      {changeEntries.length > 0
+        ? renderCard(
+            changeEntries,
+            hasGitEntry ? "Thread changes" : "Thread status",
+            hasGitEntry
+              ? {
+                  label: "Changes",
+                  icon: "FileDiff",
+                  group: "context",
+                  kind: "changes",
+                  tally: tally ?? undefined,
+                }
+              : { label: "Context", icon: "Info", group: "context" },
+          )
+        : null}
+      {parentEntries.length > 0
+        ? renderCard(parentEntries, "Thread context before sending", {
+            label: "Parent",
+            icon: "UserRound",
             group: "context",
-          }}
-          className="overflow-hidden"
-          style={{ minHeight: PROMPT_CONTEXT_BANNER_COLLAPSED_HEIGHT }}
-        >
-          {compact ? (
-            entries.map((entry) =>
-              entry.owner === "core" && entry.slot.id === "parent-thread" ? (
-                mount(entry, "summary")
-              ) : (
-                <ComposerContextRow
-                  key={threadContextSegmentKey(entry.slot)}
-                  icon="GitBranch"
-                  title={mount(entry, "summary")}
-                  action={mount(entry, "action")}
-                  subline={
-                    expandedSegment === threadContextSegmentKey(entry.slot)
-                      ? mount(entry, "details")
-                      : undefined
-                  }
-                />
-              ),
-            )
-          ) : (
-            <div
-              className={cn(
-                "flex items-center gap-0.5 text-xs text-muted-foreground",
-                PROMPT_STACK_INLAY_INSET_CLASS,
-              )}
-            >
-              {entries.map((entry) => mount(entry, "summary"))}
-              {entries.map((entry) => mount(entry, "action"))}
-            </div>
-          )}
-          {!compact && entries.map((entry) => mount(entry, "details"))}
-        </PromptStackCard>
-      ) : null}
+          })
+        : null}
     </>
   );
 }

@@ -1,12 +1,15 @@
-import { ComposerContextRow } from "@/components/promptbox/context/ComposerContextRow";
 import {
   ComposerContextItem,
   useComposerContextSource,
 } from "@/components/promptbox/context/composer-context";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@bb/shared-ui/icon";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+import {
+  ContextRow,
+  ContextRowAction,
+  ContextRowGlyph,
+} from "@bb/shared-ui/context-row";
 import { sdk } from "@/lib/sdk";
 import { BbHttpError } from "@bb/sdk/browser";
 import { useSecondTick } from "@/hooks/useSecondTick";
@@ -28,8 +31,6 @@ export function QuestionNavigator({
   const contextSource = useComposerContextSource();
   const navigation = useQuestionNavigation();
   const anchor = useBottomAnchoredScroll();
-  const [open, setOpen] = useState(false);
-  const moving = useRef(false);
   const windowSize = useRef({ threadId, pages: 1 });
   if (windowSize.current.threadId !== threadId)
     windowSize.current = { threadId, pages: 1 };
@@ -94,8 +95,6 @@ export function QuestionNavigator({
   const incomplete = !expired && (query.data?.incomplete ?? false);
   const go = (id: string) => {
     contextSource?.dismiss();
-    moving.current = true;
-    setOpen(false);
     void navigation?.navigate(id, "question");
   };
   const buttonClass = contextSource
@@ -123,7 +122,7 @@ export function QuestionNavigator({
   return (
     <ComposerContextItem
       id="questions"
-      overview
+      kind={!expired && !query.isError && total > 0 ? "needs-you" : undefined}
       label={
         expired || query.isError
           ? "Questions unavailable"
@@ -138,11 +137,7 @@ export function QuestionNavigator({
         expired || query.isError ? "error" : total > 0 ? "attention" : undefined
       }
     >
-      <div
-        className="mb-2 space-y-1"
-        role="group"
-        aria-label="Question navigation"
-      >
+      <div className="space-y-1" role="group" aria-label="Question navigation">
         <span className="sr-only" aria-live="polite">
           {query.isPending
             ? "Loading questions"
@@ -157,126 +152,45 @@ export function QuestionNavigator({
             <span role="status" className="px-2 text-xs text-muted-foreground">
               Questions · Loading…
             </span>
-          ) : contextSource && questions.length > 0 ? (
-            <div className="w-full">
+          ) : questions.length > 0 ? (
+            <div className="w-full min-w-0" role="list">
               {questions.map((question) => (
-                <ComposerContextRow
-                  key={question.id}
-                  icon="MessageQuestion"
-                  tone="attention"
-                  title={questionTitle(question.publication)}
-                  action={
-                    <button
-                      type="button"
-                      aria-label={`${legacy ? "Recent question" : "Question"} · 1 ${questionTitle(question.publication)}`}
-                      disabled={navigation?.pending}
-                      onClick={() => go(question.id)}
-                    >
-                      Answer ↑
-                    </button>
-                  }
-                />
+                <div role="listitem" key={question.id}>
+                  <ContextRow
+                    glyph={<ContextRowGlyph kind="question" />}
+                    title={questionTitle(question.publication)}
+                    age={questionTime(question.createdAt)}
+                    aria-label={questionTitle(question.publication)}
+                    disabled={navigation?.pending}
+                    onClick={() => go(question.id)}
+                    action={
+                      <ContextRowAction variant="primary">
+                        Answer
+                      </ContextRowAction>
+                    }
+                  />
+                </div>
               ))}
               {query.data?.nextCursor && !incomplete ? (
-                <button
-                  type="button"
-                  className={buttonClass}
-                  disabled={query.isFetching}
-                  onClick={() => {
-                    windowSize.current.pages++;
-                    void query.refetch();
-                  }}
+                <div
+                  data-context-fit=""
+                  className="space-y-1 px-1.5 py-1 text-xs text-muted-foreground"
                 >
-                  {query.isFetching ? "Loading…" : "Load more"}
-                </button>
-              ) : null}
-            </div>
-          ) : total === 1 && questions.length === 1 && !incomplete ? (
-            <button
-              type="button"
-              className={`${buttonClass} w-full justify-start`}
-              aria-label={`${legacy ? "Recent question" : "Question"} · 1 ${questionTitle(questions[0]!.publication)}`}
-              disabled={navigation?.pending}
-              onClick={() => go(questions[0]!.id)}
-            >
-              <Icon
-                name="MessageQuestion"
-                className="size-4 shrink-0 text-attention"
-              />
-              <span className="max-w-64 truncate">
-                {questionTitle(questions[0]!.publication)}
-              </span>
-              <span className="ml-auto shrink-0 text-muted-foreground">
-                Answer ↑
-              </span>
-            </button>
-          ) : total > 1 || incomplete ? (
-            <Popover
-              open={open}
-              onOpenChange={(value) => {
-                moving.current = false;
-                setOpen(value);
-              }}
-            >
-              <PopoverTrigger asChild>
-                <button type="button" className={buttonClass}>
-                  <Icon
-                    name="MessageQuestion"
-                    className="size-4 text-attention"
-                  />
-                  {legacy ? "Recent questions" : "Questions"} · {total}
-                  {incomplete ? "+" : ""}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="top"
-                align="start"
-                mobileTitle="Open questions"
-                className="max-h-80 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto p-1"
-                onCloseAutoFocus={(event) => {
-                  if (moving.current) event.preventDefault();
-                  moving.current = false;
-                }}
-              >
-                <div className="px-3 py-2 text-xs text-muted-foreground">
-                  Open questions · oldest first
-                </div>
-                {questions.map((question) => (
+                  Showing {questions.length} of {total}
                   <button
                     type="button"
-                    key={question.id}
-                    aria-label={questionTitle(question.publication)}
-                    onClick={() => go(question.id)}
-                    className="block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-state-hover focus-visible:outline focus-visible:outline-ring"
+                    className="ml-2 underline"
+                    disabled={query.isFetching}
+                    onClick={() => {
+                      windowSize.current.pages++;
+                      void query.refetch();
+                    }}
                   >
-                    <span className="flex min-w-0 items-center justify-between gap-3">
-                      <span className="truncate">
-                        {questionTitle(question.publication)}
-                      </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {questionTime(question.createdAt)}
-                      </span>
-                    </span>
+                    {query.isFetching ? "Loading…" : "Load more"}
                   </button>
-                ))}
-                {query.data?.nextCursor && !incomplete ? (
-                  <div className="space-y-1 px-3 py-2 text-xs text-muted-foreground">
-                    Showing {questions.length} of {total}
-                    <button
-                      type="button"
-                      className="block min-h-11 underline"
-                      disabled={query.isFetching}
-                      onClick={() => {
-                        windowSize.current.pages++;
-                        void query.refetch();
-                      }}
-                    >
-                      {query.isFetching ? "Loading…" : "Load more"}
-                    </button>
-                  </div>
-                ) : null}
-              </PopoverContent>
-            </Popover>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {showReturn ? (
             <button

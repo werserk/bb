@@ -2053,8 +2053,21 @@ export interface ExperimentalThreadContextSegmentInput {
   environment: ExperimentalThreadEnvironment | null;
 }
 
+/** Lines added and removed, as the Changes chip of the composer context strip shows them. */
+export interface InternalDoNotUseThreadContextChangeTally {
+  added: number;
+  removed: number;
+}
+
 /** Props of a thread context segment's `summary`, `action` and `details`. */
 export interface ExperimentalThreadContextSegmentProps extends ExperimentalThreadContextSegmentInput {
+  /**
+   * Internal to bb's first-party plugins: hands the segment's change tally to
+   * the Changes chip of the composer context strip; null clears it.
+   */
+  internal_DO_NOT_USE_reportChangeTally?(
+    tally: InternalDoNotUseThreadContextChangeTally | null,
+  ): void;
   /** The visible segments in row order, this one included. */
   segments: readonly ExperimentalThreadContextSegmentReference[];
   /** One segment of a thread's context row is expanded at a time. */

@@ -40,14 +40,12 @@ function mount(node: ReactNode, counter: string) {
   fireEvent.click(screen.getByRole("button", { name: counter }));
 }
 function row(title: string, action?: string) {
-  const root = [...document.querySelectorAll(".composer-context-row-title")]
-    .find((element) => element.textContent === title)
-    ?.closest(".composer-context-row");
-  expect(root?.querySelector("svg.size-4")).toBeTruthy();
-  if (action)
-    expect(
-      root?.querySelector(".composer-context-row-actions")?.textContent,
-    ).toContain(action);
+  const root = [
+    ...document.querySelectorAll<HTMLElement>("[data-context-row]"),
+  ].find((element) => element.textContent?.includes(title));
+  expect(root).toBeTruthy();
+  expect(root?.querySelector("svg")).toBeTruthy();
+  if (action) expect(root?.textContent).toContain(action);
   return root;
 }
 it("uses one child row per thread and preserves links without answer forms", () => {
@@ -66,14 +64,12 @@ it("uses one child row per thread and preserves links without answer forms", () 
       isExpanded={false}
       onExpandedChange={vi.fn()}
     />,
-    "Child threads: 1",
+    "Needs you: 1",
   );
-  expect(row("Inspect payments", "Open")?.textContent).toContain(
-    "Waiting for your answer",
-  );
-  expect(screen.getByRole("link", { name: "Open" }).getAttribute("href")).toBe(
-    "/threads/child",
-  );
+  row("Inspect payments", "Open");
+  expect(
+    screen.getByRole("link", { name: /Inspect payments/ }).getAttribute("href"),
+  ).toBe("/threads/child");
   expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
 });
 it.each(["parent", "fork"] as const)(
@@ -94,11 +90,11 @@ it.each(["parent", "fork"] as const)(
         expandedSegment={null}
         onToggleSegment={vi.fn()}
       />,
-      "Changes & context",
+      "Parent",
     );
     row("Source thread", "Open");
     expect(
-      screen.getByRole("link", { name: "Open" }).getAttribute("href"),
+      screen.getByRole("link", { name: /Source thread/ }).getAttribute("href"),
     ).toBe("/threads/source");
   },
 );
@@ -145,8 +141,8 @@ it("keeps provider requirements and their existing action in a warning row", () 
     "Connect a provider",
   );
   expect(
-    row("Connect a provider", "Connect")?.getAttribute("data-row-tone"),
-  ).toBe("attention");
+    row("Connect a provider", "Connect")?.querySelector("svg.text-attention"),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Connect" }));
   expect(action).toHaveBeenCalledOnce();
 });

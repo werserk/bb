@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -282,9 +283,9 @@ it.each(["bare", "card"] as const)(
     );
     fireEvent.click(screen.getByRole("button", { name: "conditional" }));
     expect(
-      screen.getByText("conditional", {
-        selector: ".composer-context-row-title",
-      }),
+      within(screen.getByRole("region", { name: "Thread context" }))
+        .getByText("conditional", { selector: "[data-context-row] span" })
+        .closest("[data-context-row]"),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss extension" }));

@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { useComposerContextSource } from "../context/composer-context";
 import type { ReactNode } from "react";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@bb/shared-ui/activity-row-styles";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
+import type { ComposerContextKind } from "@/components/promptbox/context/composer-context";
 import {
   PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
   PromptStackHoverChevron,
@@ -37,6 +38,7 @@ interface CollapsibleActiveStackCardProps {
   iconName: IconName;
   title: string;
   isActive: boolean;
+  contextKind?: ComposerContextKind;
   isExpanded: boolean;
   onToggle: () => void;
   dismiss: {
@@ -56,6 +58,7 @@ export function CollapsibleActiveStackCard({
   iconName,
   title,
   isActive,
+  contextKind,
   isExpanded,
   onToggle,
   dismiss,
@@ -67,7 +70,12 @@ export function CollapsibleActiveStackCard({
   return (
     <PromptStackCard
       ariaLabel={cardAriaLabel}
-      context={{ label: cardAriaLabel, icon: iconName, group: "work" }}
+      context={{
+        label: cardAriaLabel,
+        icon: iconName,
+        group: "work",
+        kind: contextKind,
+      }}
       onContextReveal={
         compact
           ? undefined
@@ -79,10 +87,16 @@ export function CollapsibleActiveStackCard({
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
       {compact ? (
-        <ComposerContextRow
-          icon={iconName}
-          tone={isActive ? "working" : undefined}
+        <ContextRow
+          as="div"
+          glyph={
+            <ContextRowIcon
+              name={iconName}
+              tone={isActive ? "working" : undefined}
+            />
+          }
           title={title}
+          actionInteractive
           action={
             <button
               ref={focus.triggerRef}

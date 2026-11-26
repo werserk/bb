@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ThreadTimelineModelFallback } from "@bb/domain";
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { rawStringLocalStorage } from "@/lib/browser-storage";
 
@@ -57,9 +57,10 @@ export function ThreadModelFallbackCard({
       className="overflow-hidden"
     >
       <div role="status" aria-live="polite">
-        <ComposerContextRow
-          icon="AlertTriangle"
-          tone="attention"
+        <ContextRow
+          as="div"
+          glyph={<ContextRowIcon name="AlertTriangle" tone="attention" />}
+          actionInteractive
           title="Model fallback"
           subline={
             <>

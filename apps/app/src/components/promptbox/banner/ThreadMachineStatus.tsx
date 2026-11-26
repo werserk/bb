@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { useComposerContextSource } from "../context/composer-context";
 import { useState } from "react";
 import { useHosts } from "@/hooks/queries/host-queries";
@@ -99,9 +99,10 @@ export function ThreadMachineStatusBanner({
         }}
       >
         <div role={detail ? "alert" : "status"}>
-          <ComposerContextRow
-            icon="AlertCircle"
-            tone="attention"
+          <ContextRow
+            as="div"
+            glyph={<ContextRowIcon name="AlertCircle" tone="attention" />}
+            actionInteractive
             title={status}
             subline={detail}
             action={

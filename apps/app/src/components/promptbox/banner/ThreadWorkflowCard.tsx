@@ -1,4 +1,4 @@
-import { ComposerContextRow } from "../context/ComposerContextRow";
+import { ContextRow, ContextRowIcon } from "@bb/shared-ui/context-row";
 import { useComposerContextSource } from "../context/composer-context";
 import { useId } from "react";
 import { isSettledWorkflowAgentState } from "@bb/domain";
@@ -88,9 +88,10 @@ export function ThreadWorkflowContextRow({
   const name = workflow.workflowName ?? workflow.description;
   return (
     <>
-      <ComposerContextRow
-        icon="Workflow"
-        tone="working"
+      <ContextRow
+        as="div"
+        glyph={<ContextRowIcon name="Workflow" tone="working" />}
+        actionInteractive
         title={name}
         subline={
           <>
@@ -148,7 +149,12 @@ export function ThreadWorkflowCard({
   return (
     <PromptStackCard
       ariaLabel="Workflow"
-      context={{ label: "Workflow", icon: "Workflow", group: "work" }}
+      context={{
+        label: "Workflow",
+        icon: "Workflow",
+        group: "work",
+        kind: "working",
+      }}
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
