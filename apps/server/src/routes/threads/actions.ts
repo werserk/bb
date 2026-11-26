@@ -282,14 +282,12 @@ export function registerThreadActionRoutes(
     }));
   });
   get(routes.sendIntakes, (context, query) => {
-    assertSendIntakeEnabled(deps);
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const page = readThreadSendIntakePage(deps.db, thread.id, query.afterOrder);
     return context.json({ admissionVersion: 1 as const, rows: page.slice(0, 100).map(toSendIntakeView),
       nextAfterOrder: page.length > 100 ? page[99]!.intakeOrder : null });
   });
   post(routes.mutateSendIntake, async (context, payload) => {
-    assertSendIntakeEnabled(deps);
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureThreadQueueIsWritable(thread);
     return context.json(await getThreadSendIntakeService(deps).mutate(thread.id, payload));

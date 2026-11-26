@@ -11,7 +11,7 @@ import type { SendMessageRequest } from "@bb/server-contract";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { queueParentSystemMessage } from "./parent-system-messages.js";
-import { acceptThreadSendRequest } from "./thread-send-request.js";
+import { acceptThreadSendRequestWithoutIntake } from "./thread-send-request.js";
 
 /**
  * Where the pre-queue `deferred_thread_messages` rows wait for this backfill.
@@ -161,7 +161,7 @@ async function deliverLegacyDeferredRow(
     return "kept";
   }
   if (parsed.data.kind === "send") {
-    await acceptThreadSendRequest(deps, {
+    await acceptThreadSendRequestWithoutIntake(deps, {
       payload: toSendPayload(parsed.data.request),
       thread,
     });

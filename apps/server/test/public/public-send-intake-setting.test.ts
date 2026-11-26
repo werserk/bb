@@ -26,7 +26,7 @@ describe("sendIntake setting", () => {
     });
   });
 
-  it("off: legacy send stores no intake row and the intake routes answer 404", async () => {
+  it("off: legacy send stores no intake row and only send-admission answers 404", async () => {
     await withTestHarness(async h => {
       const { thread } = seedThreadFixture(h, { thread: { status: "idle" } });
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);
@@ -44,7 +44,7 @@ describe("sendIntake setting", () => {
       });
       expect(admission.status).toBe(404);
       expect(await admission.json()).toMatchObject({ code: "intake_disabled" });
-      expect((await h.app.request(`/api/v1/threads/${thread.id}/send-intakes?afterOrder=0`)).status).toBe(404);
+      expect((await h.app.request(`/api/v1/threads/${thread.id}/send-intakes?afterOrder=0`)).status).toBe(200);
       expect(intakeRowCount(h)).toBe(0);
     });
   });

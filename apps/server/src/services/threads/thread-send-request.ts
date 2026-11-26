@@ -6,7 +6,7 @@ import { isServerMoveFrozen } from "../server-move/freeze-state.js";
 import { sendAdmissionResponseSchema } from "@bb/server-contract";
 import { createThreadSendIntakeService } from "./thread-send-intake.js";
 import type { SendIntakeAuthority } from "./send-intake-authority.js";
-import { getExperiments } from "@bb/db";
+import { getExperiments, listThreadSendIntakes } from "@bb/db";
 import {
   isStandaloneBuiltinClearCommand,
   isStandaloneBuiltinCompactCommand,
@@ -162,7 +162,7 @@ function validateIntakeRequest(deps: LoggedPendingInteractionWorkSessionDeps, ar
   if (args.payload.mode === "steer") throwInvalidCompactFirst("cannot steer a turn");
 }
 
-function acceptThreadSendRequestLegacy(
+export function acceptThreadSendRequestWithoutIntake(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
@@ -180,6 +180,16 @@ export function isSendIntakeEnabled(
   return getExperiments(deps.db).sendIntake;
 }
 
+export function usesSendIntakeLane(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+  threadId: string,
+): boolean {
+  return (
+    isSendIntakeEnabled(deps) ||
+    listThreadSendIntakes(deps.db, threadId, 1).length > 0
+  );
+}
+
 export function assertSendIntakeEnabled(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
 ): void {
@@ -191,7 +201,8 @@ export async function acceptThreadSendRequest(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
-  if (!isSendIntakeEnabled(deps)) return acceptThreadSendRequestLegacy(deps, args);
+  if (!usesSendIntakeLane(deps, args.thread.id))
+    return acceptThreadSendRequestWithoutIntake(deps, args);
   validateIntakeRequest(deps, args);
   const service = getThreadSendIntakeService(deps);
   const row = await service.admit(args.payload, args.thread);

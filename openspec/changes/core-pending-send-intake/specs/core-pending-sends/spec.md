@@ -194,14 +194,24 @@ C supplies the separately reviewed managed rollback barrier and old-binary-open-
 
 The core SHALL enforce these conditions:
 
-The intake path runs only while the server experiment `sendIntake` is on; it defaults off. With it off, the legacy send route keeps its in-memory submission guard and writes no intake row, and the admission, intake-read and intake-action routes answer 404 `intake_disabled`. Rows already stored are still recovered and delivered at startup whatever the setting.
+The server experiment `sendIntake` defaults off and gates admission of new sends into the intake lane; rows stored while it was on stay deliverable and visible.
 
 #### Scenario: Setting off
 
-- **WHEN** `sendIntake` is off and a send enters the legacy route
-- **THEN** it dispatches or queues exactly as before, no `thread_send_intakes` row is written, and the admission route answers 404 `intake_disabled`
+- **WHEN** `sendIntake` is off and a send enters a thread without open rows
+- **THEN** it dispatches or queues as before, no `thread_send_intakes` row is written, and `send-admission` answers 404 `intake_disabled`
 
 #### Scenario: Setting on
 
 - **WHEN** `sendIntake` is on and the same send enters
 - **THEN** it is stored as an intake row before preparation and ends transferred with its native handoff
+
+#### Scenario: Setting turned off with open rows
+
+- **WHEN** `sendIntake` is turned off while a thread has an open intake row
+- **THEN** a later send to that thread is delivered after the row, a send to another thread uses the legacy path, and the read and action routes still serve the row
+
+#### Scenario: Legacy deferred startup sweep
+
+- **WHEN** the startup sweep delivers a legacy deferred send before the worker is ready
+- **THEN** it bypasses the lane and does not wait on the worker

@@ -1031,10 +1031,14 @@ either way.
 - `sendIntake` (default off) makes the server store each sent message in
   `thread_send_intakes` before it prepares or dispatches it, so a restart
   cannot lose an accepted send; a worker delivers stored rows per thread in
-  order after startup. It also enables `POST /threads/:id/send-admission`, the
-  send-intakes read and action routes. Off keeps the legacy send path exactly,
-  and those routes answer 404 `intake_disabled`. Rows already stored are still
-  recovered and delivered at startup with it off.
+  order after startup. Off, new sends use the legacy path and
+  `POST /threads/:id/send-admission` answers 404 `intake_disabled`. Rows stored
+  while it was on are still delivered, and a send to a thread that still has
+  open rows goes through the lane behind them, so per-thread order holds (a
+  failed head answers 409 `intake_blocked`). The read and action routes stay
+  available so those rows can be seen and cancelled. Once a thread has no open
+  rows its sends use the legacy path again. The startup sweep of legacy
+  deferred sends never waits on the intake worker.
 - `resumeThreadsAfterRestart` resumes threads a
   restart cut off. When a machine's daemon comes back as a new process (bb
   quit, crashed, or updated, or the machine restarted), the server marks the

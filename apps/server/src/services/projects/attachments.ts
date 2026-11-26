@@ -427,6 +427,7 @@ export async function copyProjectAttachments(
       originalName,
       mimeType,
       options?.beforeWrite,
+      options?.targetPath !== undefined,
     );
   }
 }
@@ -458,15 +459,30 @@ async function writeInventoriedAttachment(
   originalName: string,
   mimeType: string | null,
   beforeWrite?: (tx: DbTransaction) => void,
+  reclaimUnfinished = false,
 ): Promise<void> {
   const existing = getProjectAttachment(db, projectId, storedPath);
-  if (existing) {
+  const unfinished =
+    existing !== undefined && existing.readyAt === null && reclaimUnfinished;
+  if (existing && !unfinished) {
     await ensureAttachmentReferenceExists(db, dataDir, projectId, storedPath, beforeWrite);
     return;
   }
   const now = Date.now();
   const row = db.transaction(tx => {
     beforeWrite?.(tx);
+    if (unfinished) {
+      tx.update(projectAttachments)
+        .set({ deletionClaimedAt: null })
+        .where(
+          and(
+            eq(projectAttachments.id, existing.id),
+            isNull(projectAttachments.readyAt),
+          ),
+        )
+        .run();
+      return existing;
+    }
     return recordProjectAttachment(tx, { projectId, storedPath, originalName, mimeType,
       sizeBytes: content.length, createdAt: now, readyAt: null });
   }, { behavior: "immediate" });
@@ -478,7 +494,7 @@ async function writeInventoriedAttachment(
   try {
     await mkdir(dirname(pendingPath), { recursive: true });
     await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(pendingPath, content, { flag: "wx" });
+    await writeFile(pendingPath, content, { flag: unfinished ? "w" : "wx" });
     db.transaction(
       (tx) => {
         beforeWrite?.(tx);
@@ -501,7 +517,6 @@ async function writeInventoriedAttachment(
   } catch (error) {
     await rm(pendingPath, { force: true });
     db.transaction(tx => {
-      beforeWrite?.(tx);
       tx.update(projectAttachments)
       .set({ deletionClaimedAt: Date.now() })
       .where(
