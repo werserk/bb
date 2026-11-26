@@ -610,7 +610,11 @@ authority for post-handoff tools.
 A retry grant pins an exact failed event and member plus a digest of the
 ordered group. Transport aliases identify one attributed grant. Partial
 unique indexes serialize successors for the failed request and root.
-ProviderRetry schedules an unfenced native row, and due dispatch checks its
+ProviderRetry schedules an unfenced native row. When a due retry borrows the
+resident, older compatible work takes precedence at dispatch. After a proven
+resident release the same scheduled retry can reserve its original worker and
+Workspace. Reservation pins the operation fence. The native row receives the
+fence when dispatch spends the entitlement. Due dispatch checks its
 derived agent-only input, system execution authority, current entitlement and binding before spending it. The grant actor and original presentation membership stay on their own receipts. An identical scheduler replay returns the retained queue ID after spending.
 A newer native requested event supersedes outstanding targets in the same
 transaction when the native writer calls the reconciliation hook.

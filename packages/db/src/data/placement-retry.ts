@@ -437,66 +437,84 @@ export function schedulePlacementRetry(
     { behavior: "immediate" },
   );
 }
-export function spendPlacementRetry(
-  tx: DbTransaction,
+export function duePlacementRetry(
+  db: DbQueryConnection,
   op: typeof ops.$inferSelect,
   row: typeof queue.$inferSelect,
-  body: TurnRequestEventData,
-  fence: number,
+  beforeSequence?: number,
 ) {
-  const current = tx
-    .select({ sequence: events.sequence })
-    .from(events)
-    .where(
-      and(
-        eq(events.threadId, row.threadId),
-        eq(events.type, "client/turn/requested"),
-      ),
-    )
-    .orderBy(desc(events.sequence))
-    .limit(1)
+  if (
+    op.kind !== "retry" ||
+    !op.consentId ||
+    op.phase !== "queued" ||
+    op.cancelRequested ||
+    op.retryScheduleState !== "queued" ||
+    !op.binding ||
+    op.sendAt === null ||
+    op.sendAt > Date.now() ||
+    row.sendAt !== op.sendAt ||
+    row.placementFence !== null ||
+    row.placementOperationId !== op.id ||
+    row.payloadKind !== "retry" ||
+    row.id !== op.queuedMessageId ||
+    row.threadId !== op.threadId
+  )
+    return null;
+  const f = currentPlacementRetryTarget(db, op.consentId, beforeSequence);
+  const grant = db
+    .select()
+    .from(consents)
+    .where(eq(consents.id, op.consentId))
     .get();
-  const f =
-    op.consentId &&
-    currentPlacementRetryTarget(tx, op.consentId, current?.sequence);
-  const grant =
-    op.consentId &&
-    tx.select().from(consents).where(eq(consents.id, op.consentId)).get();
   if (
     !f ||
     f.target.state !== "scheduled" ||
     !grant ||
     grant.revokedAt !== null ||
     grant.consumedByOperationId !== op.id ||
-    op.sendAt === null ||
-    op.sendAt > Date.now() ||
-    row.sendAt !== op.sendAt ||
-    row.placementFence !== null ||
-    row.id !== op.queuedMessageId ||
+    grant.failedOperationId !== op.failedOperationId ||
+    grant.principalScope !== op.principalScope ||
+    f.effect.binding !== canonicalJsonBytes(op.binding) ||
+    f.effect.thread !== op.threadId ||
     row.retryOfTurnRequestId !== f.effect.root ||
-    row.retryAttempt !== (f.body.retryAttempt ?? 1) + 1 ||
-    body.retryAttempt !== row.retryAttempt ||
-    body.initiator !== "system" ||
-    body.senderThreadId !== null ||
-    body.retryOfRequestId !== f.effect.root
+    row.retryAttempt !== (f.body.retryAttempt ?? 1) + 1
   )
-    throw new PlacementDispatchConflictError("retry target changed or not due");
-  const env = envelope(f, readPlacementActionReceipt(tx, op.id)!.authority);
+    return null;
+  const env = envelope(f, readPlacementActionReceipt(db, op.id)!.authority);
   if (
     canonicalJsonBytes(env) !== canonicalJsonBytes(op.retryDerivation) ||
     canonicalJsonBytes(env.input) !==
       canonicalJsonBytes(JSON.parse(row.content))
   )
-    throw new PlacementDispatchConflictError("retry envelope changed");
+    return null;
+  return { env, consent: op.consentId };
+}
+export function spendPlacementRetry(
+  tx: DbTransaction,
+  op: typeof ops.$inferSelect,
+  row: typeof queue.$inferSelect,
+  body: TurnRequestEventData,
+  fence: number,
+  requestSequence: number,
+) {
+  const due = duePlacementRetry(tx, op, row, requestSequence);
+  if (
+    !due ||
+    body.retryAttempt !== row.retryAttempt ||
+    body.initiator !== "system" ||
+    body.senderThreadId !== null ||
+    body.retryOfRequestId !== due.env.root
+  )
+    throw new PlacementDispatchConflictError("retry target changed or not due");
   tx.update(queue)
     .set({ placementFence: fence })
     .where(eq(queue.id, row.id))
     .run();
   tx.update(targets)
     .set({ state: "spent" })
-    .where(eq(targets.consent, f.target.consent))
+    .where(eq(targets.consent, due.consent))
     .run();
-  return env;
+  return due.env;
 }
 export function closePlacementRetry(
   tx: DbTransaction,

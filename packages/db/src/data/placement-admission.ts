@@ -7,6 +7,7 @@ import {
   readPlacementQueueAttempts,
   queueMemberDigest,
 } from "./placement-action-receipts.js";
+import { duePlacementRetry } from "./placement-retry.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
@@ -299,7 +300,11 @@ function queuedCandidateDue(db: DbQueryConnection, op: Operation) {
     .innerJoin(queue, eq(queue.id, attempts.queueId))
     .where(and(eq(attempts.op, op.id), isNull(attempts.request)))
     .all();
-  return pending.some(({ row }) => nativeQueueReady(row, true));
+  return pending.some(
+    ({ row }) =>
+      nativeQueueReady(row, true) &&
+      (op.kind !== "retry" || duePlacementRetry(db, op, row) !== null),
+  );
 }
 function nativeQueueReady(
   queued: typeof queue.$inferSelect,
@@ -324,11 +329,9 @@ function nativeQueueReady(
   );
 }
 
-// A borrowed continuation can outlive the head's lease. Only its intact,
-// unclaimed initial queue attempt can be carried into a new reservation.
-function waitingContinuation(db: DbQueryConnection, op: Operation) {
+function unreservedQueueAttempt(db: DbQueryConnection, op: Operation) {
   if (
-    op.kind !== "continuation" ||
+    (op.kind !== "continuation" && op.kind !== "retry") ||
     op.phase !== "queued" ||
     !op.binding ||
     !op.threadId ||
@@ -346,7 +349,9 @@ function waitingContinuation(db: DbQueryConnection, op: Operation) {
   if (
     !row ||
     row.threadId !== op.threadId ||
-    row.payloadKind !== "inline" ||
+    (op.kind === "retry"
+      ? !duePlacementRetry(db, op, row)
+      : row.payloadKind !== "inline") ||
     row.placementOperationId !== op.id ||
     !nativeQueueReady(row)
   )
@@ -383,11 +388,11 @@ export function reservePlacementWorker(
           operation: placementOperationProjection(op),
           fence: w.fence,
         };
-      const borrowed = waitingContinuation(tx, op);
-      if (!["pending", "accepted"].includes(op.phase) && !borrowed)
+      const pendingAttempt = unreservedQueueAttempt(tx, op);
+      if (!["pending", "accepted"].includes(op.phase) && !pendingAttempt)
         return wait("reconciliation_required");
       const continuingResident =
-        op.kind === "continuation" &&
+        (op.kind === "continuation" || op.kind === "retry") &&
         op.threadId !== null &&
         op.threadId === w.threadId &&
         w.slotState === "resident";
@@ -441,13 +446,13 @@ export function reservePlacementWorker(
         : null;
       if (pinned && canonicalJsonBytes(pinned) !== canonicalJsonBytes(binding))
         return wait("binding_changed");
-      if (op.kind === "continuation" && !pinned)
+      if ((op.kind === "continuation" || op.kind === "retry") && !pinned)
         return wait("reconciliation_required");
       const fence = continuingResident ? w.fence : w.fence + 1;
-      if (borrowed)
+      if (pendingAttempt?.payloadKind === "inline")
         tx.update(queue)
           .set({ placementFence: fence })
-          .where(eq(queue.id, borrowed.id))
+          .where(eq(queue.id, pendingAttempt.id))
           .run();
       const counter = tx
         .update(counters)
@@ -476,7 +481,7 @@ export function reservePlacementWorker(
         .set({
           binding,
           workerId: w.workerId,
-          phase: borrowed ? "queued" : "reserved",
+          phase: pendingAttempt ? "queued" : "reserved",
           reason: null,
           reservationId: randomUUID(),
           fence,
@@ -674,13 +679,14 @@ export function beginPlacementReclaim(
       const { op, w } = checked;
       if (
         w.slotState !== "resident" ||
-        (op.kind === "continuation" && op.threadId === w.threadId) ||
+        ((op.kind === "continuation" || op.kind === "retry") &&
+          op.threadId === w.threadId) ||
         w.fence !== args.expectedSourceFence ||
         w.ownerOperationId !== args.expectedSourceOperationId ||
         !w.ownerOperationId ||
         !w.threadId ||
         (!["accepted", "pending"].includes(op.phase) &&
-          !waitingContinuation(tx, op))
+          !unreservedQueueAttempt(tx, op))
       )
         return wait("selected_busy");
       const source = readPlacementOperationRecord(tx, w.ownerOperationId);

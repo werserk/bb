@@ -413,28 +413,6 @@ export function commitPlacementOrdinaryDispatch(
           links.length === 1 && op.kind !== "retry" && !receipt.protocol,
           "ordinary membership changed",
         );
-        if (op.id !== args.executionOwnerOperationId) {
-          const earlier = olderCompatible(
-            tx,
-            op,
-            owner.w,
-            args.purpose,
-            args.threadId,
-          );
-          if (earlier) {
-            const head = rows[0]!;
-            const maySeparate =
-              rows.length > 1 &&
-              head.placementOperationId === args.executionOwnerOperationId &&
-              head.payloadKind === "inline" &&
-              readPlacementQueueAttempts(tx, head.id).length === 1;
-            throw new PlacementGroupFairnessError(
-              maySeparate ? { id: head.id, claimToken: token } : null,
-              op.id,
-              earlier.id,
-            );
-          }
-        }
         const prepared = placementPreparedGroups(op.preparedRequest, op.kind);
         requireReceipt(
           equal(flattenPromptInputGroups(prepared), input),
@@ -455,7 +433,48 @@ export function commitPlacementOrdinaryDispatch(
           rows.length === 1 && links.length === 1 && op.consentId,
           "mixed retry",
         );
-        const retry = spendPlacementRetry(tx, op, row, body, args.fence);
+        requireReceipt(
+          op.fence === null ||
+            (op.id === args.executionOwnerOperationId &&
+              op.fence === args.fence),
+          "retry reservation changed",
+        );
+      }
+      if (
+        (row.payloadKind === "inline" || row.payloadKind === "retry") &&
+        op.id !== args.executionOwnerOperationId
+      ) {
+        const earlier = olderCompatible(
+          tx,
+          op,
+          owner.w,
+          args.purpose,
+          row.payloadKind === "inline" ? args.threadId : undefined,
+        );
+        if (earlier) {
+          const head = rows[0]!;
+          const maySeparate =
+            row.payloadKind === "inline" &&
+            rows.length > 1 &&
+            head.placementOperationId === args.executionOwnerOperationId &&
+            head.payloadKind === "inline" &&
+            readPlacementQueueAttempts(tx, head.id).length === 1;
+          throw new PlacementGroupFairnessError(
+            maySeparate ? { id: head.id, claimToken: token } : null,
+            op.id,
+            earlier.id,
+          );
+        }
+      }
+      if (row.payloadKind === "retry") {
+        const retry = spendPlacementRetry(
+          tx,
+          op,
+          row,
+          body,
+          args.fence,
+          event.sequence,
+        );
         retryInput = retry.input;
         groups.push(...retry.groups);
         timeline.push(...retry.membership);
