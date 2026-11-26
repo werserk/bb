@@ -53,6 +53,7 @@ describe("file operations", () => {
     const { sha256: before } = await readOp({ root, path: "src/a.py" });
     const written = await writeOp({ root, path: "src/a.py", content: "x = 2\n", expectedSha256: before });
     expect(written.created).toBe(false);
+    expect(written.diff).toBe("--- a/src/a.py\n+++ b/src/a.py\n@@ -1,2 +1,1 @@\n-def f():\n-    return 1\n+x = 2");
     await expect(
       guarded(() => writeOp({ root, path: "src/a.py", content: "y", expectedSha256: before })),
     ).resolves.toMatchObject({ ok: false, error: expect.stringContaining("file changed") });
@@ -60,13 +61,19 @@ describe("file operations", () => {
   });
 
   it("creates parent directories for a new file inside the root", async () => {
-    await expect(writeOp({ root, path: "pkg/new/b.txt", content: "b" })).resolves.toMatchObject({ created: true });
+    await expect(writeOp({ root, path: "pkg/new/b.txt", content: "b" })).resolves.toMatchObject({
+      created: true,
+      diff: "--- /dev/null\n+++ b/pkg/new/b.txt\n@@ -0,0 +1,1 @@\n+b",
+    });
   });
 
   it("edits a unique match and refuses missing or ambiguous ones", async () => {
     await expect(
       editOp({ root, path: "src/a.py", oldString: "return 1", newString: "return 2", replaceAll: false }),
-    ).resolves.toMatchObject({ replacements: 1 });
+    ).resolves.toMatchObject({
+      replacements: 1,
+      diff: "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,2 +1,2 @@\n def f():\n-    return 1\n+    return 2",
+    });
     await writeFile(path.join(root, "dup.txt"), "a a");
     await expect(
       guarded(() => editOp({ root, path: "dup.txt", oldString: "a", newString: "b", replaceAll: false })),
@@ -98,6 +105,7 @@ describe("search", () => {
     await symlink(path.join(base, "outside"), path.join(root, "out"));
     const { files } = await globOp({ root, pattern: "**/*.py" });
     expect(files).toEqual(["src/a.py"]);
+    expect((await globOp({ root, pattern: "**" })).files).not.toContain(".");
   });
 
   it("greps without a shell, so the pattern cannot run commands", async () => {

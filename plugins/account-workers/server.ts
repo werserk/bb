@@ -17,6 +17,7 @@ import {
   TOOL_NAMES,
   toolDescriptions,
   toolParameters,
+  SAME_HOST,
   transportFailure,
   type HostClient,
 } from "./tools.js";
@@ -115,8 +116,16 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     return match;
   }
 
-  async function resolveWorkspace(machine: string, path: string, signal?: AbortSignal): Promise<ResolvedWorkspace> {
+  async function resolveWorkspace(
+    machine: string,
+    path: string,
+    workerHostId: string,
+    signal?: AbortSignal,
+  ): Promise<ResolvedWorkspace> {
     const target = await resolveMachine(machine, signal);
+    if (target.id === workerHostId) {
+      throw new PluginCliError(SAME_HOST, { code: "same_host" });
+    }
     const result = await host.call("resolveRoot", { path }, { hostId: target.id, signal });
     if (!result.ok) throw new PluginCliError(`Workspace path refused: ${result.error}`, { code: "bad_workspace" });
     return { hostId: target.id, hostName: target.name, root: result.root, instructions: result.instructions };
@@ -154,8 +163,8 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             const o = input.options as Record<string, string | number | boolean | undefined>;
             const projectId = (o.project as string | undefined) ?? ctx.projectId;
             if (projectId === undefined) throw new PluginCliError("Pass --project", { code: "missing_project" });
-            const workspace = await resolveWorkspace(o["workspace-machine"] as string, o.path as string, ctx.signal);
             const worker = await resolveMachine(o.machine as string, ctx.signal);
+            const workspace = await resolveWorkspace(o["workspace-machine"] as string, o.path as string, worker.id, ctx.signal);
             const bindingId = `aw_${randomBytes(8).toString("hex")}`;
             const scratch = await host.call(
               "prepareScratch",
@@ -213,8 +222,8 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           },
           async run(input, ctx) {
             const o = input.options as Record<string, string>;
-            bindingOrFail(o.thread!);
-            const w = await resolveWorkspace(o["workspace-machine"]!, o.path!, ctx.signal);
+            const current = bindingOrFail(o.thread!);
+            const w = await resolveWorkspace(o["workspace-machine"]!, o.path!, current.workerHostId, ctx.signal);
             const binding = store.rebind(o.thread!, {
               workspaceHostId: w.hostId,
               workspaceHostName: w.hostName,
@@ -253,6 +262,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           passthrough: true,
           async run(input, ctx) {
             const binding = bindingOrFail(input.options.thread as string);
+            if (binding.workspaceHostId === binding.workerHostId) return { exitCode: 1, stderr: `refused: ${SAME_HOST}` };
             const command = input.passthrough.join(" ");
             if (command.length === 0) throw new PluginCliError("Pass the command after --");
             const timeoutMs = execTimeout(input.options["timeout-ms"] as number | undefined);

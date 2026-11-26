@@ -16,6 +16,7 @@ import { hostname } from "node:os";
 import path from "node:path";
 import type { InstructionFile } from "./contract.js";
 import { checkRoot, confine, display, WorkspaceRefusal } from "./confine.js";
+import { unifiedHunk } from "./hunk.js";
 
 export const READ_MAX_BYTES = 4 * 1024 * 1024;
 export const READ_DEFAULT_LINES = 2000;
@@ -130,9 +131,9 @@ export async function readOp(input: {
   };
 }
 
-async function currentSha(file: string): Promise<string | null> {
+async function currentContent(file: string): Promise<Buffer | null> {
   try {
-    return sha256(await readFile(file));
+    return await readFile(file);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -159,12 +160,17 @@ export async function writeOp(input: {
 }) {
   const root = await checkRoot(input.root);
   const file = await confine(root, input.path);
-  const before = await currentSha(file);
-  checkExpected(input.expectedSha256, before);
+  const previous = await currentContent(file);
+  checkExpected(input.expectedSha256, previous === null ? null : sha256(previous));
   await mkdir(path.dirname(file), { recursive: true });
   const data = Buffer.from(input.content, "utf8");
   await writeFile(file, data);
-  return { sha256: sha256(data), bytes: data.length, created: before === null };
+  const name = path.relative(root, file);
+  const diff =
+    previous !== null && (previous.length > READ_MAX_BYTES || previous.subarray(0, 8192).includes(0))
+      ? "(previous content was binary or over the read limit; no diff)"
+      : unifiedHunk(name, previous === null ? null : previous.toString("utf8"), input.content);
+  return { sha256: sha256(data), bytes: data.length, created: previous === null, diff };
 }
 
 export async function editOp(input: {
@@ -191,7 +197,11 @@ export async function editOp(input: {
     : text.replace(input.oldString, () => input.newString);
   const data = Buffer.from(next, "utf8");
   await writeFile(file, data);
-  return { sha256: sha256(data), replacements: input.replaceAll ? count : 1 };
+  return {
+    sha256: sha256(data),
+    replacements: input.replaceAll ? count : 1,
+    diff: unifiedHunk(path.relative(root, file), text, next),
+  };
 }
 
 const SKIP_DIRS = new Set([".git", "node_modules"]);
@@ -206,6 +216,7 @@ export async function globOp(input: { root: string; pattern: string; path?: stri
     exclude: (name: string) => SKIP_DIRS.has(path.basename(name)),
   })) {
     const absolute = path.resolve(base, entry);
+    if (absolute === base) continue;
     try {
       await confine(root, absolute);
     } catch {

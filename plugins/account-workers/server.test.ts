@@ -3,10 +3,12 @@ import type { ExperimentalFakeHostRpcCall } from "@get-bb/plugin-sdk/testing";
 import type { PluginAgentToolResult } from "@get-bb/plugin-sdk";
 import { describe, expect, it } from "vitest";
 import plugin, { MOVED_INSTRUCTIONS } from "./server.js";
-import { NO_BINDING, TOOL_NAMES } from "./tools.js";
+import type { Binding } from "./bindings.js";
+import { callWorkspace, NO_BINDING, SAME_HOST, TOOL_NAMES } from "./tools.js";
 
 const WORKER = "host-worker";
 const WORKSPACE = "host-workspace";
+const OTHER = "host-other";
 const SCRATCH = "/state/bb-account-workers/scratch/aw_x";
 
 function text(result: PluginAgentToolResult): string {
@@ -22,6 +24,7 @@ async function load(hostRpc: HostRpc) {
   host.harness.sdk.stub("hosts.list", async () => [
     makeHostResponse({ id: WORKER, name: "worker", status: "connected" }),
     makeHostResponse({ id: WORKSPACE, name: "workspace", status: "connected" }),
+    makeHostResponse({ id: OTHER, name: "other", status: "connected" }),
   ]);
   return host;
 }
@@ -133,6 +136,42 @@ describe("spawn and configure", () => {
   });
 });
 
+describe("worker and workspace stay on different machines", () => {
+  it("spawn refuses a workspace on the worker before touching either host", async () => {
+    const host = await load(defaultRpc());
+    host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "never" }));
+    const result = await host.harness.behavior.runCli(
+      ["spawn", "--workspace-machine", WORKER, "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1"],
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain(SAME_HOST);
+    expect(host.harness.experimental_hostRpcCalls).toEqual([]);
+    expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+  });
+
+  it("rebind refuses the worker and keeps the binding; another host is accepted", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    const refused = await host.harness.behavior.runCli(["rebind", "--thread", threadId, "--workspace-machine", "worker", "--path", "/work/repo"]);
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stderr).toContain(SAME_HOST);
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toContain("workspace:/work/repo");
+    const moved = await host.harness.behavior.runCli(["rebind", "--thread", threadId, "--workspace-machine", "other", "--path", "/work/repo"]);
+    expect(moved.exitCode).toBe(0);
+    expect(moved.stdout).toContain("other:/work/repo");
+  });
+
+  it("a tool call on a binding whose workspace is the worker refuses without a host call", async () => {
+    const binding = { workerHostId: WORKER, workspaceHostId: WORKER, root: "/work/repo" } as Binding;
+    const calls: unknown[] = [];
+    const deps = { host: { call: async (...args: unknown[]) => calls.push(args) } as never, bindingFor: () => binding };
+    const result = await callWorkspace(deps, "t", "read", { path: "a" }, new AbortController().signal, () => "ok");
+    expect(result).toMatchObject({ isError: true, content: [{ text: SAME_HOST }] });
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("tool calls", () => {
   it("send the call to the workspace host with the bound root", async () => {
     const host = await load(defaultRpc({ exec: { ok: true, output: "ws\n", truncated: false, exitCode: 0, signal: null, timedOut: false, cancelled: false, hostname: "ws", durationMs: 5 } }));
@@ -143,6 +182,21 @@ describe("tool calls", () => {
     expect(call.hostId).toBe(WORKSPACE);
     expect(call.input).toMatchObject({ root: "/work/repo", command: "hostname", timeoutMs: 120_000 });
     expect(call.timeoutMs).toBe(135_000);
+  });
+
+  it("show the change as a hunk in the edit and write results", async () => {
+    const hunk = "--- a/calc.py\n+++ b/calc.py\n@@ -1,1 +1,1 @@\n-return a - b\n+return a + b";
+    const host = await load(defaultRpc({
+      edit: { ok: true, sha256: "s1", replacements: 1, diff: hunk },
+      write: { ok: true, sha256: "s2", bytes: 4, created: true, diff: "--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,1 @@\n+new" },
+    }));
+    const { threadId } = await spawnBound(host);
+    const edit = await host.harness.behavior.callAgentTool(
+      "workspace_edit", { path: "calc.py", old_string: "a - b", new_string: "a + b" }, { threadId },
+    );
+    expect(text(edit)).toBe(`Edited calc.py: 1 replacement(s), sha256 s1\n${hunk}`);
+    const write = await host.harness.behavior.callAgentTool("workspace_write", { path: "n.txt", content: "new\n" }, { threadId });
+    expect(text(write)).toContain("Created n.txt (4 bytes, sha256 s2)\n--- /dev/null");
   });
 
   it("report a refusal from the workspace as an error", async () => {

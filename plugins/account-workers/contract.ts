@@ -65,6 +65,7 @@ export const accountWorkersHostContract = defineRpcContract({
       sha256: z.string(),
       bytes: z.number().int(),
       created: z.boolean(),
+      diff: z.string(),
     }),
   },
   edit: {
@@ -78,7 +79,7 @@ export const accountWorkersHostContract = defineRpcContract({
         expectedSha256: z.string().optional(),
       })
       .strict(),
-    output: outcome({ sha256: z.string(), replacements: z.number().int() }),
+    output: outcome({ sha256: z.string(), replacements: z.number().int(), diff: z.string() }),
   },
   glob: {
     input: z

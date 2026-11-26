@@ -45,6 +45,9 @@ function definedOnly<T extends object>(value: T): T {
 export const NO_BINDING =
   "No workspace is bound to this thread. Start the thread with `bb account-workers spawn`, or bind it with `bb account-workers rebind`.";
 
+export const SAME_HOST =
+  "The workspace machine is the worker machine. account-workers keeps the worker and the workspace on different machines; bind a workspace on another machine.";
+
 export interface ToolDeps {
   host: HostClient;
   bindingFor(threadId: string): Binding | null;
@@ -61,6 +64,7 @@ export async function callWorkspace<M extends Method>(
 ): Promise<PluginAgentToolResult> {
   const binding = deps.bindingFor(threadId);
   if (binding === null) return refused(NO_BINDING);
+  if (binding.workspaceHostId === binding.workerHostId) return refused(SAME_HOST);
   let result: z.output<Contract[M]["output"]>;
   try {
     result = (await deps.host.call(
@@ -173,7 +177,7 @@ export function runTool<N extends ToolName>(
         deps, threadId, "write",
         { path: p.path as string, content: p.content as string, expectedSha256: p.expected_sha256 as string | undefined },
         signal,
-        (r) => `${r.created ? "Created" : "Wrote"} ${p.path as string} (${r.bytes} bytes, sha256 ${r.sha256})`,
+        (r) => `${r.created ? "Created" : "Wrote"} ${p.path as string} (${r.bytes} bytes, sha256 ${r.sha256})\n${r.diff}`,
       );
     case "workspace_edit":
       return callWorkspace(
@@ -186,7 +190,7 @@ export function runTool<N extends ToolName>(
           expectedSha256: p.expected_sha256 as string | undefined,
         },
         signal,
-        (r) => `Edited ${p.path as string}: ${r.replacements} replacement(s), sha256 ${r.sha256}`,
+        (r) => `Edited ${p.path as string}: ${r.replacements} replacement(s), sha256 ${r.sha256}\n${r.diff}`,
       );
     case "workspace_glob":
       return callWorkspace(

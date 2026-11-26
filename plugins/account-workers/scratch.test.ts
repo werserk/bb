@@ -56,6 +56,23 @@ describe("scratch directory", () => {
     expect(runGuard(dir, JSON.stringify({ tool_name: "Bash", tool_input: { tool_name: "ToolSearch" } })).status).toBe(2);
   });
 
+  it("launcher fails closed when the guard script is missing or broken", async () => {
+    const { path: dir } = await prepareScratch({ bindingId: "aw_broken", allowedTools: ALLOWED });
+    const guard = path.join(dir, ".claude", "aw-guard.mjs");
+    const allowed = JSON.stringify({ tool_name: "ToolSearch", tool_input: {} });
+    expect(runGuard(dir, allowed).status).toBe(0);
+    await writeFile(guard, "this is not javascript (");
+    expect(runGuard(dir, allowed).status).toBe(2);
+    await writeFile(guard, "process.exit(1);");
+    expect(runGuard(dir, allowed).status).toBe(2);
+    await writeFile(guard, "process.kill(process.pid, 'SIGKILL');");
+    expect(runGuard(dir, allowed).status).toBe(2);
+    await rm(guard);
+    const missing = runGuard(dir, allowed);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("tool blocked");
+  });
+
   it("launcher fails closed when no node is found", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "aw-launch-"));
     try {
