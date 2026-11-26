@@ -61,6 +61,8 @@ CREATE TABLE `placement_counter` (
 CREATE TABLE `placement_effect` (
 	`request` text PRIMARY KEY NOT NULL,
 	`event_id` text NOT NULL,
+	`request_sequence` integer NOT NULL,
+	`live_event_id` text,
 	`thread` text NOT NULL,
 	`root` text NOT NULL,
 	`execution_owner_operation_id` text NOT NULL,
@@ -71,18 +73,21 @@ CREATE TABLE `placement_effect` (
 	`fence` integer NOT NULL,
 	`execution` text NOT NULL,
 	`state` text NOT NULL,
-	FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`live_event_id`) REFERENCES `events`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`thread`) REFERENCES `threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`root`) REFERENCES `placement_effect`(`request`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`execution_owner_operation_id`) REFERENCES `placement_operation`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "placement_effect_live_identity" CHECK("placement_effect"."live_event_id" IS NULL OR "placement_effect"."live_event_id"="placement_effect"."event_id"),
 	CONSTRAINT "placement_effect_command_tuple" CHECK(("placement_effect"."command_id" IS NULL)=("placement_effect"."native_execution_id" IS NULL) AND ("placement_effect"."command_id" IS NULL)=("placement_effect"."agent_session_id" IS NULL) AND ("placement_effect"."command_id" IS NOT NULL OR "placement_effect"."state" IN ('prepared','refused_unsent','cancelled'))),
 	CONSTRAINT "placement_effect_fence" CHECK("placement_effect"."fence">0),
 	CONSTRAINT "placement_effect_state" CHECK("placement_effect"."state" IN ('prepared','possibly_sent','succeeded','failed_accepted','refused','refused_unsent','cancelled'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_event_id_unique` ON `placement_effect` (`event_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `placement_effect_live_event_id_unique` ON `placement_effect` (`live_event_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_native_execution_id_unique` ON `placement_effect` (`native_execution_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `placement_effect_command_id_unique` ON `placement_effect` (`command_id`);--> statement-breakpoint
+CREATE INDEX `placement_active_effect_owner_fence` ON `placement_effect` (`execution_owner_operation_id`,`fence`) WHERE "placement_effect"."state" IN ('possibly_sent','prepared');--> statement-breakpoint
 CREATE TABLE `placement_grant_key` (
 	`principal` text NOT NULL,
 	`transport_key` text NOT NULL,
@@ -194,9 +199,11 @@ CREATE UNIQUE INDEX `placement_one_live_chain_retry` ON `placement_retry_target`
 CREATE TABLE `placement_source_fact` (
 	`source` text PRIMARY KEY NOT NULL,
 	`revision` integer NOT NULL,
-	`bytes` text NOT NULL
+	`bytes` text NOT NULL,
+	`blocked_lock` text
 );
 --> statement-breakpoint
+CREATE INDEX `placement_source_blocked_lock` ON `placement_source_fact` (`blocked_lock`) WHERE "placement_source_fact"."blocked_lock" IS NOT NULL;--> statement-breakpoint
 CREATE TABLE `placement_step` (
 	`op` text NOT NULL,
 	`step` integer NOT NULL,
@@ -226,14 +233,17 @@ CREATE TABLE `placement_worker` (
 	`last_assigned_seq` integer,
 	`reclaim_operation_id` text,
 	`reclaim_source_fence` integer,
+	`physical_lock` text,
 	`fence_lock` text,
 	`native_custody` text,
 	PRIMARY KEY(`owner_plugin_id`, `worker_id`),
 	CONSTRAINT "placement_worker_slot" CHECK("placement_worker"."slot_state" IN ('free','reserved','resident','active','reclaiming','maintenance','unknown')),
 	CONSTRAINT "placement_worker_owner" CHECK(("placement_worker"."slot_state" != 'free' OR ("placement_worker"."owner_operation_id" IS NULL AND "placement_worker"."thread_id" IS NULL AND "placement_worker"."reclaim_operation_id" IS NULL)) AND ("placement_worker"."slot_state" NOT IN ('reserved','resident','active','reclaiming') OR "placement_worker"."owner_operation_id" IS NOT NULL) AND ("placement_worker"."slot_state" != 'reclaiming' OR ("placement_worker"."reclaim_operation_id" IS NOT NULL AND "placement_worker"."reclaim_source_fence" IS NOT NULL))),
+	CONSTRAINT "placement_worker_lock_pin" CHECK(("placement_worker"."owner_operation_id" IS NULL AND "placement_worker"."physical_lock" IS NULL AND "placement_worker"."fence_lock" IS NULL) OR ("placement_worker"."owner_operation_id" IS NOT NULL AND "placement_worker"."physical_lock" IS NOT NULL AND json_type("placement_worker"."physical_lock",'$[0]') IS 'text' AND json_type("placement_worker"."fence_lock",'$.device') IS 'text' AND json_type("placement_worker"."fence_lock",'$.inode') IS 'text' AND NOT(json_extract("placement_worker"."fence_lock",'$.device') GLOB '0[0-9]*' AND json_extract("placement_worker"."fence_lock",'$.device') NOT GLOB '*[^0-9]*') AND NOT(json_extract("placement_worker"."fence_lock",'$.inode') GLOB '0[0-9]*' AND json_extract("placement_worker"."fence_lock",'$.inode') NOT GLOB '*[^0-9]*') AND "placement_worker"."physical_lock"=json_array(json_extract("placement_worker"."physical_lock",'$[0]'),json_extract("placement_worker"."fence_lock",'$.device'),json_extract("placement_worker"."fence_lock",'$.inode')))),
 	CONSTRAINT "placement_worker_fence" CHECK("placement_worker"."fence" >= 0)
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `placement_worker_physical_lock_unique` ON `placement_worker` (`physical_lock`);--> statement-breakpoint
 CREATE INDEX `placement_worker_provider` ON `placement_worker` (`provider_id`,`available`);--> statement-breakpoint
 CREATE TABLE `placement_workspace` (
 	`workspace_binding_id` text NOT NULL,
@@ -295,7 +305,7 @@ WHEN NOT ((OLD.state='prepared' AND NEW.state IN ('possibly_sent','refused_unsen
 OR (OLD.state='possibly_sent' AND NEW.state IN ('succeeded','refused','failed_accepted')))
 BEGIN SELECT RAISE(ABORT,'invalid effect transition'); END;
 --> statement-breakpoint
-CREATE TRIGGER placement_effect_identity BEFORE UPDATE OF request,event_id,thread,root,execution_owner_operation_id,binding,fence,execution
+CREATE TRIGGER placement_effect_identity BEFORE UPDATE OF request,event_id,request_sequence,thread,root,execution_owner_operation_id,binding,fence,execution
 ON placement_effect BEGIN SELECT RAISE(ABORT,'immutable effect'); END;
 --> statement-breakpoint
 CREATE TRIGGER placement_action_immutable BEFORE UPDATE ON placement_action_identity
@@ -334,3 +344,36 @@ BEGIN SELECT RAISE(ABORT,'immutable placement command'); END;
 CREATE TRIGGER placement_prepared_request_immutable BEFORE UPDATE OF prepared_request ON placement_operation
 WHEN OLD.prepared_request IS NOT NULL AND NEW.prepared_request IS NOT OLD.prepared_request
 BEGIN SELECT RAISE(ABORT,'immutable prepared placement input'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER placement_effect_anchor BEFORE INSERT ON placement_effect
+WHEN NEW.live_event_id IS NOT NEW.event_id OR NOT EXISTS (SELECT 1 FROM events
+ WHERE id=NEW.event_id AND thread_id=NEW.thread AND sequence=NEW.request_sequence AND type='client/turn/requested' AND json_extract(data,'$.requestId')=NEW.request)
+BEGIN SELECT RAISE(ABORT,'missing native requested event'); END;
+--> statement-breakpoint
+CREATE TRIGGER placement_effect_no_relink BEFORE UPDATE OF live_event_id ON placement_effect
+WHEN NEW.live_event_id IS NOT NULL OR EXISTS (SELECT 1 FROM events WHERE id=OLD.live_event_id)
+BEGIN SELECT RAISE(ABORT,'immutable native event link'); END;
+--> statement-breakpoint
+CREATE TRIGGER placement_effect_detached AFTER UPDATE OF live_event_id ON placement_effect
+WHEN NEW.live_event_id IS NULL AND OLD.state='prepared'
+BEGIN UPDATE placement_effect SET state='cancelled' WHERE request=OLD.request; END;
+--> statement-breakpoint
+CREATE TRIGGER placement_worker_physical_pin BEFORE UPDATE OF physical_lock ON placement_worker
+WHEN NEW.physical_lock IS NOT NULL AND (json_extract(NEW.physical_lock,'$[0]') IS NOT NEW.agent_host_id
+ OR (OLD.physical_lock IS NOT NULL AND NEW.physical_lock IS NOT OLD.physical_lock))
+BEGIN SELECT RAISE(ABORT,'physical lock changed during ownership'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER placement_worker_initial_pin BEFORE INSERT ON placement_worker
+WHEN NEW.physical_lock IS NOT NULL AND json_extract(NEW.physical_lock,'$[0]') IS NOT NEW.agent_host_id
+BEGIN SELECT RAISE(ABORT,'wrong physical lock host'); END;
+
+--> statement-breakpoint
+CREATE TRIGGER placement_worker_physical_release BEFORE UPDATE OF physical_lock ON placement_worker
+WHEN OLD.physical_lock IS NOT NULL AND NEW.physical_lock IS NULL AND (
+ OLD.slot_state='reclaiming' AND OLD.reclaim_source_fence=OLD.fence AND NEW.slot_state='free'
+ AND json_extract(NEW.native_custody,'$.status') IS 'free'
+ AND json_extract(NEW.native_custody,'$.revision') > json_extract(OLD.native_custody,'$.revision')
+ AND json_array(json_extract(NEW.native_custody,'$.agentHostId'),json_extract(NEW.native_custody,'$.lock.device'),json_extract(NEW.native_custody,'$.lock.inode'))=OLD.physical_lock) IS NOT TRUE
+BEGIN SELECT RAISE(ABORT,'physical release requires verified reclaim'); END;

@@ -4,15 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createConnection, migrate } from "../src/index.js";
-import { setupPlacement, acceptPrepared } from "./helpers/placement.js";
+import {
+  setupPlacement,
+  acceptPrepared,
+  observation,
+} from "./helpers/placement.js";
 import { readPlacementOperation } from "../src/data/placement-operations.js";
-import { readPlacementWorker } from "../src/data/placement-workers.js";
+import {
+  observePlacementWorkers,
+  readPlacementWorker,
+} from "../src/data/placement-workers.js";
 
-async function race(path: string, mode: string, ids: string[]) {
-  const children = ids.map((id) =>
+async function race(
+  path: string,
+  mode: string,
+  ids: string[],
+  workers?: string[],
+) {
+  const children = ids.map((id, index) =>
     fork(
       new URL("./helpers/placement-process.ts", import.meta.url),
-      [path, mode, id],
+      [path, mode, id, ...(workers ? [workers[index]!] : [])],
       {
         execArgv: ["--import", "tsx"],
         stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -75,6 +87,52 @@ it("two processes accept once and atomically reserve only the oldest compatible 
     expect(readPlacementOperation(db, first.id)).toMatchObject({
       phase: "reserved",
     });
+  } finally {
+    db.$client.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("serializes alias reservations in separate processes on the same physical host and inode", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "alias-race-")),
+    path = join(dir, "race.db");
+  const db = createConnection(path);
+  try {
+    migrate(db);
+    setupPlacement(db);
+    const sibling = observation({
+      workerId: "sibling",
+      generation: "generation-two",
+    });
+    sibling.custody.lock = { device: "01", inode: "002" };
+    sibling.custody.workerId = sibling.workerId;
+    sibling.custody.generation = sibling.generation;
+    sibling.routes[0]!.agent.generation = sibling.generation;
+    expect(
+      observePlacementWorkers(db, {
+        ownerPluginId: "workers",
+        providerId: "claude",
+        expectedOwnerRevision: 1,
+        workers: [observation({ revision: 2 }), sibling],
+      }).kind,
+    ).toBe("observed");
+    const names = ["worker", "sibling"];
+    const ids = names.map((name) => acceptPrepared(db, name, {}, {}, name).id);
+    const results = await race(path, "reserve", ids, names);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "reserved" }),
+        expect.objectContaining({ kind: "wait" }),
+      ]),
+    );
+    expect(
+      db.$client
+        .prepare(
+          "select count(*) from placement_worker where physical_lock is not null",
+        )
+        .pluck()
+        .get(),
+    ).toBe(1);
   } finally {
     db.$client.close();
     rmSync(dir, { recursive: true, force: true });

@@ -161,6 +161,7 @@ export function acceptPrepared(
   key: string,
   patch: Partial<WorkspaceBinding> = {},
   requestOptions: { compactFirst?: boolean } = {},
+  selectedWorker?: string,
 ) {
   const accepted = acceptPlacementOperation(db, {
     authority: fixtureAuthority,
@@ -172,7 +173,9 @@ export function acceptPrepared(
       schemaVersion: 1,
       intent: {
         kind: "independent",
-        selection: { mode: "auto" },
+        selection: selectedWorker
+          ? { mode: "worker", workerId: selectedWorker }
+          : { mode: "auto" },
         request: { input: key, ...requestOptions },
       },
     },

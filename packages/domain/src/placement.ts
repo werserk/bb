@@ -77,6 +77,9 @@ export const workerLeaseSchema = z.strictObject({
   fence: revision,
   purpose: z.enum(["runtime", "usage-read"]),
 });
+const lockNumber = id.transform((part) =>
+  /^\d+$/.test(part) ? part.replace(/^0+(?=\d)/, "") : part,
+);
 export const workerCustodySchema = z
   .strictObject({
     revision,
@@ -92,7 +95,7 @@ export const workerCustodySchema = z
         bootId: id,
       })
       .nullable(),
-    lock: z.strictObject({ device: id, inode: id }).nullable(),
+    lock: z.strictObject({ device: lockNumber, inode: lockNumber }).nullable(),
   })
   .superRefine((v, ctx) => {
     if (

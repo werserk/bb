@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import {
   canonicalJsonBytes,
   workerObservationSchema,
@@ -47,6 +47,60 @@ function custodyFact(owner: string, provider: string, c: WorkerCustody) {
     c,
   );
 }
+export function physicalLockKey(
+  host: string,
+  lock: NonNullable<WorkerCustody["lock"]>,
+) {
+  return key([host, lock.device, lock.inode]);
+}
+function lockReportKey(resource: string, custodySource: string) {
+  return key(["lock-report", resource, custodySource]);
+}
+function custodyReports(
+  db: DbQueryConnection,
+  owner: string,
+  provider: string,
+  c: WorkerCustody,
+): Fact[] {
+  const local = custodyFact(owner, provider, c);
+  const prior = !c.lock && get(db, local.source);
+  const lock =
+    c.lock ||
+    (prior &&
+      workerObservationSchema.shape.custody.parse(JSON.parse(prior.bytes))
+        .lock);
+  if (!lock) return [local];
+  const resource = physicalLockKey(c.agentHostId, lock);
+  return [
+    local,
+    {
+      ...asFact(lockReportKey(resource, local.source), c),
+      blockedLock: c.status === "free" ? null : resource,
+    },
+  ];
+}
+export function foreignLockReport(
+  db: DbQueryConnection,
+  owner: string,
+  provider: string,
+  c: WorkerCustody,
+) {
+  if (!c.lock) return false;
+  const resource = physicalLockKey(c.agentHostId, c.lock);
+  return !!db
+    .select({ source: facts.source })
+    .from(facts)
+    .where(
+      and(
+        eq(facts.blockedLock, resource),
+        ne(
+          facts.source,
+          lockReportKey(resource, custodyFact(owner, provider, c).source),
+        ),
+      ),
+    )
+    .get();
+}
 function get(db: DbQueryConnection, source: string) {
   return db.select().from(facts).where(eq(facts.source, source)).get();
 }
@@ -55,7 +109,11 @@ function store(tx: DbTransaction, f: Fact) {
     .values(f)
     .onConflictDoUpdate({
       target: facts.source,
-      set: { revision: f.revision, bytes: f.bytes },
+      set: {
+        revision: f.revision,
+        bytes: f.bytes,
+        blockedLock: f.blockedLock ?? null,
+      },
     })
     .run();
 }
@@ -73,7 +131,8 @@ export function recordCustodyFact(
       (old.revision === f.revision && old.bytes !== f.bytes))
   )
     return false;
-  store(tx, f);
+  for (const report of custodyReports(tx, owner, provider, c))
+    store(tx, report);
   return true;
 }
 export function publishSourceFacts(
@@ -103,7 +162,7 @@ export function publishSourceFacts(
       asFact(quotaSource, w.quota),
       ...applicable,
       asFact(exclusion, w.exclusion),
-      custodyFact(owner, w.providerId, w.custody),
+      ...custodyReports(tx, owner, w.providerId, w.custody),
       ...w.routes.map((r) => asFact(routeKey(owner, w, r), r)),
     ]) {
       const old = get(tx, f.source);

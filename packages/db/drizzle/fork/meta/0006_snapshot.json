@@ -2726,6 +2726,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "request_sequence": {
+          "name": "request_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "live_event_id": {
+          "name": "live_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "thread": {
           "name": "thread",
           "type": "text",
@@ -2805,6 +2819,13 @@
           ],
           "isUnique": true
         },
+        "placement_effect_live_event_id_unique": {
+          "name": "placement_effect_live_event_id_unique",
+          "columns": [
+            "live_event_id"
+          ],
+          "isUnique": true
+        },
         "placement_effect_native_execution_id_unique": {
           "name": "placement_effect_native_execution_id_unique",
           "columns": [
@@ -2818,20 +2839,29 @@
             "command_id"
           ],
           "isUnique": true
+        },
+        "placement_active_effect_owner_fence": {
+          "name": "placement_active_effect_owner_fence",
+          "columns": [
+            "execution_owner_operation_id",
+            "fence"
+          ],
+          "isUnique": false,
+          "where": "\"placement_effect\".\"state\" IN ('possibly_sent','prepared')"
         }
       },
       "foreignKeys": {
-        "placement_effect_event_id_events_id_fk": {
-          "name": "placement_effect_event_id_events_id_fk",
+        "placement_effect_live_event_id_events_id_fk": {
+          "name": "placement_effect_live_event_id_events_id_fk",
           "tableFrom": "placement_effect",
           "tableTo": "events",
           "columnsFrom": [
-            "event_id"
+            "live_event_id"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "placement_effect_thread_threads_id_fk": {
@@ -2877,6 +2907,10 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
+        "placement_effect_live_identity": {
+          "name": "placement_effect_live_identity",
+          "value": "\"placement_effect\".\"live_event_id\" IS NULL OR \"placement_effect\".\"live_event_id\"=\"placement_effect\".\"event_id\""
+        },
         "placement_effect_command_tuple": {
           "name": "placement_effect_command_tuple",
           "value": "(\"placement_effect\".\"command_id\" IS NULL)=(\"placement_effect\".\"native_execution_id\" IS NULL) AND (\"placement_effect\".\"command_id\" IS NULL)=(\"placement_effect\".\"agent_session_id\" IS NULL) AND (\"placement_effect\".\"command_id\" IS NOT NULL OR \"placement_effect\".\"state\" IN ('prepared','refused_unsent','cancelled'))"
@@ -3661,9 +3695,25 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "blocked_lock": {
+          "name": "blocked_lock",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "placement_source_blocked_lock": {
+          "name": "placement_source_blocked_lock",
+          "columns": [
+            "blocked_lock"
+          ],
+          "isUnique": false,
+          "where": "\"placement_source_fact\".\"blocked_lock\" IS NOT NULL"
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -3862,6 +3912,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "physical_lock": {
+          "name": "physical_lock",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "fence_lock": {
           "name": "fence_lock",
           "type": "text",
@@ -3878,6 +3935,13 @@
         }
       },
       "indexes": {
+        "placement_worker_physical_lock_unique": {
+          "name": "placement_worker_physical_lock_unique",
+          "columns": [
+            "physical_lock"
+          ],
+          "isUnique": true
+        },
         "placement_worker_provider": {
           "name": "placement_worker_provider",
           "columns": [
@@ -3906,6 +3970,10 @@
         "placement_worker_owner": {
           "name": "placement_worker_owner",
           "value": "(\"placement_worker\".\"slot_state\" != 'free' OR (\"placement_worker\".\"owner_operation_id\" IS NULL AND \"placement_worker\".\"thread_id\" IS NULL AND \"placement_worker\".\"reclaim_operation_id\" IS NULL)) AND (\"placement_worker\".\"slot_state\" NOT IN ('reserved','resident','active','reclaiming') OR \"placement_worker\".\"owner_operation_id\" IS NOT NULL) AND (\"placement_worker\".\"slot_state\" != 'reclaiming' OR (\"placement_worker\".\"reclaim_operation_id\" IS NOT NULL AND \"placement_worker\".\"reclaim_source_fence\" IS NOT NULL))"
+        },
+        "placement_worker_lock_pin": {
+          "name": "placement_worker_lock_pin",
+          "value": "(\"placement_worker\".\"owner_operation_id\" IS NULL AND \"placement_worker\".\"physical_lock\" IS NULL AND \"placement_worker\".\"fence_lock\" IS NULL) OR (\"placement_worker\".\"owner_operation_id\" IS NOT NULL AND \"placement_worker\".\"physical_lock\" IS NOT NULL AND json_type(\"placement_worker\".\"physical_lock\",'$[0]') IS 'text' AND json_type(\"placement_worker\".\"fence_lock\",'$.device') IS 'text' AND json_type(\"placement_worker\".\"fence_lock\",'$.inode') IS 'text' AND NOT(json_extract(\"placement_worker\".\"fence_lock\",'$.device') GLOB '0[0-9]*' AND json_extract(\"placement_worker\".\"fence_lock\",'$.device') NOT GLOB '*[^0-9]*') AND NOT(json_extract(\"placement_worker\".\"fence_lock\",'$.inode') GLOB '0[0-9]*' AND json_extract(\"placement_worker\".\"fence_lock\",'$.inode') NOT GLOB '*[^0-9]*') AND \"placement_worker\".\"physical_lock\"=json_array(json_extract(\"placement_worker\".\"physical_lock\",'$[0]'),json_extract(\"placement_worker\".\"fence_lock\",'$.device'),json_extract(\"placement_worker\".\"fence_lock\",'$.inode')))"
         },
         "placement_worker_fence": {
           "name": "placement_worker_fence",

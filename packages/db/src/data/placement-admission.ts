@@ -1,5 +1,7 @@
 import {
   readSharedPolicy,
+  physicalLockKey,
+  foreignLockReport,
   currentRoute,
   recordCustodyFact,
 } from "./placement-source-facts.js";
@@ -7,6 +9,7 @@ import {
   readPlacementQueueAttempts,
   queueMemberDigest,
 } from "./placement-action-receipts.js";
+import { duePlacementRetry } from "./placement-retry.js";
 import { hasTimeWait } from "./queued-thread-messages.js";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
@@ -33,6 +36,7 @@ import {
   placementWorkspaces as workspaces,
   placementRetryConsents as consents,
   placementEffects as effects,
+  unresolvedPlacementEffect,
   placementAttempts as attempts,
   threads,
   queuedThreadMessages as queue,
@@ -90,6 +94,11 @@ export function placementMemberIneligible(
     op.requestedSelection.workerId !== w.workerId
   )
     return "binding_changed";
+  if (
+    w.nativeCustody &&
+    foreignLockReport(db, w.ownerPluginId, w.providerId, w.nativeCustody)
+  )
+    return "custody_unknown";
   if (!w.available || !o.connected) return "worker_offline";
   if (o.admission !== "enabled")
     return o.admission === "draining" ? "worker_draining" : "worker_disabled";
@@ -299,7 +308,11 @@ function queuedCandidateDue(db: DbQueryConnection, op: Operation) {
     .innerJoin(queue, eq(queue.id, attempts.queueId))
     .where(and(eq(attempts.op, op.id), isNull(attempts.request)))
     .all();
-  return pending.some(({ row }) => nativeQueueReady(row, true));
+  return pending.some(
+    ({ row }) =>
+      nativeQueueReady(row, true) &&
+      (op.kind !== "retry" || duePlacementRetry(db, op, row) !== null),
+  );
 }
 function nativeQueueReady(
   queued: typeof queue.$inferSelect,
@@ -324,11 +337,9 @@ function nativeQueueReady(
   );
 }
 
-// A borrowed continuation can outlive the head's lease. Only its intact,
-// unclaimed initial queue attempt can be carried into a new reservation.
-function waitingContinuation(db: DbQueryConnection, op: Operation) {
+function unreservedQueueAttempt(db: DbQueryConnection, op: Operation) {
   if (
-    op.kind !== "continuation" ||
+    (op.kind !== "continuation" && op.kind !== "retry") ||
     op.phase !== "queued" ||
     !op.binding ||
     !op.threadId ||
@@ -346,7 +357,9 @@ function waitingContinuation(db: DbQueryConnection, op: Operation) {
   if (
     !row ||
     row.threadId !== op.threadId ||
-    row.payloadKind !== "inline" ||
+    (op.kind === "retry"
+      ? !duePlacementRetry(db, op, row)
+      : row.payloadKind !== "inline") ||
     row.placementOperationId !== op.id ||
     !nativeQueueReady(row)
   )
@@ -368,6 +381,8 @@ export function reservePlacementWorker(
   db: DbConnection,
   args: PlacementCandidate,
 ) {
+  if (db.$client?.inTransaction !== false)
+    return wait("reconciliation_required");
   return db.transaction(
     (tx) => {
       const checked = validateCandidate(tx, args);
@@ -383,11 +398,11 @@ export function reservePlacementWorker(
           operation: placementOperationProjection(op),
           fence: w.fence,
         };
-      const borrowed = waitingContinuation(tx, op);
-      if (!["pending", "accepted"].includes(op.phase) && !borrowed)
+      const pendingAttempt = unreservedQueueAttempt(tx, op);
+      if (!["pending", "accepted"].includes(op.phase) && !pendingAttempt)
         return wait("reconciliation_required");
       const continuingResident =
-        op.kind === "continuation" &&
+        (op.kind === "continuation" || op.kind === "retry") &&
         op.threadId !== null &&
         op.threadId === w.threadId &&
         w.slotState === "resident";
@@ -416,6 +431,17 @@ export function reservePlacementWorker(
         custody.generation !== w.generation
       )
         return wait("custody_unknown");
+      const physicalLock = physicalLockKey(custody.agentHostId, custody.lock);
+      const holder = tx
+        .select({ owner: workers.ownerPluginId, worker: workers.workerId })
+        .from(workers)
+        .where(eq(workers.physicalLock, physicalLock))
+        .get();
+      if (
+        holder &&
+        (holder.owner !== w.ownerPluginId || holder.worker !== w.workerId)
+      )
+        return wait("selected_busy");
       if (olderCompatible(tx, op, w, args.purpose)) return wait("all_busy");
       if (
         !op.resolvedWorkspaceId ||
@@ -441,13 +467,13 @@ export function reservePlacementWorker(
         : null;
       if (pinned && canonicalJsonBytes(pinned) !== canonicalJsonBytes(binding))
         return wait("binding_changed");
-      if (op.kind === "continuation" && !pinned)
+      if ((op.kind === "continuation" || op.kind === "retry") && !pinned)
         return wait("reconciliation_required");
       const fence = continuingResident ? w.fence : w.fence + 1;
-      if (borrowed)
+      if (pendingAttempt?.payloadKind === "inline")
         tx.update(queue)
           .set({ placementFence: fence })
-          .where(eq(queue.id, borrowed.id))
+          .where(eq(queue.id, pendingAttempt.id))
           .run();
       const counter = tx
         .update(counters)
@@ -461,6 +487,7 @@ export function reservePlacementWorker(
           ownerOperationId: op.id,
           threadId: op.threadId,
           fence,
+          physicalLock,
           fenceLock: custody.lock,
           lastAssignedSeq: counter.allocationSeq,
         })
@@ -476,7 +503,7 @@ export function reservePlacementWorker(
         .set({
           binding,
           workerId: w.workerId,
-          phase: borrowed ? "queued" : "reserved",
+          phase: pendingAttempt ? "queued" : "reserved",
           reason: null,
           reservationId: randomUUID(),
           fence,
@@ -620,7 +647,7 @@ export function recordPlacementRuntimeState(
           and(
             eq(effects.executionOwnerOperationId, op.id),
             eq(effects.fence, w.fence),
-            inArray(effects.state, ["prepared", "possibly_sent"]),
+            unresolvedPlacementEffect(effects.state),
           ),
         )
         .get();
@@ -667,6 +694,8 @@ export function beginPlacementReclaim(
     expectedSourceOperationId: string;
   },
 ) {
+  if (db.$client?.inTransaction !== false)
+    return wait("reconciliation_required");
   return db.transaction(
     (tx) => {
       const checked = validateCandidate(tx, args);
@@ -674,13 +703,14 @@ export function beginPlacementReclaim(
       const { op, w } = checked;
       if (
         w.slotState !== "resident" ||
-        (op.kind === "continuation" && op.threadId === w.threadId) ||
+        ((op.kind === "continuation" || op.kind === "retry") &&
+          op.threadId === w.threadId) ||
         w.fence !== args.expectedSourceFence ||
         w.ownerOperationId !== args.expectedSourceOperationId ||
         !w.ownerOperationId ||
         !w.threadId ||
         (!["accepted", "pending"].includes(op.phase) &&
-          !waitingContinuation(tx, op))
+          !unreservedQueueAttempt(tx, op))
       )
         return wait("selected_busy");
       const source = readPlacementOperationRecord(tx, w.ownerOperationId);
@@ -724,6 +754,8 @@ export function beginCancelledPlacementRelease(
     expectedFence: number;
   },
 ) {
+  if (db.$client?.inTransaction !== false)
+    return wait("reconciliation_required");
   return db.transaction(
     (tx) => {
       const w = readPlacementWorker(tx, args.ownerPluginId, args.workerId),
@@ -733,7 +765,22 @@ export function beginCancelledPlacementRelease(
         !op?.cancelRequested ||
         w.ownerOperationId !== op.id ||
         w.fence !== args.expectedFence ||
-        !["reserved", "resident", "active"].includes(w.slotState)
+        (!["reserved", "resident", "active"].includes(w.slotState) &&
+          !(
+            w.slotState === "unknown" &&
+            w.nativeCustody?.status === "free" &&
+            w.nativeCustody.lock &&
+            w.physicalLock ===
+              physicalLockKey(
+                w.nativeCustody.agentHostId,
+                w.nativeCustody.lock,
+              ) &&
+            op.binding &&
+            matchesBinding(w, op.binding) &&
+            w.physicalLock &&
+            w.fenceLock &&
+            w.physicalLock === physicalLockKey(w.agentHostId, w.fenceLock)
+          ))
       )
         return wait("reconciliation_required");
       tx.update(workers)
@@ -789,6 +836,8 @@ export function finishPlacementReclaim(
         !observation.lock ||
         !w.nativeCustody ||
         !w.fenceLock ||
+        w.physicalLock !==
+          physicalLockKey(observation.agentHostId, observation.lock) ||
         observation.lock.device !== w.fenceLock.device ||
         observation.lock.inode !== w.fenceLock.inode ||
         observation.revision <= w.nativeCustody.revision
@@ -804,6 +853,7 @@ export function finishPlacementReclaim(
           reclaimOperationId: null,
           reclaimSourceFence: null,
           nativeCustody: observation,
+          physicalLock: null,
           fenceLock: null,
         })
         .where(
