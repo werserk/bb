@@ -26,8 +26,7 @@ function renderStrip(children: React.ReactNode) {
     .map((button) => ({
       name: button.getAttribute("aria-label"),
       category: button.getAttribute("data-context-category"),
-    }))
-    .filter((chip) => chip.name !== "All thread context");
+    }));
 }
 
 it("keeps Plan mode out of the Working group", () => {
