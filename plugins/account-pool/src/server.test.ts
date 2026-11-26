@@ -1648,8 +1648,17 @@ describe("Account Pool plugin", () => {
       if (state === "quota")
         quotas.put({
           ...quota,
-          fiveHourUtilization: 1,
-          fiveHourResetAt: Date.now() + 3600000,
+          limitWindows: [
+            {
+              slot: "primary",
+              windowMinutes: 300,
+              utilization: 1,
+              resetAt: Date.now() + 3600000,
+              status: "rejected",
+              source: "header",
+              observedAt: Date.now(),
+            },
+          ],
         });
       if (state === "hold")
         quotas.put({ ...quota, heldUntil: Date.now() + 3600000 });

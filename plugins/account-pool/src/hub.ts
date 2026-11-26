@@ -257,7 +257,7 @@ export class AccountPoolHub {
       quota.error !== null ||
       isUsageRestricted(quota, now) ||
       (quota.heldUntil !== null && quota.heldUntil > now) ||
-      isQuotaExhausted(
+      isPastThreshold(
         quota,
         "haiku",
         this.options.getSettings().switchThreshold,

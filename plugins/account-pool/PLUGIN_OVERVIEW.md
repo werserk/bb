@@ -33,16 +33,8 @@ Experimental: routing, storage, and CLI may change.
 
 ## For agents
 
-`bb pool account add|login|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, and `bb pool bypass <thread-id>`. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
+`bb pool account add|login|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id>`, and `bb pool ping <id>`. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
 
 ## Automatic retries
 
 Provider Retry uses pool recovery times. Inspect `bb provider-retry status` or `bb provider-retry explain <thread-id>`.
-
-## Targeted Claude ping
-
-`bb pool ping <account-uuid> [--json]` sends one tiny Haiku request through
-exactly one local Claude account. It consumes quota, refuses unavailable
-accounts and parent proxy mode, never fails over, and preserves routing
-cursor and session affinity. CLI and `account.ping` RPC return only status,
-account id and model. See the account-pool skill reference for limitations.
