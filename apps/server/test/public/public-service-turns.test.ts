@@ -182,6 +182,7 @@ describe("service admission", () => {
     }));
   it("accepts authenticated managed input and rejects foreign senders", async () =>
     withTestHarness(async (h) => {
+      const info = vi.spyOn(h.deps.logger, "info");
       const { host } = seedHostSession(h.deps),
         { project } = seedProjectWithSource(h.deps, { hostId: host.id });
       const environment = seedEnvironment(h.deps, {
@@ -227,6 +228,20 @@ describe("service admission", () => {
           }),
         });
       expect((await send("foreign")).status).toBe(403);
+      const diagnosticLogs = () =>
+        info.mock.calls
+          .filter((call) => call[1] === "Send diagnostic")
+          .map((call) => call[0]);
+      expect(diagnosticLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sendDiagnostic: expect.objectContaining({
+              stage: "guards",
+              status: 2,
+            }),
+          }),
+        ]),
+      );
       const response = await send(null);
       const result = await response.json();
       expect(response.status, JSON.stringify(result)).toBe(200);
@@ -234,11 +249,25 @@ describe("service admission", () => {
         delivery: "queued",
         queuedMessage: { serviceTurn: { reason: "future-rotation-seed" } },
       });
+      expect(diagnosticLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sendDiagnostic: expect.objectContaining({
+              stage: "enqueue.done",
+              messageId: result.queuedMessage.id,
+            }),
+          }),
+        ]),
+      );
+      expect(JSON.stringify(diagnosticLogs())).not.toContain(
+        "arbitrary wording",
+      );
     }));
 });
 
 it("allocates an empty plugin thread without dispatching a visible bootstrap", async () =>
   withTestHarness(async (h) => {
+    const info = vi.spyOn(h.deps.logger, "info");
     const { host } = seedHostSession(h.deps),
       { project } = seedProjectWithSource(h.deps, { hostId: host.id });
     const response = await h.app.request("/api/v1/threads", {
@@ -310,6 +339,22 @@ it("allocates an empty plugin thread without dispatching a visible bootstrap", a
       },
     );
     expect(dispatched.status, await dispatched.text()).toBe(200);
+    expect(
+      info.mock.calls
+        .filter((call) => call[1] === "Send diagnostic")
+        .map((call) => call[0]),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sendDiagnostic: expect.objectContaining({
+            stage: "queue.dispatch",
+            messageId: queuedId,
+            service: 1,
+            status: 1,
+          }),
+        }),
+      ]),
+    );
     const retained = await (
       await h.app.request(`/api/v1/threads/${body.id}/events`)
     ).json();

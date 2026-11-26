@@ -4814,3 +4814,23 @@ question preservation, unknown-host coverage and SDK/CLI contract parity.
 ## Composer editor actions
 
 `ComposerCustomization.actions[].experimental_placement: "editor"` places a plugin action at the start of the draft line instead of the action row; `ExperimentalComposerContributions.experimental_EditorActions` is the host renderer the bundled Composer mounts there on expanded layouts, and the editor text indents only while that slot holds a button. The host applies the same plugin ownership, crash boundary, scope filtering and suppression as toolbar actions. Prompt Suggestion's ✦ is the first caller: a click asks for a new proposal and Tab accepts it. Audit focus order, touch sizes and multiple editor actions before stabilization.
+## Pre-completion policy (partial companion)
+
+`PluginExperimentalThreads.experimental_preCompletionCapabilities` and
+`experimental_setPreCompletionPolicy`, `PluginPreCompletionContext`,
+`PluginPreCompletionHandler`, `PluginPreCompletionGap`, and provider-bridge
+`experimental_PRE_COMPLETION_TOOL_NAME` and `experimental_PRE_COMPLETION_LIMITS` are experimental. The source capability
+is conditional on matching bridges (Codex 0.166 uses trusted session-local
+Stop hooks and private Unix IPC; Windows is unsupported).
+The fake host refuses native registration. The normal core callers are Claude and Codex
+native Stop callbacks; the authenticated builtin route and server guard are its
+only action implementation. Plugins register policy, not a parallel continuation
+path. Both bridges reject model attempts to invoke the reserved builtin.
+
+Stabilization requires installed Codex hook integration, exact native-to-bb identity and
+question-format fixtures, deployment/cancellation compatibility across old hosts,
+installed same-turn correction, reconnect/restart/rollback proof for the durable
+reservation and retained gap observations, and review of per-host capability
+reporting. See [the implemented contract](core-owner-attention.md). Method presence
+and source fixtures cannot establish runtime support or complete owner-attention
+coverage. No daemon protocol or migration change is made in this candidate.

@@ -13,6 +13,7 @@ import { PluginReplacementSlot } from "@/components/plugin/PluginReplacementSlot
 import { appToast } from "@/components/ui/app-toast";
 import { schedulePluginFrontendReconcile } from "@/lib/plugin-frontend-lazy";
 import { useSidebar } from "@/components/ui/sidebar.js";
+import { hasVisibleMatch } from "@/lib/visible-dom";
 import type { ExperimentalSidebarNavigationSlot } from "@/lib/plugin-slots";
 import { SidebarNavigationCustomizePopoverContent } from "./SidebarNavigationCustomize";
 import type { ResolvedSidebarNavigation } from "./sidebarNavigationProvider";
@@ -29,7 +30,7 @@ export function afterOpenMenusClose(run: () => void): () => void {
   let timer = 0;
   const check = () => {
     if (
-      document.querySelector(OPEN_MENU_SELECTOR) !== null &&
+      hasVisibleMatch(OPEN_MENU_SELECTOR) &&
       performance.now() - start < OPEN_MENU_WAIT_MS
     ) {
       frame = requestAnimationFrame(check);

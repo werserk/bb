@@ -1,3 +1,4 @@
+import { traceSendStage, markSendDiagnostic } from "../system/send-diagnostics.js";
 import { hostCommandMayWake } from "./wake-policy.js";
 import { isHostCleanupAllowed } from "./cleanup-context.js";
 import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
@@ -386,17 +387,22 @@ function requestHostOnlineRpcResponse(
         ),
       );
   }
-  return traceTurnRpc(args.command.type, () =>
-    deps.hub.requestHostOnlineRpc({
-      hostId: args.hostId,
-      message: {
-        type: "host-rpc.request",
-        requestId: randomUUID(),
-        command: args.command,
-      },
-      ...(args.signal ? { signal: args.signal } : {}),
-      timeoutMs: args.timeoutMs,
-    }),
+  const requestId = randomUUID();
+  markSendDiagnostic("daemon.send", requestId);
+  return traceSendStage("daemon.ack", () =>
+    traceTurnRpc(args.command.type, () =>
+      deps.hub.requestHostOnlineRpc({
+        hostId: args.hostId,
+        message: {
+          type: "host-rpc.request",
+          requestId,
+          command: args.command,
+        },
+        ...(args.signal ? { signal: args.signal } : {}),
+        timeoutMs: args.timeoutMs,
+      }),
+    ),
+    requestId,
   );
 }
 

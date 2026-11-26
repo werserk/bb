@@ -3,6 +3,10 @@ import {
   handleConversationQuestionToolCall,
 } from "../services/threads/conversation-question-tool.js";
 import {
+  checkPreCompletion,
+  PRE_COMPLETION_TOOL_NAME,
+} from "../services/threads/pre-completion.js";
+import {
   hostDaemonToolCallRequestSchema,
   typedRoutes,
   type HostDaemonInternalSchema,
@@ -172,6 +176,19 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             providerThreadId: payload.providerThreadId,
             signal: context.req.raw.signal,
             input: payload.arguments,
+          }),
+        );
+      }
+
+      if (payload.tool === PRE_COMPLETION_TOOL_NAME) {
+        return context.json(
+          await checkPreCompletion(deps, {
+            threadId: thread.id,
+            providerThreadId: payload.providerThreadId,
+            turnId: payload.turnId,
+            turnOrigin: payload.turnOrigin,
+            input: payload.arguments,
+            signal: context.req.raw.signal,
           }),
         );
       }

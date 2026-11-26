@@ -549,3 +549,20 @@ network loss preserves pending sends. Unknown identity disables journal restorat
 The pending owner fences old reads and mutation receipts by scope generation and
 keeps account identity in the journal key. See [pending send overlay](pending-send-overlay.md)
 for causal legacy handoff, lock ownership and review dispositions.
+
+## Owner-attention pre-completion candidate
+
+`apps/server/src/services/threads/pre-completion.ts` owns the opted-in policy,
+strict native question read, bounded deadline, typed fail-open observations and
+atomic once reservation in existing core-namespaced KV. Claude's native Stop
+callback uses the ordinary authenticated builtin-tool action; both bridges
+reject model-selected calls of its reserved domain name. No daemon wire or
+schema change is introduced. Codex 0.166 uses a session-local trusted command
+hook and bounded private Unix IPC into that same action. Activation first checks
+actual configuration layers and discovery, preserving existing hooks and
+explicit feature opt-out by refusing conflicting or unknown configuration without
+a visible warning (user trust state alone is merged, not refused). Missing observations remain opted-in coverage gaps. Recheck
+or trust verification rejection fails construction and cleans up its child/IPC. Its native lifecycle
+and exact session/turn gate precede the existing assembler mapping; installed bb
+runtime proof remains missing;
+see [the contract and limitations](core-owner-attention.md).

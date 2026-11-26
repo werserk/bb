@@ -1,3 +1,4 @@
+import { traceSendStage } from "../system/send-diagnostics.js";
 import {
   environments,
   hasStoredSpawnAgentToolCall,
@@ -285,6 +286,16 @@ function toRuntimeExecutionOptions(
 }
 
 export async function buildExecutionOptions(
+  deps: Pick<AppDeps, "db" | "hub" | "providerRegistry">,
+  request: ExecutionOptionsRequest,
+  args: BuildExecutionOptionsArgs,
+): Promise<ResolvedThreadExecutionOptions> {
+  return traceSendStage("execution", () =>
+    buildExecutionOptionsImpl(deps, request, args),
+  );
+}
+
+async function buildExecutionOptionsImpl(
   deps: Pick<AppDeps, "db" | "hub" | "providerRegistry">,
   request: ExecutionOptionsRequest,
   args: BuildExecutionOptionsArgs,

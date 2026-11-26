@@ -99,3 +99,21 @@ describe("handleResponses fidelity", () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe("handleResponses upstream content types", () => {
+  it("collects an SSE body labelled text/plain", async () => {
+    const res = await handleResponses(post({ model: "m", input: [] }), async () =>
+      new Response(
+        `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "r3" } })}\n\n`,
+        { headers: { "content-type": "text/plain; charset=UTF-8" } },
+      ),
+    );
+    expect(await res.json()).toEqual({ id: "r3" });
+  });
+
+  it("passes a JSON upstream reply through", async () => {
+    const upstream = Response.json({ id: "plain" });
+    const res = await handleResponses(post({ model: "m", input: [] }), async () => upstream);
+    expect(res).toBe(upstream);
+  });
+});

@@ -1,3 +1,4 @@
+import { traceSendStage } from "../system/send-diagnostics.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
 import type { EnvironmentRow } from "@bb/db";
 import type { Thread } from "@bb/domain";
@@ -53,6 +54,15 @@ export function requireThreadHostCommandEnvironment(
 }
 
 export async function requireThreadCommandEnvironment(
+  deps: WorkSessionDeps,
+  args: RequireThreadCommandEnvironmentArgs,
+): Promise<EnvironmentRow> {
+  return traceSendStage("environment.ready", () =>
+    requireThreadCommandEnvironmentImpl(deps, args),
+  );
+}
+
+async function requireThreadCommandEnvironmentImpl(
   deps: WorkSessionDeps,
   args: RequireThreadCommandEnvironmentArgs,
 ): Promise<EnvironmentRow> {

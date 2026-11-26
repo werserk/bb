@@ -258,13 +258,30 @@ function mapSidebarNavigationProjectThreads(
   };
 }
 
+const sidebarNavigationThreadsByNavigation = new WeakMap<
+  SidebarBootstrapResponse,
+  ThreadListEntry[]
+>();
+let lastSidebarNavigationThreads: ThreadListEntry[] = [];
+
 export function listSidebarNavigationThreads(
   navigation: SidebarBootstrapResponse,
 ): ThreadListEntry[] {
-  return [
+  const cached = sidebarNavigationThreadsByNavigation.get(navigation);
+  if (cached !== undefined) return cached;
+  const threads = [
     ...navigation.projects.flatMap((project) => project.threads),
     ...navigation.personalProject.threads,
   ];
+  const last = lastSidebarNavigationThreads;
+  const result =
+    last.length === threads.length &&
+    last.every((thread, index) => thread === threads[index])
+      ? last
+      : threads;
+  lastSidebarNavigationThreads = result;
+  sidebarNavigationThreadsByNavigation.set(navigation, result);
+  return result;
 }
 
 export function getCachedSidebarNavigationThreads(

@@ -3,8 +3,15 @@ import {
   CODEX_ASYNC_QUESTION_EXTENSION_KIND,
   codexAsyncQuestionStateSchema,
 } from "../extension-kinds.js";
+import { experimental_PRE_COMPLETION_TOOL_NAME as PRE_COMPLETION_TOOL_NAME } from "@get-bb/plugin-sdk/provider-bridge";
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
+import {
+  codexStopHookConfigIsClear,
+  createCodexStopHook,
+  preCompletionHooksEnabled,
+  type CodexStopHook,
+} from "./pre-completion.js";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import {
@@ -273,9 +280,10 @@ const pendingRuntimeRequests = new Map<
 >();
 let runtimeRequestIdCounter = 0;
 
-function sendRuntimeRequest(
+async function sendRuntimeRequest(
   method: string,
   params: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   runtimeRequestIdCounter += 1;
   const requestId = runtimeRequestIdCounter;
@@ -292,8 +300,25 @@ function sendRuntimeRequest(
       });
     },
   );
-  send({ jsonrpc: "2.0", id: requestId, method, params });
-  return responsePromise;
+  if (!signal) {
+    send({ jsonrpc: "2.0", id: requestId, method, params });
+    return responsePromise;
+  }
+  let abort: () => void = () => {};
+  try {
+    if (signal.aborted) throw new Error("cancelled");
+    send({ jsonrpc: "2.0", id: requestId, method, params });
+    return await Promise.race([
+      responsePromise,
+      new Promise<never>((_, reject) => {
+        abort = () => reject(new Error("cancelled"));
+        signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+    pendingRuntimeRequests.delete(requestId);
+  }
 }
 
 const CODEX_APP_SERVER_COMMAND_ENV = "BB_CODEX_BRIDGE_APP_SERVER_COMMAND";
@@ -507,6 +532,7 @@ interface CodexBridgeSession {
   previousChildExit: Promise<void> | null;
   releasePromise: Promise<void> | null;
   goalStatus: CodexGoalStatus | null;
+  stopHook: CodexStopHook | null;
 }
 
 const sessionsByBbThreadId = new Map<string, CodexBridgeSession>();
@@ -537,12 +563,17 @@ function releaseSession(session: CodexBridgeSession): Promise<void> {
     return session.releasePromise;
   }
   session.closing = true;
+  const hookExit = session.stopHook?.close() ?? Promise.resolve();
+  session.stopHook = null;
   if (sessionsByBbThreadId.get(session.bbThreadId) === session) {
     sessionsByBbThreadId.delete(session.bbThreadId);
   }
   const previousChildExit = session.previousChildExit;
   session.previousChildExit = null;
-  const currentChildExit = session.connection?.kill() ?? Promise.resolve();
+  const currentChildExit = Promise.all([
+    session.connection?.kill(),
+    hookExit,
+  ]).then(() => undefined);
   session.connection = null;
   const releasePromise =
     previousChildExit === null
@@ -655,6 +686,7 @@ function sendThreadDeltas(
     }
     if (delta.kind === "turn.boundary" && delta.providerTurnId !== undefined) {
       session.openCodexTurnIds.delete(delta.providerTurnId);
+      session.stopHook?.settle(delta.providerTurnId);
       settleResponseOpenedTurn(session, delta.providerTurnId);
       const waiters = session.turnSettledWaiters.get(delta.providerTurnId);
       if (waiters !== undefined) {
@@ -732,6 +764,7 @@ async function handleChildNotification(
   if (!session) {
     return;
   }
+  session.stopHook?.notification(method, params);
   if (method === "thread/started") {
     const parsed = codexThreadStartedNotificationSchema.safeParse(params);
     if (parsed.success) {
@@ -918,6 +951,13 @@ function handleChildRequest(
       );
       return;
     }
+    if (parsed.data.tool === PRE_COMPLETION_TOOL_NAME) {
+      responder.error(
+        BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
+        "Reserved core callback",
+      );
+      return;
+    }
     void sendRuntimeRequest(BRIDGE_INBOUND_REQUEST_METHODS.toolCall, {
       providerThreadId: session.codexThreadId ?? parsed.data.threadId,
       threadId: session.bbThreadId,
@@ -1033,6 +1073,9 @@ function handleChildExit(
     return;
   }
   session.connection = null;
+  const hook = session.stopHook;
+  session.stopHook = null;
+  void hook?.close();
 
   const openTurnIds = [...session.openCodexTurnIds];
   const message = `codex app-server exited unexpectedly (code ${info.code ?? "null"}, signal ${info.signal ?? "null"})${info.stderrTail ? `: ${info.stderrTail}` : ""}`;
@@ -1079,6 +1122,7 @@ function spawnChildConnection(callbacks: {
   cwd?: string;
   envVars?: Readonly<Record<string, string>>;
   recordThreadId: string | null;
+  extraArgs?: string[];
   onNotification: (method: string, params: unknown) => void;
   onRequest: (
     method: string,
@@ -1089,10 +1133,15 @@ function spawnChildConnection(callbacks: {
 }): CodexAppServerConnection {
   const env = buildAppServerEnv(callbacks.envVars);
   const launch = resolveAppServerLaunch(appServerLaunchEnv(callbacks.envVars));
-  const { envVars: _envVars, cwd, ...connectionCallbacks } = callbacks;
+  const {
+    envVars: _envVars,
+    cwd,
+    extraArgs,
+    ...connectionCallbacks
+  } = callbacks;
   return createCodexAppServerConnection({
     command: launch.command,
-    args: launch.args,
+    args: [...launch.args, ...(extraArgs ?? [])],
     cwd: cwd ?? process.cwd(),
     env,
     ...connectionCallbacks,
@@ -1369,6 +1418,7 @@ async function constructThreadSession(
     previousChildExit: null,
     releasePromise: null,
     goalStatus: existing?.goalStatus ?? null,
+    stopHook: null,
   };
   sessionsByBbThreadId.set(args.threadId, session);
   if (existing) {
@@ -1392,33 +1442,108 @@ async function constructThreadSession(
   sendThreadDeltas(session, [{ kind: "session.reset" }]);
 
   let notifications = Promise.resolve();
-  const connection = spawnChildConnection({
-    envVars: decoded.sessionOptions.envVars,
-    recordThreadId: args.threadId,
-    onNotification: (method, params) => {
-      notifications = notifications
-        .then(() =>
-          handleChildNotification(args.threadId, serial, method, params),
-        )
-        .catch((error: unknown) => {
-          sendNotification(BRIDGE_NOTIFICATION_METHODS.error, {
-            threadId: args.threadId,
-            message: describeCodexLaunchError(error),
-          });
+  const spawnSessionConnection = (extraArgs?: string[]) => {
+    const child = spawnChildConnection({
+      extraArgs,
+      envVars: decoded.sessionOptions.envVars,
+      recordThreadId: args.threadId,
+      onNotification: (method, params) => {
+        notifications = notifications
+          .then(() =>
+            handleChildNotification(args.threadId, serial, method, params),
+          )
+          .catch((error: unknown) =>
+            sendNotification(BRIDGE_NOTIFICATION_METHODS.error, {
+              threadId: args.threadId,
+              message: describeCodexLaunchError(error),
+            }),
+          );
+      },
+      onRequest: (method, params, responder) =>
+        handleChildRequest(args.threadId, serial, method, params, responder),
+      onExit: (info) => {
+        void notifications.then(() => {
+          if (session.connection === child)
+            handleChildExit(args.threadId, serial, info);
         });
-    },
-    onRequest: (method, params, responder) =>
-      handleChildRequest(args.threadId, serial, method, params, responder),
-    onExit: (info) => {
-      void notifications.then(() =>
-        handleChildExit(args.threadId, serial, info),
+      },
+    });
+    session.connection = child;
+    return child;
+  };
+  let connection = spawnSessionConnection();
+  let initialized = false;
+  let hookConfigClear = false;
+  const hooksEnabled = preCompletionHooksEnabled(
+    decoded.sessionOptions.envVars,
+  );
+  try {
+    if (!hooksEnabled) throw new Error("pre-completion hooks are off");
+    await initializeChild(connection);
+    initialized = true;
+    hookConfigClear = await codexStopHookConfigIsClear(
+      (method, params) =>
+        connection.request({
+          method,
+          params,
+          resultSchema: ignoredChildResultSchema,
+          timeoutMs: 3000,
+        }),
+      args.cwd,
+    );
+  } catch {
+    hookConfigClear = false;
+  }
+  try {
+    if (hookConfigClear && !session.closing)
+      session.stopHook = await createCodexStopHook({
+        identity: () => ({
+          threadId: session.codexThreadId,
+          openTurnIds: session.openCodexTurnIds,
+          live:
+            !session.closing &&
+            currentSession(args.threadId, serial) === session,
+        }),
+        request: (turnId, input, signal) =>
+          sendRuntimeRequest(
+            BRIDGE_INBOUND_REQUEST_METHODS.toolCall,
+            {
+              providerThreadId: session.codexThreadId,
+              threadId: session.bbThreadId,
+              turnId,
+              callId: `bb-stop-${serial}-${turnId}`,
+              tool: PRE_COMPLETION_TOOL_NAME,
+              arguments: input,
+            },
+            signal,
+          ),
+      });
+  } catch {
+    session.stopHook = null;
+  }
+  if (session.closing) {
+    await session.stopHook?.close();
+    session.stopHook = null;
+    throw new CodexSessionReleasedError(
+      new Error("session released before launch"),
+    );
+  }
+  if (session.stopHook) {
+    session.connection = null;
+    await connection.kill();
+    if (session.closing) {
+      await session.stopHook?.close();
+      session.stopHook = null;
+      throw new CodexSessionReleasedError(
+        new Error("session released during hook activation"),
       );
-    },
-  });
-  session.connection = connection;
+    }
+    connection = spawnSessionConnection(session.stopHook.launchArgs);
+    initialized = false;
+  }
 
   try {
-    await initializeChild(connection);
+    if (!initialized) await initializeChild(connection);
 
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       command: {
@@ -1432,6 +1557,17 @@ async function constructThreadSession(
       instructionMode: args.instructionMode,
       options: decoded.sessionOptions,
     });
+    const hookConfig =
+      (await session.stopHook?.trustConfig(
+        (method, params) =>
+          connection.request({
+            method,
+            params,
+            resultSchema: ignoredChildResultSchema,
+            timeoutMs: 3000,
+          }),
+        args.cwd,
+      )) ?? {};
     const sharedConstructionParams = {
       approvalPolicy: preparedGitRoots.permissionSettings.approvalPolicy,
       approvalsReviewer: preparedGitRoots.permissionSettings.approvalsReviewer,
@@ -1440,7 +1576,9 @@ async function constructThreadSession(
       ...instructionOverrides,
       model: decoded.sessionOptions.model ?? undefined,
       serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
-      config: preparedGitRoots.config ?? undefined,
+      config: session.stopHook
+        ? { ...preparedGitRoots.config, ...hookConfig }
+        : (preparedGitRoots.config ?? undefined),
       ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
     };
 
@@ -1495,6 +1633,16 @@ async function constructThreadSession(
     );
     const codexThreadId = result.thread.id;
     session.codexThreadId = codexThreadId;
+    await session.stopHook?.verify(
+      (method, params) =>
+        connection.request({
+          method,
+          params,
+          resultSchema: ignoredChildResultSchema,
+          timeoutMs: 3000,
+        }),
+      codexThreadId,
+    );
     translator.activateThreadGitWritableRoots({
       providerThreadId: codexThreadId,
       threadId: args.threadId,
@@ -1543,6 +1691,8 @@ async function constructThreadSession(
       sessionsByBbThreadId.delete(args.threadId);
     }
     session.closing = true;
+    await session.stopHook?.close();
+    session.stopHook = null;
     await connection.kill();
     throw released ? new CodexSessionReleasedError(error) : error;
   }
@@ -1591,6 +1741,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     previousChildExit: null,
     releasePromise: null,
     goalStatus: session.goalStatus,
+    stopHook: null,
   });
 }
 
@@ -2379,6 +2530,7 @@ async function handleThreadStop(
   params: ThreadStopParamsShape,
 ): Promise<void> {
   const session = sessionsByBbThreadId.get(params.threadId);
+  session?.stopHook?.cancel();
 
   if (params.intent === "release") {
     if (session) {

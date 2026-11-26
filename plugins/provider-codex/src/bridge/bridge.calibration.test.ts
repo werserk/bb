@@ -480,6 +480,9 @@ it("replays one scripted codex session onto the golden event stream", async () =
     ),
   ).toEqual(GOLDEN_EVENT_STREAM);
 
+  expect(
+    canonical.events.find((event) => event.type === "provider/warning"),
+  ).toBeUndefined();
   expect(canonical.approvals).toHaveLength(1);
   const approvalRequest = canonical.approvals[0];
   const canonicalApproval = approvalRequest?.payload;
