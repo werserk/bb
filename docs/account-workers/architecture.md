@@ -127,7 +127,7 @@ The layers fail differently: removal silently if OpenCode renames its plugin ids
 
 Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin tool. The scratch directory holds `.codex/` and `.aw/`. Probe and evidence: [probe-3](probe-3.md).
 
-- `.codex/config.toml` turns Codex features off (`shell_tool`, `unified_exec`, `view_image`, `multi_agent`, `apps`, `plugins`, `browser_use`, `computer_use`, `image_generation`, `memories`). It also sets `web_search = "disabled"` and disables each MCP server named in the worker's user config, read at each spawn. These are defence in depth.
+- `.codex/config.toml` turns Codex features off (`shell_tool`, `unified_exec`, `view_image`, `multi_agent`, `multi_agent_v2`, `apps`, `plugins`, `browser_use`, `computer_use`, `image_generation`, `memories`) and forces `hooks` on, so a user config that turns hooks off cannot disable the guard. It also sets `web_search = "disabled"` and disables each MCP server named in the worker's user config, read at each spawn. These are defence in depth.
 - `.codex/hooks.json` declares one `PreToolUse` hook, matcher `*`, launched through block 1's fail-closed `sh` launcher. It is the barrier. It lets through only the seven `workspace_*` tools, `bb_update_plan` and `update_plan`, and blocks the rest with exit 2:
   - `apply_patch`, which no config can turn off;
   - MCP tools;
@@ -137,12 +137,15 @@ Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin too
 
   Code-mode `exec` and `wait` stay unhooked. `exec` is a V8 isolate without fs, process or network access, and its nested calls are hooked.
 - **Hook trust.** Codex reads hook trust only from the user layer. So `prepare` writes one entry per binding into the worker's `~/.codex/config.toml`: `projects."<scratch>".trust_level` and `hooks.state."<scratch>/.codex/hooks.json:pre_tool_use:0:0".trusted_hash`. The hash comes from Codex itself (`hooks/list`).
-  - The write is one atomic, verified edit: a fresh read, the addition, then a parse that must show both values. The result goes to a temp file with the same mode and replaces the config by `rename`. The edit retries if the file changed meanwhile.
-  - If `check` fails, the same edit removes the entry.
+  - The write is one atomic, verified edit: a fresh read, the addition, then a parse that must show both values. The result goes to a temp file with the same mode and replaces the config by `rename`. The edit retries if the file changed meanwhile. Edits in one daemon run one at a time, and a symlinked `config.toml` is written at its target, as Codex does.
+  - If `check` fails, the same edit removes the entry by its parsed keys. If the removal fails, the spawn error says so.
   - The profile refuses to run when a system or managed Codex config layer exists.
   - `spawn` refuses when `CODEX_HOME` or `BB_CODEX_BRIDGE_APP_SERVER_COMMAND`/`_ARGS` is a BB machine variable (`refusedMachineEnv`). The thread would read those, but the host entry would not, so the trust and the gate would apply to another Codex home or binary.
-- **No-fallback gate.** `check` runs the canary from [probe-3](probe-3.md#the-no-fallback-test) before the spawn and refuses the spawn on any failure. The canary uses the same Codex binary, model, model cache, `thread/start` config and sandbox as the thread, but a temporary Codex home with no credentials and a mock model.
-- **Live check per call.** On every allowed call the guard appends `tool_name`, the raw `tool_input` and `tool_use_id` to `.aw/heartbeat.jsonl`. `verify` consumes one fresh heartbeat, under 5 minutes old, that matches the call's tool and its parsed input on the parsed keys. With no match the call is refused and the binding is marked broken. A refusal therefore means the guard hook did not see a workspace call: it was skipped, untrusted or replaced. This is the only check on the real thread rather than on a copy.
+- **No-fallback gate.** `check` runs the canary from [probe-3](probe-3.md#the-no-fallback-test) before the spawn and refuses the spawn on any failure. The canary uses the thread's Codex binary, model and `thread/start` config, but a temporary Codex home with no credentials, a mock model and the `danger-full-access` sandbox (the widest BB grants).
+  - A Codex profile spawn needs `--model`; the canary checks that model, never the config's default.
+  - The worker's `models_cache.json` is passed to the canary as its model catalog (`model_catalog_json`), so a model that exists only in the cache is checked with its own tool set. Without a cache the canary uses the bundled catalog. The gate fails when the canary's catalog lacks the model, or when the catalog marks it `code_mode_only` and `exec` was not offered.
+  - The result (binary, version, model, catalog, offered tools, failures) is saved to `.aw/gate.json` in the scratch directory.
+- **Live check per call.** On every allowed workspace call the guard writes `tool_name`, the raw `tool_input` and `tool_use_id` to its own file in `.aw/hb/`. `verify` consumes (deletes) one fresh heartbeat, under 15 minutes old (the longest `workspace_exec` plus a margin), that matches the call's tool and its parsed input on the parsed keys. With no match the call is refused and the binding is marked broken. A refusal therefore means the guard hook did not see a workspace call: it was skipped, untrusted or replaced. This is the only check on the real thread rather than on a copy. Consumed ids go to `.aw/verified.jsonl`; stale heartbeats are deleted.
 
 ## Accounts
 
@@ -182,5 +185,7 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
   - What Codex does on a hook timeout or a missing `sh` was not checked.
   - The canary assumes the host daemon's own process environment (`CODEX_HOME`, `BB_CODEX_BRIDGE_APP_SERVER_*`) is the bridge's. BB machine variables with those names refuse the spawn.
   - An MCP server removed from the worker's config while a binding lives makes the thread fail to load its config; this fails closed.
+  - The canary has no login, so it cannot see tools that Codex offers only with a Codex-backend login (`image_generation`, apps and connectors). Their features are off in the overlay; if one came back on, its tool would appear only on the real thread, where the hook still blocks it.
+  - The canary's catalog is the worker's cache. A thread whose login does not match the cache's identity uses the bundled catalog or fetches a fresh one, which may differ.
   - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).

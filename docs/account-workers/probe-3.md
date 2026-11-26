@@ -15,7 +15,7 @@ Answers to the probe of [#3](https://github.com/werserk/bb/issues/3), checked ag
 
 The profile's `check` runs it on the worker before every spawn ("canary"); the same code runs in vitest on a synthetic config (`profiles/codex-canary.test.ts`, skipped when `codex` is absent).
 
-It starts a real `codex app-server`, the binary the bridge would run, against a mock model. The mock's first reply calls every way Codex could act on the worker, and each way would touch a marker in a worker-only directory:
+It starts a real `codex app-server`, the binary the bridge would run, against a mock model. It uses the spawn's model (a Codex spawn needs `--model`) and, as its model catalog, the worker's `models_cache.json`, so a model known only from the cache gets its own tool set. The mock's first reply calls every way Codex could act on the worker, and each way would touch a marker in a worker-only directory:
 
 - `exec_command`, `shell`, `shell_command` and `local_shell_call`;
 - `apply_patch` in its custom and function forms;
@@ -34,7 +34,10 @@ It then calls every offered tool that is not on the allowlist, direct and nested
 - a non-allowlisted call reached BB;
 - a call was not blocked by the hook. Only a named Codex refusal that comes before the hook counts as blocked: `apply_patch` and `read_mcp_resource` with an empty input;
 - a custom or freeform tool other than `exec` and `apply_patch` is offered, since Codex hooks only function payloads by default;
-- a hosted tool is offered.
+- a hosted tool is offered;
+- the canary's catalog lacks the model, or marks it `code_mode_only` and `exec` was not offered.
+
+The result is saved to `.aw/gate.json` in the scratch directory.
 
 Markers are secondary evidence; an unblocked call fails the gate even when its marker has not appeared yet.
 
@@ -52,7 +55,7 @@ Canary results on the worker host with Codex 0.167.1:
 |---|---|---|---|---|
 | Synthetic | `gpt-5.6-luna` (code mode only) | 19 | 0 | 0.8 s, 5.5 s |
 | Synthetic | `gpt-5.5` (direct tools, no `exec`) | 23 | 0 | 0.5 s, 3.0 s |
-| The worker's real user config (9 MCP servers), dry run | the config's default | 27 | 0 | 7.3 s, 5.2 s |
+| The worker's real user config with its MCP servers, dry run | the config's default | 27 | 0 | 7.3 s, 5.2 s |
 
 Hook-trust discovery adds 0.2–1.2 s. The dry run left the real `config.toml` byte-identical. The canary runs with a temporary `CODEX_HOME` that holds only the tool- and trust-relevant keys and no credentials, and with a minimal environment.
 
@@ -60,7 +63,7 @@ Hook-trust discovery adds 0.2–1.2 s. The dry run left the real `config.toml` b
 
 1. **Unlisted tools still run.** A code-mode-only model is offered `exec`, `wait` and `request_user_input`, yet direct calls to `exec_command` and `apply_patch` ran. A tool missing from the list can still run: this is the fallback class the test targets.
 2. **Project config loads in BB threads.** `thread/start` auto-trusts the cwd when it has no trust entry and the effective permissions can write it. BB's `workspace-write` and `danger-full-access` both qualify. The profile writes the project trust itself, so the thread's own `thread/start` does not rewrite the file.
-3. **Features off by project config:** `shell_tool`, `unified_exec`, `view_image`, `multi_agent`, `apps`, `plugins`, `browser_use`, `computer_use`, `image_generation` and `memories`, plus each user MCP server by name. These are defence in depth, not the barrier:
+3. **Features off by project config:** `shell_tool`, `unified_exec`, `view_image`, `multi_agent`, `multi_agent_v2`, `apps`, `plugins`, `browser_use`, `computer_use`, `image_generation` and `memories`, plus each user MCP server by name. These are defence in depth, not the barrier. The overlay also forces `hooks = true`: with `hooks = false` in the user config, every hook is off and the canary fails.
    - `multi_agent = false` removes the direct subagent tools but not the nested `multi_agent_v1__*` tools inside code-mode `exec`. With an untrusted hook, a nested `spawn_agent` starts a subagent; the trusted hook blocks it.
    - `memories = false` is load-bearing: the memory consolidation subagent runs with a reduced hook set.
    - Hosted `web_search` cannot be hooked, so `web_search = "disabled"` removes it.
@@ -91,6 +94,6 @@ All of this was checked by name only. Codex's MCP OAuth store (`.credentials.jso
 |---|---|
 | Spawn through the real gate on the worker host | Pass, twice (two bindings). `bb account-workers spawn --provider codex` ran `prepare` and the canary on the worker and created the binding. The scratch `.codex/` files and the trust entry (project trust plus one hook-trust key) are in place. The Codex thread started in the scratch directory and sent its first model request. |
 | No-fallback canary on the worker's real user config | Pass (dry run, see above); the config stayed byte-identical. |
-| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Not run yet.** Two attempts were refused before any sampling: first `429` (both Codex subscription accounts on the worker had used their weekly quota), then a quota/billing refusal on the owner-approved API-key account, which was disabled again right after. No tool call ran, and the workspace and decoy files are unchanged, so the attempts give no evidence either way. |
+| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Not run yet.** Two attempts were refused by the provider before any sampling (quota). No tool call ran, and the workspace and decoy files are unchanged, so the attempts give no evidence either way. |
 | Stop ends the remote process group (R2) | **Not run yet**, for the same reason. The Stop path itself is shared with blocks 1 and 2. |
 | Native tools unavailable, other plugins' tools blocked | Covered by the canary, against the real `codex app-server` with a mock model. The live check is pending R1. |
