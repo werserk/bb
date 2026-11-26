@@ -185,7 +185,7 @@ Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin too
 
 ## Accounts
 
-Several isolated accounts per worker host, one chosen per thread (block 4). **On hold**: the owner is choosing the direction; the binding lifecycle above was built first.
+Several accounts per worker, one chosen per thread. **Direction chosen** (owner, 2026-11-27): the pool is the central key keeper. Each account signs in once, in BB; a worker holds agent CLIs and scratch directories but no credentials, and a workspace host gets neither.
 
 What the pool gives a thread today, checked in `plugins/account-pool` and the live `account-pool-prewarm` variant:
 
@@ -198,12 +198,13 @@ What the pool gives a thread today, checked in `plugins/account-pool` and the li
 | Providers | `claude-code`, `codex`; no OpenCode. |
 | Native cells (variant only) | `bb pool native …` (`docs/NATIVE_POOL.md` there): one labelled Claude account per enrolled, centrally excluded host under its own Unix user, with thread→cell bindings. Out of repo, one whole host per account. |
 
-The two directions:
+Next step (new blocks, not built):
 
-- **Account homes on the worker** (plan revision 2, code parked): a named provider config directory per account on the worker, chosen with `spawn --account`, given to the thread as `CLAUDE_CONFIG_DIR` through `contributeEnv`, and the pool bypassed for that thread. Keys stay on the worker, but each home needs its own sign-in on each worker.
-- **The pool as the central key keeper**: one sign-in in BB, used by every worker, with a pin-and-label seam in the pool so a thread keeps and shows one account. Fewer sign-ins, which matters for provider ban risk; it moves keys off the worker (against the earlier "keys only on the worker host" decision) and needs a pool change.
+- **Pool:** a per-thread pass issued through `contributeEnv` in place of the per-machine hub token; the hub maps pass → thread → account policy (`auto`, or one named account with a per-thread limit action: ask, fall back to auto, or stop) and revokes the pass on archive and delete; a versioned contract to get and set a thread's policy and read its current account; machine roles so a workspace host gets no pass.
+- **account-workers:** `spawn --account` through that contract, and the account shown in `list`.
+- **Switching mid-thread:** the next model request goes to the new account without a new provider session, as the pool's failover does today. That this holds for each CLI is inferred, not checked.
 
-Open point for either direction: switching the account mid-conversation means a new provider session, and Claude and Codex keep session history inside the account's home, so the history does not follow the switch. The binding should therefore keep its account choice mutable and resolve it per session start, not freeze it at spawn.
+Dropped: per-worker account homes and a pool bypass for them (each home needed its own sign-in on each worker). Homes may return for a worker with no hub.
 
 ## Built vs planned
 
@@ -215,7 +216,7 @@ Open point for either direction: switching the account mid-conversation means a 
 | Provider profile seam, OpenCode profile | Built, block 2 |
 | Codex profile | Built, block 3 |
 | Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4 |
-| Account selection | On hold, block 4: direction is the owner's choice ([accounts](#accounts)) |
+| Account selection | Planned: pool as key keeper with per-thread passes ([accounts](#accounts)); block 4 built the binding lifecycle it needs |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
 ## Open points

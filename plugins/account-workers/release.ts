@@ -65,17 +65,19 @@ export class Releaser {
   }
 
   sweep(): Promise<void> {
-    this.sweeping ??= (async () => {
-      try {
-        for (const binding of this.deps.store.pendingRelease()) {
-          if (binding.releaseError === null) await this.release(binding);
-        }
-      } finally {
-        this.sweeping = null;
-        this.schedule();
-      }
-    })();
-    return this.sweeping;
+    if (this.sweeping !== null) return this.sweeping;
+    const run = this.releasePending().finally(() => {
+      this.sweeping = null;
+      this.schedule();
+    });
+    this.sweeping = run;
+    return run;
+  }
+
+  private async releasePending(): Promise<void> {
+    for (const binding of this.deps.store.pendingRelease()) {
+      if (binding.releaseError === null) await this.release(binding);
+    }
   }
 
   private schedule(): void {

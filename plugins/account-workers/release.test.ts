@@ -83,6 +83,15 @@ describe("release", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("a sweep with nothing pending does not block later sweeps", async () => {
+    await releaser.sweep();
+    const b = bound();
+    releaser.retire(b, now, "unbind");
+    await releaser.sweep();
+    expect(calls.map((c) => c.method)).toEqual(["releaseScratch"]);
+    expect(store.byId(b.id)?.cleanedAt).toBe(now);
+  });
+
   it("the due timer runs the sweep", async () => {
     const b = bound();
     releaser.retire(b, now + 30_000, "archive");
