@@ -1,9 +1,12 @@
-import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DENIED_NATIVE_TOOLS, guardLauncher, prepareScratch, scratchBase } from "./scratch.js";
+import { WorkspaceRefusal } from "./confine.js";
+import { PROFILES } from "./profiles/index.js";
+import type { ProviderProfile } from "./profiles/types.js";
+import { prepareScratch, scratchBase, verifyProfile } from "./scratch.js";
+import { TOOL_NAMES } from "./tools.js";
 
 let state: string;
 beforeEach(async () => {
@@ -12,13 +15,15 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   await rm(state, { recursive: true, force: true });
 });
 
-const ALLOWED = ["mcp__bb-bridge__workspace_read"];
+const base = () => path.join(state, "bb-account-workers/scratch");
 
-function runGuard(dir: string, stdin: string) {
-  return spawnSync("sh", [path.join(dir, ".claude", "aw-guard.sh")], { input: stdin, encoding: "utf8" });
+function withProfile(profile: ProviderProfile) {
+  (PROFILES as ProviderProfile[]).push(profile);
+  return () => (PROFILES as ProviderProfile[]).splice(PROFILES.indexOf(profile), 1);
 }
 
 describe("scratch directory", () => {
@@ -27,62 +32,74 @@ describe("scratch directory", () => {
     expect(scratchBase({ XDG_STATE_HOME: "relative" })).toMatch(/\.local\/state\/bb-account-workers\/scratch$/);
   });
 
-  it("writes a settings file that denies native tools and hooks every tool call", async () => {
-    const { path: dir } = await prepareScratch({ bindingId: "aw_test", allowedTools: ALLOWED });
-    expect(dir).toBe(path.join(state, "bb-account-workers/scratch/aw_test"));
-    const settings = JSON.parse(await readFile(path.join(dir, ".claude/settings.local.json"), "utf8"));
-    expect(settings.permissions.deny).toEqual(DENIED_NATIVE_TOOLS);
-    expect(settings.permissions.deny).toEqual(expect.arrayContaining(["Bash", "Read", "Agent", "mcp__bb-bridge__update_environment_directory"]));
-    expect(settings.hooks.PreToolUse).toEqual([
-      { matcher: "*", hooks: [{ type: "command", command: `sh '${dir}/.claude/aw-guard.sh'` }] },
-    ]);
-    expect((await stat(path.join(dir, ".claude/aw-guard.sh"))).mode & 0o111).not.toBe(0);
-  });
-
-  it("guard allows only listed tools and blocks everything else with exit 2", async () => {
-    const { path: dir } = await prepareScratch({ bindingId: "aw_guard", allowedTools: ALLOWED });
-    const call = (tool_name: unknown, extra = {}) => runGuard(dir, JSON.stringify({ tool_name, tool_input: {}, ...extra }));
-    expect(call("mcp__bb-bridge__workspace_read").status).toBe(0);
-    expect(call("ToolSearch").status).toBe(0);
-    expect(call("mcp__bb-bridge__bb_update_plan").status).toBe(0);
-    for (const name of ["Bash", "mcp__bb-bridge__rtk_shell", "mcp__bb-bridge__agent_plugins_call", "mcp__other__x", "Agent"]) {
-      const result = call(name);
-      expect(result.status).toBe(2);
-      expect(result.stderr).toContain("disabled in this thread");
-    }
-    expect(call(42).status).toBe(2);
-    expect(runGuard(dir, "not json").status).toBe(2);
-    expect(runGuard(dir, "").status).toBe(2);
-    expect(runGuard(dir, JSON.stringify({ tool_name: "Bash", tool_input: { tool_name: "ToolSearch" } })).status).toBe(2);
-  });
-
-  it("launcher fails closed when the guard script is missing or broken", async () => {
-    const { path: dir } = await prepareScratch({ bindingId: "aw_broken", allowedTools: ALLOWED });
-    const guard = path.join(dir, ".claude", "aw-guard.mjs");
-    const allowed = JSON.stringify({ tool_name: "ToolSearch", tool_input: {} });
-    expect(runGuard(dir, allowed).status).toBe(0);
-    await writeFile(guard, "this is not javascript (");
-    expect(runGuard(dir, allowed).status).toBe(2);
-    await writeFile(guard, "process.exit(1);");
-    expect(runGuard(dir, allowed).status).toBe(2);
-    await writeFile(guard, "process.kill(process.pid, 'SIGKILL');");
-    expect(runGuard(dir, allowed).status).toBe(2);
-    await rm(guard);
-    const missing = runGuard(dir, allowed);
-    expect(missing.status).toBe(2);
-    expect(missing.stderr).toContain("tool blocked");
-  });
-
-  it("launcher fails closed when no node is found", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "aw-launch-"));
+  it("hands the profile the real scratch path, tool names, provider and model, then runs check", async () => {
+    const seen: string[] = [];
+    const undo = withProfile({
+      id: "probe",
+      providerIds: ["probe-provider"],
+      async prepare(ctx) {
+        seen.push(`prepare ${ctx.scratchDir} ${ctx.bindingId} ${ctx.toolNames.join(",")} ${ctx.providerId} ${ctx.model}`);
+        expect(await readdir(ctx.scratchDir)).toEqual([]);
+      },
+      async check(ctx) {
+        seen.push(`check ${ctx.scratchDir}`);
+      },
+    });
     try {
-      const launcher = path.join(dir, "aw-guard.sh");
-      await writeFile(launcher, guardLauncher("/nonexistent/node"));
-      const result = spawnSync("/bin/sh", [launcher], { input: "{}", encoding: "utf8", env: { PATH: "/nonexistent" } });
-      expect(result.status).toBe(2);
-      expect(result.stderr).toContain("node not found");
+      const result = await prepareScratch({ bindingId: "aw_p", profile: "probe", providerId: "probe-provider", model: "m1" });
+      const dir = path.join(base(), "aw_p");
+      expect(result).toEqual({ path: dir });
+      expect(seen).toEqual([`prepare ${dir} aw_p ${TOOL_NAMES.join(",")} probe-provider m1`, `check ${dir}`]);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      undo();
+    }
+  });
+
+  it("removes the scratch directory when prepare or check throws", async () => {
+    for (const stage of ["prepare", "check"] as const) {
+      const undo = withProfile({
+        id: "failing",
+        providerIds: [],
+        async prepare() {
+          if (stage === "prepare") throw new WorkspaceRefusal("no prepare");
+        },
+        async check() {
+          throw new WorkspaceRefusal("no check");
+        },
+      });
+      try {
+        await expect(prepareScratch({ bindingId: "aw_f", profile: "failing", providerId: "x", model: null })).rejects.toThrow(`no ${stage}`);
+        expect(await readdir(base())).toEqual([]);
+      } finally {
+        undo();
+      }
+    }
+  });
+
+  it("refuses an unknown profile before touching the disk", async () => {
+    await expect(prepareScratch({ bindingId: "aw_u", profile: "nope", providerId: "x", model: null })).rejects.toThrow("unknown provider profile nope");
+    await expect(readdir(base())).rejects.toThrow();
+  });
+
+  it("verify runs the profile's hook with the real scratch path; profiles without one accept", async () => {
+    const calls: unknown[] = [];
+    const undo = withProfile({
+      id: "verifying",
+      providerIds: [],
+      async prepare() {},
+      async verify(ctx) {
+        calls.push(ctx);
+        if (ctx.toolName === "workspace_exec") throw new WorkspaceRefusal("no heartbeat");
+      },
+    });
+    try {
+      await prepareScratch({ bindingId: "aw_v", profile: "verifying", providerId: "x", model: null });
+      await expect(verifyProfile({ bindingId: "aw_v", profile: "verifying", toolName: "workspace_read", input: { path: "a" } })).resolves.toEqual({});
+      await expect(verifyProfile({ bindingId: "aw_v", profile: "verifying", toolName: "workspace_exec", input: {} })).rejects.toThrow("no heartbeat");
+      expect(calls[0]).toMatchObject({ scratchDir: path.join(base(), "aw_v"), bindingId: "aw_v", toolName: "workspace_read", input: { path: "a" } });
+      await expect(verifyProfile({ bindingId: "aw_none", profile: "claude", toolName: "workspace_read", input: {} })).resolves.toEqual({});
+    } finally {
+      undo();
     }
   });
 });

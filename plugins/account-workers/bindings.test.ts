@@ -1,0 +1,40 @@
+import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
+import { BindingStore } from "./bindings.js";
+
+const BLOCK1_SCHEMA = `CREATE TABLE bindings (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT UNIQUE,
+  worker_host_id TEXT NOT NULL,
+  scratch_path TEXT NOT NULL,
+  workspace_host_id TEXT NOT NULL,
+  workspace_host_name TEXT NOT NULL,
+  root TEXT NOT NULL,
+  instructions TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`;
+
+const target = { workspaceHostId: "w2", workspaceHostName: "ws2", root: "/r2", instructions: [] };
+
+describe("binding store", () => {
+  it("migrates a block 1 database: old rows read as the claude profile, not broken", () => {
+    const db = new Database(":memory:");
+    db.exec(BLOCK1_SCHEMA);
+    db.prepare("INSERT INTO bindings VALUES ('aw_old', 't1', 'h1', '/s/aw_old', 'h2', 'ws', '/r', '[]', 1, 1)").run();
+    const store = new BindingStore(db);
+    expect(store.byThread("t1")).toMatchObject({ id: "aw_old", profile: "claude", brokenReason: null, root: "/r" });
+    new BindingStore(db);
+    const created = store.create({ id: "aw_new", workerHostId: "h1", scratchPath: "/s/aw_new", workspaceHostId: "h2", workspaceHostName: "ws", root: "/r", instructions: [], profile: "opencode" });
+    expect(created).toMatchObject({ profile: "opencode", brokenReason: null, threadId: null });
+  });
+
+  it("markBroken sticks until rebind clears it", () => {
+    const store = new BindingStore(new Database(":memory:"));
+    store.create({ id: "aw_b", workerHostId: "h1", scratchPath: "/s/aw_b", workspaceHostId: "h2", workspaceHostName: "ws", root: "/r", instructions: [], profile: "claude" });
+    store.claimById("aw_b", "t");
+    store.markBroken("aw_b", "no heartbeat");
+    expect(store.byThread("t")?.brokenReason).toBe("no heartbeat");
+    expect(store.rebind("t", target)).toMatchObject({ brokenReason: null, root: "/r2" });
+  });
+});

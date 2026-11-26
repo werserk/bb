@@ -12,13 +12,14 @@ import {
   resolveRoot,
   writeOp,
 } from "./ops.js";
-import { prepareScratch } from "./scratch.js";
+import { prepareScratch, verifyProfile } from "./scratch.js";
 
 export default experimental_defineHostEntry({
   contract: accountWorkersHostContract,
   handlers: {
     resolveRoot: (input) => guarded(() => resolveRoot(input)),
-    prepareScratch: (input) => guarded(() => prepareScratch(input)),
+    prepareScratch: (input, ctx) => guarded(() => prepareScratch(input, ctx.signal)),
+    verifyProfile: (input, ctx) => guarded(() => verifyProfile(input, ctx.signal)),
     read: (input) => guarded(() => readOp(input)),
     write: (input) => guarded(() => writeOp(input)),
     edit: (input) => guarded(() => editOp(input)),

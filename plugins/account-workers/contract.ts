@@ -1,5 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { PROFILE_ID } from "./profiles/types.js";
 
 function outcome<T extends z.ZodRawShape>(shape: T) {
   return z.discriminatedUnion("ok", [
@@ -10,6 +11,8 @@ function outcome<T extends z.ZodRawShape>(shape: T) {
 
 const root = z.string().min(1);
 const relPath = z.string().min(1).max(4096);
+const bindingId = z.string().regex(/^[a-z0-9_-]{1,64}$/);
+const profileId = z.string().regex(PROFILE_ID);
 
 export const instructionFileSchema = z
   .object({ file: z.string(), text: z.string(), truncated: z.boolean() })
@@ -29,11 +32,24 @@ export const accountWorkersHostContract = defineRpcContract({
   prepareScratch: {
     input: z
       .object({
-        bindingId: z.string().regex(/^[a-z0-9_-]{1,64}$/),
-        allowedTools: z.array(z.string().regex(/^[A-Za-z0-9_-]+$/)).min(1),
+        bindingId,
+        profile: profileId,
+        providerId: z.string().min(1).max(128),
+        model: z.string().min(1).max(256).nullable(),
       })
       .strict(),
     output: outcome({ path: z.string() }),
+  },
+  verifyProfile: {
+    input: z
+      .object({
+        bindingId,
+        profile: profileId,
+        toolName: z.string().regex(/^[a-z_]{1,64}$/),
+        input: z.record(z.string(), z.unknown()),
+      })
+      .strict(),
+    output: outcome({}),
   },
   read: {
     input: z
