@@ -1,3 +1,4 @@
+import { rewindPlacementMigration } from "./helpers/rewind.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
@@ -114,6 +115,19 @@ it.each([false, true])(
         .all();
       expect(queueBefore).toHaveLength(alreadyMigrated ? 2 : 5);
 
+      rewindPlacementMigration(db);
+      for (const table of [
+        "conversation_questions",
+        "question_resolution_events",
+      ]) {
+        expect(db.$client.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
+        db.$client.exec(`DROP TABLE ${table}`);
+      }
+      for (const column of ["service_turn", "question_id", "question_revision"])
+        db.$client.exec(
+          `ALTER TABLE queued_thread_messages DROP COLUMN ${column}`,
+        );
+      db.$client.exec("DELETE FROM __bb_fork_migrations");
       dropIdleLifecycleIndexes(db);
       rewindThreadPruningWork(db);
       dropPluginEnabledFollowsDefaultColumn(db);

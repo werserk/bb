@@ -1,6 +1,7 @@
 import type { DbConnection } from "../../src/index.js";
 
 export function dropPluginEnabledFollowsDefaultColumn(db: DbConnection): void {
+  rewindPlacementMigration(db);
   const columns = db.$client
     .prepare<[], { name: string }>("PRAGMA table_info(plugins)")
     .all();
@@ -10,6 +11,7 @@ export function dropPluginEnabledFollowsDefaultColumn(db: DbConnection): void {
 }
 
 export function rewindThreadPruningWork(db: DbConnection): void {
+  rewindPlacementMigration(db);
   db.$client.exec(`
     DROP TABLE IF EXISTS thread_pruning_work;
     DELETE FROM __drizzle_migrations WHERE created_at >= 1791399370294;
@@ -76,6 +78,7 @@ interface QueuedTableColumn {
 }
 
 export function rewindQueuedMessageStateMigration(db: DbConnection): void {
+  rewindPlacementMigration(db);
   const columns = db.$client
     .prepare<[], QueuedTableColumn>("PRAGMA table_info(queued_thread_messages)")
     .all();
@@ -126,6 +129,7 @@ export function dropQueuedMessageDeliveryColumns(db: DbConnection): void {
 }
 
 export function dropThreadStatusChangedAtColumn(db: DbConnection): void {
+  rewindPlacementMigration(db);
   const columns = db.$client
     .prepare<[], { name: string }>("PRAGMA table_info(threads)")
     .all();
@@ -135,6 +139,7 @@ export function dropThreadStatusChangedAtColumn(db: DbConnection): void {
 }
 
 export function restoreDiffViewedFilesTable(db: DbConnection): void {
+  rewindPlacementMigration(db);
   db.$client.exec(`
     CREATE TABLE IF NOT EXISTS diff_viewed_files (
       environment_id text NOT NULL,
@@ -146,4 +151,47 @@ export function restoreDiffViewedFilesTable(db: DbConnection): void {
       FOREIGN KEY (environment_id) REFERENCES environments(id) ON UPDATE no action ON DELETE cascade
     )
   `);
+}
+
+export function rewindPlacementMigration(db: DbConnection): void {
+  const exists = db.$client
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE name = 'placement_operation'",
+    )
+    .get();
+  if (!exists) return;
+  db.$client.exec(
+    "DROP INDEX IF EXISTS environments_owner_placement_idx; DROP INDEX IF EXISTS queued_thread_messages_placement_idx;",
+  );
+  const queueColumns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(queued_thread_messages)")
+    .all();
+  if (queueColumns.some((c) => c.name === "placement_operation_id"))
+    db.$client.exec(
+      "ALTER TABLE queued_thread_messages DROP COLUMN placement_operation_id",
+    );
+  if (queueColumns.some((c) => c.name === "placement_fence"))
+    db.$client.exec(
+      "ALTER TABLE queued_thread_messages DROP COLUMN placement_fence",
+    );
+  const environmentColumns = db.$client
+    .prepare<[], { name: string }>("PRAGMA table_info(environments)")
+    .all();
+  if (environmentColumns.some((c) => c.name === "owner_placement_operation_id"))
+    db.$client.exec(
+      "ALTER TABLE environments DROP COLUMN owner_placement_operation_id",
+    );
+  for (const table of [
+    "placement_binding",
+    "placement_retry_consent",
+    "placement_worker",
+    "placement_operation",
+    "placement_workspace",
+    "placement_owner",
+    "placement_counter",
+  ])
+    db.$client.exec(`DROP TABLE ${table}`);
+  db.$client
+    .prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?")
+    .run(1794894504782);
 }

@@ -514,3 +514,31 @@ termination. Concurrent replacements share the same handoff; Stop invalidates it
 before a successor can start. Termination timeouts retain closing ownership and
 reject new work until a later close proves the previous child has exited. This
 keeps inherited native account locks authoritative during same-session continuation.
+
+### Placement custody contracts and storage
+
+The domain owns the closed Workspace v1 descriptor, normalized capability set,
+canonical digest, Agent binding, worker evidence, and placement operation
+projection. Server-contract composes the existing create/send/fork schemas into
+the versioned placement envelope; retries accept only a failed operation and
+one consent reference. Full original input is separate from the public operation
+projection and its explicit draft recovery contract.
+
+The placement tables retain acceptance sequence, immutable accepted bytes,
+prepared snapshots, Workspace descriptors, worker fences, thread affinity,
+retry consent, and queue receipts. The queue remains `queued_thread_messages`;
+consuming its row cannot remove the operation's receipt. IMMEDIATE transactions
+serialize acceptance, reservation, cancellation and custody changes. Thread
+attachment and queue receipt helpers use their caller's transaction and defer
+notifications until commit. Reclaim requires a proved idle resident and the
+oldest compatible target; release requires process closure and a newer
+independent observation of the same fixed inode free. Unknown custody never
+expires into availability. Managed workers must be excluded from old central
+routing before admission.
+
+Migration 0153 adds nullable ownership references without rebuilding legacy
+queue/environment tables, preserving fork-only columns and existing Codex and
+Claude rows. Owner registration defaults to disabled admission. These are local
+contract/storage foundations: placement service orchestration, normal-entrypoint
+guards, provider transport, SDK/CLI/UI integration, activation and live
+qualification remain pending.

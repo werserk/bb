@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { publishedMigrationWhensByTag } from "../src/migration-history.js";
 import {
+  rewindPlacementMigration,
   dropPluginEnabledFollowsDefaultColumn,
   dropIdleLifecycleIndexes,
   rewindThreadPruningWork,
@@ -305,6 +306,7 @@ function dropThreadConversationOutlinesTable(db: DbConnection): void {
 }
 
 function dropRewindAddedTables(db: DbConnection): void {
+  rewindPlacementMigration(db);
   rewindEnvironmentRowFactsMigration(db);
   rewindEnvironmentProvidersMigration(db);
   dropThreadConversationOutlinesTable(db);
@@ -740,6 +742,7 @@ function dropMarketplaceStatsColumn(db: DbConnection): void {
  * 0108's, so the replay recreates the table before 0110 drops it again.
  */
 function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
+  rewindPlacementMigration(db);
   dropIdleLifecycleIndexes(db);
   rewindThreadPruningWork(db);
   dropPluginEnabledFollowsDefaultColumn(db);
