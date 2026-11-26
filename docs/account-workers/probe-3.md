@@ -89,8 +89,8 @@ All of this was checked by name only. Codex's MCP OAuth store (`.credentials.jso
 
 | Item | Result |
 |---|---|
-| Spawn through the real gate on the worker host | Pass. `bb account-workers spawn --provider codex` ran `prepare` and the canary on the worker and created the binding. The scratch `.codex/` files and the trust entry (project trust plus one hook-trust key) are in place. The Codex thread started in the scratch directory. |
+| Spawn through the real gate on the worker host | Pass, twice (two bindings). `bb account-workers spawn --provider codex` ran `prepare` and the canary on the worker and created the binding. The scratch `.codex/` files and the trust entry (project trust plus one hook-trust key) are in place. The Codex thread started in the scratch directory and sent its first model request. |
 | No-fallback canary on the worker's real user config | Pass (dry run, see above); the config stayed byte-identical. |
-| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Not run yet.** The model request was refused with `429 Too Many Requests`: both Codex accounts on the worker had used their weekly quota. No tool call ran, so this attempt gives no evidence either way. |
+| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Not run yet.** Two attempts were refused before any sampling: first `429` (both Codex subscription accounts on the worker had used their weekly quota), then a quota/billing refusal on the owner-approved API-key account, which was disabled again right after. No tool call ran, and the workspace and decoy files are unchanged, so the attempts give no evidence either way. |
 | Stop ends the remote process group (R2) | **Not run yet**, for the same reason. The Stop path itself is shared with blocks 1 and 2. |
 | Native tools unavailable, other plugins' tools blocked | Covered by the canary, against the real `codex app-server` with a mock model. The live check is pending R1. |
