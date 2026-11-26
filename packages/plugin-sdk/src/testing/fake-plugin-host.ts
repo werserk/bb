@@ -1,4 +1,5 @@
 import { createAiGenerationDispatcher } from "../internal/ai-generation.js";
+import { BB_PRE_COMPLETION_LIMITS } from "@bb/domain";
 import { experimental_PluginRpcCallError } from "../rpc-contract.js";
 import {
   rpcInvalidationTags,
@@ -1090,6 +1091,23 @@ function createFakePluginHostInternal(
   const aiServiceRegistrations: PluginAiServiceDeclaration[] = [];
   const attentionPolicies = new Map<string, PluginThreadAttentionPolicy>();
   const experimental_threads: PluginExperimentalThreads = {
+    experimental_preCompletionCapabilities() {
+      return {
+        version: 1,
+        providers: {
+          "claude-code": "requires-matching-bridge",
+          codex: "requires-matching-bridge",
+        },
+        deadlineMs: BB_PRE_COMPLETION_LIMITS.deadlineMs,
+        finalTextLimit: BB_PRE_COMPLETION_LIMITS.finalTextLimit,
+      };
+    },
+    experimental_setPreCompletionPolicy() {
+      assertLive();
+      throw new Error(
+        "Native pre-completion is unavailable in the fake host; use a core integration fixture",
+      );
+    },
     experimental_serviceTurnCapabilities() {
       return { serviceTurns: { version: 1 } };
     },

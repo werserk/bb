@@ -17,6 +17,7 @@ export const notificationSourceSchema = z.enum([
   "ancestor",
   "global",
   "child-default",
+  "ancestor-child-default",
 ]);
 
 export const threadNotificationInputsSchema = z
@@ -26,6 +27,12 @@ export const threadNotificationInputsSchema = z
       .object({ level: notificationLevelSchema, threadId: z.string().min(1) })
       .strict()
       .nullable(),
+    childLevel: ownNotificationLevelSchema.optional(),
+    inheritedChildLevel: z
+      .object({ level: notificationLevelSchema, threadId: z.string().min(1) })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -103,13 +110,15 @@ export function resolveThreadNotifications(
   thread: { parentThreadId: string | null },
   defaults: NotificationDefaults,
 ): ThreadNotifications {
-  const { own, ancestorCap } = stored;
+  const { own, ancestorCap, inheritedChildLevel } = stored;
   const base: { level: NotificationLevel; source: NotificationSource } =
     own !== "inherit"
       ? { level: own, source: "self" }
-      : thread.parentThreadId !== null && defaults.childLevel !== "inherit"
-        ? { level: defaults.childLevel, source: "child-default" }
-        : { level: defaults.defaultLevel, source: "global" };
+      : thread.parentThreadId !== null && inheritedChildLevel
+        ? { level: inheritedChildLevel.level, source: "ancestor-child-default" }
+        : thread.parentThreadId !== null && defaults.childLevel !== "inherit"
+          ? { level: defaults.childLevel, source: "child-default" }
+          : { level: defaults.defaultLevel, source: "global" };
   if (ancestorCap === null || !isQuieter(ancestorCap.level, base.level)) {
     return { own, effective: base.level, source: base.source };
   }
@@ -126,11 +135,18 @@ export function describeNotificationSource(row: ThreadNotifications): string {
   if (row.source === "parent") return "limited by parent";
   if (row.source === "ancestor") return "limited by an ancestor";
   if (row.source === "child-default") return "child-thread default";
+  if (row.source === "ancestor-child-default")
+    return "child-thread default set by an ancestor";
   return "default";
 }
 
 function isUnset(inputs: ThreadNotificationInputs): boolean {
-  return inputs.own === "inherit" && inputs.ancestorCap === null;
+  return (
+    inputs.own === "inherit" &&
+    inputs.ancestorCap === null &&
+    (inputs.childLevel ?? "inherit") === "inherit" &&
+    !inputs.inheritedChildLevel
+  );
 }
 
 const SDK_THREAD_BATCH_MAX_IDS = 200;
@@ -145,9 +161,17 @@ function chunk<T>(items: readonly T[]): T[][] {
 
 const NOTIFICATIONS_METADATA_KEY = "notifications";
 
+const CHILD_NOTIFICATIONS_METADATA_KEY = "childNotifications";
+
 const storedNotificationsMetadataSchema = z.object({
   [NOTIFICATIONS_METADATA_KEY]: z
     .object({ own: notificationLevelSchema })
+    .strict(),
+});
+
+const storedChildNotificationsMetadataSchema = z.object({
+  [CHILD_NOTIFICATIONS_METADATA_KEY]: z
+    .object({ level: notificationLevelSchema })
     .strict(),
 });
 
@@ -156,6 +180,20 @@ export function parseStoredNotificationLevel(
 ): NotificationLevel | null {
   const parsed = storedNotificationsMetadataSchema.safeParse(metadata);
   return parsed.success ? parsed.data[NOTIFICATIONS_METADATA_KEY].own : null;
+}
+
+export function parseStoredChildNotificationLevel(
+  metadata: unknown,
+): NotificationLevel | null {
+  const parsed = storedChildNotificationsMetadataSchema.safeParse(metadata);
+  return parsed.success
+    ? parsed.data[CHILD_NOTIFICATIONS_METADATA_KEY].level
+    : null;
+}
+
+interface StoredLevels {
+  own: NotificationLevel | null;
+  child: NotificationLevel | null;
 }
 
 interface ResolvedThreadInputs {
@@ -169,6 +207,10 @@ export interface NotificationPreferences {
   ): Promise<Record<string, ThreadNotificationInputs>>;
   get(threadId: string): Promise<ThreadNotifications>;
   set(
+    threadId: string,
+    level: OwnNotificationLevel,
+  ): Promise<ThreadNotificationInputs>;
+  setChildLevel(
     threadId: string,
     level: OwnNotificationLevel,
   ): Promise<ThreadNotificationInputs>;
@@ -186,17 +228,19 @@ export function createNotificationPreferences(args: {
 }): NotificationPreferences {
   const { bb, getDefaults, publish } = args;
 
-  async function readOwnLevels(
+  async function readStoredLevels(
     threadIds: readonly string[],
-  ): Promise<Map<string, NotificationLevel>> {
-    const levels = new Map<string, NotificationLevel>();
+  ): Promise<Map<string, StoredLevels>> {
+    const levels = new Map<string, StoredLevels>();
     for (const batch of chunk(threadIds)) {
       const { threads } = await bb.sdk.threads.experimental_listPluginMetadata({
         threadIds: batch,
       });
       for (const { threadId, metadata } of threads) {
-        const level = parseStoredNotificationLevel(metadata);
-        if (level !== null) levels.set(threadId, level);
+        const own = parseStoredNotificationLevel(metadata);
+        const child = parseStoredChildNotificationLevel(metadata);
+        if (own !== null || child !== null)
+          levels.set(threadId, { own, child });
       }
     }
     return levels;
@@ -212,7 +256,7 @@ export function createNotificationPreferences(args: {
       });
       ancestry.push(...threads);
     }
-    const levels = await readOwnLevels([
+    const levels = await readStoredLevels([
       ...new Set(
         ancestry.flatMap(({ threadId, ancestorIds }) => [
           threadId,
@@ -223,17 +267,29 @@ export function createNotificationPreferences(args: {
     const resolved = new Map<string, ResolvedThreadInputs>();
     for (const { threadId, ancestorIds } of ancestry) {
       let ancestorCap: ThreadNotificationInputs["ancestorCap"] = null;
+      let inheritedChildLevel: ThreadNotificationInputs["inheritedChildLevel"] =
+        null;
       for (const ancestorId of ancestorIds) {
-        const level = levels.get(ancestorId);
+        const stored = levels.get(ancestorId);
+        const level = stored?.own ?? null;
         if (
-          level !== undefined &&
+          level !== null &&
           (ancestorCap === null || isQuieter(level, ancestorCap.level))
         ) {
           ancestorCap = { level, threadId: ancestorId };
         }
+        if (inheritedChildLevel === null && stored?.child) {
+          inheritedChildLevel = { level: stored.child, threadId: ancestorId };
+        }
       }
+      const self = levels.get(threadId);
       resolved.set(threadId, {
-        inputs: { own: levels.get(threadId) ?? "inherit", ancestorCap },
+        inputs: {
+          own: self?.own ?? "inherit",
+          ancestorCap,
+          childLevel: self?.child ?? "inherit",
+          inheritedChildLevel,
+        },
         parentThreadId: ancestorIds[0] ?? null,
       });
     }
@@ -276,6 +332,19 @@ export function createNotificationPreferences(args: {
         level === "inherit"
           ? { threadId, remove: [NOTIFICATIONS_METADATA_KEY] }
           : { threadId, set: { [NOTIFICATIONS_METADATA_KEY]: { own: level } } },
+      );
+      await publishSubtree(threadId);
+      return (await requireInputs(threadId)).inputs;
+    },
+    async setChildLevel(threadId, level) {
+      await requireInputs(threadId);
+      await bb.sdk.threads.updatePluginMetadata(
+        level === "inherit"
+          ? { threadId, remove: [CHILD_NOTIFICATIONS_METADATA_KEY] }
+          : {
+              threadId,
+              set: { [CHILD_NOTIFICATIONS_METADATA_KEY]: { level } },
+            },
       );
       await publishSubtree(threadId);
       return (await requireInputs(threadId)).inputs;

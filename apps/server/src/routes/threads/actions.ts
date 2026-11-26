@@ -1,6 +1,10 @@
 import { requestQueuedMessageDispatch } from "../../services/threads/queued-message-dispatch.js";
 import { readThreadSendIntakePage } from "@bb/db";
 import { toSendIntakeView } from "../../services/threads/thread-send-intake.js";
+import {
+  runWithSendDiagnostics,
+  traceSendStage,
+} from "../../services/system/send-diagnostics.js";
 import { PLUGIN_RPC_CALLER_HEADER } from "../../services/plugins/plugin-rpc-caller.js";
 import { refreshProviderRetirement } from "../../services/environments/environment-engine.js";
 import {
@@ -270,10 +274,17 @@ export function registerThreadActionRoutes(
     return { payload, thread };
   }
 
-  post(routes.send, async (context, payload) => {
-    const args = authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload);
-    return context.json(await acceptThreadSendRequest(deps, args));
-  });
+  post(routes.send, async (context, payload) =>
+    runWithSendDiagnostics(
+      deps,
+      { threadId: context.req.param("id"), service: payload.serviceTurn ? 1 : 0 },
+      async () => {
+        const args = await traceSendStage("guards", async () =>
+          authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload));
+        return context.json(await acceptThreadSendRequest(deps, args));
+      },
+    ),
+  );
   post(routes.sendAdmission, async (context, payload) => {
     assertSendIntakeEnabled(deps);
     const args = authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload);

@@ -487,12 +487,84 @@ async function handleRequest(message) {
       });
       return;
     case "config/read":
-      if (script?.configReadError) {
+      if (script?.hookActivationFailure) {
+        const flag = process.argv.find((arg) => arg.startsWith("hooks.Stop="));
+        const command = flag
+          ? JSON.parse(
+              flag.slice(
+                flag.indexOf("command=") + 8,
+                flag.indexOf(",timeout="),
+              ),
+            )
+          : null;
+        const layers = [
+          {
+            name: { type: "user" },
+            config:
+              command && script.hookActivationFailure === "recheck"
+                ? {
+                    hooks: {
+                      Stop: [
+                        { hooks: [{ type: "command", command: "existing" }] },
+                      ],
+                    },
+                  }
+                : {},
+          },
+        ];
+        if (command)
+          layers.push({
+            name: { type: "sessionFlags" },
+            config: {
+              features: { hooks: true },
+              hooks: {
+                Stop: [{ hooks: [{ type: "command", command, timeout: 4 }] }],
+              },
+            },
+          });
+        respond(id, { layers });
+      } else if (script?.configReadError) {
         respondError(id, -32601, "Configuration read unavailable");
       } else {
         respond(id, script?.configRead ?? { config: { model: null } });
       }
       return;
+    case "hooks/list": {
+      const flag = process.argv.find((arg) => arg.startsWith("hooks.Stop="));
+      const command = flag
+        ? JSON.parse(
+            flag.slice(flag.indexOf("command=") + 8, flag.indexOf(",timeout=")),
+          )
+        : null;
+      respond(id, {
+        data: [
+          {
+            warnings: [],
+            errors: [],
+            hooks: command
+              ? [
+                  {
+                    key: "/<session-flags>/config.toml:stop:0:0",
+                    command,
+                    currentHash: "sha256:" + "a".repeat(64),
+                    eventName: "stop",
+                    enabled: true,
+                    trustStatus:
+                      params.threadId &&
+                      script?.hookActivationFailure === "verify"
+                        ? "untrusted"
+                        : "trusted",
+                    source: "sessionFlags",
+                    sourcePath: "/<session-flags>/config.toml",
+                    displayOrder: 0,
+                  },
+                ]
+              : [],
+          },
+        ],
+      });
+      return;
+    }
     case "skills/list":
       respond(id, script?.skillsList ?? { data: [] });
       return;

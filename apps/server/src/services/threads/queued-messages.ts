@@ -1,3 +1,4 @@
+import { runWithSendDiagnostics } from "../system/send-diagnostics.js";
 import {
   getLatestThreadSequence,
   listQueuedThreadMessages,
@@ -523,7 +524,15 @@ async function sendClaimedQueuedMessageForThread(
   args: SendClaimedQueuedMessageForThreadArgs,
 ): Promise<ThreadQueuedMessage> {
   try {
-    return await sendClaimedQueuedMessageForThreadImpl(deps, args);
+    return await runWithSendDiagnostics(
+      deps,
+      {
+        threadId: args.thread.id,
+        service: args.queuedMessages[0]?.serviceTurn ? 1 : 0,
+        queuedMessageId: args.queuedMessages[0]?.id,
+      },
+      () => sendClaimedQueuedMessageForThreadImpl(deps, args),
+    );
   } catch (error) {
     if (!(error instanceof QuestionResponseNotDeliverableError)) throw error;
     releaseQueuedMessageClaims(deps, args.queuedMessages);

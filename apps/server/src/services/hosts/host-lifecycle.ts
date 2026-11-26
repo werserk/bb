@@ -1,3 +1,4 @@
+import { traceSendStage } from "../system/send-diagnostics.js";
 import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
 import { getHost } from "@bb/db";
 import type { WorkSessionDeps } from "../../types.js";
@@ -9,6 +10,15 @@ import {
 } from "../machines/provider-orchestration.js";
 
 export async function ensureHostSessionReadyForWork(
+  deps: WorkSessionDeps,
+  args: { hostId: string },
+) {
+  return traceSendStage("host.ready", () =>
+    ensureHostSessionReadyForWorkImpl(deps, args),
+  );
+}
+
+async function ensureHostSessionReadyForWorkImpl(
   deps: WorkSessionDeps,
   args: { hostId: string },
 ) {

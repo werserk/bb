@@ -1066,6 +1066,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         title: "Data & platform",
         surfaceIds: [
           "storage",
+          "pre-completion-policy",
           "bb-sdk",
           "thread-plugin-metadata",
           "thread-plan-steps",
@@ -1637,6 +1638,30 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Thread list",
           "Workflows",
         ],
+      },
+      {
+        id: "pre-completion-policy",
+        tagline: "Experimental native Stop policy",
+        title: "Pre-completion policy",
+        summary:
+          "Use a bounded native Stop check on opted-in managed threads. With this, a plugin can:",
+        bullets: [
+          "Register a policy per thread; remove it with null and re-register after restart",
+          "Read bb turn identity, capped final text and pending question IDs",
+          "Allow completion or request one short same-turn continuation",
+          "Expect coverage gaps on timeouts and providers without a matching bridge",
+        ],
+        apiSymbols: [
+          "PluginPreCompletionContext",
+          "PluginPreCompletionHandler",
+          "PluginPreCompletionGap",
+          "bb.experimental_threads.experimental_preCompletionCapabilities",
+          "bb.experimental_threads.experimental_setPreCompletionPolicy",
+          "experimental_PRE_COMPLETION_TOOL_NAME",
+          "experimental_PRE_COMPLETION_LIMITS",
+        ],
+        experimental: true,
+        reference: ["docs/core-owner-attention.md"],
       },
       {
         id: "bb-sdk",

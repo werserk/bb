@@ -570,3 +570,20 @@ Dedicated clear/compact, native drain and thread creation retain native entrypoi
 Provider-registry readiness has a bounded timeout; it does not start intake recovery. runServer explicitly starts the app intake lifecycle after startServerPlugins settles. Early admitted custody remains pending until this signal. Permanent stop fences late startup completion; server-move pause removes readiness before stopping workers. Test harness startup uses the same app lifecycle method and can defer it for a real-DB cold-start regression.
 
 Deleted-thread intake waiters retire from the existing `thread-deleted` notification after the actual database commit; rollback cannot reject live custody. Empty-head recovery also settles vanished-row waiters. Invalid stored native receipt JSON/schema rejects all current listeners with retained-custody `intake_blocked`, unregisters them and reports a content-free diagnostic; it does not alter the row, release its lane or resend. Healthy unrelated threads and active inline tails retain their awaited result.
+
+## Owner-attention pre-completion candidate
+
+`apps/server/src/services/threads/pre-completion.ts` owns the opted-in policy,
+strict native question read, bounded deadline, typed fail-open observations and
+atomic once reservation in existing core-namespaced KV. Claude's native Stop
+callback uses the ordinary authenticated builtin-tool action; both bridges
+reject model-selected calls of its reserved domain name. No daemon wire or
+schema change is introduced. Codex 0.166 uses a session-local trusted command
+hook and bounded private Unix IPC into that same action. Activation first checks
+actual configuration layers and discovery, preserving existing hooks and
+explicit feature opt-out by refusing conflicting or unknown configuration without
+a visible warning (user trust state alone is merged, not refused). Missing observations remain opted-in coverage gaps. Recheck
+or trust verification rejection fails construction and cleans up its child/IPC. Its native lifecycle
+and exact session/turn gate precede the existing assembler mapping; installed bb
+runtime proof remains missing;
+see [the contract and limitations](core-owner-attention.md).

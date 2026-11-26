@@ -1,4 +1,8 @@
 import {
+  traceSendStage,
+  markSendDiagnostic,
+} from "../system/send-diagnostics.js";
+import {
   BB_ASK_QUESTION_TOOL,
   CONVERSATION_QUESTION_INSTRUCTIONS,
 } from "./conversation-question-tool.js";
@@ -152,6 +156,15 @@ export async function resolveThreadRuntimeCommandConfig(
   deps: LoggedWorkSessionDeps,
   args: ResolveThreadRuntimeCommandConfigArgs,
 ): Promise<ResolvedThreadRuntimeCommandConfig> {
+  return traceSendStage("runtime.config", () =>
+    resolveThreadRuntimeCommandConfigImpl(deps, args),
+  );
+}
+
+async function resolveThreadRuntimeCommandConfigImpl(
+  deps: LoggedWorkSessionDeps,
+  args: ResolveThreadRuntimeCommandConfigArgs,
+): Promise<ResolvedThreadRuntimeCommandConfig> {
   markTurnTraceSpan("runtimeConfig.started");
   const workspacePath = requireWorkspacePath(args.environment);
   const project = getProject(deps.db, args.thread.projectId);
@@ -173,6 +186,7 @@ export async function resolveThreadRuntimeCommandConfig(
     workspacePath,
   });
   markTurnTraceSpan("runtimeConfig.workspaceRead");
+  markSendDiagnostic("config.workspace");
   const pluginSkillRoots = getPluginSkillRootContributions(args.thread.id);
   const skillIdsByPlugin = await discoverPluginSkillIds(deps.logger, {
     pluginSkillRoots,
@@ -219,6 +233,7 @@ export async function resolveThreadRuntimeCommandConfig(
     skillIdsByPlugin,
   });
   markTurnTraceSpan("runtimeConfig.pluginConfig");
+  markSendDiagnostic("config.plugins");
   const contributedEnv = mergeHostAndProviderEnvironment(
     await resolveHostEnvironment(deps, {
       hostId: host.id,
@@ -234,6 +249,7 @@ export async function resolveThreadRuntimeCommandConfig(
     }),
   );
   markTurnTraceSpan("runtimeConfig.env");
+  markSendDiagnostic("config.env");
   const injectedSkillSources = (
     await resolveSkillCatalog(deps, {
       pluginSkillRoots,

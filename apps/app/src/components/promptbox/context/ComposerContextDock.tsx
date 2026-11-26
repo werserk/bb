@@ -30,7 +30,6 @@ import "./composer-context.css";
 
 const COMPOSER_INPUT_SELECTOR =
   'textarea, [contenteditable="true"], [role="textbox"]';
-const SECTION_SCROLL_PADDING = 6;
 const CANVAS_BOTTOM_PADDING = 8;
 
 function ContextBody({
@@ -106,17 +105,9 @@ function fitRows(canvas: HTMLElement) {
   canvas.style.height = `${end - canvas.scrollTop}px`;
 }
 
-function scrollToSection(canvas: HTMLElement, key: string | null) {
-  const section =
-    key === null
-      ? null
-      : [
-          ...canvas.querySelectorAll<HTMLElement>("[data-context-section]"),
-        ].find((candidate) => candidate.dataset.contextSection === key);
+function showFromTop(canvas: HTMLElement) {
   canvas.style.height = "";
-  canvas.scrollTop = section
-    ? Math.max(0, positionWithin(canvas, section) - SECTION_SCROLL_PADDING)
-    : 0;
+  canvas.scrollTop = 0;
   fitRows(canvas);
 }
 
@@ -199,6 +190,10 @@ function GroupChip({
   );
 }
 
+const pickOf = (group: ComposerContextGroup) => ({
+  key: group.key,
+  sourceIds: group.entries.map((entry) => entry.sourceId),
+});
 const EMPTY: readonly ComposerContextEntry[] = [];
 const noopSubscribe = () => () => {};
 export function ComposerContextDock({
@@ -225,19 +220,39 @@ export function ComposerContextDock({
     [entries],
   );
   const [expanded, setExpanded] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [pick, setPick] = useState<{
+    key: string;
+    sourceIds: readonly string[];
+  } | null>(null);
   const [canvas, setCanvas] = useState<HTMLDivElement | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const chipButtons = useRef(new Map<string, HTMLButtonElement>());
   const panelId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
-  const disclosure = useRef<HTMLButtonElement>(null);
   const setPanelRef = useComposedRefs(store?.setPanel, panel);
   const hasFacts = entries.length > 0;
-  const open = hasFacts && expanded;
-  const active = groups.find((group) => group.key === selected);
+  // A group's key can change when its source re-publishes (kind or label
+  // arrives later): follow the sources. If they split across groups, or
+  // vanish, the selection is gone.
+  const byKey = pick
+    ? groups.find((group) => group.key === pick.key)
+    : undefined;
+  const bySources =
+    pick && !byKey
+      ? groups.filter((group) =>
+          group.entries.some((entry) =>
+            pick.sourceIds.includes(entry.sourceId),
+          ),
+        )
+      : [];
+  const active = byKey ?? (bySources.length === 1 ? bySources[0] : undefined);
   const sectionKey = active?.key ?? null;
+  // One part at a time: a chip's section, or the composer preview alone.
+  const open =
+    hasFacts && expanded && (pick === null ? Boolean(helper) : !!active);
+  const sectionRef = useRef<string | null>(null);
+  sectionRef.current = sectionKey;
 
   const focusInput = useCallback(() => {
     const input = dock.current?.querySelector<HTMLElement>(
@@ -254,34 +269,36 @@ export function ComposerContextDock({
       setExpanded(false);
       if (!returnFocus) return;
       if (focusInput()) return;
-      (trigger.current?.isConnected
-        ? trigger.current
-        : disclosure.current
-      )?.focus({ preventScroll: true });
+      const chip = sectionRef.current
+        ? chipButtons.current.get(sectionRef.current)
+        : undefined;
+      (trigger.current?.isConnected ? trigger.current : chip)?.focus({
+        preventScroll: true,
+      });
     },
     [focusInput],
   );
-  const reveal = (key: string | null, button: HTMLElement | null) => {
+  const reveal = (group: ComposerContextGroup, button: HTMLElement | null) => {
     trigger.current = button;
-    for (const group of groups) {
-      if (key === null || group.key === key)
-        for (const entry of group.entries) entry.onReveal?.();
-    }
-    setSelected(key);
+    for (const entry of group.entries) entry.onReveal?.();
+    setPick(pickOf(group));
     setExpanded(true);
   };
   const expandPreview = (element: HTMLElement) => {
     trigger.current = element;
     helper?.onReveal?.();
-    setSelected(null);
+    setPick(null);
     setExpanded(true);
   };
-  const toggleGroup = (key: string, button: HTMLButtonElement) => {
-    if (open && sectionKey === key) {
+  const toggleGroup = (
+    group: ComposerContextGroup,
+    button: HTMLButtonElement,
+  ) => {
+    if (open && sectionKey === group.key) {
       trigger.current = button;
       close(true);
     } else {
-      reveal(key, button);
+      reveal(group, button);
     }
   };
 
@@ -299,9 +316,8 @@ export function ComposerContextDock({
         if (!group) return;
         for (const entry of group.entries)
           if (entry.sourceId === sourceId) entry.onReveal?.();
-        trigger.current =
-          chipButtons.current.get(group.key) ?? disclosure.current;
-        setSelected(group.key);
+        trigger.current = chipButtons.current.get(group.key) ?? null;
+        setPick(pickOf(group));
         setExpanded(true);
       },
       blur: onBlurCapture,
@@ -310,7 +326,8 @@ export function ComposerContextDock({
 
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    helper?.strip?.onDismiss();
+    // Only dismiss the preview when it is the part being shown.
+    if (sectionKey === null) helper?.strip?.onDismiss();
     close(true);
   };
   useEffect(() => {
@@ -325,7 +342,7 @@ export function ComposerContextDock({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (canvas && open) scrollToSection(canvas, sectionKey);
+    if (canvas && open) showFromTop(canvas);
   }, [canvas, open, sectionKey]);
   useEffect(() => {
     if (!canvas || !open || typeof ResizeObserver === "undefined") return;
@@ -334,9 +351,17 @@ export function ComposerContextDock({
     return () => observer.disconnect();
   }, [canvas, open, groups, helper]);
 
-  if (!hasFacts && expanded) {
+  if (expanded && !open) {
     setExpanded(false);
-    setSelected(null);
+    setPick(null);
+  } else if (
+    pick &&
+    active &&
+    (active.key !== pick.key ||
+      active.entries.map((entry) => entry.sourceId).join() !==
+        pick.sourceIds.join())
+  ) {
+    setPick(pickOf(active));
   }
 
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -379,7 +404,7 @@ export function ComposerContextDock({
           className="composer-context-panel"
         >
           <div ref={setCanvas} className="composer-context-canvas">
-            {helper && (
+            {helper && sectionKey === null && (
               <section
                 data-context-helper=""
                 className="composer-context-section"
@@ -387,35 +412,35 @@ export function ComposerContextDock({
                 <ContextBody entry={helper} />
               </section>
             )}
-            {groups.map((group) => (
+            {active && (
               <section
-                key={group.key}
-                data-context-section={group.key}
-                data-context-kind={group.kind}
-                data-context-tone={group.tone}
-                aria-labelledby={`${panelId}-${group.key}`}
+                key={active.key}
+                data-context-section={active.key}
+                data-context-kind={active.kind}
+                data-context-tone={active.tone}
+                aria-labelledby={`${panelId}-${active.key}`}
                 className="composer-context-section"
               >
                 <h3
-                  id={`${panelId}-${group.key}`}
+                  id={`${panelId}-${active.key}`}
                   data-context-heading=""
                   className="composer-context-heading"
                 >
-                  <span>{group.label}</span>
-                  {group.count !== undefined && (
+                  <span>{active.label}</span>
+                  {active.count !== undefined && (
                     <>
                       <span aria-hidden>·</span>
                       <span className="composer-context-heading-count">
-                        {group.count}
+                        {active.count}
                       </span>
                     </>
                   )}
                 </h3>
-                {group.entries.map((entry) => (
+                {active.entries.map((entry) => (
                   <ContextBody key={entry.id} entry={entry} />
                 ))}
               </section>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -428,7 +453,7 @@ export function ComposerContextDock({
           aria-label="Thread context summary"
           onKeyDown={onToolbarKeyDown}
         >
-          {helper && !open && (
+          {helper && !(open && sectionKey === null) && (
             <div
               className="composer-context-preview"
               tabIndex={0}
@@ -458,43 +483,10 @@ export function ComposerContextDock({
                   if (button) chipButtons.current.set(group.key, button);
                   else chipButtons.current.delete(group.key);
                 }}
-                onClick={(button) => toggleGroup(group.key, button)}
+                onClick={(button) => toggleGroup(group, button)}
               />
             ))}
           </div>
-          {groups.length >= 2 && (
-            <button
-              ref={disclosure}
-              type="button"
-              className="composer-context-disclosure"
-              aria-label="All thread context"
-              aria-controls={panelId}
-              aria-expanded={open && sectionKey === null}
-              title={
-                open && sectionKey === null
-                  ? "Collapse thread context"
-                  : "Show all thread context"
-              }
-              onClick={(event) => {
-                if (open && sectionKey === null) {
-                  trigger.current = event.currentTarget;
-                  close(true);
-                } else {
-                  reveal(null, event.currentTarget);
-                }
-              }}
-            >
-              <span className="composer-context-label">All</span>
-              <Icon
-                name="ChevronDown"
-                aria-hidden
-                className={cn(
-                  "size-3.5 transition-transform",
-                  !(open && sectionKey === null) && "rotate-180",
-                )}
-              />
-            </button>
-          )}
         </div>
       )}
       {children}

@@ -3,6 +3,10 @@ import {
   assertSubmissionNotAdmitted,
   submissionAdmissionFloor,
 } from "./submission-admission.js";
+import {
+  traceSendStage,
+  markSendDiagnostic,
+} from "../system/send-diagnostics.js";
 import type { ServiceTurnDescriptor } from "@bb/domain";
 import {
   getEnvironment,
@@ -557,7 +561,9 @@ export async function sendThreadMessage(
     return;
   }
   return withThreadSendGuard(args.thread.id, () =>
-    sendThreadMessageWithoutContextClear(deps, args),
+    traceSendStage("send.prepare", () =>
+      sendThreadMessageWithoutContextClear(deps, args),
+    ),
   );
 }
 
@@ -572,6 +578,7 @@ async function sendThreadMessageWithoutContextClear(
   }
   const mode = resolveSendMode(thread, payload.mode);
   ensureRuntimeCanAcceptActiveSend(deps, args);
+  markSendDiagnostic("guards");
   if (mode === "start") {
     ensureThreadCanStartRequest(thread);
   }
@@ -602,10 +609,12 @@ async function sendThreadMessageWithoutContextClear(
   const hasEffectfulMentions = input.some(item => item.type === "text" && item.mentions.some(mention => mention.resource.kind === "plugin"));
   if (hasEffectfulMentions) sealSendIntake(deps.db, args.intake, "mention");
   if (args.deferredFromRequestId === undefined)
-    ({ input, inputGroups } = await appendPluginMentionContext({
-      input,
-      ...(inputGroups !== undefined ? { inputGroups } : {}),
-    }));
+    ({ input, inputGroups } = await traceSendStage("context", () =>
+      appendPluginMentionContext({
+        input,
+        ...(inputGroups !== undefined ? { inputGroups } : {}),
+      }),
+    ));
   if (args.intake) deps.db.transaction(tx => assertSendIntake(tx, args.intake));
   const deferredFirstTurnContext =
     args.deferredFromRequestId === undefined && args.retryOf === undefined
@@ -627,14 +636,16 @@ async function sendThreadMessageWithoutContextClear(
       });
     }
   };
-  const resolvedInput = await resolvePromptAttachmentReferences({
-    db: deps.db,
-    dataDir: deps.config.dataDir,
-    input,
-    projectId: thread.projectId,
-    hostId: threadTargetHostId(deps, thread),
-    beforeWrite: tx => assertSendIntake(tx, args.intake),
-  });
+  const resolvedInput = await traceSendStage("context", () =>
+    resolvePromptAttachmentReferences({
+      db: deps.db,
+      dataDir: deps.config.dataDir,
+      input,
+      projectId: thread.projectId,
+      hostId: threadTargetHostId(deps, thread),
+      beforeWrite: tx => assertSendIntake(tx, args.intake),
+    }),
+  );
   const resolvedByInput = new Map(
     input.map((item, index) => [item, resolvedInput[index]!]),
   );
@@ -846,6 +857,7 @@ async function sendThreadMessageWithoutContextClear(
       queuedRequest.request.notificationChanges,
       queuedRequest.request.notificationMetadata,
     );
+    markSendDiagnostic("enqueue.done", requestId);
     startLiveHostCommand(deps, {
       command: {
         ...command.command,
@@ -946,6 +958,7 @@ async function sendThreadMessageWithoutContextClear(
     queuedRequest.request.notificationChanges,
     queuedRequest.request.notificationMetadata,
   );
+  markSendDiagnostic("enqueue.done", requestId);
   startLiveHostCommand(deps, {
     command,
     hostId: readyEnvironment.hostId,
