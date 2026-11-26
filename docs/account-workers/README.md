@@ -23,6 +23,7 @@ It is built as a BB plugin, `plugins/account-workers`, with no core changes (see
 | [architecture.md](architecture.md) | Design as built, per-provider profile, built vs planned, open points |
 | [decisions.md](decisions.md) | Dated owner decisions with reasons |
 | [roadmap.md](roadmap.md) | Blocks and their issues |
+| [probe-1.md](probe-1.md) | Block 1 probe answers and acceptance results |
 
 ## How to work here
 
