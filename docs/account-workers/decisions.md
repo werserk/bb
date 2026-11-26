@@ -2,6 +2,11 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-26 — Block 2: provider profile seam and the OpenCode profile
+
+- **Decision.** Each provider's worker-side lock-down is a profile in `plugins/account-workers/profiles/` with `prepare`, an optional `check` (refuses the spawn) and an optional `verify` (refuses one tool call and marks the binding broken). The binding stores its profile. `spawn` picks the profile from `--provider`; omitted means `claude-code`, now passed to BB explicitly; a provider with no profile is refused. `configure` gives the tools only to the provider the profile guards. For OpenCode the scratch directory gets an `.opencode/` config that removes the built-in tool plugins and denies every tool except the workspace tools and `bb_update_plan`, plus a guard plugin that rejects anything else; the spawn is refused on OpenCode other than major 2, on config-overriding env vars and on managed config. No core or provider-plugin change.
+- **Why.** Blocks 2 and 3 needed one place to add a provider without touching routing, storage or the host contract; Codex also needs a gate and a per-call check, so the seam carries both. OpenCode reads project config from the session directory with no trust prompt, so scratch files are enough. A permission deny alone is not: upstream BB patches the session to allow `edit`, `shell`, `webfetch` and `external_directory`, and those rules come last. Removing the tool plugins does not depend on rule order, the deny covers tools from other sources, and the guard covers an OpenCode change that makes removal a no-op ([architecture](architecture.md#opencode)).
+
 ## 2026-11-26 — Block 1 design as built (plan approved after independent review)
 
 - **Decision.** Instructions and the per-thread tool set come from `bb.agents.configure`, not `contributeInstructions`. There is no `stop` tool and no background jobs: Stop is the tool call's abort signal, and `exec` is bounded by its timeout (default 120 s, max 600 s). Native Claude tools are off through settings in the thread's scratch directory, a deny list plus a `PreToolUse` allowlist hook, with no change to `provider-claude-code`. The scratch directory lives outside BB's data directory.

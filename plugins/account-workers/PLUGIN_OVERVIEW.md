@@ -6,11 +6,11 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 - Edits and writes show their change as a diff hunk in the chat.
 - Stop ends the running command's process group on the workspace machine.
 - The workspace's `AGENTS.md` and `CLAUDE.md` reach the agent as quoted instructions.
-- For Claude, the thread runs in an empty scratch directory on the worker whose settings turn off native file, shell and other tools, so nothing acts on the worker by mistake.
+- The thread runs in an empty scratch directory on the worker whose settings turn off the provider's native file, shell and other tools, so nothing acts on the worker by mistake. Supported providers: Claude Code (`claude-code`, the default) and OpenCode 2 (`acp-opencode`).
 
 ## For agents and scripts
 
-- `bb account-workers spawn --workspace-machine <machine> --path <dir> --machine <worker> --prompt <text>` starts a bound thread.
+- `bb account-workers spawn --workspace-machine <machine> --path <dir> --machine <worker> --prompt <text> [--provider <id>] [--model <id>]` starts a bound thread.
 - `bb account-workers list`, `rebind`, `unbind` manage bindings.
 - `bb account-workers exec --thread <id> -- <command>` runs a command through the same path as the agent's exec tool.
 

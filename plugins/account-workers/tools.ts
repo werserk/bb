@@ -48,9 +48,45 @@ export const NO_BINDING =
 export const SAME_HOST =
   "The workspace machine is the worker machine. account-workers keeps the worker and the workspace on different machines; bind a workspace on another machine.";
 
+export function brokenText(reason: string): string {
+  return `Workspace tools are off for this thread: the provider profile check refused a call (${reason}). Nothing was changed. The owner can re-enable them with \`bb account-workers rebind\`.`;
+}
+
 export interface ToolDeps {
   host: HostClient;
   bindingFor(threadId: string): Binding | null;
+}
+
+export interface GateDeps extends ToolDeps {
+  verifies(profile: string): boolean;
+  markBroken(bindingId: string, reason: string): void;
+}
+
+export async function gateCall(
+  deps: GateDeps,
+  threadId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<PluginAgentToolResult | null> {
+  const binding = deps.bindingFor(threadId);
+  if (binding === null) return refused(NO_BINDING);
+  if (binding.brokenReason !== null) return refused(brokenText(binding.brokenReason));
+  if (!deps.verifies(binding.profile)) return null;
+  let result: z.output<Contract["verifyProfile"]["output"]>;
+  try {
+    result = await deps.host.call(
+      "verifyProfile",
+      { bindingId: binding.id, profile: binding.profile, toolName, input },
+      { hostId: binding.workerHostId, signal, timeoutMs: CALL_TIMEOUT_MS },
+    );
+  } catch (error) {
+    const cause = signal.aborted ? "the call was stopped" : `the worker check failed (${errorText(error)})`;
+    return refused(`Workspace ${toolName}: ${cause}. Nothing was changed by this call.`);
+  }
+  if (result.ok) return null;
+  deps.markBroken(binding.id, result.error);
+  return refused(brokenText(result.error));
 }
 
 export async function callWorkspace<M extends Method>(
@@ -156,14 +192,16 @@ export const toolDescriptions: Record<ToolName, string> = {
 
 type Params<N extends ToolName> = z.output<(typeof toolParameters)[N]>;
 
-export function runTool<N extends ToolName>(
-  deps: ToolDeps,
+export async function runTool<N extends ToolName>(
+  deps: GateDeps,
   name: N,
   params: Params<N>,
   threadId: string,
   signal: AbortSignal,
 ): Promise<PluginAgentToolResult> {
   const p = params as Record<string, unknown>;
+  const gate = await gateCall(deps, threadId, name, p, signal);
+  if (gate !== null) return gate;
   switch (name) {
     case "workspace_read":
       return callWorkspace(
@@ -224,6 +262,6 @@ export function runTool<N extends ToolName>(
     case "workspace_diff":
       return callWorkspace(deps, threadId, "diff", {}, signal, (r) => r.output);
     default:
-      return Promise.resolve(refused(`unknown tool ${String(name)}`));
+      return refused(`unknown tool ${String(name)}`);
   }
 }

@@ -1,8 +1,10 @@
 import { createFakePluginHost, makeHostResponse, makePluginAgentConfigurationContext, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import type { ExperimentalFakeHostRpcCall } from "@get-bb/plugin-sdk/testing";
 import type { PluginAgentToolResult } from "@get-bb/plugin-sdk";
-import { describe, expect, it } from "vitest";
-import plugin, { MOVED_INSTRUCTIONS } from "./server.js";
+import { afterEach, describe, expect, it } from "vitest";
+import plugin, { MOVED_INSTRUCTIONS, OTHER_PROVIDER_INSTRUCTIONS } from "./server.js";
+import { PROFILES } from "./profiles/index.js";
+import type { ProviderProfile } from "./profiles/types.js";
 import type { Binding } from "./bindings.js";
 import { callWorkspace, NO_BINDING, SAME_HOST, TOOL_NAMES } from "./tools.js";
 
@@ -26,7 +28,17 @@ async function load(hostRpc: HostRpc) {
     makeHostResponse({ id: WORKSPACE, name: "workspace", status: "connected" }),
     makeHostResponse({ id: OTHER, name: "other", status: "connected" }),
   ]);
+  stubMachineEnv(host, [], []);
   return host;
+}
+
+function stubMachineEnv(host: { harness: { sdk: { stub: (method: string, fn: (...args: never[]) => unknown) => void } } }, project: string[], global: string[]) {
+  const vars = (names: string[]) => names.map((name) => ({ name, value: null, secret: true as const, note: null }));
+  host.harness.sdk.stub("projects.machineEnvironment", async () => ({
+    builtInGit: { status: "disabled" as const, statusMessage: "" },
+    variables: vars(project),
+    inheritedVariables: vars(global),
+  }));
 }
 
 function defaultRpc(overrides: Record<string, unknown> = {}): HostRpc {
@@ -47,18 +59,18 @@ function defaultRpc(overrides: Record<string, unknown> = {}): HostRpc {
   };
 }
 
-async function spawnBound(host: Awaited<ReturnType<typeof load>>, threadId = "thread-new") {
+async function spawnBound(host: Awaited<ReturnType<typeof load>>, threadId = "thread-new", extra: string[] = []) {
   host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: threadId }));
   const result = await host.harness.behavior.runCli(
-    ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--json"],
+    ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--json", ...extra],
   );
   expect(result.stderr).toBe("");
   expect(result.exitCode).toBe(0);
   return JSON.parse(result.stdout) as { threadId: string; bindingId: string };
 }
 
-function context(threadId: string, hostId: string, envPath: string | null) {
-  return makePluginAgentConfigurationContext({ thread: { id: threadId }, host: { id: hostId }, environment: { path: envPath } });
+function context(threadId: string, hostId: string, envPath: string | null, providerId = "claude-code") {
+  return makePluginAgentConfigurationContext({ thread: { id: threadId }, host: { id: hostId }, environment: { path: envPath }, provider: { id: providerId } });
 }
 
 describe("spawn and configure", () => {
@@ -72,7 +84,9 @@ describe("spawn and configure", () => {
     });
     const prepare = host.harness.experimental_hostRpcCalls.find((c) => c.method === "prepareScratch");
     expect(prepare?.hostId).toBe(WORKER);
-    expect((prepare?.input as { allowedTools: string[] }).allowedTools).toContain("mcp__bb-bridge__workspace_exec");
+    expect(prepare?.input).toEqual({ bindingId: spawned.bindingId, profile: "claude", providerId: "claude-code", model: null });
+    expect(spawnArgs.providerId).toBe("claude-code");
+    expect(spawnArgs).not.toHaveProperty("model");
 
     const config = await host.harness.behavior.resolveAgentConfiguration(context(spawned.threadId, WORKER, SCRATCH));
     expect(config.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
@@ -224,5 +238,140 @@ describe("tool calls", () => {
     const result = await host.harness.behavior.runCli(["exec", "--thread", threadId, "--timeout-ms", "1000", "--", "sleep", "300"]);
     expect(result.stdout).toContain("cancelled (process group killed)");
     expect(host.harness.experimental_hostRpcCalls.find((c) => c.method === "exec")?.input).toMatchObject({ command: "sleep 300", timeoutMs: 1000 });
+  });
+});
+
+describe("provider profiles", () => {
+  it("spawn picks the profile from --provider and passes provider and model on", async () => {
+    const host = await load(defaultRpc());
+    const spawned = await spawnBound(host, "thread-oc", ["--provider", "acp-opencode", "--model", "openrouter/cheap"]);
+    const prepare = host.harness.experimental_hostRpcCalls.find((c) => c.method === "prepareScratch");
+    expect(prepare?.input).toEqual({ bindingId: spawned.bindingId, profile: "opencode", providerId: "acp-opencode", model: "openrouter/cheap" });
+    const [spawnArgs] = host.harness.sdk.callsTo("threads.spawn")[0] as [Record<string, unknown>];
+    expect(spawnArgs).toMatchObject({ providerId: "acp-opencode", model: "openrouter/cheap" });
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toContain("profile opencode");
+    const config = await host.harness.behavior.resolveAgentConfiguration(context("thread-oc", WORKER, SCRATCH, "acp-opencode"));
+    expect(config.tools).toHaveLength(TOOL_NAMES.length);
+  });
+
+  it("spawn refuses a provider with no profile before any host call", async () => {
+    const host = await load(defaultRpc());
+    host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "never" }));
+    const result = await host.harness.behavior.runCli(
+      ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--provider", "acp-gemini"],
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("Provider acp-gemini has no account-workers profile");
+    expect(host.harness.experimental_hostRpcCalls).toEqual([]);
+    expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+  });
+
+  it("spawn leaves no binding when the worker refuses the profile", async () => {
+    const host = await load(defaultRpc({ prepareScratch: { ok: false, error: "OpenCode 1.4.0 on the worker" } }));
+    host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "never" }));
+    const result = await host.harness.behavior.runCli(
+      ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--provider", "acp-opencode"],
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("OpenCode 1.4.0");
+    expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+  });
+
+  it("spawn refuses when a project or global BB machine variable overrides the profile's config, before any host call", async () => {
+    for (const [project, global, name] of [[["OPENCODE_DISABLE_PROJECT_CONFIG"], [], "OPENCODE_DISABLE_PROJECT_CONFIG"], [["OTHER"], ["OPENCODE_CONFIG_CONTENT"], "OPENCODE_CONFIG_CONTENT"]] as const) {
+      const host = await load(defaultRpc());
+      stubMachineEnv(host, [...project], [...global]);
+      host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "never" }));
+      const result = await host.harness.behavior.runCli(
+        ["spawn", "--workspace-machine", "workspace", "--path", "/work/repo", "--machine", "worker", "--prompt", "hi", "--project", "p1", "--provider", "acp-opencode"],
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(`BB machine variables ${name} are set for project p1`);
+      expect(host.harness.sdk.callsTo("projects.machineEnvironment")[0]).toEqual([{ projectId: "p1" }]);
+      expect(host.harness.experimental_hostRpcCalls).toEqual([]);
+      expect(host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    }
+  });
+
+  it("a profile with no refused variables does not read the machine environment", async () => {
+    const host = await load(defaultRpc());
+    stubMachineEnv(host, ["OPENCODE_CONFIG_CONTENT"], []);
+    await spawnBound(host);
+    expect(host.harness.sdk.callsTo("projects.machineEnvironment")).toEqual([]);
+  });
+
+  it("a thread on a provider its profile does not guard loses the tools", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    for (const provider of ["acp-opencode", "codex", "test-provider"]) {
+      const config = await host.harness.behavior.resolveAgentConfiguration(context(threadId, WORKER, SCRATCH, provider));
+      expect(config.tools).toEqual([]);
+      expect(config.instructions).toBe(OTHER_PROVIDER_INSTRUCTIONS);
+    }
+  });
+});
+
+describe("per-call verify", () => {
+  const verifying: ProviderProfile = { id: "verifying", providerIds: ["verifying-provider"], async prepare() {}, async verify() {} };
+  const read = { ok: true, text: "x", sha256: "s", totalLines: 1, truncated: false };
+
+  async function bound(verify: unknown) {
+    (PROFILES as ProviderProfile[]).push(verifying);
+    const host = await load(defaultRpc({ verifyProfile: verify, read }));
+    const { threadId, bindingId } = await spawnBound(host, "thread-v", ["--provider", "verifying-provider"]);
+    return { host, threadId, bindingId };
+  }
+  const methods = (host: Awaited<ReturnType<typeof load>>) => host.harness.experimental_hostRpcCalls.map((c) => c.method);
+
+  afterEach(() => {
+    const at = PROFILES.indexOf(verifying);
+    if (at >= 0) (PROFILES as ProviderProfile[]).splice(at, 1);
+  });
+
+  it("asks the worker before the workspace call, with the parsed tool input", async () => {
+    const { host, threadId, bindingId } = await bound({ ok: true });
+    const result = await host.harness.behavior.callAgentTool("workspace_read", { path: "a", extra: 1 }, { threadId });
+    expect(text(result)).toContain("x");
+    expect(methods(host)).toEqual(["resolveRoot", "prepareScratch", "verifyProfile", "read"]);
+    const verify = host.harness.experimental_hostRpcCalls.find((c) => c.method === "verifyProfile")!;
+    expect(verify.hostId).toBe(WORKER);
+    expect(verify.input).toEqual({ bindingId, profile: "verifying", toolName: "workspace_read", input: { path: "a" } });
+  });
+
+  it("a refusal marks the binding broken: later calls refuse without host calls and configure drops the tools until rebind", async () => {
+    const { host, threadId } = await bound({ ok: false, error: "no heartbeat for workspace_exec" });
+    const first = await host.harness.behavior.callAgentTool("workspace_exec", { command: "id" }, { threadId });
+    expect(text(first)).toContain("no heartbeat for workspace_exec");
+    const before = methods(host).length;
+    const second = await host.harness.behavior.callAgentTool("workspace_read", { path: "a" }, { threadId });
+    expect(second).toMatchObject({ isError: true });
+    expect(text(second)).toContain("Workspace tools are off");
+    expect(methods(host)).toHaveLength(before);
+    expect(methods(host)).not.toContain("exec");
+    const config = await host.harness.behavior.resolveAgentConfiguration(context(threadId, WORKER, SCRATCH, "verifying-provider"));
+    expect(config.tools).toEqual([]);
+    expect(config.instructions).toContain("no heartbeat");
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toContain("BROKEN");
+
+    expect((await host.harness.behavior.runCli(["rebind", "--thread", threadId, "--workspace-machine", "other", "--path", "/work/repo"])).exitCode).toBe(0);
+    const again = await host.harness.behavior.resolveAgentConfiguration(context(threadId, WORKER, SCRATCH, "verifying-provider"));
+    expect(again.tools).toHaveLength(TOOL_NAMES.length);
+  });
+
+  it("a failed call to the worker refuses that call only", async () => {
+    const { host, threadId } = await bound(new Error("worker disconnected"));
+    const result = await host.harness.behavior.callAgentTool("workspace_read", { path: "a" }, { threadId });
+    expect(result).toMatchObject({ isError: true });
+    expect(text(result)).toContain("the worker check failed (worker disconnected). Nothing was changed");
+    expect(methods(host)).not.toContain("read");
+    expect((await host.harness.behavior.runCli(["list"])).stdout).not.toContain("BROKEN");
+  });
+
+  it("profiles without verify make no extra host call", async () => {
+    const host = await load(defaultRpc({ read }));
+    const { threadId } = await spawnBound(host);
+    await host.harness.behavior.callAgentTool("workspace_read", { path: "a" }, { threadId });
+    expect(methods(host)).toEqual(["resolveRoot", "prepareScratch", "read"]);
   });
 });

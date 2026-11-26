@@ -9,6 +9,8 @@ import {
 } from "@get-bb/plugin-sdk";
 import { BindingStore, canonicalPath, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
+import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
+import type { ProviderProfile } from "./profiles/types.js";
 import {
   execCallTimeout,
   execTimeout,
@@ -19,12 +21,9 @@ import {
   toolParameters,
   SAME_HOST,
   transportFailure,
+  brokenText,
   type HostClient,
 } from "./tools.js";
-
-export function bridgeToolName(name: string): string {
-  return `mcp__bb-bridge__${name}`;
-}
 
 function fence(text: string): string {
   const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
@@ -53,6 +52,9 @@ export function workspaceInstructions(binding: Binding): string {
 export const MOVED_INSTRUCTIONS =
   "## account-workers\nWorkspace tools are disabled: this thread no longer runs in the scratch directory it was bound to.";
 
+export const OTHER_PROVIDER_INSTRUCTIONS =
+  "## account-workers\nWorkspace tools are disabled: this thread now runs on a provider its workspace binding was not prepared for.";
+
 export function configureThread(
   store: BindingStore,
   context: PluginAgentConfigurationContext,
@@ -68,6 +70,12 @@ export function configureThread(
     context.environment.path !== null &&
     canonicalPath(context.environment.path) === binding.scratchPath;
   if (!inScratch) return { ...none, instructions: MOVED_INSTRUCTIONS };
+  if (!profileById(binding.profile)?.providerIds.includes(context.provider.id)) {
+    return { ...none, instructions: OTHER_PROVIDER_INSTRUCTIONS };
+  }
+  if (binding.brokenReason !== null) {
+    return { ...none, instructions: `## account-workers\n${brokenText(binding.brokenReason)}` };
+  }
   return { tools: [...TOOL_NAMES], skills: [], instructions: workspaceInstructions(binding) };
 }
 
@@ -81,7 +89,12 @@ interface ResolvedWorkspace {
 export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<void> {
   const store = new BindingStore(bb.storage.database());
   const host: HostClient = bb.hosts.experimental_client({ contract: accountWorkersHostContract });
-  const deps = { host, bindingFor: (threadId: string) => store.byThread(threadId) };
+  const deps = {
+    host,
+    bindingFor: (threadId: string) => store.byThread(threadId),
+    verifies: (profile: string) => profileById(profile)?.verify !== undefined,
+    markBroken: (bindingId: string, reason: string) => store.markBroken(bindingId, reason),
+  };
 
   for (const name of TOOL_NAMES) {
     bb.agents.registerTool({
@@ -137,8 +150,16 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     return binding;
   }
 
+  async function refusedMachineEnv(profile: ProviderProfile, projectId: string): Promise<string[]> {
+    const names = profile.refusedMachineEnv ?? [];
+    if (names.length === 0) return [];
+    const env = await bb.sdk.projects.machineEnvironment({ projectId });
+    const set = new Set([...env.variables, ...env.inheritedVariables].map((v) => v.name));
+    return names.filter((name) => set.has(name));
+  }
+
   const describe = (b: Binding) =>
-    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}`;
+    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${b.brokenReason !== null ? "  BROKEN" : ""}`;
 
   bb.cli.register(
     defineCli({
@@ -153,7 +174,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             machine: { type: "string", required: true, description: "Worker machine the agent runs on (id or name)" },
             prompt: { type: "string", required: true, stdin: true, description: "First message; --prompt-stdin reads it from stdin" },
             project: { type: "string", description: "Project id (default: the calling thread's project)" },
-            provider: { type: "string", description: "Provider id, e.g. claude-code" },
+            provider: { type: "string", description: `Provider id (default ${DEFAULT_PROVIDER}); one of ${PROFILES.flatMap((p) => p.providerIds).join(", ")}` },
             model: { type: "string", description: "Model id" },
             title: { type: "string", description: "Thread title" },
             "send-at": { type: "integer", min: 0, max: Number.MAX_SAFE_INTEGER, description: "Schedule the first message at this epoch ms instead of now" },
@@ -163,12 +184,28 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             const o = input.options as Record<string, string | number | boolean | undefined>;
             const projectId = (o.project as string | undefined) ?? ctx.projectId;
             if (projectId === undefined) throw new PluginCliError("Pass --project", { code: "missing_project" });
+            const providerId = (o.provider as string | undefined) || DEFAULT_PROVIDER;
+            const profile = profileForProvider(providerId);
+            if (profile === undefined) {
+              throw new PluginCliError(
+                `Provider ${providerId} has no account-workers profile; supported: ${PROFILES.flatMap((p) => p.providerIds).join(", ")}`,
+                { code: "unsupported_provider" },
+              );
+            }
+            const refused = await refusedMachineEnv(profile, projectId);
+            if (refused.length > 0) {
+              throw new PluginCliError(
+                `BB machine variables ${refused.join(", ")} are set for project ${projectId}; they override or disable the scratch ${profile.id} config, so the worker's native tools would stay on. Remove them first.`,
+                { code: "overriding_env" },
+              );
+            }
+            const model = (o.model as string | undefined) || null;
             const worker = await resolveMachine(o.machine as string, ctx.signal);
             const workspace = await resolveWorkspace(o["workspace-machine"] as string, o.path as string, worker.id, ctx.signal);
             const bindingId = `aw_${randomBytes(8).toString("hex")}`;
             const scratch = await host.call(
               "prepareScratch",
-              { bindingId, allowedTools: TOOL_NAMES.map(bridgeToolName) },
+              { bindingId, profile: profile.id, providerId, model },
               { hostId: worker.id, signal: ctx.signal },
             );
             if (!scratch.ok) throw new PluginCliError(`Scratch directory failed: ${scratch.error}`);
@@ -180,14 +217,15 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               workspaceHostName: workspace.hostName,
               root: workspace.root,
               instructions: workspace.instructions,
+              profile: profile.id,
             });
             let threadId: string;
             try {
               const thread = await bb.sdk.threads.spawn({
                 projectId,
                 prompt: o.prompt as string,
-                ...(o.provider ? { providerId: o.provider as string } : {}),
-                ...(o.model ? { model: o.model as string } : {}),
+                providerId,
+                ...(model !== null ? { model } : {}),
                 title: (o.title as string | undefined) ?? `Workspace ${workspace.hostName}:${workspace.root}`,
                 ...(o["send-at"] !== undefined ? { sendAt: o["send-at"] as number } : {}),
                 environment: {
@@ -208,7 +246,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             return {
               exitCode: 0,
               stdout: o.json
-                ? JSON.stringify({ threadId, bindingId, workerHostId: worker.id, scratchPath: scratch.path, workspaceHostId: workspace.hostId, root: workspace.root })
+                ? JSON.stringify({ threadId, bindingId, profile: profile.id, workerHostId: worker.id, scratchPath: scratch.path, workspaceHostId: workspace.hostId, root: workspace.root })
                 : `Thread ${threadId} on ${worker.name}, workspace ${workspace.hostName}:${workspace.root}\nscratch ${scratch.path}`,
             };
           },

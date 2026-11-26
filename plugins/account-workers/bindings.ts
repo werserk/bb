@@ -11,6 +11,8 @@ export interface Binding {
   workspaceHostName: string;
   root: string;
   instructions: InstructionFile[];
+  profile: string;
+  brokenReason: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -24,6 +26,8 @@ interface Row {
   workspace_host_name: string;
   root: string;
   instructions: string;
+  profile: string;
+  broken_reason: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -38,6 +42,8 @@ function toBinding(row: Row): Binding {
     workspaceHostName: row.workspace_host_name,
     root: row.root,
     instructions: JSON.parse(row.instructions) as InstructionFile[],
+    profile: row.profile,
+    brokenReason: row.broken_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -62,16 +68,27 @@ export class BindingStore {
       root TEXT NOT NULL,
       instructions TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      profile TEXT NOT NULL DEFAULT 'claude',
+      broken_reason TEXT
     )`);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(bindings)").all() as { name: string }[]).map((c) => c.name),
+    );
+    if (!columns.has("profile")) {
+      db.exec("ALTER TABLE bindings ADD COLUMN profile TEXT NOT NULL DEFAULT 'claude'");
+    }
+    if (!columns.has("broken_reason")) db.exec("ALTER TABLE bindings ADD COLUMN broken_reason TEXT");
   }
 
-  create(binding: Omit<Binding, "threadId" | "createdAt" | "updatedAt">): Binding {
+  create(binding: Omit<Binding, "threadId" | "brokenReason" | "createdAt" | "updatedAt">): Binding {
     const at = this.now();
     this.db
       .prepare(
-        `INSERT INTO bindings VALUES (@id, NULL, @workerHostId, @scratchPath,
-          @workspaceHostId, @workspaceHostName, @root, @instructions, @at, @at)`,
+        `INSERT INTO bindings (id, thread_id, worker_host_id, scratch_path, workspace_host_id,
+          workspace_host_name, root, instructions, profile, broken_reason, created_at, updated_at)
+         VALUES (@id, NULL, @workerHostId, @scratchPath, @workspaceHostId,
+          @workspaceHostName, @root, @instructions, @profile, NULL, @at, @at)`,
       )
       .run({
         ...binding,
@@ -118,7 +135,7 @@ export class BindingStore {
     this.db
       .prepare(
         `UPDATE bindings SET workspace_host_id = ?, workspace_host_name = ?, root = ?,
-           instructions = ?, updated_at = ? WHERE thread_id = ?`,
+           instructions = ?, broken_reason = NULL, updated_at = ? WHERE thread_id = ?`,
       )
       .run(
         target.workspaceHostId,
@@ -129,6 +146,12 @@ export class BindingStore {
         threadId,
       );
     return this.byThread(threadId);
+  }
+
+  markBroken(id: string, reason: string): void {
+    this.db
+      .prepare("UPDATE bindings SET broken_reason = ?, updated_at = ? WHERE id = ?")
+      .run(reason, this.now(), id);
   }
 
   remove(id: string): boolean {
