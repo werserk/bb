@@ -55,7 +55,9 @@ Canary results on the worker host with Codex 0.167.1:
 |---|---|---|---|---|
 | Synthetic | `gpt-5.6-luna` (code mode only) | 19 | 0 | 0.8 s, 5.5 s |
 | Synthetic | `gpt-5.5` (direct tools, no `exec`) | 23 | 0 | 0.5 s, 3.0 s |
-| The worker's real user config with its MCP servers, dry run | the config's default | 27 | 0 | 7.3 s, 5.2 s |
+| The worker's real user config with its MCP servers, dry run | the config's default, before the review fixes | 27 | 0 | 7.3 s, 5.2 s |
+| The same, after the review fixes (catalog from `models_cache.json`) | `gpt-5.6-luna` | 19 | 0 | 1.0 s |
+| The same | a model known only from the cache (code mode, multi-agent v2) | 28 | 0 | 1.2 s |
 
 Hook-trust discovery adds 0.2–1.2 s. The dry run left the real `config.toml` byte-identical. The canary runs with a temporary `CODEX_HOME` that holds only the tool- and trust-relevant keys and no credentials, and with a minimal environment.
 
@@ -92,8 +94,12 @@ All of this was checked by name only. Codex's MCP OAuth store (`.credentials.jso
 
 | Item | Result |
 |---|---|
-| Spawn through the real gate on the worker host | Pass, twice (two bindings). `bb account-workers spawn --provider codex` ran `prepare` and the canary on the worker and created the binding. The scratch `.codex/` files and the trust entry (project trust plus one hook-trust key) are in place. The Codex thread started in the scratch directory and sent its first model request. |
+| Spawn through the real gate on the worker host | Pass, three bindings. `bb account-workers spawn --provider codex --model gpt-5.6-luna` ran `prepare` and the canary on the worker and created the binding; the last one, on the final code, passed in 3.0 s and saved `.aw/gate.json` (catalog from the cache, `code_mode_only`, 19 calls, 0 failures). |
 | No-fallback canary on the worker's real user config | Pass (dry run, see above); the config stayed byte-identical. |
-| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Not run yet.** Two attempts were refused by the provider before any sampling (quota). No tool call ran, and the workspace and decoy files are unchanged, so the attempts give no evidence either way. |
-| Stop ends the remote process group (R2) | **Not run yet**, for the same reason. The Stop path itself is shared with blocks 1 and 2. |
-| Native tools unavailable, other plugins' tools blocked | Covered by the canary, against the real `codex app-server` with a mock model. The live check is pending R1. |
+| Codex edits and runs code on the workspace host, decoy untouched, local tools blocked (R1) | **Pass.** One turn at low reasoning effort. Codex read the workspace `AGENTS.md` and followed it, fixed `calc.mjs` with `workspace_edit`, and ran `node test.mjs` (`tests passed`) and `uname -n` on the workspace host. Its attempt to create a file on the worker with `apply_patch` was blocked by the guard hook. The decoy copy on the worker (same path) is byte-identical, and neither host has the probe file. |
+| `verify` on the real thread | **Pass.** Seven workspace calls (glob, three parallel reads, edit, two exec), all nested in code-mode `exec`, each consumed one guard heartbeat; none was left over. |
+| Stop ends the remote process group (R2) | **Pass.** Second turn in the same thread: `workspace_exec` `sleep 300` was running on the workspace host 2 s later; after Stop, `ps` 4 s later showed no `sleep`. |
+| Rebind, and a workspace on the worker itself | **Pass** (debug CLI, no model). Rebind moved the next call to another directory on the workspace host; a rebind to the worker machine was refused and left the binding unchanged. |
+| Native tools unavailable, other plugins' tools blocked | Canary against the real `codex app-server` with a mock model, and the blocked `apply_patch` in R1. |
+
+The two live turns used 10 model requests. Two earlier attempts were refused by the provider before any sampling (quota) and ran no tool call.
