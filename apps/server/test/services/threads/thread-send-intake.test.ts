@@ -27,7 +27,7 @@ const payload = (): SendMessageRequest => ({ input: textInput("preserve me"), mo
 
 describe("raw send intake custody", () => {
   it("commits text custody before any asynchronous attachment/provider preparation and replays canonical UUID/hash", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h);
       const resolve = vi.spyOn(attachments, "resolvePromptAttachmentReferences");
       const held = createDeferredPromise<void>();
@@ -59,7 +59,7 @@ describe("raw send intake custody", () => {
   });
 
   it("refuses a retained service reference stopped before startup readiness without changing acknowledged custody", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h);
       const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
       const service = createThreadSendIntakeService(h.deps, execute, () => false);
@@ -78,7 +78,7 @@ describe("raw send intake custody", () => {
   });
 
   it("settles deleted-thread legacy waiters only after the real cascade commits, even before readiness", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h);
       const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
       const service = createThreadSendIntakeService(h.deps, execute, () => false);
@@ -112,7 +112,7 @@ describe("raw send intake custody", () => {
   });
 
   it.each(["project", "host"] as const)("settles vanished-row waiters after a committed %s notification without retiring surviving threads", async signal => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { host, project, thread } = seed(h);
       const other = seed(h);
       const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
@@ -158,7 +158,7 @@ describe("raw send intake custody", () => {
   });
 
   it("does not accept a supplied identity already in the native queue", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h); const request = payload();
       h.db.transaction(tx => createQueuedThreadMessageInTransaction(tx, {
         threadId: thread.id, clientSubmissionId: request.clientSubmissionId, content: request.input,
@@ -174,7 +174,7 @@ describe("raw send intake custody", () => {
   });
 
   it("pins ready same-project assets in the same actual transaction as the receipt", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, project } = seed(h);
       recordProjectAttachment(h.db, { projectId: project.id, storedPath: "owned.bin", originalName: "owned.bin", mimeType: null, sizeBytes: 4, createdAt: 1, readyAt: 2 });
       const held = createDeferredPromise<void>();
@@ -196,7 +196,7 @@ describe("raw send intake custody", () => {
   });
 
   it("copies into a stable private target before ack and survives source-project deletion", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { host, project, thread } = seed(h);
       const { project: source } = seedProjectWithSource(h.deps, { hostId: host.id, path: "/source" });
       const sourceDir = join(h.config.dataDir, "attachments", source.id);
@@ -219,7 +219,7 @@ describe("raw send intake custody", () => {
   });
 
   it("recovers an unacknowledged staging copy from its stable ready target without rereading the source", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, project } = seed(h); const request = payload();
       request.input = [{ type: "localFile", path: "asset.bin", sourceProjectId: "deleted-source" }];
       const id = `qsub_${request.clientSubmissionId}`;

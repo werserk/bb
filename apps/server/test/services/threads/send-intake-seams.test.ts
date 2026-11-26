@@ -43,18 +43,18 @@ function assertNoNativeEffects(h: TestAppHarness, threadId: string, intake: Send
 
 describe("intake transaction/effect seams", () => {
   it("rejects stale queue handoff within the actual queue transaction", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h); const intake = authority(h, thread.id); expire(h, intake);
-      expect(() => recordQueuedMessageWait(h.deps, { intake, thread, claimed: null, sendAt: null,
+      expect(() => recordQueuedMessageWait(h.deps, { intake, placement: "back", thread, claimed: null, sendAt: null,
         waitingOn: { kind: "thread-busy" }, message: { clientSubmissionId: intake.claim.clientSubmissionId!, input: textInput("owned"), execution,
-          senderThreadId: null, origin: null, originPluginId: null, requestedBy: null, payload: { kind: "inline" }, systemNotice: null },
+          senderThreadId: null, origin: null, originPluginId: null, requestedBy: null, payload: { kind: "inline" }, systemNotice: null, deliveryMode: "queue" },
       })).toThrow(/claim/i);
       assertNoNativeEffects(h, thread.id, intake);
     });
   });
 
   it("rejects a late requested append after provider command preparation", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, environment } = seedThreadFixture(h); const intake = authority(h, thread.id);
       seedThreadRuntimeState(h.deps, { environmentId: environment.id, providerThreadId: "provider-intake", threadId: thread.id });
       const beforeSequence = listStoredEventRows(h.db, { threadId: thread.id, order: "desc", limit: 1 })[0]!.sequence;
@@ -67,7 +67,7 @@ describe("intake transaction/effect seams", () => {
         entered.resolve(); await release.promise;
         return prepared;
       });
-      const sending = sendThreadMessage(h.deps, { intake, thread, environment, payload: { input: textInput("owned"), mode: "start" }, trigger: "user" });
+      const sending = sendThreadMessage(h.deps, { intake, originPluginId: null, thread, environment, payload: { input: textInput("owned"), mode: "start" }, trigger: "user" });
       const rejected = expect(sending).rejects.toThrow(/claim/i);
       await entered.promise; expire(h, intake); release.resolve(); await rejected;
       assertNoNativeEffects(h, thread.id, intake, beforeSequence);
@@ -75,7 +75,7 @@ describe("intake transaction/effect seams", () => {
   });
 
   it("fences first-start before lifecycle/startup custody in its outer transaction", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, environment } = seedThreadFixture(h, { thread: { status: "pending" } }); const intake = authority(h, thread.id);
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>(); let calls = 0;
       vi.spyOn(commands, "buildExecutionOptions").mockImplementation(async () => {
@@ -83,7 +83,7 @@ describe("intake transaction/effect seams", () => {
         return execution;
       });
       const attempt = attemptDispatch(h.deps, { intake, thread, payload: { input: textInput("owned"), mode: "auto" }, source: { kind: "inline" }, queuePayload: { kind: "inline" },
-        pluginSubmission: null, origin: null, originPluginId: null, startedOnBehalfOf: null, trigger: "user",
+        pluginSubmission: null, systemNotice: null, origin: null, originPluginId: null, startedOnBehalfOf: null, trigger: "user",
         startContext: { environmentIntent: { type: "reuse", environmentId: environment.id }, fork: null, startedOnBehalfOf: null, titleProvided: false },
       });
       const rejected = expect(attempt).rejects.toThrow(/claim/i);
@@ -94,7 +94,7 @@ describe("intake transaction/effect seams", () => {
   });
 
   it("retains stable clear correlation but fences a late stop grant before completion", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, environment } = seedThreadFixture(h); const intake = authority(h, thread.id);
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       vi.spyOn(lifecycle, "stopThreadForCurrentState").mockImplementation(async () => { entered.resolve(); await release.promise; });
@@ -108,7 +108,7 @@ describe("intake transaction/effect seams", () => {
   });
 
   it("allocates a stable compact request without sealing pure preparation and fences its late append", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h); const intake = authority(h, thread.id);
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       vi.spyOn(h.deps.providerRegistry, "supportsManualCompaction").mockReturnValue(true);
@@ -126,7 +126,7 @@ describe("intake transaction/effect seams", () => {
   });
 
   it("fences model recovery after the catalog await without mutating the override", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h); const intake = authority(h, thread.id);
       setThreadExecutionOverride(h.db, { threadId: thread.id, modelOverride: "before" });
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();

@@ -21,7 +21,8 @@ const forkJournal = JSON.parse(
   readFileSync(`${forkFolder}/meta/_journal.json`, "utf8"),
 ) as { entries: { tag: string; when: number }[] };
 
-// The ledger identity of the fork migrations already applied in production.
+// The ledger identity of the fork migrations already applied in production;
+// newer fork migrations are appended to the journal after these.
 const productionForkMigrations = [
   ["0000_petite_karen_page", 1794014431811],
   ["0001_lumpy_hammerhead", 1794352508595],
@@ -260,14 +261,23 @@ function expectMigratedLedgers(db: DbConnection): void {
 
 describe("fork migration ledger", () => {
   it("keeps the production ledger identity of the fork migrations", () => {
-    expect(forkJournal.entries.map((entry) => [entry.tag, entry.when])).toEqual(
-      productionForkMigrations,
+    const produced = productionForkMigrations.length;
+    expect(
+      forkJournal.entries
+        .slice(0, produced)
+        .map((entry) => [entry.tag, entry.when]),
+    ).toEqual(productionForkMigrations);
+    expect(forkWhens.slice(0, produced)).toEqual(
+      productionForkMigrations.map(([, when]) => when),
     );
-    expect(forkWhens).toEqual(productionForkMigrations.map(([, when]) => when));
+    const lastProduced = productionForkMigrations[produced - 1]![1];
+    for (const when of forkWhens.slice(produced)) {
+      expect(when).toBeGreaterThan(lastProduced);
+    }
   });
 
   it("adopts legacy rows from the production shape and migrates its data", () => {
-    const db = legacyDatabase(forkMigrations.length);
+    const db = legacyDatabase(productionForkMigrations.length);
     try {
       migrate(db);
       expectMigratedLedgers(db);
@@ -348,7 +358,7 @@ describe("fork migration ledger", () => {
   });
 
   it("refuses a legacy row whose hash differs and moves nothing", () => {
-    const db = legacyDatabase(forkMigrations.length);
+    const db = legacyDatabase(productionForkMigrations.length);
     try {
       db.$client
         .prepare(

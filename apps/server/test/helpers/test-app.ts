@@ -12,6 +12,7 @@ import {
   getAppSettings,
   getDisabledProviderIds,
   getExperiments,
+  setExperiments,
   getAutoAppUpdate,
   getSkippedAppUpdate,
   setAutoAppUpdate,
@@ -109,6 +110,7 @@ export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
   liveCommandsClock?: () => number;
   seedFirstPartyProviders?: boolean;
   startSendIntakes?: boolean;
+  sendIntake?: boolean;
   tunnelIngressNow?: () => number;
   extraProviders?: readonly {
     declaration: PluginProviderDeclaration;
@@ -176,6 +178,7 @@ export async function createTestAppHarness(
     liveCommandsClock,
     seedFirstPartyProviders = true,
     startSendIntakes: autoStartSendIntakes = true,
+    sendIntake = false,
     tunnelIngressNow: _tunnelIngressNow,
     ...configOverrides
   } = overrides;
@@ -395,6 +398,7 @@ export async function createTestAppHarness(
   const { app, pluginCatalogService, pluginService, serverMove, startSendIntakes, stopSendIntakes } =
     createApp(deps);
   installDefaultEnvironmentProviders();
+  if (sendIntake) setExperiments(db, { sendIntake: true });
   if (autoStartSendIntakes) startSendIntakes();
 
   return {

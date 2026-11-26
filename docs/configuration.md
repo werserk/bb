@@ -1028,6 +1028,13 @@ either way.
   badge counts plugin updates. While it is off, the six-hourly background check,
   `bb plugin outdated`, `bb plugin update`, and Settings → Installed plugins
   work as before.
+- `sendIntake` (default off) makes the server store each sent message in
+  `thread_send_intakes` before it prepares or dispatches it, so a restart
+  cannot lose an accepted send; a worker delivers stored rows per thread in
+  order after startup. It also enables `POST /threads/:id/send-admission`, the
+  send-intakes read and action routes. Off keeps the legacy send path exactly,
+  and those routes answer 404 `intake_disabled`. Rows already stored are still
+  recovered and delivered at startup with it off.
 - `resumeThreadsAfterRestart` resumes threads a
   restart cut off. When a machine's daemon comes back as a new process (bb
   quit, crashed, or updated, or the machine restarted), the server marks the

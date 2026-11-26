@@ -1,4 +1,4 @@
-import { assertSendIntake, sealSendIntake, commitSendIntake, compactSendIntakeComplete, type SendIntakeAuthority } from "./send-intake-authority.js";
+import { assertSendIntake, sealSendIntake, commitSendIntake, stableSendIntakeOperation, compactSendIntakeComplete, type SendIntakeAuthority } from "./send-intake-authority.js";
 import {
   classifyLocalQuestionAnswer,
   QuestionResponseNotDeliverableError,
@@ -253,6 +253,7 @@ export type DispatchAttemptSource =
   | {
       kind: "operation";
       environment: EnvironmentRow;
+      requestId?: string;
       beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
       historyReplacement?: {
         forkSourceProviderThreadId: string | null;
@@ -355,6 +356,7 @@ async function runOperationDispatch(
 ): Promise<DispatchAttemptOutcome> {
   await sendThreadMessage(deps, {
     intake: args.intake,
+    ...(source.requestId !== undefined ? { requestId: source.requestId } : {}),
     environment: source.environment,
     originPluginId: args.originPluginId,
     payload: args.payload,
@@ -1141,6 +1143,7 @@ export async function compactThreadContext(
   }
 
   const environment = await requireThreadCommandEnvironment(deps, { thread });
+  const requestId = stableSendIntakeOperation(deps.db, intake, "compact");
   await attemptDispatch(deps, {
     intake: intake === undefined ? undefined : { ...intake, stage: "compact" },
     thread,
@@ -1148,7 +1151,11 @@ export async function compactThreadContext(
       input: createStandaloneBuiltinCompactCommandInput(),
       mode: "start",
     },
-    source: { kind: "operation", environment },
+    source: {
+      kind: "operation",
+      environment,
+      ...(requestId !== undefined ? { requestId } : {}),
+    },
     queuePayload: { kind: "inline" },
     pluginSubmission: null,
     systemNotice: null,

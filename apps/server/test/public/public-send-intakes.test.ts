@@ -16,7 +16,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("send admission contract", () => {
   it("retains early custody until the actual app startup signal, independently of bounded provider readiness", async () => {
-    await withTestHarness({ startSendIntakes: false }, async h => {
+    await withTestHarness({ startSendIntakes: false, sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h, { thread: { status: "stopping" } });
       const build = vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);
       const id = randomUUID();
@@ -34,7 +34,7 @@ describe("send admission contract", () => {
   });
 
   it("negotiates accepted before held preparation while no-ID old ingress shares the lane", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h, { thread: { status: "stopping" } });
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       const seen: string[] = [];
@@ -81,7 +81,7 @@ describe("send admission contract", () => {
   });
 
   it("rejects unsupported negotiation and exposes revision conflicts without losing custody", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h, { thread: { status: "stopping" } });
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       vi.spyOn(commands, "buildExecutionOptions").mockImplementation(async () => { entered.resolve(); await release.promise; return execution; });
@@ -105,7 +105,7 @@ describe("send admission contract", () => {
     });
   });
   it("keeps post-seal cancel/edit conflicts canonical and prevents late work after production stop", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h);
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);

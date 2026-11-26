@@ -47,7 +47,7 @@ async function failed(h: TestAppHarness, input: PromptInput[] = textInput("owned
 
 function request(h: TestAppHarness, f: Awaited<ReturnType<typeof failed>>, input = f.payload.input, requestId?: string, identified = true) {
   return h.db.transaction(tx => appendPreparedClientTurnRequestedEventWithNotificationInTransaction(tx, { threadId: f.thread.id, environmentId: f.environment.id,
-    type: "client/turn/requested", input, execution, initiator: "user", senderThreadId: null,
+    type: "client/turn/requested", input, execution, initiator: "user", originPluginId: null, senderThreadId: null,
     requestMethod: "turn/start", source: "tell", target: { kind: "new-turn" },
     ...(identified ? { clientSubmissions: [{ id: f.id, inputGroupIndex: 0 }] } : {}),
     requestId: requestId ?? createClientTurnRequestId(),
@@ -56,7 +56,7 @@ function request(h: TestAppHarness, f: Awaited<ReturnType<typeof failed>>, input
 
 describe("revisioned server-evidence intake recovery", () => {
   it("settles from an actual committed native queue row with a truthful resolved receipt", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h); f.stop();
       try {
         const queued = h.db.transaction(tx => createQueuedThreadMessageInTransaction(tx, {
@@ -73,7 +73,7 @@ describe("revisioned server-evidence intake recovery", () => {
   });
 
   it("keeps absent proof unresolved, bounds legacy followers and preserves same-ID replay", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h); f.stop();
       try {
         const before = getThreadSendIntake(h.db, f.key)!;
@@ -89,7 +89,7 @@ describe("revisioned server-evidence intake recovery", () => {
   });
 
   it("settles only from a genuine native request and releases the successor once without resending the head", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h); f.stop();
       try {
         const follower = await f.service.admit({ input: textInput("following"), mode: "auto" }, f.thread);
@@ -107,7 +107,7 @@ describe("revisioned server-evidence intake recovery", () => {
   });
 
   it("does not mistake compactFirst's native compact subrequest for the following original message", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h, textInput("after compact"), true);
       try {
         const compactId = createClientTurnRequestId();
@@ -125,11 +125,11 @@ describe("revisioned server-evidence intake recovery", () => {
   });
 
   it("does not treat a first-start intent/request without native startup custody as proof", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h); f.stop();
       try {
         const intent = appendClientTurnEvent(h.deps, { threadId: f.thread.id, environmentId: f.environment.id,
-          type: "client/turn/requested", input: f.payload.input, execution, initiator: "user", senderThreadId: null,
+          type: "client/turn/requested", input: f.payload.input, execution, initiator: "user", originPluginId: null, senderThreadId: null,
           requestMethod: "thread/start", source: "spawn", target: { kind: "thread-start" }, clientSubmissions: [{ id: f.id, inputGroupIndex: 0 }],
         });
         let current = getThreadSendIntake(h.db, f.key)!;
@@ -139,7 +139,7 @@ describe("revisioned server-evidence intake recovery", () => {
             { threadId: f.thread.id, event: { type: "run.preparing" } }).applied).toBe(true);
           saveThreadProvisionContext({ db: tx, threadId: f.thread.id, replace: true,
           context: createThreadStartup({ clientRequestId: intent.requestId, input: f.payload.input, execution,
-            environmentIntent: { type: "reuse", environmentId: f.environment.id }, fork: null, seedWithoutRun: false,
+            environmentIntent: { type: "reuse", environmentId: f.environment.id }, fork: null, initiator: "user", seedWithoutRun: false,
             titleProvided: false, clientSubmissions: [{ id: f.id, inputGroupIndex: 0 }],
           }),
           });
@@ -152,7 +152,7 @@ describe("revisioned server-evidence intake recovery", () => {
   });
 
   it.each(["clear", "compact"] as const)("recovers only a committed standalone %s correlation after restart without re-execution", async kind => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = await failed(h, kind === "clear" ? clearInput() : createStandaloneBuiltinCompactCommandInput());
       try {
         const correlation = kind === "clear" ? `evt_${randomUUID()}` : createClientTurnRequestId();

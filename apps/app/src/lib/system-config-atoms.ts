@@ -37,6 +37,7 @@ const unavailableSystemConfig: SystemConfigResponse = {
     performanceDiagnostics: false,
     pluginUpdates: false,
     resumeThreadsAfterRestart: false,
+    sendIntake: false,
     skipFocusedThreadNotifications: false,
     threadContextCard: false,
     threadRowMetadata: false,

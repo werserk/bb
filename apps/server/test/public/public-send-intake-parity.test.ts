@@ -37,7 +37,7 @@ const modes = [
 
 describe("original inline intake contract", () => {
   it("preserves a stock active/start 409 as terminal rejection and lets a legacy successor queue", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const { thread, environment, session } = seedThreadFixture(h, { thread: { status: "active" } });
       seedTurnStarted(h.deps, { threadId: thread.id, environmentId: environment.id, turnId: "active-rejection" });
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);
@@ -62,7 +62,7 @@ describe("original inline intake contract", () => {
 
   it.each(modes)("preserves $status/$mode hook attempt and original context on old and negotiated ingress", async entry => {
     for (const route of ["send", "send-admission"] as const) {
-      await withTestHarness(async h => {
+      await withTestHarness({ sendIntake: true }, async h => {
         const { thread, environment } = seedThreadFixture(h, { thread: { status: entry.status } });
         if (entry.status === "active") seedTurnStarted(h.deps, { threadId: thread.id, environmentId: environment.id, turnId: `turn-${route}` });
         const seen: MessageDispatchHookContext[] = [];
@@ -96,7 +96,7 @@ describe("original inline intake contract", () => {
     { command: "clear", form: "mixed" }, { command: "compact", form: "mixed" },
   ] as const)("keeps $form /$command as original message input through both routes", async entry => {
     for (const route of ["send", "send-admission"] as const) {
-      await withTestHarness(async h => {
+      await withTestHarness({ sendIntake: true }, async h => {
         const { thread } = seedThreadFixture(h);
         const input = entry.form === "raw" ? textInput(`/${entry.command}`) : builtin(entry.command).map(block =>
           block.type === "text" ? { ...block, text: `${block.text} original argument` } : block);
@@ -122,7 +122,7 @@ describe("original inline intake contract", () => {
     { route: "send", command: "clear" }, { route: "send-admission", command: "clear" },
     { route: "send", command: "compact" }, { route: "send-admission", command: "compact" },
   ] as const)("preserves selected builtin $command through $route and same-ID replay", async entry => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = seedThreadFixture(h);
       seedThreadRuntimeState(h.deps, { threadId: f.thread.id, environmentId: f.environment.id, providerThreadId: "intake-command" });
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);

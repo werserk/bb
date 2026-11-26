@@ -108,26 +108,31 @@ function throwInvalidCompactFirst(reason: string): never {
   throw new ApiError(400, "invalid_request", `compactFirst ${reason}`);
 }
 
-async function executeThreadSendIntake(
+async function sendWithReceipt(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: AcceptThreadSendRequestArgs,
+  floor?: number,
+): Promise<SendMessageResponse> {
+  const id = args.payload.clientSubmissionId;
+  const result = await acceptThreadSendRequestOnce(deps, args);
+  if (!id) return result;
+  if (result.delivery === "queued") return { ...result, submissionIds: [id] };
+  if (isStandaloneBuiltinClearCommand(args.payload.input))
+    return { ...result, submissionIds: [id], command: true as const };
+  const { requested } = findRequestedSubmission(
+    deps.db,
+    args.thread.id,
+    id,
+    floor,
+  );
+  return requested ? { ...result, submissionIds: [id], requested } : result;
+}
+
+function executeThreadSendIntake(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
-  const id = args.payload.clientSubmissionId;
-  const send = async (floor?: number) => {
-    const result = await acceptThreadSendRequestOnce(deps, args);
-    if (!id) return result;
-    if (result.delivery === "queued") return { ...result, submissionIds: [id] };
-    if (isStandaloneBuiltinClearCommand(args.payload.input))
-      return { ...result, submissionIds: [id], command: true as const };
-    const { requested } = findRequestedSubmission(
-      deps.db,
-      args.thread.id,
-      id,
-      floor,
-    );
-    return requested ? { ...result, submissionIds: [id], requested } : result;
-  };
-  return send();
+  return sendWithReceipt(deps, args);
 }
 
 const readyIntakeDatabases = new WeakSet<object>();
@@ -157,10 +162,36 @@ function validateIntakeRequest(deps: LoggedPendingInteractionWorkSessionDeps, ar
   if (args.payload.mode === "steer") throwInvalidCompactFirst("cannot steer a turn");
 }
 
+function acceptThreadSendRequestLegacy(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: AcceptThreadSendRequestArgs,
+): Promise<SendMessageResponse> {
+  const id = args.payload.clientSubmissionId;
+  return id
+    ? guardSubmission(deps.db, args.thread.id, id, args.payload, (floor) =>
+        sendWithReceipt(deps, args, floor),
+      )
+    : sendWithReceipt(deps, args);
+}
+
+export function isSendIntakeEnabled(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+): boolean {
+  return getExperiments(deps.db).sendIntake;
+}
+
+export function assertSendIntakeEnabled(
+  deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
+): void {
+  if (!isSendIntakeEnabled(deps))
+    throw new ApiError(404, "intake_disabled", "Pending send intake is not enabled");
+}
+
 export async function acceptThreadSendRequest(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: AcceptThreadSendRequestArgs,
 ): Promise<SendMessageResponse> {
+  if (!isSendIntakeEnabled(deps)) return acceptThreadSendRequestLegacy(deps, args);
   validateIntakeRequest(deps, args);
   const service = getThreadSendIntakeService(deps);
   const row = await service.admit(args.payload, args.thread);
@@ -171,6 +202,7 @@ export async function admitThreadSendRequest(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: { payload: import("@bb/server-contract").SendAdmissionRequest; thread: Thread },
 ): Promise<import("@bb/server-contract").SendAdmissionResponse> {
+  assertSendIntakeEnabled(deps);
   validateIntakeRequest(deps, args);
   const { admissionVersion, ...payload } = args.payload;
   const row = await getThreadSendIntakeService(deps).admit(payload, args.thread);

@@ -39,7 +39,7 @@ function admit(h: TestAppHarness, threadId: string, id: string) {
 
 describe("intake and dedicated context boundaries", () => {
   it("hands off once to the native queue while a dedicated compact's submit remains held", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const submitted = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       const f = runtime(h, async () => {}, async () => { submitted.resolve(); await release.promise; });
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);
@@ -59,7 +59,7 @@ describe("intake and dedicated context boundaries", () => {
   });
 
   it("recovers a real held dedicated clear collision before seal and appends once after clear", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const stopping = createDeferredPromise<void>(); const release = createDeferredPromise<void>();
       const f = runtime(h, async () => { stopping.resolve(); await release.promise; });
       vi.spyOn(commands, "buildExecutionOptions").mockResolvedValue(execution);
@@ -82,7 +82,7 @@ describe("intake and dedicated context boundaries", () => {
   });
 
   it("allows dedicated clear and ordered native drain during pure intake preparation", async () => {
-    await withTestHarness(async h => {
+    await withTestHarness({ sendIntake: true }, async h => {
       const f = runtime(h, async () => {});
       const entered = createDeferredPromise<void>(); const release = createDeferredPromise<void>(); let builds = 0;
       vi.spyOn(commands, "buildExecutionOptions").mockImplementation(async () => {

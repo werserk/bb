@@ -65,7 +65,7 @@ import {
   ensureThreadIsWritable,
   ensureThreadQueueIsWritable,
 } from "../../services/threads/thread-send.js";
-import { acceptThreadSendRequest, admitThreadSendRequest, getThreadSendIntakeService } from "../../services/threads/thread-send-request.js";
+import { acceptThreadSendRequest, admitThreadSendRequest, assertSendIntakeEnabled, getThreadSendIntakeService } from "../../services/threads/thread-send-request.js";
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
 import {
@@ -275,18 +275,21 @@ export function registerThreadActionRoutes(
     return context.json(await acceptThreadSendRequest(deps, args));
   });
   post(routes.sendAdmission, async (context, payload) => {
+    assertSendIntakeEnabled(deps);
     const args = authoriseSend(context.req.param("id"), context.req.header(PLUGIN_RPC_CALLER_HEADER), payload);
     return context.json(await admitThreadSendRequest(deps, {
       thread: args.thread, payload: { ...args.payload, clientSubmissionId: payload.clientSubmissionId, admissionVersion: payload.admissionVersion },
     }));
   });
   get(routes.sendIntakes, (context, query) => {
+    assertSendIntakeEnabled(deps);
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const page = readThreadSendIntakePage(deps.db, thread.id, query.afterOrder);
     return context.json({ admissionVersion: 1 as const, rows: page.slice(0, 100).map(toSendIntakeView),
       nextAfterOrder: page.length > 100 ? page[99]!.intakeOrder : null });
   });
   post(routes.mutateSendIntake, async (context, payload) => {
+    assertSendIntakeEnabled(deps);
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     ensureThreadQueueIsWritable(thread);
     return context.json(await getThreadSendIntakeService(deps).mutate(thread.id, payload));

@@ -1149,6 +1149,11 @@ const EXPERIMENT_DEFINITIONS: Record<
     description:
       "When an update, crash or restart cuts off a running thread or stops a background command a thread is waiting on, bb resumes the thread a few seconds after it comes back and tells the agent what was cut off. Messages you queued meanwhile send after it.",
   },
+  sendIntake: {
+    label: "Durable send intake",
+    description:
+      "Store each message on the server before it is prepared and deliver it in order after a restart. Off keeps the legacy send path.",
+  },
   serverMove: {
     label: "Server move",
     description:
