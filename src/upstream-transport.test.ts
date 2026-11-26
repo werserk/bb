@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -28,7 +28,9 @@ afterEach(async () => {
 });
 
 // A throwaway self-signed certificate for 127.0.0.1, made per run so that no
-// private key is kept in the repository.
+// private key is kept in the repository. It needs the openssl CLI; without it
+// the TLS test is skipped rather than adding a dependency.
+const HAS_OPENSSL = spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;
 async function localhostCertificate(): Promise<{ cert: string; key: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), "bb-pool-tls-"));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
@@ -96,7 +98,9 @@ it("uses an independent transport when the default dispatcher retains a destroye
   expect(target.requests()).toBe(2);
 });
 
-it("negotiates HTTP/1.1 when the upstream also offers HTTP/2", async () => {
+it.skipIf(!HAS_OPENSSL)(
+  `negotiates HTTP/1.1 when the upstream also offers HTTP/2${HAS_OPENSSL ? "" : " (skipped: needs the openssl CLI)"}`,
+  async () => {
   const { cert, key } = await localhostCertificate();
   const server = http2.createSecureServer({
     cert: await readFile(cert),

@@ -1,20 +1,9 @@
 import { z } from "zod";
 
 export const DEFAULT_ACCOUNT_POOL_CONFIG = {
-  anthropicUpstreamBaseUrl: "https://api.anthropic.com",
-  codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
   switchThreshold: 0.98,
   parentMode: "proxy" as const,
 };
-
-const httpUrlSchema = z.string().refine((value) => {
-  try {
-    const protocol = new URL(value).protocol;
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
-  }
-}, "Must be an HTTP or HTTPS URL.");
 
 const switchThresholdSchema = z
   .number()
@@ -25,12 +14,6 @@ export const parentModeSchema = z.enum(["proxy", "isolate"]);
 
 export const accountPoolConfigSchema = z
   .object({
-    anthropicUpstreamBaseUrl: httpUrlSchema.default(
-      DEFAULT_ACCOUNT_POOL_CONFIG.anthropicUpstreamBaseUrl,
-    ),
-    codexUpstreamBaseUrl: httpUrlSchema.default(
-      DEFAULT_ACCOUNT_POOL_CONFIG.codexUpstreamBaseUrl,
-    ),
     switchThreshold: switchThresholdSchema.default(
       DEFAULT_ACCOUNT_POOL_CONFIG.switchThreshold,
     ),
@@ -42,10 +25,17 @@ export const accountPoolConfigSchema = z
 
 export type AccountPoolConfig = z.infer<typeof accountPoolConfigSchema>;
 
+// Keys earlier builds stored. A stored config that still has them loads, and
+// the keys are dropped: provider upstreams are fixed in code (src/upstreams.ts).
+export const REMOVED_CONFIG_KEYS = [
+  "anthropicUpstreamBaseUrl",
+  "codexUpstreamBaseUrl",
+  "cacheMissDebug",
+  "cacheMissMinTokens",
+] as const;
+
 export const accountPoolConfigSetInputSchema = z
   .object({
-    anthropicUpstreamBaseUrl: httpUrlSchema.optional(),
-    codexUpstreamBaseUrl: httpUrlSchema.optional(),
     switchThreshold: switchThresholdSchema.optional(),
     parentMode: parentModeSchema.optional(),
   })
@@ -294,12 +284,10 @@ export type PoolStatusReport = z.infer<typeof statusReportSchema>;
 export const accountAddInputSchema = z
   .object({
     provider: providerSchema,
-    source: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("import") }).strict(),
-      z
-        .object({ kind: z.literal("api-key"), apiKey: z.string().min(1) })
-        .strict(),
-    ]),
+    // API keys only: OAuth accounts are added by the hub's own login.
+    source: z
+      .object({ kind: z.literal("api-key"), apiKey: z.string().min(1) })
+      .strict(),
     label: z.string().min(1).nullable(),
     priority: z.number().int(),
   })

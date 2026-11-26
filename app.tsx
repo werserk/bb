@@ -92,11 +92,7 @@ type DialogState =
 
 type ConfigField = Exclude<keyof AccountPoolConfig, "parentMode">;
 
-const CONFIG_FIELDS: readonly ConfigField[] = [
-  "anthropicUpstreamBaseUrl",
-  "codexUpstreamBaseUrl",
-  "switchThreshold",
-];
+const CONFIG_FIELDS: readonly ConfigField[] = ["switchThreshold"];
 
 const ACCOUNT_ACTIONS = [
   "toggle",
@@ -135,21 +131,8 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function httpUrlError(value: string): string | null {
-  try {
-    const protocol = new URL(value).protocol;
-    return protocol === "http:" || protocol === "https:"
-      ? null
-      : "Must be an HTTP or HTTPS URL.";
-  } catch {
-    return "Must be a valid URL.";
-  }
-}
-
 function configDrafts(config: AccountPoolConfig): Record<ConfigField, string> {
   return {
-    anthropicUpstreamBaseUrl: config.anthropicUpstreamBaseUrl,
-    codexUpstreamBaseUrl: config.codexUpstreamBaseUrl,
     switchThreshold: String(config.switchThreshold),
   };
 }
@@ -565,7 +548,7 @@ function AddAccountMenu({
   onChoose,
 }: {
   provider: PoolProvider;
-  onChoose: (choice: "login" | "import" | "api-key") => void;
+  onChoose: (choice: "login" | "api-key") => void;
 }) {
   return (
     <DropdownMenu>
@@ -589,19 +572,6 @@ function AddAccountMenu({
               {provider === "claude"
                 ? "Opens claude.ai, paste the code back"
                 : "Opens ChatGPT with a device code"}
-            </span>
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="items-start py-2"
-          onSelect={() => onChoose("import")}
-        >
-          <Icon name="Download" className="mt-0.5" />
-          <span>
-            <span className="block">Import from this machine</span>
-            <span className="block text-xs text-muted-foreground">
-              Copies the server host&apos;s{" "}
-              {provider === "claude" ? "~/.claude" : "Codex"} login
             </span>
           </span>
         </DropdownMenuItem>
@@ -930,15 +900,11 @@ function AccountPoolSettings() {
   const [statusIsCached, setStatusIsCached] = useState(status !== null);
   const [config, setConfig] = useState<AccountPoolConfig | null>(null);
   const [drafts, setDrafts] = useState<Record<ConfigField, string>>({
-    anthropicUpstreamBaseUrl: "",
-    codexUpstreamBaseUrl: "",
     switchThreshold: "",
   });
   const [configErrors, setConfigErrors] = useState<
     Record<ConfigField, string | null>
   >({
-    anthropicUpstreamBaseUrl: null,
-    codexUpstreamBaseUrl: null,
     switchThreshold: null,
   });
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -1094,40 +1060,22 @@ function AccountPoolSettings() {
   }
   async function saveConfigField(field: ConfigField): Promise<void> {
     if (config === null || configSaving) return;
-    let update: AccountPoolConfigSetInput;
-    if (field === "switchThreshold") {
-      const raw = drafts.switchThreshold.trim();
-      const value = Number(raw);
-      if (
-        raw.length === 0 ||
-        !Number.isFinite(value) ||
-        value <= 0 ||
-        value > 1
-      ) {
-        setConfigErrors((current) => ({
-          ...current,
-          switchThreshold: "Must be greater than 0 and at most 1.",
-        }));
-        return;
-      }
-      if (value === config.switchThreshold) return;
-      update = { switchThreshold: value };
-    } else {
-      const value = drafts[field].trim();
-      const validationError = httpUrlError(value);
-      if (validationError !== null) {
-        setConfigErrors((current) => ({
-          ...current,
-          [field]: validationError,
-        }));
-        return;
-      }
-      if (value === config[field]) return;
-      update =
-        field === "anthropicUpstreamBaseUrl"
-          ? { anthropicUpstreamBaseUrl: value }
-          : { codexUpstreamBaseUrl: value };
+    const raw = drafts.switchThreshold.trim();
+    const value = Number(raw);
+    if (
+      raw.length === 0 ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value > 1
+    ) {
+      setConfigErrors((current) => ({
+        ...current,
+        switchThreshold: "Must be greater than 0 and at most 1.",
+      }));
+      return;
     }
+    if (value === config.switchThreshold) return;
+    const update: AccountPoolConfigSetInput = { switchThreshold: value };
     markPending(`config-${field}`, null);
     setConfigErrors((current) => ({ ...current, [field]: null }));
     try {
@@ -1159,25 +1107,14 @@ function AccountPoolSettings() {
   }
   async function chooseAdd(
     provider: PoolProvider,
-    choice: "login" | "import" | "api-key",
+    choice: "login" | "api-key",
   ): Promise<void> {
     if (choice === "login") {
       if (provider === "claude") await startClaude();
       else await startCodex();
       return;
     }
-    if (choice === "api-key") {
-      setDialog({ kind: "api-key", provider });
-      return;
-    }
-    await run(`import-${provider}`, async () => {
-      await rpc.call("account.add", {
-        provider,
-        source: { kind: "import" },
-        label: null,
-        priority: 100,
-      });
-    });
+    setDialog({ kind: "api-key", provider });
   }
   async function accountAction(
     account: AccountSummary,
@@ -1315,8 +1252,8 @@ function AccountPoolSettings() {
               </Button>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              or use either provider&apos;s Add account menu to import this
-              machine&apos;s login
+              or use either provider&apos;s Add account menu to add an API
+              key
             </p>
           </div>
         ) : null}
@@ -1431,60 +1368,6 @@ function AccountPoolSettings() {
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="divide-y divide-border border-t border-border">
-              <ConfigFieldRow
-                label="Anthropic upstream base URL"
-                description="QA override for Anthropic traffic."
-                error={configErrors.anthropicUpstreamBaseUrl}
-              >
-                <Input
-                  aria-label="Anthropic upstream base URL"
-                  aria-invalid={
-                    configErrors.anthropicUpstreamBaseUrl === null
-                      ? undefined
-                      : true
-                  }
-                  disabled={config === null || configSaving}
-                  value={drafts.anthropicUpstreamBaseUrl}
-                  onChange={(event) =>
-                    updateConfigDraft(
-                      "anthropicUpstreamBaseUrl",
-                      event.target.value,
-                    )
-                  }
-                  onBlur={() =>
-                    void saveConfigField("anthropicUpstreamBaseUrl")
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-              </ConfigFieldRow>
-              <ConfigFieldRow
-                label="Codex upstream base URL"
-                description="QA override for ChatGPT Codex traffic."
-                error={configErrors.codexUpstreamBaseUrl}
-              >
-                <Input
-                  aria-label="Codex upstream base URL"
-                  aria-invalid={
-                    configErrors.codexUpstreamBaseUrl === null
-                      ? undefined
-                      : true
-                  }
-                  disabled={config === null || configSaving}
-                  value={drafts.codexUpstreamBaseUrl}
-                  onChange={(event) =>
-                    updateConfigDraft(
-                      "codexUpstreamBaseUrl",
-                      event.target.value,
-                    )
-                  }
-                  onBlur={() => void saveConfigField("codexUpstreamBaseUrl")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-              </ConfigFieldRow>
               <ConfigFieldRow
                 label="Quota switch threshold"
                 description="Stop selecting an account at this quota fraction."

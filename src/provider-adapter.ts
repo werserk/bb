@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type {
   Account,
-  AccountPoolConfig,
   AccountQuota,
   AccountSecret,
   ModelFamily,
@@ -10,7 +9,7 @@ import type {
 import { retryAfterMilliseconds } from "./quota.js";
 import type { AccountStore, QuotaStore } from "./store.js";
 
-const OAUTH_REFRESH_TIMEOUT_MS = 15_000;
+export const OAUTH_REFRESH_TIMEOUT_MS = 15_000;
 const OAUTH_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
 const oauthErrorCodeSchema = z.enum([
@@ -80,20 +79,9 @@ export interface AdapterUsageContext {
   now: () => number;
 }
 
-export interface ImportedProviderAccount {
-  label: string;
-  email: string | null;
-  accountUuid?: string;
-  codexAccountId?: string;
-  subscriptionType: string | null;
-  rateLimitTier: string | null;
-  secret: Extract<AccountSecret, { kind: "oauth" }>;
-}
-
 export interface ProviderAdapter {
   provider: PoolProvider;
   upstreamName: string;
-  importAccount(): Promise<ImportedProviderAccount>;
   parseRequest(
     body: Uint8Array,
     headers: Headers,
@@ -103,7 +91,7 @@ export interface ProviderAdapter {
     parentAffinityId: string | null;
     forAccount: (account: Account) => Uint8Array;
   };
-  upstreamUrl(request: Request, settings: AccountPoolConfig, account: Account): URL;
+  upstreamUrl(request: Request, account: Account): URL;
   requestHeaders(
     inbound: Headers,
     account: Account,
@@ -309,8 +297,13 @@ export function mountedUpstreamUrl(
   const upstreamPath = normalizedPath.startsWith(stripPrefix)
     ? normalizedPath.slice(stripPrefix.length)
     : normalizedPath;
-  return new URL(
-    upstreamPath + requestUrl.search,
+  const base = new URL(
     upstreamBaseUrl.endsWith("/") ? upstreamBaseUrl : `${upstreamBaseUrl}/`,
   );
+  const url = new URL(upstreamPath + requestUrl.search, base);
+  // A path such as `//host/...` or `https://host/...` would replace the host
+  // and send the account token there.
+  if (url.origin !== base.origin)
+    throw new Error("Upstream path must stay on the provider host.");
+  return url;
 }

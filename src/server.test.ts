@@ -21,6 +21,7 @@ import {
   accountSecretSchema,
   accountSummarySchema,
   accountPoolConfigSchema,
+  DEFAULT_ACCOUNT_POOL_CONFIG,
   accountPoolConfigSetInputSchema,
   codexLoginPollSchema,
   codexLoginStartSchema,
@@ -30,10 +31,6 @@ import {
   type AccountSummary,
 } from "./contracts.js";
 import { z } from "zod";
-import type {
-  ImportedClaudeCredentials,
-  ImportedCodexCredentials,
-} from "./credentials.js";
 import { PARENT_TOKEN_ENV, PARENT_URL_ENV } from "./parent-pool.js";
 import {
   AccountStore,
@@ -46,6 +43,124 @@ import {
   helloResponse,
   type AccountPoolPluginOptions,
 } from "./server.js";
+import type { BbPluginApi } from "@get-bb/plugin-sdk";
+
+// The pool adds OAuth accounts only through its own logins. Most tests need a
+// ready OAuth account rather than a login, so they seed the record the login
+// path stores, through the plugin's own AccountStore and secret directory.
+interface ClaudeLoginSeed {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number | null;
+  subscriptionType: string | null;
+  rateLimitTier: string | null;
+  email: string | null;
+  accountUuid: string | null;
+}
+
+interface CodexLoginSeed {
+  accessToken: string;
+  refreshToken: string;
+  idToken: string | null;
+  accountId: string;
+  email: string | null;
+  expiresAt: number | null;
+}
+
+type TestPluginOptions = AccountPoolPluginOptions & {
+  seedClaude?: () => Promise<ClaudeLoginSeed>;
+  seedCodex?: () => Promise<CodexLoginSeed>;
+};
+
+const loginSeeds = new WeakMap<
+  BbPluginApi,
+  Pick<TestPluginOptions, "seedClaude" | "seedCodex">
+>();
+
+function testPlugin(options: TestPluginOptions = {}) {
+  const { seedClaude, seedCodex, ...pluginOptions } = options;
+  const plugin = createAccountPoolPlugin(pluginOptions);
+  return async (bb: BbPluginApi): Promise<void> => {
+    loginSeeds.set(bb, { seedClaude, seedCodex });
+    await plugin(bb);
+  };
+}
+
+// Test-only: the Anthropic and ChatGPT upstreams at one fake server. OpenAI API
+// keys keep the fixed api.openai.com upstream, as the old stored config did.
+function upstreamsAt(url: string) {
+  return { anthropic: url, chatgptCodex: url };
+}
+
+async function addOAuthAccount(
+  host: { bb: BbPluginApi; harness: { behavior: { callRpc: (method: string, input: unknown) => Promise<unknown> } } },
+  input: { provider: "claude" | "codex"; label: string | null; priority: number },
+) {
+  const seeds = loginSeeds.get(host.bb);
+  const store = new AccountStore(
+    host.bb.storage.kv,
+    path.join(
+      host.bb.server.experimental_dataDir,
+      "plugins",
+      host.bb.pluginId,
+      "secrets",
+      "accounts",
+    ),
+  );
+  let account;
+  if (input.provider === "claude") {
+    if (seeds?.seedClaude === undefined) throw new Error("No Claude login seed.");
+    const login = await seeds.seedClaude();
+    account = await store.add(
+      {
+        provider: "claude",
+        kind: "oauth",
+        label: input.label ?? login.email ?? "Claude Code account",
+        email: login.email,
+        accountUuid: login.accountUuid,
+        subscriptionType: login.subscriptionType,
+        rateLimitTier: login.rateLimitTier,
+        enabled: true,
+        priority: input.priority,
+      },
+      {
+        kind: "oauth",
+        accessToken: login.accessToken,
+        refreshToken: login.refreshToken,
+        expiresAt: login.expiresAt,
+      },
+    );
+  } else {
+    if (seeds?.seedCodex === undefined) throw new Error("No Codex login seed.");
+    const login = await seeds.seedCodex();
+    account = await store.add(
+      {
+        provider: "codex",
+        kind: "oauth",
+        label: input.label ?? login.email ?? "Codex account",
+        email: login.email,
+        accountUuid: null,
+        codexAccountId: login.accountId,
+        subscriptionType: null,
+        rateLimitTier: null,
+        enabled: true,
+        priority: input.priority,
+      },
+      {
+        kind: "oauth",
+        accessToken: login.accessToken,
+        refreshToken: login.refreshToken,
+        expiresAt: login.expiresAt,
+        ...(login.idToken === null ? {} : { idToken: login.idToken }),
+      },
+    );
+  }
+  // A finished login refreshes the new account's usage; do the same.
+  await host.harness.behavior.callRpc("account.refreshUsage", {
+    accountId: account.id,
+  });
+  return account;
+}
 
 type UpstreamHandler = (
   request: IncomingMessage,
@@ -192,9 +307,9 @@ async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function importedCredentials(
-  overrides: Partial<ImportedClaudeCredentials> = {},
-): ImportedClaudeCredentials {
+function claudeLoginSeed(
+  overrides: Partial<ClaudeLoginSeed> = {},
+): ClaudeLoginSeed {
   return {
     accessToken: "oauth-access",
     refreshToken: "oauth-refresh",
@@ -216,10 +331,12 @@ function testJwt(payload: object): string {
 }
 
 async function createFixture(args: {
-  upstreamUrl: string;
-  options?: AccountPoolPluginOptions;
+  // null keeps the fixed provider upstreams.
+  upstreamUrl: string | null;
+  storedConfig?: Record<string, unknown>;
+  options?: TestPluginOptions;
   provider?: "claude" | "codex";
-  source?: "api-key" | "import";
+  source?: "api-key" | "oauth";
   apiKey?: string;
   priority?: number;
   beforePlugin?: (host: Fixture["host"]) => void;
@@ -230,27 +347,31 @@ async function createFixture(args: {
     dataDir,
     sdk: sdkStubs(),
   });
-  await host.bb.storage.kv.set("config", {
-    anthropicUpstreamBaseUrl: args.upstreamUrl,
-    codexUpstreamBaseUrl: args.upstreamUrl,
-  });
-  const plugin = createAccountPoolPlugin({
+  if (args.storedConfig !== undefined) {
+    await host.bb.storage.kv.set("config", args.storedConfig);
+  }
+  const plugin = testPlugin({
     usageUrl: "data:application/json,{}",
+    ...(args.upstreamUrl === null
+      ? {}
+      : { upstreams: upstreamsAt(args.upstreamUrl) }),
     ...args.options,
   });
   args.beforePlugin?.(host);
   await plugin(host.bb);
-  const accountMetadata = accountSchema.parse(
-    await host.harness.behavior.callRpc("account.add", {
-      provider: args.provider ?? "claude",
-      source:
-        args.source === "import"
-          ? { kind: "import" }
-          : { kind: "api-key", apiKey: args.apiKey ?? "sk-account" },
-      label: null,
-      priority: args.priority ?? 100,
-    }),
-  );
+  const provider = args.provider ?? "claude";
+  const priority = args.priority ?? 100;
+  const accountMetadata =
+    args.source === "oauth"
+      ? await addOAuthAccount(host, { provider, label: null, priority })
+      : accountSchema.parse(
+          await host.harness.behavior.callRpc("account.add", {
+            provider,
+            source: { kind: "api-key", apiKey: args.apiKey ?? "sk-account" },
+            label: null,
+            priority,
+          }),
+        );
   const service = host.harness.behavior.runService("hub");
   await vi.waitFor(async () => {
     const result = await host.harness.behavior.runCli(["status", "--json"]);
@@ -282,12 +403,14 @@ async function createOAuthRequestFixture(
   provider: "claude" | "codex",
   upstreamFetch: typeof fetch,
   now: () => number,
+  extra: TestPluginOptions = {},
 ): Promise<Fixture> {
   return createFixture({
     upstreamUrl: "https://upstream.example",
     provider,
-    source: "import",
+    source: "oauth",
     options: {
+      ...extra,
       fetch: (input, init) =>
         String(input) === EMPTY_USAGE_URL
           ? Promise.resolve(Response.json({}))
@@ -296,12 +419,12 @@ async function createOAuthRequestFixture(
       refreshUrl: "https://upstream.example/oauth/token",
       codexRefreshUrl: "https://upstream.example/oauth/token",
       codexUsageUrl: EMPTY_USAGE_URL,
-      importCredentials: async () =>
-        importedCredentials({
+      seedClaude: async () =>
+        claudeLoginSeed({
           accessToken: "oauth-old",
           expiresAt: now() + 60 * 60 * 1_000,
         }),
-      importCodexCredentials: async () => ({
+      seedCodex: async () => ({
         accessToken: "oauth-old",
         refreshToken: "oauth-refresh",
         idToken: null,
@@ -377,18 +500,22 @@ const EMPTY_USAGE_URL = "data:application/json,{}";
 const CODEX_USAGE_STUB_URL = "https://usage.example/wham/usage";
 
 describe("Account Pool config schema", () => {
-  it("fills defaults and rejects invalid URLs and thresholds", () => {
+  it("fills defaults and rejects removed upstream keys and bad thresholds", () => {
     expect(accountPoolConfigSchema.parse({})).toEqual({
-      anthropicUpstreamBaseUrl: "https://api.anthropic.com",
-      codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
       switchThreshold: 0.98,
       parentMode: "proxy",
     });
-    expect(
-      accountPoolConfigSetInputSchema.safeParse({
-        anthropicUpstreamBaseUrl: "ftp://example.com",
-      }).success,
-    ).toBe(false);
+    for (const key of ["anthropicUpstreamBaseUrl", "codexUpstreamBaseUrl"]) {
+      expect(
+        accountPoolConfigSetInputSchema.safeParse({
+          [key]: "https://example.invalid",
+        }).success,
+      ).toBe(false);
+      expect(
+        accountPoolConfigSchema.safeParse({ [key]: "https://example.invalid" })
+          .success,
+      ).toBe(false);
+    }
     expect(
       accountPoolConfigSetInputSchema.safeParse({ switchThreshold: 0 }).success,
     ).toBe(false);
@@ -400,7 +527,7 @@ describe("Account Pool config schema", () => {
 });
 
 describe("Account Pool plugin", () => {
-  it("removes persisted cache debugging settings while preserving pool configuration across reloads", async () => {
+  it("drops removed settings from a stored config, logs it once, and keeps the rest across reloads", async () => {
     const dataDir = await mkdtemp(
       path.join(tmpdir(), "bb-account-pool-config-upgrade-"),
     );
@@ -414,16 +541,17 @@ describe("Account Pool plugin", () => {
       await fs.rm(dataDir, { recursive: true, force: true });
     });
     const expected = accountPoolConfigSchema.parse({
-      anthropicUpstreamBaseUrl: "http://127.0.0.1:9000",
       switchThreshold: 0.75,
       parentMode: "isolate",
     });
     await host.bb.storage.kv.set("config", {
       ...expected,
+      anthropicUpstreamBaseUrl: "https://evil.example",
+      codexUpstreamBaseUrl: "https://evil.example/codex",
       cacheMissDebug: true,
       cacheMissMinTokens: 20_000,
     });
-    const plugin = createAccountPoolPlugin();
+    const plugin = testPlugin();
     await plugin(host.bb);
     expect(await host.bb.storage.kv.get("config")).toEqual(expected);
     expect(await host.harness.behavior.callRpc("config.get", null)).toEqual(
@@ -433,6 +561,53 @@ describe("Account Pool plugin", () => {
     expect(await host.harness.behavior.callRpc("config.get", null)).toEqual(
       expected,
     );
+    const removedNotices = host.harness.inspection.logEntries.filter((entry) =>
+      entry.message.startsWith("Ignored removed config keys"),
+    );
+    expect(removedNotices).toEqual([
+      {
+        level: "warn",
+        message:
+          "Ignored removed config keys: anthropicUpstreamBaseUrl, codexUpstreamBaseUrl, cacheMissDebug, cacheMissMinTokens. Provider upstreams are fixed in code. A non-default upstream was stored for anthropicUpstreamBaseUrl, codexUpstreamBaseUrl (value not logged).",
+      },
+    ]);
+    expect(
+      host.harness.inspection.logEntries.some((entry) =>
+        entry.message.includes("evil.example"),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag stored upstreams that equal the former defaults", async () => {
+    const dataDir = await mkdtemp(
+      path.join(tmpdir(), "bb-account-pool-config-defaults-"),
+    );
+    const host = createFakePluginHost({
+      pluginId: "account-pool",
+      dataDir,
+      sdk: sdkStubs(),
+    });
+    cleanups.push(async () => {
+      await host.harness.lifecycle.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    await host.bb.storage.kv.set("config", {
+      ...DEFAULT_ACCOUNT_POOL_CONFIG,
+      anthropicUpstreamBaseUrl: "https://api.anthropic.com",
+      codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
+    });
+    await testPlugin()(host.bb);
+    expect(
+      host.harness.inspection.logEntries.filter((entry) =>
+        entry.message.startsWith("Ignored removed config keys"),
+      ),
+    ).toEqual([
+      {
+        level: "warn",
+        message:
+          "Ignored removed config keys: anthropicUpstreamBaseUrl, codexUpstreamBaseUrl. Provider upstreams are fixed in code.",
+      },
+    ]);
   });
 
   it("reads and updates one full config record through RPC and CLI", async () => {
@@ -444,7 +619,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await createAccountPoolPlugin()(host.bb);
+    await testPlugin()(host.bb);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -457,13 +632,7 @@ describe("Account Pool plugin", () => {
     ).toEqual(accountPoolConfigSchema.parse({}));
     const cliGet = await host.harness.behavior.runCli(["config"]);
     expect(cliGet.exitCode).toBe(0);
-    expect(cliGet.stdout).toContain(
-      "anthropicUpstreamBaseUrl: https://api.anthropic.com",
-    );
-    expect(cliGet.stdout).toContain(
-      "codexUpstreamBaseUrl: https://chatgpt.com/backend-api/codex",
-    );
-    expect(cliGet.stdout).toContain("switchThreshold: 0.98");
+    expect(cliGet.stdout).toBe("switchThreshold: 0.98\nparentMode: proxy\n");
 
     const cliSet = await host.harness.behavior.runCli([
       "config",
@@ -475,15 +644,10 @@ describe("Account Pool plugin", () => {
     expect(cliSet.stdout).toContain("switchThreshold: 0.75");
     const updated = accountPoolConfigSchema.parse(
       await host.harness.behavior.callRpc("config.set", {
-        anthropicUpstreamBaseUrl: "http://127.0.0.1:9000",
+        parentMode: "isolate",
       }),
     );
-    expect(updated).toEqual({
-      anthropicUpstreamBaseUrl: "http://127.0.0.1:9000",
-      codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
-      switchThreshold: 0.75,
-      parentMode: "proxy",
-    });
+    expect(updated).toEqual({ switchThreshold: 0.75, parentMode: "isolate" });
     expect(
       accountPoolConfigSchema.parse(await host.bb.storage.kv.get("config")),
     ).toEqual(updated);
@@ -491,6 +655,230 @@ describe("Account Pool plugin", () => {
       channel: "config-changed",
       payload: {},
     });
+  });
+
+  it.each(["anthropicUpstreamBaseUrl", "codexUpstreamBaseUrl"])(
+    "refuses to set the removed %s key through RPC and CLI",
+    async (key) => {
+      const dataDir = await mkdtemp(
+        path.join(tmpdir(), "bb-account-pool-config-refuse-"),
+      );
+      const host = createFakePluginHost({
+        pluginId: "account-pool",
+        dataDir,
+        sdk: sdkStubs(),
+      });
+      await testPlugin()(host.bb);
+      cleanups.push(async () => {
+        await host.harness.lifecycle.dispose();
+        await fs.rm(dataDir, { recursive: true, force: true });
+      });
+      const before = await host.harness.behavior.callRpc("config.get", null);
+      await expect(
+        host.harness.behavior.callRpc("config.set", {
+          [key]: "https://example.invalid",
+        }),
+      ).rejects.toThrow();
+      const cli = await host.harness.behavior.runCli([
+        "config",
+        "set",
+        key,
+        "https://example.invalid",
+      ]);
+      expect(cli.exitCode).not.toBe(0);
+      expect(cli.stderr).toContain(
+        `${key} was removed: provider upstreams are fixed in code.`,
+      );
+      expect(await host.harness.behavior.callRpc("config.get", null)).toEqual(
+        before,
+      );
+      expect(JSON.stringify(await host.bb.storage.kv.get("config") ?? {})).not.toContain(
+        "example.invalid",
+      );
+    },
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "refuses to import a %s login through RPC",
+    async (provider) => {
+      const dataDir = await mkdtemp(
+        path.join(tmpdir(), "bb-account-pool-no-import-"),
+      );
+      const host = createFakePluginHost({
+        pluginId: "account-pool",
+        dataDir,
+        sdk: sdkStubs(),
+      });
+      await testPlugin()(host.bb);
+      cleanups.push(async () => {
+        await host.harness.lifecycle.dispose();
+        await fs.rm(dataDir, { recursive: true, force: true });
+      });
+      await expect(
+        host.harness.behavior.callRpc("account.add", {
+          provider,
+          source: { kind: "import" },
+          label: null,
+          priority: 100,
+        }),
+      ).rejects.toThrow();
+      expect(
+        await host.harness.behavior.callRpc("account.list", null),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    {
+      name: "a Claude OAuth account",
+      provider: "claude" as const,
+      source: "oauth" as const,
+      path: "/v1/messages",
+      expected: "https://api.anthropic.com/v1/messages",
+    },
+    {
+      name: "an Anthropic API key",
+      provider: "claude" as const,
+      source: "api-key" as const,
+      path: "/v1/messages",
+      expected: "https://api.anthropic.com/v1/messages",
+    },
+    {
+      name: "a ChatGPT Codex account",
+      provider: "codex" as const,
+      source: "oauth" as const,
+      path: "/v1/responses",
+      expected: "https://chatgpt.com/backend-api/codex/responses",
+    },
+    {
+      name: "an OpenAI API key",
+      provider: "codex" as const,
+      source: "api-key" as const,
+      path: "/v1/responses",
+      expected: "https://api.openai.com/v1/responses",
+    },
+  ])(
+    "sends $name to the fixed upstream whatever the stored config says",
+    async ({ provider, source, path: requestPath, expected }) => {
+      const fetched: string[] = [];
+      const fixture = await createFixture({
+        upstreamUrl: null,
+        storedConfig: {
+          anthropicUpstreamBaseUrl: "https://evil.example",
+          codexUpstreamBaseUrl: "https://evil.example/codex",
+        },
+        provider,
+        source,
+        options: {
+          fetch: async (input) => {
+            fetched.push(String(input instanceof Request ? input.url : input));
+            return Response.json({});
+          },
+          codexUsageUrl: EMPTY_USAGE_URL,
+          seedClaude: async () => claudeLoginSeed(),
+          seedCodex: async () => ({
+            accessToken: "codex-access",
+            refreshToken: "codex-refresh",
+            idToken: null,
+            accountId: "chatgpt-account-1",
+            email: "codex@example.com",
+            expiresAt: Date.now() + 60 * 60 * 1_000,
+          }),
+        },
+      });
+      const response = await fixture.host.harness.behavior.fetchHttp(
+        "POST",
+        requestPath,
+        { headers: authHeaders(fixture.key), body: "{}" },
+      );
+      await response.text();
+      expect(fetched).toContain(expected);
+      expect(fetched.join("\n")).not.toContain("evil.example");
+    },
+  );
+
+  it("sends every request, refresh, usage poll and ping only to provider hosts", async () => {
+    const PROVIDER_HOSTS = new Set([
+      "api.anthropic.com",
+      "platform.claude.com",
+      "chatgpt.com",
+      "auth.openai.com",
+      "api.openai.com",
+    ]);
+    const fetched: URL[] = [];
+    const codexToken = testJwt({ exp: Math.floor(Date.now() / 1_000) + 3600 });
+    const fixture = await createFixture({
+      upstreamUrl: null,
+      provider: "claude",
+      source: "oauth",
+      options: {
+        usageUrl: undefined,
+        fetch: async (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input));
+          fetched.push(url);
+          if (url.pathname.endsWith("/oauth/token"))
+            return Response.json({
+              access_token: url.host === "auth.openai.com" ? codexToken : "claude-new",
+              refresh_token: "refresh-new",
+              expires_in: 3600,
+            });
+          const authorization = new Headers(init?.headers).get("authorization");
+          if (authorization === "Bearer claude-old" || authorization === "Bearer codex-old")
+            return Response.json({ error: { message: "expired" } }, { status: 401 });
+          return Response.json({});
+        },
+        seedClaude: async () => claudeLoginSeed({ accessToken: "claude-old" }),
+        seedCodex: async () => ({
+          accessToken: "codex-old",
+          refreshToken: "codex-refresh",
+          idToken: null,
+          accountId: "chatgpt-account-1",
+          email: "codex@example.com",
+          expiresAt: Date.now() + 60 * 60 * 1_000,
+        }),
+      },
+    });
+    const codex = await addOAuthAccount(fixture.host, {
+      provider: "codex",
+      label: null,
+      priority: 100,
+    });
+    const claudeKey = await addApiAccount(fixture, "sk-claude-key", 200);
+    await fixture.host.harness.behavior.callRpc("account.add", {
+      provider: "codex",
+      source: { kind: "api-key", apiKey: "sk-openai-key" },
+      label: null,
+      priority: 200,
+    });
+    for (const [route, key] of [
+      ["/v1/messages", fixture.key],
+      ["/v1/responses", (await resolveCodexToken(fixture.host)).token],
+    ] as const) {
+      const response = await fixture.host.harness.behavior.fetchHttp("POST", route, {
+        headers: authHeaders(key),
+        body: "{}",
+      });
+      await response.text();
+    }
+    for (const id of [fixture.account.id, claudeKey.id])
+      await fixture.host.harness.behavior
+        .callRpc("account.ping", { id, diagnostic: true })
+        .catch(() => null);
+    for (const id of [fixture.account.id, codex.id])
+      await fixture.host.harness.behavior.callRpc("account.refreshUsage", { accountId: id });
+    const hosts = new Set(fetched.map((url) => url.host));
+    expect([...hosts].filter((host) => !PROVIDER_HOSTS.has(host))).toEqual([]);
+    const seen = fetched.map((url) => `${url.host}${url.pathname}`);
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        "api.anthropic.com/v1/messages",
+        "platform.claude.com/v1/oauth/token",
+        "api.anthropic.com/api/oauth/usage",
+        "chatgpt.com/backend-api/codex/responses",
+        "auth.openai.com/oauth/token",
+        "chatgpt.com/backend-api/wham/usage",
+      ]),
+    );
   });
 
   it.each([
@@ -561,7 +949,7 @@ describe("Account Pool plugin", () => {
     },
   );
 
-  it("imports, refreshes, and routes Codex HTTP sessions by provider", async () => {
+  it("refreshes and routes Codex HTTP sessions by provider", async () => {
     const seen: Array<{
       path: string;
       authorization: string | undefined;
@@ -673,8 +1061,8 @@ describe("Account Pool plugin", () => {
       path.join(tmpdir(), "bb-account-pool-codex-"),
     );
     let imported = 0;
-    const importCodexCredentials =
-      async (): Promise<ImportedCodexCredentials> => {
+    const seedCodex =
+      async (): Promise<CodexLoginSeed> => {
         imported += 1;
         return {
           accessToken: "expired-token",
@@ -690,14 +1078,11 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await host.bb.storage.kv.set("config", {
-      anthropicUpstreamBaseUrl: upstream.url,
-      codexUpstreamBaseUrl: upstream.url,
-    });
-    await createAccountPoolPlugin({
+    await testPlugin({
+      upstreams: upstreamsAt(upstream.url),
       codexRefreshUrl: `${upstream.url}/oauth`,
       codexUsageUrl: `${upstream.url}/usage`,
-      importCodexCredentials,
+      seedCodex,
       usageUrl: "data:application/json,{}",
     })(host.bb);
     const service = host.harness.behavior.runService("hub");
@@ -720,17 +1105,22 @@ describe("Account Pool plugin", () => {
       label: "Claude first",
       priority: 0,
     });
-    const importedByCli = await host.harness.behavior.runCli([
+    const importByCli = await host.harness.behavior.runCli([
       "account",
       "add",
       "--provider",
       "codex",
       "--import",
     ]);
-    expect(importedByCli.exitCode).toBe(0);
-    await host.harness.behavior.callRpc("account.add", {
+    expect(importByCli.exitCode).toBe(1);
+    expect(importByCli.stderr).toContain("unknown option '--import'");
+    await addOAuthAccount(host, {
       provider: "codex",
-      source: { kind: "import" },
+      label: null,
+      priority: 100,
+    });
+    await addOAuthAccount(host, {
+      provider: "codex",
       label: null,
       priority: 100,
     });
@@ -968,13 +1358,11 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await host.bb.storage.kv.set("config", {
-      codexUpstreamBaseUrl: "https://example.com",
-    });
-    await createAccountPoolPlugin({
+    await testPlugin({
+      upstreams: { chatgptCodex: "https://example.com" },
       fetch: upstreamFetch,
       codexUsageUrl: CODEX_USAGE_STUB_URL,
-      importCodexCredentials: async () => ({
+      seedCodex: async () => ({
         accessToken: "access",
         refreshToken: "refresh",
         idToken: null,
@@ -997,9 +1385,8 @@ describe("Account Pool plugin", () => {
         ).accepting,
       ).toBe(true);
     });
-    await host.harness.behavior.callRpc("account.add", {
+    await addOAuthAccount(host, {
       provider: "codex",
-      source: { kind: "import" },
       label: null,
       priority: 100,
     });
@@ -1053,7 +1440,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await createAccountPoolPlugin()(host.bb);
+    await testPlugin()(host.bb);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -1128,10 +1515,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await host.bb.storage.kv.set("config", {
-      anthropicUpstreamBaseUrl: upstream.url,
-    });
-    await createAccountPoolPlugin()(host.bb);
+    await testPlugin({ upstreams: { anthropic: upstream.url } })(host.bb);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       service.controller.abort();
@@ -1542,13 +1926,13 @@ describe("Account Pool plugin", () => {
       let inferenceCalls = 0;
       const fixture = await createFixture({
         upstreamUrl: "https://synthetic.example",
-        source: "import",
+        source: "oauth",
         options: {
           now: () => now,
           usageUrl: "https://synthetic.example/usage",
           refreshUrl: "https://synthetic.example/oauth/token",
-          importCredentials: async () =>
-            importedCredentials({ expiresAt: now - 1 }),
+          seedClaude: async () =>
+            claudeLoginSeed({ expiresAt: now - 1 }),
           fetch: async (input) => {
             const url = String(input);
             if (url.endsWith("/oauth/token")) {
@@ -1951,10 +2335,10 @@ describe("Account Pool plugin", () => {
       });
       const fixture = await createFixture({
         upstreamUrl: upstream.url,
-        source: "import",
+        source: "oauth",
         options: {
-          importCredentials: async () =>
-            importedCredentials({
+          seedClaude: async () =>
+            claudeLoginSeed({
               accessToken: "oauth-test-access",
               refreshToken: "oauth-test-refresh",
             }),
@@ -2037,10 +2421,10 @@ describe("Account Pool plugin", () => {
       });
       const fixture = await createFixture({
         upstreamUrl: upstream.url,
-        source: "import",
+        source: "oauth",
         options: {
-          importCredentials: async () =>
-            importedCredentials({
+          seedClaude: async () =>
+            claudeLoginSeed({
               accessToken: `oauth-${++imported}`,
               accountUuid:
                 imported === 1
@@ -2050,9 +2434,8 @@ describe("Account Pool plugin", () => {
         },
       });
       const second = accountSchema.parse(
-        await fixture.host.harness.behavior.callRpc("account.add", {
+        await addOAuthAccount(fixture.host, {
           provider: "claude",
-          source: { kind: "import" },
           label: "C2",
           priority: 100,
         }),
@@ -2173,7 +2556,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await createAccountPoolPlugin()(host.bb);
+    await testPlugin()(host.bb);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -2208,7 +2591,7 @@ describe("Account Pool plugin", () => {
       "add",
       "--provider",
       "gemini",
-      "--import",
+      "--login",
     ]);
     expect(badProvider.exitCode).toBe(1);
     expect(badProvider.stderr).toContain(
@@ -2220,13 +2603,22 @@ describe("Account Pool plugin", () => {
       "add",
       "--provider",
       "claude",
-      "--import",
+      "--api-key",
+      "sk-conflict",
       "--login",
     ]);
     expect(conflicting.exitCode).toBe(1);
     expect(conflicting.stderr).toContain(
-      "--login and --import cannot be combined",
+      "--login and --api-key cannot be combined",
     );
+
+    for (const flag of ["--import", "--import-local", "--local"]) {
+      const imported = await run(["account", "add", "--provider", "claude", flag]);
+      expect(imported.exitCode).toBe(1);
+      expect(imported.stderr).toContain(`unknown option '${flag}'`);
+    }
+    const addHelp = await run(["account", "add", "--help"]);
+    expect(addHelp.stdout).not.toMatch(/--import|--local|import credentials/u);
 
     const jsonEnvelope = await run([
       "account",
@@ -2241,12 +2633,12 @@ describe("Account Pool plugin", () => {
       error: {
         code: "missing_required",
         message:
-          "missing required options: one of --login, --import, --api-key",
+          "missing required options: one of --login, --api-key",
         hint: expect.stringContaining("bb pool account add"),
       },
     });
     expect(jsonEnvelope.stderr).toContain(
-      "missing required options: one of --login, --import, --api-key",
+      "missing required options: one of --login, --api-key",
     );
 
     const bypassWithoutThread = await run(["bypass"], {
@@ -2302,7 +2694,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await createAccountPoolPlugin({
+    await testPlugin({
       oauthAuthorizeUrl: `${oauth.url}/authorize`,
       oauthTokenUrl: `${oauth.url}/token`,
       oauthProfileUrl: `${oauth.url}/profile`,
@@ -2464,7 +2856,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await createAccountPoolPlugin({
+    await testPlugin({
       codexAuthBaseUrl: auth.url,
       codexUsageUrl: EMPTY_USAGE_URL,
       usageUrl: "data:application/json,{}",
@@ -2659,10 +3051,10 @@ describe("Account Pool plugin", () => {
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
       provider: "codex",
-      source: "import",
+      source: "oauth",
       options: {
         codexUsageUrl: EMPTY_USAGE_URL,
-        importCodexCredentials: async () => ({
+        seedCodex: async () => ({
           accessToken: "sk-codex",
           refreshToken: "refresh",
           idToken: null,
@@ -2704,7 +3096,7 @@ describe("Account Pool plugin", () => {
     cleanups.push(upstream.close);
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      options: { importCredentials: async () => importedCredentials() },
+      options: { seedClaude: async () => claudeLoginSeed() },
     });
     const cacheEntry = async () =>
       (
@@ -2716,9 +3108,8 @@ describe("Account Pool plugin", () => {
       ).find((entry) => entry.name === "ENABLE_PROMPT_CACHING_1H");
     await expect(cacheEntry()).resolves.toBeUndefined();
     const subscription = accountSchema.parse(
-      await fixture.host.harness.behavior.callRpc("account.add", {
+      await addOAuthAccount(fixture.host, {
         provider: "claude",
-        source: { kind: "import" },
         label: null,
         priority: 100,
       }),
@@ -3019,8 +3410,8 @@ describe("Account Pool plugin", () => {
     cleanups.push(upstream.close);
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
-      options: { importCredentials: async () => importedCredentials() },
+      source: "oauth",
+      options: { seedClaude: async () => claudeLoginSeed() },
     });
     const unauthorized = await fixture.host.harness.behavior.fetchHttp(
       "POST",
@@ -3403,11 +3794,11 @@ describe("Account Pool plugin", () => {
     });
     cleanups.push(upstream.close);
     const imports = [
-      importedCredentials({
+      claudeLoginSeed({
         accessToken: "oauth-a",
         accountUuid: null,
       }),
-      importedCredentials({
+      claudeLoginSeed({
         accessToken: "oauth-b",
         accountUuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       }),
@@ -3415,11 +3806,11 @@ describe("Account Pool plugin", () => {
     let importIndex = 0;
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
         usageUrl: `${upstream.url}/usage`,
         oauthProfileUrl: `${upstream.url}/profile`,
-        importCredentials: async () => {
+        seedClaude: async () => {
           const imported = imports[importIndex];
           importIndex += 1;
           if (imported === undefined) throw new Error("No import fixture.");
@@ -3428,9 +3819,8 @@ describe("Account Pool plugin", () => {
       },
     });
     const second = accountSchema.parse(
-      await fixture.host.harness.behavior.callRpc("account.add", {
+      await addOAuthAccount(fixture.host, {
         provider: "claude",
-        source: { kind: "import" },
         label: "second",
         priority: 100,
       }),
@@ -3491,9 +3881,9 @@ describe("Account Pool plugin", () => {
     const oldUuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
-        importCredentials: async () => importedCredentials({ accountUuid }),
+        seedClaude: async () => claudeLoginSeed({ accountUuid }),
       },
     });
     const inputs = [
@@ -4647,7 +5037,7 @@ describe("Account Pool plugin", () => {
         upstreamUrl: "https://upstream.example",
         provider,
         apiKey: "sk-first",
-        source: provider === "codex" ? "import" : "api-key",
+        source: provider === "codex" ? "oauth" : "api-key",
         options: {
           now,
           codexUsageUrl: EMPTY_USAGE_URL,
@@ -4655,7 +5045,7 @@ describe("Account Pool plugin", () => {
             String(input) === EMPTY_USAGE_URL
               ? Promise.resolve(Response.json({}))
               : upstreamFetch(input, init),
-          importCodexCredentials: async () => ({
+          seedCodex: async () => ({
             accessToken:
               ["sk-first", "sk-second", "sk-third"][imported++] ?? "sk-extra",
             refreshToken: "refresh",
@@ -4668,9 +5058,8 @@ describe("Account Pool plugin", () => {
       });
       if (provider === "claude") await addApiAccount(fixture, "sk-second");
       else
-        await fixture.host.harness.behavior.callRpc("account.add", {
+        await addOAuthAccount(fixture.host, {
           provider,
-          source: { kind: "import" },
           label: null,
           priority: 100,
         });
@@ -4699,9 +5088,8 @@ describe("Account Pool plugin", () => {
         );
         if (provider === "claude") await addApiAccount(fixture, "sk-third");
         else
-          await fixture.host.harness.behavior.callRpc("account.add", {
+          await addOAuthAccount(fixture.host, {
             provider,
-            source: { kind: "import" },
             label: null,
             priority: 100,
           });
@@ -4867,7 +5255,7 @@ describe("Account Pool plugin", () => {
         await send("fallback");
         outage = false;
         host = await host.harness.lifecycle.reload(
-          createAccountPoolPlugin({
+          testPlugin({
             fetch: upstreamFetch,
             now: () => 1_800_000_000_000,
             usageUrl: EMPTY_USAGE_URL,
@@ -4947,7 +5335,7 @@ describe("Account Pool plugin", () => {
         now += idleMinutes * 60 * 1_000;
         if (reload) {
           host = await host.harness.lifecycle.reload(
-            createAccountPoolPlugin({
+            testPlugin({
               fetch: upstreamFetch,
               now: () => now,
               usageUrl: EMPTY_USAGE_URL,
@@ -6384,11 +6772,11 @@ describe("Account Pool plugin", () => {
     cleanups.push(upstream.close);
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
         now: () => now,
-        importCredentials: async () =>
-          importedCredentials({ expiresAt: now + 10 * 60 * 1_000 }),
+        seedClaude: async () =>
+          claudeLoginSeed({ expiresAt: now + 10 * 60 * 1_000 }),
         refreshUrl: `${upstream.url}/oauth/token`,
       },
     });
@@ -6490,12 +6878,12 @@ describe("Account Pool plugin", () => {
     let imported = 0;
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
         now: () => now,
-        importCredentials: async () => {
+        seedClaude: async () => {
           imported += 1;
-          return importedCredentials({
+          return claudeLoginSeed({
             accessToken: `access-${imported}`,
             refreshToken: `refresh-${imported}`,
             email: `account-${imported}@example.com`,
@@ -6506,9 +6894,8 @@ describe("Account Pool plugin", () => {
       },
     });
     const second = accountSchema.parse(
-      await fixture.host.harness.behavior.callRpc("account.add", {
+      await addOAuthAccount(fixture.host, {
         provider: "claude",
-        source: { kind: "import" },
         label: "second",
         priority: 200,
       }),
@@ -6616,12 +7003,12 @@ describe("Account Pool plugin", () => {
       const fixture = await createFixture({
         upstreamUrl: upstream.url,
         provider,
-        source: "import",
+        source: "oauth",
         options: {
           now: () => now,
-          importCredentials: async () =>
-            importedCredentials({ accessToken: oldToken, expiresAt }),
-          importCodexCredentials: async () => ({
+          seedClaude: async () =>
+            claudeLoginSeed({ accessToken: oldToken, expiresAt }),
+          seedCodex: async () => ({
             accessToken: oldToken,
             refreshToken: "old-refresh",
             idToken: null,
@@ -6713,10 +7100,10 @@ describe("Account Pool plugin", () => {
     cleanups.push(upstream.close);
     const fixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
         now: () => now,
-        importCredentials: async () => importedCredentials({ expiresAt }),
+        seedClaude: async () => claudeLoginSeed({ expiresAt }),
         refreshUrl: `${upstream.url}/oauth/token`,
       },
     });
@@ -6757,10 +7144,10 @@ describe("Account Pool plugin", () => {
     cleanups.push(upstream.close);
     const refreshFixture = await createFixture({
       upstreamUrl: upstream.url,
-      source: "import",
+      source: "oauth",
       options: {
-        importCredentials: async () =>
-          importedCredentials({ expiresAt: Date.now() + 1_000 }),
+        seedClaude: async () =>
+          claudeLoginSeed({ expiresAt: Date.now() + 1_000 }),
         refreshUrl: `${upstream.url}/oauth/token`,
       },
     });
@@ -6805,7 +7192,7 @@ describe("Account Pool plugin", () => {
       options: {
         fetch: async () => Response.json({}),
         codexUsageUrl: EMPTY_USAGE_URL,
-        importCodexCredentials: async () => ({
+        seedCodex: async () => ({
           accessToken: "codex-access",
           refreshToken: "codex-refresh",
           idToken: "codex-id",
@@ -6815,9 +7202,8 @@ describe("Account Pool plugin", () => {
         }),
       },
     });
-    await fixture.host.harness.behavior.callRpc("account.add", {
+    await addOAuthAccount(fixture.host, {
       provider: "codex",
-      source: { kind: "import" },
       label: null,
       priority: 100,
     });
@@ -6962,6 +7348,90 @@ describe("Account Pool plugin", () => {
   });
 });
 
+describe("hub stop and OAuth refresh", () => {
+  it("lets an in-flight OAuth refresh finish and persist before the hub stops", async () => {
+    let refreshCalls = 0;
+    const gate = deferred();
+    const fixture = await createOAuthRequestFixture(
+      "claude",
+      async (input, init) => {
+        if (String(input).endsWith("/oauth/token")) {
+          refreshCalls += 1;
+          await gate.promise;
+          return Response.json({
+            access_token: "oauth-rotated",
+            refresh_token: "oauth-refresh-rotated",
+            expires_in: 3600,
+          });
+        }
+        const authorization = new Headers(init?.headers).get("authorization");
+        return authorization === "Bearer oauth-old"
+          ? Response.json({ error: { message: "expired" } }, { status: 401 })
+          : Response.json({});
+      },
+      Date.now,
+      { drainTimeoutMs: 10 },
+    );
+    const request = fixture.host.harness.behavior
+      .fetchHttp("POST", "/v1/messages", {
+        headers: authHeaders(fixture.key),
+        body: "{}",
+      })
+      .catch(() => null);
+    await vi.waitFor(() => expect(refreshCalls).toBe(1));
+    let stopped = false;
+    fixture.service.controller.abort();
+    const done = fixture.service.done.then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(stopped).toBe(false);
+    gate.resolve();
+    await done;
+    await request;
+    const store = new AccountStore(
+      fixture.host.bb.storage.kv,
+      path.join(fixture.dataDir, "plugins", fixture.host.bb.pluginId, "secrets", "accounts"),
+    );
+    expect(await store.readSecret(fixture.account.id)).toMatchObject({
+      kind: "oauth",
+      accessToken: "oauth-rotated",
+      refreshToken: "oauth-refresh-rotated",
+    });
+  });
+
+  it("stops waiting for a hung refresh after the refresh drain bound", async () => {
+    let refreshCalls = 0;
+    const fixture = await createOAuthRequestFixture(
+      "claude",
+      async (input, init) => {
+        if (String(input).endsWith("/oauth/token")) {
+          refreshCalls += 1;
+          return new Promise<Response>(() => {});
+        }
+        const authorization = new Headers(init?.headers).get("authorization");
+        return authorization === "Bearer oauth-old"
+          ? Response.json({ error: { message: "expired" } }, { status: 401 })
+          : Response.json({});
+      },
+      Date.now,
+      { drainTimeoutMs: 10, refreshDrainTimeoutMs: 50 },
+    );
+    void fixture.host.harness.behavior
+      .fetchHttp("POST", "/v1/messages", {
+        headers: authHeaders(fixture.key),
+        body: "{}",
+      })
+      .catch(() => null);
+    await vi.waitFor(() => expect(refreshCalls).toBe(1));
+    const startedAt = Date.now();
+    fixture.service.controller.abort();
+    await fixture.service.done;
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(40);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
+});
+
 describe("sequential pool recovery", () => {
   const body = JSON.stringify({
     model: "claude-opus-4-1",
@@ -7099,10 +7569,10 @@ describe("sequential pool recovery", () => {
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
       provider: "codex",
-      source: "import",
+      source: "oauth",
       options: {
         codexUsageUrl: EMPTY_USAGE_URL,
-        importCodexCredentials: async () => ({
+        seedCodex: async () => ({
           accessToken: imported++ === 0 ? "sk-first" : "sk-second",
           refreshToken: "refresh",
           idToken: null,
@@ -7130,9 +7600,8 @@ describe("sequential pool recovery", () => {
         },
       },
     });
-    await fixture.host.harness.behavior.callRpc("account.add", {
+    await addOAuthAccount(fixture.host, {
       provider: "codex",
-      source: { kind: "import" },
       label: null,
       priority: 100,
     });
@@ -7189,10 +7658,10 @@ describe("sequential pool recovery", () => {
       const fixture = await createFixture({
         upstreamUrl: "https://upstream.example",
         provider: "codex",
-        source: "import",
+        source: "oauth",
         options: {
           codexUsageUrl: "https://upstream.example/usage",
-          importCodexCredentials: async () => ({
+          seedCodex: async () => ({
             accessToken: "codex-credit",
             refreshToken: "refresh",
             expiresAt: Date.now() + 3600000,
@@ -7240,10 +7709,10 @@ describe("sequential pool recovery", () => {
     let includedPercent = 10;
     let spendingBlocked = false;
     const calls: string[] = [];
-    const options: AccountPoolPluginOptions = {
+    const options: TestPluginOptions = {
       now: () => now,
       codexUsageUrl: "https://upstream.example/usage",
-      importCodexCredentials: async () => ({
+      seedCodex: async () => ({
         accessToken: ++imports === 1 ? "paid" : "included",
         refreshToken: "refresh",
         expiresAt: now + 3600000,
@@ -7284,14 +7753,13 @@ describe("sequential pool recovery", () => {
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
       provider: "codex",
-      source: "import",
+      source: "oauth",
       priority: 1,
       options,
     });
     const second = accountSchema.parse(
-      await fixture.host.harness.behavior.callRpc("account.add", {
+      await addOAuthAccount(fixture.host, {
         provider: "codex",
-        source: { kind: "import" },
         label: "Included",
         priority: 2,
       }),
@@ -7333,7 +7801,7 @@ describe("sequential pool recovery", () => {
     spendingBlocked = true;
     expect(await send()).toBe(429);
     host = await host.harness.lifecycle.reload(
-      createAccountPoolPlugin(options),
+      testPlugin(options),
     );
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
@@ -7397,10 +7865,10 @@ describe("sequential pool recovery", () => {
       const calls: string[] = [];
       const fixture = await createFixture({
         upstreamUrl: "https://upstream.example",
-        source: "import",
+        source: "oauth",
         options: {
           usageUrl: "https://upstream.example/usage",
-          importCredentials: async () => importedCredentials(),
+          seedClaude: async () => claudeLoginSeed(),
           fetch: async (input) => {
             const pathname = new URL(String(input)).pathname;
             if (pathname === "/usage")
@@ -7453,13 +7921,13 @@ describe("sequential pool recovery", () => {
       const attempts: string[] = [];
       const fixture = await createFixture({
         upstreamUrl: "https://upstream.example",
-        source: "import",
+        source: "oauth",
         priority: 1,
         options: {
           now: () => now,
           usageUrl: "https://upstream.example/usage",
-          importCredentials: async () =>
-            importedCredentials({
+          seedClaude: async () =>
+            claudeLoginSeed({
               accessToken: ++importCount === 1 ? "paid" : "included",
             }),
           fetch: async (input, init) => {
@@ -7483,9 +7951,8 @@ describe("sequential pool recovery", () => {
         },
       });
       const second = accountSchema.parse(
-        await fixture.host.harness.behavior.callRpc("account.add", {
+        await addOAuthAccount(fixture.host, {
           provider: "claude",
-          source: { kind: "import" },
           label: "included",
           priority: 2,
         }),
@@ -7535,9 +8002,9 @@ describe("sequential pool recovery", () => {
   it("learns extra usage from headers, preserves it across restart, and stops on an overage rejection", async () => {
     let rejectOverage = false;
     let upstreamCalls = 0;
-    const options: AccountPoolPluginOptions = {
+    const options: TestPluginOptions = {
       usageUrl: "https://upstream.example/usage",
-      importCredentials: async () => importedCredentials(),
+      seedClaude: async () => claudeLoginSeed(),
       fetch: async (input) => {
         if (new URL(String(input)).pathname === "/usage")
           return Response.json({});
@@ -7560,7 +8027,7 @@ describe("sequential pool recovery", () => {
     };
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
-      source: "import",
+      source: "oauth",
       options,
     });
     let host = fixture.host;
@@ -7575,7 +8042,7 @@ describe("sequential pool recovery", () => {
     };
     expect(await send()).toBe(200);
     host = await host.harness.lifecycle.reload(
-      createAccountPoolPlugin(options),
+      testPlugin(options),
     );
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
@@ -7603,11 +8070,11 @@ describe("sequential pool recovery", () => {
     const calls: string[] = [];
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
-      source: "import",
+      source: "oauth",
       options: {
         now: () => now,
         usageUrl: "https://upstream.example/usage",
-        importCredentials: async () => importedCredentials(),
+        seedClaude: async () => claudeLoginSeed(),
         fetch: async (input) => {
           const url = new URL(String(input));
           calls.push(url.pathname);
@@ -7653,11 +8120,11 @@ describe("sequential pool recovery", () => {
     const calls: string[] = [];
     const fixture = await createFixture({
       upstreamUrl: "https://upstream.example",
-      source: "import",
+      source: "oauth",
       options: {
         now: () => now,
         usageUrl: "https://upstream.example/usage",
-        importCredentials: async () => importedCredentials(),
+        seedClaude: async () => claudeLoginSeed(),
         fetch: async (input) => {
           const url = new URL(String(input));
           calls.push(url.pathname);
@@ -7973,7 +8440,7 @@ it("publishes an empty shared usage group before any accounts or settings are co
     throw new Error("An empty pool must not contact an upstream");
   });
   try {
-    await createAccountPoolPlugin({ fetch })(host.bb);
+    await testPlugin({ fetch })(host.bb);
     expect(
       host.harness.registrations.experimental_publishedRpcMethods.map(
         (entry) => entry.method,
@@ -8049,7 +8516,7 @@ describe("Account Pool nested proxy", () => {
     if (args.parentMode !== undefined) {
       await host.bb.storage.kv.set("config", { parentMode: args.parentMode });
     }
-    await createAccountPoolPlugin({
+    await testPlugin({
       usageUrl: "data:application/json,{}",
       availabilityTtlMs: 0,
       env:
@@ -8456,11 +8923,11 @@ it("switches from a spent ChatGPT subscription to an OpenAI key without leaking 
   const fixture = await createFixture({
     upstreamUrl: "https://chatgpt.com/backend-api/codex",
     provider: "codex",
-    source: "import",
+    source: "oauth",
     priority: 1,
     options: {
       codexUsageUrl: "https://usage.example/usage",
-      importCodexCredentials: async () => ({
+      seedCodex: async () => ({
         accessToken: "oauth-live-test",
         refreshToken: "refresh-test",
         idToken: null,

@@ -1,9 +1,5 @@
 import { z } from "zod";
 import type { AccountSecret } from "./contracts.js";
-import {
-  importClaudeCredentials,
-  type ImportedClaudeCredentials,
-} from "./credentials.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
 import {
   fetchOAuthRefresh,
@@ -54,31 +50,11 @@ export function createClaudeAdapter(options: {
   refreshUrl: string;
   usageUrl: string;
   profileUrl: string;
-  importCredentials?: () => Promise<ImportedClaudeCredentials>;
+  upstreamBaseUrl: string;
 }): ProviderAdapter {
   return {
     provider: "claude",
     upstreamName: "Anthropic",
-    async importAccount() {
-      const imported = await (
-        options.importCredentials ?? importClaudeCredentials
-      )();
-      return {
-        label: imported.email ?? "Claude Code account",
-        email: imported.email,
-        ...(imported.accountUuid === null
-          ? {}
-          : { accountUuid: imported.accountUuid }),
-        subscriptionType: imported.subscriptionType,
-        rateLimitTier: imported.rateLimitTier,
-        secret: {
-          kind: "oauth",
-          accessToken: imported.accessToken,
-          refreshToken: imported.refreshToken,
-          expiresAt: imported.expiresAt,
-        },
-      };
-    },
     parseRequest(body) {
       const parsed = parseRequestBody(body);
       return {
@@ -88,8 +64,8 @@ export function createClaudeAdapter(options: {
         forAccount: (account) => parsed.forAccount(account.accountUuid),
       };
     },
-    upstreamUrl: (request, settings) => {
-      const url = mountedUpstreamUrl(request, settings.anthropicUpstreamBaseUrl);
+    upstreamUrl: (request) => {
+      const url = mountedUpstreamUrl(request, options.upstreamBaseUrl);
       const path = new URL(request.url).pathname;
       if (path === "/models" || path.endsWith("/http/models")) {
         url.pathname = url.pathname.replace(/\/models$/u, "/v1/models");

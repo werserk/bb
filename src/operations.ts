@@ -55,43 +55,24 @@ export class PoolOperations {
     return this.hub.ping(id, diagnostic);
   }
 
+  // API keys only. OAuth accounts come from the hub's own logins (addOAuth,
+  // addCodexOAuth); a CLI's live login is never imported.
   async add(input: AccountAddInput): Promise<Account> {
-    if (input.source.kind === "api-key") {
-      const account = await this.accounts.add(
-        {
-          provider: input.provider,
-          kind: "api-key",
-          label: input.label ?? (input.provider === "claude" ? "Claude API key" : "OpenAI API key"),
-          email: null,
-          accountUuid: null,
-          subscriptionType: null,
-          rateLimitTier: null,
-          enabled: true,
-          priority: input.priority,
-        },
-        { kind: "api-key", apiKey: input.source.apiKey },
-      );
-      this.onAccountsChanged();
-      await this.onAccountEnabled(account.id);
-      return account;
-    }
-    const imported = await this.hub.importAccount(input.provider);
     const account = await this.accounts.add(
       {
         provider: input.provider,
-        kind: "oauth",
-        label: input.label ?? imported.label,
-        email: imported.email,
-        accountUuid: imported.accountUuid ?? null,
-        ...(imported.codexAccountId === undefined
-          ? {}
-          : { codexAccountId: imported.codexAccountId }),
-        subscriptionType: imported.subscriptionType,
-        rateLimitTier: imported.rateLimitTier,
+        kind: "api-key",
+        label:
+          input.label ??
+          (input.provider === "claude" ? "Claude API key" : "OpenAI API key"),
+        email: null,
+        accountUuid: null,
+        subscriptionType: null,
+        rateLimitTier: null,
         enabled: true,
         priority: input.priority,
       },
-      imported.secret,
+      { kind: "api-key", apiKey: input.source.apiKey },
     );
     this.onAccountsChanged();
     await this.onAccountEnabled(account.id);

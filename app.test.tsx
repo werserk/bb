@@ -109,8 +109,6 @@ function status(accounts: AccountSummary[] = [account()]): PoolStatus {
 
 function config(overrides: Partial<AccountPoolConfig> = {}): AccountPoolConfig {
   return {
-    anthropicUpstreamBaseUrl: "https://api.anthropic.com",
-    codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
     switchThreshold: 0.98,
     parentMode: "proxy",
     ...overrides,
@@ -462,6 +460,10 @@ describe("Account Pool settings", () => {
       name: "Add account",
     });
     fireEvent.pointerDown(addButtons[0]!);
+    expect(
+      await slot.findByText("Add API key…", { selector: "span.block" }),
+    ).toBeTruthy();
+    expect(slot.queryByText(/Import from this machine/u)).toBeNull();
     fireEvent.click(
       await slot.findByText("Sign in to Claude", { selector: "span.block" }),
     );
@@ -493,39 +495,34 @@ describe("Account Pool settings", () => {
     );
   });
 
-  it("edits Advanced config fields and shows URL validation inline", async () => {
-    const nextConfig = config({
-      anthropicUpstreamBaseUrl: "https://proxy.example.com",
-    });
+  it("edits the Advanced switch threshold inline and offers no upstream URL fields", async () => {
+    const nextConfig = config({ switchThreshold: 0.9 });
     const slot = render([account()], {
       "config.set": () => nextConfig,
     });
     fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-    const anthropic = await slot.findByLabelText("Anthropic upstream base URL");
-    if (!(anthropic instanceof HTMLInputElement)) {
-      throw new Error("Expected the Anthropic config field to be an input.");
+    const threshold = await slot.findByLabelText("Quota switch threshold");
+    if (!(threshold instanceof HTMLInputElement)) {
+      throw new Error("Expected the threshold config field to be an input.");
     }
-    await waitFor(() =>
-      expect(anthropic.value).toBe("https://api.anthropic.com"),
-    );
-    expect(slot.getByLabelText("Codex upstream base URL")).toBeTruthy();
-    expect(slot.getByLabelText("Quota switch threshold")).toBeTruthy();
+    await waitFor(() => expect(threshold.value).toBe("0.98"));
+    expect(slot.queryByLabelText(/upstream base URL/u)).toBeNull();
 
-    fireEvent.change(anthropic, { target: { value: "ftp://invalid.example" } });
-    fireEvent.blur(anthropic);
-    expect(await slot.findByText("Must be an HTTP or HTTPS URL.")).toBeTruthy();
+    fireEvent.change(threshold, { target: { value: "1.5" } });
+    fireEvent.blur(threshold);
+    expect(
+      await slot.findByText("Must be greater than 0 and at most 1."),
+    ).toBeTruthy();
     expect(slot.rpcCalls.some((call) => call.method === "config.set")).toBe(
       false,
     );
 
-    fireEvent.change(anthropic, {
-      target: { value: "https://proxy.example.com" },
-    });
-    fireEvent.blur(anthropic);
+    fireEvent.change(threshold, { target: { value: "0.9" } });
+    fireEvent.blur(threshold);
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({
         method: "config.set",
-        input: { anthropicUpstreamBaseUrl: "https://proxy.example.com" },
+        input: { switchThreshold: 0.9 },
       }),
     );
   });

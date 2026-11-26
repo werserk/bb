@@ -91,12 +91,10 @@ async function startPool(): Promise<Pool> {
       },
     },
   });
-  await host.bb.storage.kv.set("config", {
-    anthropicUpstreamBaseUrl: `http://127.0.0.1:${address.port}`,
-  });
   const clock = { now: Date.now() };
   await createAccountPoolPlugin({
     usageUrl: "data:application/json,{}",
+    upstreams: { anthropic: `http://127.0.0.1:${address.port}` },
     now: () => clock.now,
   })(host.bb);
   const ids = {} as Pool["ids"];

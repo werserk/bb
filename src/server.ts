@@ -31,6 +31,7 @@ import { z } from "zod";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { registerPoolCli } from "./cli.js";
 import {
+  REMOVED_CONFIG_KEYS,
   accountPoolConfigSchema,
   accountPoolConfigSetInputSchema,
   poolAvailabilitySchema,
@@ -46,11 +47,8 @@ import {
   readParentPool,
   type ParentPool,
 } from "./parent-pool.js";
-import type {
-  ImportedClaudeCredentials,
-  ImportedCodexCredentials,
-} from "./credentials.js";
 import { createHub } from "./hub.js";
+import { PROVIDER_UPSTREAMS, type ProviderUpstreams } from "./upstreams.js";
 import {
   CUSTOM_HEADERS_ENV,
   ProjectPriority,
@@ -74,6 +72,12 @@ import {
   RoutingStore,
 } from "./store.js";
 
+// The values the removed upstream settings defaulted to before P0.
+const FORMER_UPSTREAM_DEFAULTS: Readonly<Record<string, string>> = {
+  anthropicUpstreamBaseUrl: PROVIDER_UPSTREAMS.anthropic,
+  codexUpstreamBaseUrl: PROVIDER_UPSTREAMS.chatgptCodex,
+};
+
 export interface AccountPoolPluginOptions {
   nativeClients?: NativeClients;
   nativePolicy?: { enabled: boolean; qualified: boolean };
@@ -86,10 +90,13 @@ export interface AccountPoolPluginOptions {
   codexUsageUrl?: string;
   usageUrl?: string;
   drainTimeoutMs?: number;
+  refreshDrainTimeoutMs?: number;
   maxAffinityBindings?: number;
   disposeTimeoutMs?: number;
-  importCredentials?: () => Promise<ImportedClaudeCredentials>;
-  importCodexCredentials?: () => Promise<ImportedCodexCredentials>;
+  // Test-only: replaces the fixed provider upstreams. The shipped plugin is
+  // `createAccountPoolPlugin()` with no options, and no RPC, CLI, env or stored
+  // config reaches this field.
+  upstreams?: Partial<ProviderUpstreams>;
   oauthAuthorizeUrl?: string;
   oauthTokenUrl?: string;
   oauthProfileUrl?: string;
@@ -122,13 +129,30 @@ export function createAccountPoolPlugin(
     const storedConfig = z
       .record(z.string(), z.unknown())
       .parse((await bb.storage.kv.get("config")) ?? {});
-    const hasRemovedSettings =
-      "cacheMissDebug" in storedConfig || "cacheMissMinTokens" in storedConfig;
-    delete storedConfig.cacheMissDebug;
-    delete storedConfig.cacheMissMinTokens;
+    const removedKeys = REMOVED_CONFIG_KEYS.filter((key) => key in storedConfig);
+    // A stored upstream other than the old default is the one trace that the
+    // removed setting was used; name the key, never the value.
+    const nonDefaultUpstreams = Object.entries(FORMER_UPSTREAM_DEFAULTS)
+      .filter(
+        ([key, value]) => key in storedConfig && storedConfig[key] !== value,
+      )
+      .map(([key]) => key);
+    for (const key of removedKeys) delete storedConfig[key];
     let currentSettings = accountPoolConfigSchema.parse(storedConfig);
-    if (hasRemovedSettings) {
+    if (removedKeys.length > 0) {
       await bb.storage.kv.set("config", currentSettings);
+      const upstreamKeys = removedKeys.some((key) => key in FORMER_UPSTREAM_DEFAULTS);
+      bb.log.warn(
+        [
+          `Ignored removed config keys: ${removedKeys.join(", ")}.`,
+          ...(upstreamKeys ? ["Provider upstreams are fixed in code."] : []),
+          ...(nonDefaultUpstreams.length > 0
+            ? [
+                `A non-default upstream was stored for ${nonDefaultUpstreams.join(", ")} (value not logged).`,
+              ]
+            : []),
+        ].join(" "),
+      );
     }
     const config: AccountPoolConfigController = {
       get: () => currentSettings,
@@ -220,9 +244,9 @@ export function createAccountPoolPlugin(
       codexUsageUrl: options.codexUsageUrl,
       usageUrl: options.usageUrl,
       profileUrl: options.oauthProfileUrl,
-      importClaudeCredentials: options.importCredentials,
-      importCodexCredentials: options.importCodexCredentials,
+      upstreams: options.upstreams,
       drainTimeoutMs: options.drainTimeoutMs,
+      refreshDrainTimeoutMs: options.refreshDrainTimeoutMs,
       maxAffinityBindings: options.maxAffinityBindings,
       getParentRoute: proxyingParent,
       getProjectOrder: (projectId) => projectPriority.get(projectId),

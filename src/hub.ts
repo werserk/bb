@@ -21,16 +21,12 @@ import {
   DEFAULT_CODEX_USAGE_URL,
 } from "./codex-adapter.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
-import type { ImportedProviderAccount } from "./provider-adapter.js";
 import {
+  OAUTH_REFRESH_TIMEOUT_MS,
   OAuthRefreshError,
   TransientOAuthRefreshError,
   UsageAuthenticationError,
 } from "./provider-adapter.js";
-import type {
-  ImportedClaudeCredentials,
-  ImportedCodexCredentials,
-} from "./credentials.js";
 import {
   accountStatus,
   blockingResetAt,
@@ -50,6 +46,7 @@ import type {
 } from "./store.js";
 import { parentRequestHeaders, type ParentPool } from "./parent-pool.js";
 import { orderForProject, readProjectId } from "./project-priority.js";
+import { PROVIDER_UPSTREAMS, type ProviderUpstreams } from "./upstreams.js";
 
 const ROUTE = "/api/v1/plugins/account-pool-prewarm/http";
 const DEFAULT_REFRESH_URL = "https://platform.claude.com/v1/oauth/token";
@@ -89,6 +86,7 @@ interface HubOptions {
   fetch: typeof fetch;
   now: () => number;
   drainTimeoutMs: number;
+  refreshDrainTimeoutMs: number;
   getParentRoute: () => ParentPool | null;
   getProjectOrder: (projectId: string) => readonly string[] | null;
   onAccountsChanged: () => void;
@@ -187,12 +185,6 @@ export class AccountPoolHub {
       request.headers.get("x-bb-account-pool-token") ??
       readBearer(request.headers.get("authorization"));
     return this.options.hubTokens.authenticate(token);
-  }
-
-  async importAccount(
-    provider: PoolProvider,
-  ): Promise<ImportedProviderAccount> {
-    return this.adapter(provider).importAccount();
   }
 
   async handle(
@@ -576,6 +568,34 @@ export class AccountPoolHub {
   async stop(): Promise<void> {
     this.accepting = false;
     this.stopped.abort(new Error("Account Pooler stopped accepting requests."));
+    await this.drainRequests();
+    await this.settleRefreshes();
+  }
+
+  // A refresh cut off after the provider rotated the refresh token would lose
+  // the new pair and force a re-login, so stop waits for it (bounded).
+  private async settleRefreshes(): Promise<void> {
+    if (this.refreshes.size === 0) return;
+    let expired = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<void>((resolve) => {
+      timeout = setTimeout(() => {
+        expired = true;
+        resolve();
+      }, this.options.refreshDrainTimeoutMs);
+    });
+    while (this.refreshes.size > 0 && !expired) {
+      await Promise.race([
+        Promise.allSettled(
+          [...this.refreshes.values()].map((flight) => flight.result),
+        ),
+        deadline,
+      ]);
+    }
+    if (timeout !== null) clearTimeout(timeout);
+  }
+
+  private async drainRequests(): Promise<void> {
     if (this.inFlightCount() === 0) return;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     await Promise.race([
@@ -1432,7 +1452,7 @@ export class AccountPoolHub {
     try {
       const upstreamBody = new ArrayBuffer(body.byteLength);
       new Uint8Array(upstreamBody).set(body);
-      const url = adapter.upstreamUrl(request, this.options.getSettings(), account);
+      const url = adapter.upstreamUrl(request, account);
       const headers = adapter.requestHeaders(request.headers, account, secret);
       const response = await this.options
         .fetch(url, {
@@ -1685,11 +1705,11 @@ export function createHub(options: {
   refreshUrl?: string;
   codexRefreshUrl?: string;
   codexUsageUrl?: string;
-  importClaudeCredentials?: () => Promise<ImportedClaudeCredentials>;
-  importCodexCredentials?: () => Promise<ImportedCodexCredentials>;
   usageUrl?: string;
   profileUrl?: string;
+  upstreams?: Partial<ProviderUpstreams>;
   drainTimeoutMs?: number;
+  refreshDrainTimeoutMs?: number;
   maxAffinityBindings?: number;
   getParentRoute?: () => ParentPool | null;
   getProjectOrder?: (projectId: string) => readonly string[] | null;
@@ -1697,6 +1717,10 @@ export function createHub(options: {
   onUpstreamError?: (provider: PoolProvider, error: unknown) => void;
   onOAuthRefresh?: HubOptions["onOAuthRefresh"];
 }): AccountPoolHub {
+  const upstreams: ProviderUpstreams = {
+    ...PROVIDER_UPSTREAMS,
+    ...options.upstreams,
+  };
   const adapters: ReadonlyMap<PoolProvider, ProviderAdapter> = new Map([
     [
       "claude",
@@ -1704,7 +1728,7 @@ export function createHub(options: {
         refreshUrl: options.refreshUrl ?? DEFAULT_REFRESH_URL,
         usageUrl: options.usageUrl ?? DEFAULT_USAGE_URL,
         profileUrl: options.profileUrl ?? DEFAULT_PROFILE_URL,
-        importCredentials: options.importClaudeCredentials,
+        upstreamBaseUrl: upstreams.anthropic,
       }),
     ],
     [
@@ -1712,7 +1736,8 @@ export function createHub(options: {
       createCodexAdapter({
         refreshUrl: options.codexRefreshUrl ?? DEFAULT_CODEX_REFRESH_URL,
         usageUrl: options.codexUsageUrl ?? DEFAULT_CODEX_USAGE_URL,
-        importCredentials: options.importCodexCredentials,
+        chatgptBaseUrl: upstreams.chatgptCodex,
+        openaiBaseUrl: upstreams.openai,
       }),
     ],
   ]);
@@ -1727,6 +1752,8 @@ export function createHub(options: {
     fetch: options.fetch ?? fetch,
     now: options.now ?? Date.now,
     drainTimeoutMs: options.drainTimeoutMs ?? 60_000,
+    refreshDrainTimeoutMs:
+      options.refreshDrainTimeoutMs ?? OAUTH_REFRESH_TIMEOUT_MS + 5_000,
     getParentRoute: options.getParentRoute ?? (() => null),
     getProjectOrder: options.getProjectOrder ?? (() => null),
     onAccountsChanged: options.onAccountsChanged ?? (() => {}),

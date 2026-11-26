@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { codexQuotaFromUsage, createCodexAdapter } from "./codex-adapter.js";
 import type { AccountQuota } from "./contracts.js";
 import { isQuotaExhausted } from "./quota.js";
+import { PROVIDER_UPSTREAMS } from "./upstreams.js";
 
 const ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -35,6 +36,8 @@ function emptyQuota(): AccountQuota {
 const adapter = createCodexAdapter({
   refreshUrl: "https://auth.example/oauth/token",
   usageUrl: "https://usage.example/usage",
+  chatgptBaseUrl: PROVIDER_UPSTREAMS.chatgptCodex,
+  openaiBaseUrl: PROVIDER_UPSTREAMS.openai,
 });
 
 describe("Codex credit observations", () => {

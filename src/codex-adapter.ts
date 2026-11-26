@@ -7,11 +7,7 @@ import {
   type LimitWindow,
   type LimitWindowSlot,
 } from "./contracts.js";
-import {
-  codexAccessTokenExpiresAt,
-  importCodexCredentials,
-  type ImportedCodexCredentials,
-} from "./credentials.js";
+import { codexAccessTokenExpiresAt } from "./credentials.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
 import {
   fetchOAuthRefresh,
@@ -386,30 +382,12 @@ export function codexQuotaFromUsage(
 export function createCodexAdapter(options: {
   refreshUrl: string;
   usageUrl: string;
-  importCredentials?: () => Promise<ImportedCodexCredentials>;
+  chatgptBaseUrl: string;
+  openaiBaseUrl: string;
 }): ProviderAdapter {
   return {
     provider: "codex",
     upstreamName: "ChatGPT",
-    async importAccount() {
-      const imported = await (
-        options.importCredentials ?? importCodexCredentials
-      )();
-      return {
-        label: imported.email ?? "Codex account",
-        email: imported.email,
-        codexAccountId: imported.accountId,
-        subscriptionType: null,
-        rateLimitTier: null,
-        secret: {
-          kind: "oauth",
-          accessToken: imported.accessToken,
-          refreshToken: imported.refreshToken,
-          expiresAt: imported.expiresAt,
-          ...(imported.idToken === null ? {} : { idToken: imported.idToken }),
-        },
-      };
-    },
     parseRequest(body, headers) {
       const parsed = parseCodexRequestBody(body, headers);
       return {
@@ -419,8 +397,14 @@ export function createCodexAdapter(options: {
         forAccount: () => body,
       };
     },
-    upstreamUrl: (request, settings, account) =>
-      mountedUpstreamUrl(request, account.kind === "api-key" ? "https://api.openai.com/v1" : settings.codexUpstreamBaseUrl, "v1/"),
+    upstreamUrl: (request, account) =>
+      mountedUpstreamUrl(
+        request,
+        account.kind === "api-key"
+          ? options.openaiBaseUrl
+          : options.chatgptBaseUrl,
+        "v1/",
+      ),
     requestHeaders(inbound, account, secret) {
       if (secret.kind === "api-key") {
         const headers = filterRequestHeaders(inbound, new Set(["accept", "content-type", "content-encoding", "openai-beta"]), []);
