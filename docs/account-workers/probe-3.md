@@ -72,7 +72,7 @@ Hook-trust discovery adds 0.2–1.2 s. The dry run left the real `config.toml` b
 
    An untrusted hook is skipped silently. A hook that exits non-zero other than 2, or exits 2 without stderr, counts as a failure and the tool proceeds. So the launcher maps every failure to exit 2 with a reason, as in block 1.
 6. **BB tool names in Codex are plain** (`workspace_exec`) and sit next to every other plugin's tools as `dynamicTools`. The hook sees the same plain names for direct and nested calls. The plugin cannot remove other plugins' tools, so the hook blocks them.
-7. **Hook input** carries `tool_name`, the raw `tool_input` (unknown keys kept) and `tool_use_id`. The live per-call check uses this input (see [architecture](architecture.md#thread-placement-and-native-tools-codex)).
+7. **Hook input** carries `tool_name`, the raw `tool_input` (unknown keys kept) and `tool_use_id`. The live per-call check uses this input (see [architecture](architecture.md#codex)).
 
 ## Workspace host
 

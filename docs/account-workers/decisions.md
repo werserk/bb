@@ -2,6 +2,18 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-26 — Codex hook trust in the worker's user config (block 3, D2)
+
+- **Decision.** The Codex profile writes one trust entry per binding into the worker's `~/.codex/config.toml`: the scratch project's trust and its guard hook's trusted hash. Two conditions from the plan review apply:
+  - A live check on every call: before each workspace call, the server calls `verify`, which consumes the guard hook's heartbeat for that call.
+  - One atomic, verified edit: a fresh read, the addition, a parse, then `rename`. No lock and no `config/value/write`.
+- **Why.** Codex reads hook trust only from the user and session-flag layers. A project cannot trust its own hook, and Codex skips an untrusted hook silently. The session-flag route needs a `provider-codex` change, so it stays a later seam ([architecture](architecture.md#open-points), G9). The heartbeat check makes a skipped hook visible on the real thread, not only in the canary.
+
+## 2026-11-26 — No Codex login on the acceptance workspace host (block 3, D1)
+
+- **Decision.** Codex was logged out on the workspace host used for block 3 acceptance. The owner signs in again himself if he wants Codex there.
+- **Why.** Every connected machine held a Codex login, and keys stay only on worker hosts. The logout was checked by name only ([probe-3](probe-3.md#workspace-host)).
+
 ## 2026-11-26 — Block 2: provider profile seam and the OpenCode profile
 
 - **Decision.** Each provider's worker-side lock-down is a profile in `plugins/account-workers/profiles/` with `prepare`, an optional `check` (refuses the spawn) and an optional `verify` (refuses one tool call and marks the binding broken). The binding stores its profile. `spawn` picks the profile from `--provider`; omitted means `claude-code`, now passed to BB explicitly; a provider with no profile is refused. `configure` gives the tools only to the provider the profile guards. For OpenCode the scratch directory gets an `.opencode/` config that removes the built-in tool plugins and denies every tool except the workspace tools and `bb_update_plan`, plus a guard plugin that rejects anything else; the spawn is refused on OpenCode other than major 2, on config-overriding env vars and on managed config. No core or provider-plugin change.

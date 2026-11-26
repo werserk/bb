@@ -6,7 +6,7 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 - Edits and writes show their change as a diff hunk in the chat.
 - Stop ends the running command's process group on the workspace machine.
 - The workspace's `AGENTS.md` and `CLAUDE.md` reach the agent as quoted instructions.
-- The thread runs in an empty scratch directory on the worker whose settings turn off the provider's native file, shell and other tools, so nothing acts on the worker by mistake. Supported providers: Claude Code (`claude-code`, the default) and OpenCode 2 (`acp-opencode`).
+- The thread runs in an empty scratch directory on the worker whose settings turn off the provider's native file, shell and other tools, so nothing acts on the worker by mistake. Supported providers: Claude Code (`claude-code`, the default), OpenCode 2 (`acp-opencode`) and Codex (`codex`; the spawn first runs a no-fallback check on the worker).
 
 ## For agents and scripts
 
