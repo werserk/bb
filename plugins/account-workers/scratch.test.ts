@@ -44,6 +44,7 @@ describe("scratch directory", () => {
     const call = (tool_name: unknown, extra = {}) => runGuard(dir, JSON.stringify({ tool_name, tool_input: {}, ...extra }));
     expect(call("mcp__bb-bridge__workspace_read").status).toBe(0);
     expect(call("ToolSearch").status).toBe(0);
+    expect(call("mcp__bb-bridge__bb_update_plan").status).toBe(0);
     for (const name of ["Bash", "mcp__bb-bridge__rtk_shell", "mcp__bb-bridge__agent_plugins_call", "mcp__other__x", "Agent"]) {
       const result = call(name);
       expect(result.status).toBe(2);

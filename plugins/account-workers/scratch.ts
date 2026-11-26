@@ -28,7 +28,7 @@ export const DENIED_NATIVE_TOOLS = [
   "mcp__bb-bridge__update_environment_directory",
 ];
 
-export const ALLOWED_BUILTIN_TOOLS = ["ToolSearch", "TodoWrite"];
+export const ALLOWED_BUILTIN_TOOLS = ["ToolSearch", "TodoWrite", "mcp__bb-bridge__bb_update_plan"];
 
 export function scratchBase(env: NodeJS.ProcessEnv = process.env): string {
   const state = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME)
