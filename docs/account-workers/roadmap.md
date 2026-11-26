@@ -20,7 +20,7 @@ OpenCode over ACP with native tools off, using the same plugin tools. **Built**:
 
 ## 3. Codex profile
 
-Codex with file and shell work only on the workspace host: plugin tools with native tools off, or Codex's native exec-server/environments via app-server. A probe must show there is no silent local fallback (Codex issue `openai/codex#41563`).
+Codex with file and shell work only on the workspace host: plugin tools with native tools off, or Codex's native exec-server/environments via app-server. A probe must show there is no silent local fallback (Codex issue `openai/codex#41563`). **Built**: route A, plugin tools as `dynamicTools` with native tools off and a trusted `PreToolUse` allowlist hook; Codex exec-server rejected ([architecture](architecture.md#codex), [probe-3](probe-3.md)).
 
 ## 4. Account selection
 

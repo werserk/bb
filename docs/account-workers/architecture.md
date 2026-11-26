@@ -82,7 +82,7 @@ A provider profile turns off one provider's worker-side tools in the scratch dir
 |---|---|---|---|---|
 | `claude` | `claude-code` | BB tools through the `bb-bridge` MCP server | Off: scratch-local settings deny plus `PreToolUse` allowlist ([above](#thread-placement-and-native-tools-claude)) | Block 1, built |
 | `opencode` | `acp-opencode` | BB tools as the ACP session MCP server `bb-bridge` | Not loaded: tool plugins removed in the scratch config, `*` denied, a guard plugin ([below](#opencode)) | Block 2, built |
-| Codex | — | Plugin tools, or Codex's native exec-server/environments via app-server | Off, with a probe for silent local fallback (`openai/codex#41563`) | Block 3 |
+| `codex` | `codex` | BB plugin tools as Codex `dynamicTools` | Off: scratch `.codex/config.toml` turns features off, a `PreToolUse` allowlist hook trusted in the worker's Codex config blocks the rest; a no-fallback canary before the spawn and a heartbeat check on every call ([below](#codex)) | Block 3, built |
 
 ### Profile seam
 
@@ -123,6 +123,30 @@ The layers fail differently: removal silently if OpenCode renames its plugin ids
 
 "Denied" for OpenCode therefore means "not registered": the live run showed only the eight allowed tools, and a call to any other name cannot be issued.
 
+### Codex
+
+Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin tool. The scratch directory holds `.codex/` and `.aw/`. Probe and evidence: [probe-3](probe-3.md).
+
+- `.codex/config.toml` turns Codex features off (`shell_tool`, `unified_exec`, `view_image`, `multi_agent`, `multi_agent_v2`, `apps`, `plugins`, `browser_use`, `computer_use`, `image_generation`, `memories`) and forces `hooks` on, so a user config that turns hooks off cannot disable the guard. It also sets `web_search = "disabled"` and disables each MCP server named in the worker's user config, read at each spawn. These are defence in depth.
+- `.codex/hooks.json` declares one `PreToolUse` hook, matcher `*`, launched through block 1's fail-closed `sh` launcher. It is the barrier. It lets through only the seven `workspace_*` tools, `bb_update_plan` and `update_plan`, and blocks the rest with exit 2:
+  - `apply_patch`, which no config can turn off;
+  - MCP tools;
+  - nested subagent and goal tools;
+  - `request_user_input`;
+  - other plugins' tools.
+
+  Code-mode `exec` and `wait` stay unhooked. `exec` is a V8 isolate without fs, process or network access, and its nested calls are hooked.
+- **Hook trust.** Codex reads hook trust only from the user layer. So `prepare` writes one entry per binding into the worker's `~/.codex/config.toml`: `projects."<scratch>".trust_level` and `hooks.state."<scratch>/.codex/hooks.json:pre_tool_use:0:0".trusted_hash`. The hash comes from Codex itself (`hooks/list`).
+  - The write is one atomic, verified edit: a fresh read, the addition, then a parse that must show both values. The result goes to a temp file with the same mode and replaces the config by `rename`. The edit retries if the file changed meanwhile. Edits in one daemon run one at a time, and a symlinked `config.toml` is written at its target, as Codex does.
+  - If `check` fails, the same edit removes the entry by its parsed keys. If the removal fails, the spawn error says so.
+  - The profile refuses to run when a system or managed Codex config layer exists.
+  - `spawn` refuses when `CODEX_HOME` or `BB_CODEX_BRIDGE_APP_SERVER_COMMAND`/`_ARGS` is a BB machine variable (`refusedMachineEnv`). The thread would read those, but the host entry would not, so the trust and the gate would apply to another Codex home or binary.
+- **No-fallback gate.** `check` runs the canary from [probe-3](probe-3.md#the-no-fallback-test) before the spawn and refuses the spawn on any failure. The canary uses the thread's Codex binary, model and `thread/start` config, but a temporary Codex home with no credentials, a mock model and the `danger-full-access` sandbox (the widest BB grants).
+  - A Codex profile spawn needs `--model`; the canary checks that model, never the config's default.
+  - The worker's `models_cache.json` is passed to the canary as its model catalog (`model_catalog_json`), so a model that exists only in the cache is checked with its own tool set. Without a cache the canary uses the bundled catalog. The gate fails when the canary's catalog lacks the model, or when the catalog marks it `code_mode_only` and `exec` was not offered.
+  - The result (binary, version, model, catalog, offered tools, failures) is saved to `.aw/gate.json` in the scratch directory.
+- **Live check per call.** On every allowed workspace call the guard writes `tool_name`, the raw `tool_input` and `tool_use_id` to its own file in `.aw/hb/`. `verify` consumes (deletes) one fresh heartbeat, under 15 minutes old (the longest `workspace_exec` plus a margin), that matches the call's tool and its parsed input on the parsed keys. With no match the call is refused and the binding is marked broken. A refusal therefore means the guard hook did not see a workspace call: it was skipped, untrusted or replaced. This is the only check on the real thread rather than on a copy. Consumed ids go to `.aw/verified.jsonl`; stale heartbeats are deleted.
+
 ## Accounts
 
 Several isolated accounts per worker host, one chosen per thread (block 4). The upstream `account-pool` plugin already routes Claude and Codex API traffic across account pools; block 4 reuses it where it fits and documents what is new.
@@ -135,7 +159,7 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
 | `account-pool` plugin | In upstream |
 | `plugins/account-workers`: tools, routing, binding, instructions, Claude scratch profile | Built, block 1 |
 | Provider profile seam, OpenCode profile | Built, block 2 |
-| Codex profile | Planned, block 3 |
+| Codex profile | Built, block 3 |
 | Account selection | Planned, block 4 |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
@@ -154,4 +178,14 @@ Several isolated accounts per worker host, one chosen per thread (block 4). The 
 - **G6. Scratch cleanup.** Deleting a thread or `unbind` drops the binding but leaves the scratch directory (profile files only, no workspace data) on the worker. OpenCode's background service keeps a per-directory instance, so a scratch path is never reused: binding ids are fresh. If `threads.spawn` fails after `prepareScratch`, the binding is removed but nothing undoes a profile's writes outside the scratch directory (none for Claude and OpenCode; block 3's Codex trust entry would stay); a `release` hook can be added when a profile needs it. A cleanup on delete, or a sweep of directories with no binding, is not built.
 - **G7. Worker context reaches the workspace.** The agent runs with the worker user's instructions, memory and skill list in context (G2), and the workspace's `AGENTS.md` is quoted into its instructions. A workspace the owner does not control can ask the agent to write that context into a workspace file or pass it to `workspace_exec`, and so read it. The guard does not stop this: the workspace tools are the allowed path. Like G1, this is a precondition for foreign workspaces; options are a worker profile with no personal instructions or memory, or treating workspace instructions as untrusted and not loading them.
 - **G8. Provider switch.** A bound thread that changes provider in BB loses the workspace tools at the next session (`configure` checks the provider against the profile), but its scratch directory holds only the old provider's guard. The new provider then runs with its own native tools in an empty directory on the worker. BB's CLI has no provider switch for a thread today; a UI switch would need a re-prepare, or a profile that guards every provider.
+- **G9. Codex hook trust lives in the worker's user config.** The trust entry is written outside the scratch directory. Codex writes the same file without a lock, so a Codex write between the profile's read and its rename is lost. The edit re-reads before the rename and retries; that narrows the window but does not close it. A later `provider-codex` seam that passes hook trust through `thread/start` (the session-flag layer) would remove the write, but that is a provider change. Trust entries of deleted bindings stay until cleanup (G6).
+- **G10. Codex gate scope.**
+  - The canary runs at spawn only. It does not run on resume, or after a Codex update while a binding lives.
+  - The heartbeat check covers only `workspace_*` calls on the live thread; the hook's block is what stops the other calls.
+  - What Codex does on a hook timeout or a missing `sh` was not checked.
+  - The canary assumes the host daemon's own process environment (`CODEX_HOME`, `BB_CODEX_BRIDGE_APP_SERVER_*`) is the bridge's. BB machine variables with those names refuse the spawn.
+  - An MCP server removed from the worker's config while a binding lives makes the thread fail to load its config; this fails closed.
+  - The canary has no login, so it cannot see tools that Codex offers only with a Codex-backend login (`image_generation`, apps and connectors). Their features are off in the overlay; if one came back on, its tool would appear only on the real thread, where the hook still blocks it.
+  - The canary's catalog is the worker's cache. A thread whose login does not match the cache's identity uses the bundled catalog or fetches a fresh one, which may differ.
+  - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).
