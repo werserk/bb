@@ -123,6 +123,9 @@ const timelineConversationRowBaseSchema = timelineRowBaseSchema.extend({
 export const timelineUserConversationRowSchema =
   timelineConversationRowBaseSchema.extend({
     role: z.literal("user"),
+    submissionRequestId: z.string().optional(),
+    clientSubmissionIds: z.array(z.string()).optional(),
+    sourceQueuedMessageIds: z.array(z.string()).optional(),
     initiator: threadTurnInitiatorSchema,
     senderThreadId: z.string().nullable(),
     systemMessageKind: systemMessageKindSchema,

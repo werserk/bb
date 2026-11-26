@@ -131,7 +131,7 @@ export function completionBody(request: OpenRouterGenerationRequest, model: Open
   };
 }
 
-async function readJson(response: Response, limit: number, signal: AbortSignal): Promise<unknown> {
+export async function readJson(response: Response, limit: number, signal: AbortSignal): Promise<unknown> {
   const reader = response.body?.getReader();
   if (!reader) throw failure();
   const chunks: Uint8Array[] = [];

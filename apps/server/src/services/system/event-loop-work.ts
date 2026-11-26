@@ -27,22 +27,44 @@ interface EventLoopWorkSnapshot {
 }
 
 const activeFrames = new Map<number, EventLoopWorkFrame>();
-const currentFrameId = new AsyncLocalStorage<number>();
+interface EventLoopWorkContext {
+  id: number;
+  lineage: readonly string[];
+}
+
+const currentFrame = new AsyncLocalStorage<EventLoopWorkContext>();
+const lineageLimit = 8;
+
+function childLineage(
+  parent: readonly string[],
+  label: string,
+): readonly string[] {
+  if (parent.length < lineageLimit) return [...parent, label];
+  return [parent[0] ?? label, "…", ...parent.slice(-(lineageLimit - 3)), label];
+}
 const completedInWindow: CompletedEventLoopWork[] = [];
 let nextFrameId = 1;
 let lastCompleted: CompletedEventLoopWork | null = null;
 
-function enterEventLoopWork(label: string, blocksEventLoop: boolean): number {
+function enterEventLoopWork(
+  label: string,
+  blocksEventLoop: boolean,
+): EventLoopWorkContext {
   const id = nextFrameId;
   nextFrameId += 1;
+  const parent = currentFrame.getStore();
   activeFrames.set(id, {
     blocksEventLoop,
     id,
     label,
-    parentId: currentFrameId.getStore() ?? null,
+    parentId: parent?.id ?? null,
     startedAt: performance.now(),
   });
-  return id;
+  return { id, lineage: childLineage(parent?.lineage ?? [], label) };
+}
+
+export function currentEventLoopWorkLabel(): string | null {
+  return currentFrame.getStore()?.lineage.join(" > ") ?? null;
 }
 
 function leaveEventLoopWork(id: number, cpuMs: number | null): void {
@@ -127,14 +149,14 @@ export function takeEventLoopWorkWindowSnapshot(): EventLoopWorkSnapshot {
 }
 
 export function runEventLoopWorkSync<T>(label: string, work: () => T): T {
-  const id = enterEventLoopWork(label, true);
+  const frame = enterEventLoopWork(label, true);
   const cpuStart = process.threadCpuUsage();
-  return currentFrameId.run(id, () => {
+  return currentFrame.run(frame, () => {
     try {
       return work();
     } finally {
       const cpu = process.threadCpuUsage(cpuStart);
-      leaveEventLoopWork(id, (cpu.user + cpu.system) / 1_000);
+      leaveEventLoopWork(frame.id, (cpu.user + cpu.system) / 1_000);
     }
   });
 }
@@ -143,12 +165,12 @@ export async function runEventLoopWork<T>(
   label: string,
   work: () => Promise<T> | T,
 ): Promise<T> {
-  const id = enterEventLoopWork(label, false);
-  return currentFrameId.run(id, async () => {
+  const frame = enterEventLoopWork(label, false);
+  return currentFrame.run(frame, async () => {
     try {
       return await work();
     } finally {
-      leaveEventLoopWork(id, null);
+      leaveEventLoopWork(frame.id, null);
     }
   });
 }

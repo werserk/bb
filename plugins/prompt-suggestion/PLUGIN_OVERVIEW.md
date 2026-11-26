@@ -4,7 +4,7 @@ Prompt Suggestion (formerly Autosay) helps you direct the working agent toward t
 
 ## Prompt helper
 
-Open Prompt helper in an existing thread composer to preview an improved request or, with an empty draft, a grounded next step. Advice appears separately. Replace draft or Insert applies the result as editable text; application never sends it. Dismiss preserves the original draft. Changes to the draft or conversation invalidate the preview. Structured mention identities and attachments are preserved.
+Open Prompt helper in an existing thread composer to preview an improved request or, with an empty draft, a grounded next step. The proposal takes over the context strip and expands into its panel. Advice appears in the star tooltip. Tab applies the result as editable text; application never sends it. Escape preserves the original draft. Changes to the draft or composer identity prevent application; conversation and memory changes do not discard a snapshot proposal. With an existing empty-draft ghost, the star accepts that suggestion. Structured mention identities and attachments are preserved.
 
 The helper works while automatic suggestions are disabled and while the working agent is active. It supports existing threads without history, but not a new-thread composer without a thread ID. Open conversation questions do not block assistance; command approvals and queued messages retain their existing gates. An unsent draft is a proposal, never an accepted decision or permission.
 
@@ -16,7 +16,7 @@ A foreground visit tracks a thread for ten minutes, with at most eight tracked t
 
 Source-linked task memory separates accepted criteria from proposals, reported progress from evidence, and remaining work from blockers. Context clearing discards earlier memory; bounded history remains explicitly incomplete. Each generation receives the complete owner instructions. Missing instructions fail closed.
 
-All three roles share the configured rolling-hour request budget, preserved across cache clearing and settings reset. Manual help preempts background memory. Memory reserves the final request for foreground work. Failed and cancelled admitted requests still count; there are no automatic retries or fallback models. Diagnostics contain counters and timing, not conversation content. The helper stores no draft or result corpus.
+All three roles share the configured rolling-hour request budget, preserved across cache clearing and settings reset. Manual help preempts background memory. Memory reserves the final request for foreground work. Failed and cancelled admitted requests still count. There are no automatic retries; the optional **Fallback model** setting is tried once, with the provider's default effort and speed and without session affinity, when the generator model's request fails (for example on an exhausted quota); after such a failure the generator model is skipped for five minutes in that plugin process. Diagnostics contain counters and timing, not conversation content. The helper stores no draft or result corpus.
 
 ## CLI and details
 

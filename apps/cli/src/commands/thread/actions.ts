@@ -89,6 +89,7 @@ interface ThreadDeleteCommandOptions {
 }
 
 interface ThreadTellCommandOptions {
+  clientSubmissionId?: string;
   json?: boolean;
   messageFile?: string;
   model?: string;
@@ -127,6 +128,7 @@ interface ThreadEditMessageCommandOptions {
 type ThreadTellDeliveryMode = "auto" | "queue" | "steer";
 
 interface PostThreadMessageArgs {
+  clientSubmissionId?: string;
   getUrl: () => string;
   threadId: string;
   message: string;
@@ -542,6 +544,10 @@ export function registerActionsCommands(
       "--message-file <path>",
       `Read the message from a file instead of [message]; ${TEXT_FILE_HELP_SUFFIX}`,
     )
+    .option(
+      "--client-submission-id <uuid>",
+      "Stable identity for one send action; repeated admission is rejected",
+    )
     .option("--json", "Print machine-readable JSON output")
     .option("--model <model>", "Model ID for this message")
     .option("--service-tier <tier>", SERVICE_TIER_HELP)
@@ -588,6 +594,7 @@ export function registerActionsCommands(
           const response = await postThreadMessage({
             getUrl,
             threadId: id,
+            clientSubmissionId: opts.clientSubmissionId,
             message,
             mode: resolveThreadMessageMode(opts.mode),
             model: opts.model,
@@ -644,6 +651,22 @@ export function registerActionsCommands(
           console.log(describeThreadRetryOutcome(threadId, response));
         },
       ),
+    );
+
+  parent
+    .command("release-idle [id]")
+    .description("Release an idle runtime without interrupting work")
+    .option("--self", "Target the current thread (from BB_THREAD_ID)")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string | undefined, opts: ThreadActionOptions) => {
+        const threadId = requireThreadIdOrSelf(id, opts);
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).threads.experimental_releaseIdle({ threadId });
+        if (outputJson(opts, { threadId, ...result })) return;
+        console.log(`Thread ${threadId}: ${result.status} (${result.reason})`);
+      }),
     );
 
   for (const { name, description, method, done } of [
@@ -714,6 +737,9 @@ async function postThreadMessage(
   try {
     response = await sdk.threads.send({
       threadId: args.threadId,
+      ...(args.clientSubmissionId === undefined
+        ? {}
+        : { clientSubmissionId: args.clientSubmissionId }),
       input,
       mode:
         args.mode === "steer"

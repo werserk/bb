@@ -1,4 +1,8 @@
 import type {
+  QueueSnapshotRequest,
+  QueueSnapshotResponse,
+} from "@bb/server-contract";
+import type {
   ConversationQuestion,
   ConversationQuestionsOpenPage,
   ConversationQuestionPublication,
@@ -24,6 +28,8 @@ import {
 import {
   DEFAULT_TURN_RETRY_REASON,
   threadTabsResponseSchema,
+  threadReleaseIdleResultSchema,
+  type ThreadReleaseIdleResult,
 } from "@bb/server-contract";
 import type {
   CreateQueuedMessageRequest,
@@ -662,6 +668,7 @@ export interface ThreadQueueArea {
 export interface ThreadsArea {
   plans(args: {
     threadIds: readonly string[];
+    known?: Readonly<Record<string, string>>;
     signal?: AbortSignal;
   }): Promise<ThreadPlansReadResponse>;
   archive(args: ThreadActionArgs): Promise<ThreadArchiveResult>;
@@ -755,6 +762,9 @@ export interface ThreadsArea {
   promptHistory(
     args: ThreadPromptHistoryArgs,
   ): Promise<ThreadPromptHistoryResult>;
+  queueSnapshot(
+    input: QueueSnapshotRequest & { threadId: string },
+  ): Promise<QueueSnapshotResponse>;
   queuedMessages: ThreadQueuedMessagesArea;
   reorderPinned(args: ThreadPinOrderArgs): Promise<ThreadPinOrderResult>;
   resolveMentions(
@@ -788,6 +798,9 @@ export interface ThreadsArea {
    * treating the stop as confirmed.
    */
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
+  experimental_releaseIdle(
+    args: ThreadActionArgs,
+  ): Promise<ThreadReleaseIdleResult>;
   tabs: ThreadTabsArea;
   context(args: ThreadStatusArgs): Promise<ThreadContextResult>;
   timeline(
@@ -864,6 +877,7 @@ function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
 
 function sendJson(args: ThreadSendArgs): SendMessageRequest {
   return {
+    clientSubmissionId: args.clientSubmissionId,
     input: args.input,
     serviceTurn: args.serviceTurn,
     mode: args.mode,
@@ -1424,7 +1438,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     async plans(input) {
       return transport.readJson(
         transport.api.v1.threads.plans.$post(
-          { json: { threadIds: [...input.threadIds] } },
+          {
+            json: {
+              threadIds: [...input.threadIds],
+              ...(input.known === undefined
+                ? {}
+                : { known: { ...input.known } }),
+            },
+          },
           ...signalRequestArgs(input.signal),
         ),
       );
@@ -1709,6 +1730,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         ),
       );
     },
+    async queueSnapshot(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["queue-snapshot"].$post({
+          param: { id: input.threadId },
+          json: { knownAdmittedQueueIds: input.knownAdmittedQueueIds },
+        }),
+      );
+    },
     async send(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"].send.$post({
@@ -1737,6 +1766,15 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads.$post({
           json: spawnJson(input),
         }),
+      );
+    },
+    async experimental_releaseIdle(input) {
+      return threadReleaseIdleResultSchema.parse(
+        await transport.readJson(
+          transport.api.v1.threads[":id"]["release-idle"].$post({
+            param: { id: input.threadId },
+          }),
+        ),
       );
     },
     async stop(input) {

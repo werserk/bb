@@ -1,3 +1,4 @@
+import { useComposerContextStore } from "./context/composer-context";
 import { ComposerInlinePanels } from "../plugin/PluginComposerInlinePanels";
 import { createComposerSuggestionController } from "@get-bb/plugin-sdk/internal/composer-handle";
 import {
@@ -111,6 +112,7 @@ import {
   ComposerContributionsContext,
   ComposerMenuEntry,
   ComposerPluginActions,
+  ComposerPluginEditorActions,
   ComposerRootHostContext,
   NoComposerPluginActions,
   type ComposerRootHost,
@@ -529,6 +531,7 @@ function useComposerRendererHostApi({
   liveSuggestionHostRef.current = host ?? boxHost;
   const suggestionHostRef = useRef(boxHost);
   suggestionHostRef.current = boxHost;
+  const contextStore = useComposerContextStore();
   const [suggestionStore] = useState(() =>
     createComposerSuggestionController(
       (text) => {
@@ -548,6 +551,7 @@ function useComposerRendererHostApi({
           liveDraft.attachments.length === 0
         );
       },
+      (key) => contextStore?.previewKey(key) ?? false,
     ),
   );
   const [suggestionSupport, setSuggestionSupport] = useState(false);
@@ -720,6 +724,9 @@ function useComposerRendererHostApi({
     experimental_InlinePanels: suppress
       ? NoComposerPluginActions
       : ComposerInlinePanels,
+    experimental_EditorActions: suppress
+      ? NoComposerPluginActions
+      : ComposerPluginEditorActions,
     Popup: PluginComposerPopup,
     MenuEntry: ComposerMenuEntry,
   };

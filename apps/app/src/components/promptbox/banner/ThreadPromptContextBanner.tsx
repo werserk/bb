@@ -1,3 +1,4 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
 import {
   experimental_THREAD_CONTEXT_SEGMENT_GROUPS,
   type ExperimentalThreadContextSegmentInput,
@@ -387,7 +388,20 @@ function ActiveChildThreadsCard({
         <PromptStackCountSlot count={items.length} />
       </button>
       {compact ? (
-        list
+        <>
+          {items.map((item) => (
+            <ComposerContextRow
+              key={item.id}
+              icon={item.needsOwnerAttention ? "CircleQuestion" : "Circle"}
+              tone={item.needsOwnerAttention ? "attention" : "working"}
+              title={<ThreadTitle title={item.title} inline tooltip />}
+              subline={
+                item.needsOwnerAttention ? "Waiting for your answer" : "Working"
+              }
+              action={<NavLink to={item.href}>Open</NavLink>}
+            />
+          ))}
+        </>
       ) : (
         <AnimatedBody
           collapsedBorder="reserve"
@@ -433,6 +447,7 @@ type DisclosureFocusHandoff = ReturnType<typeof useDisclosureFocusHandoff>;
 
 interface CoreThreadContextValue extends CoreThreadContext {
   parentFocus: DisclosureFocusHandoff;
+  compact: boolean;
 }
 
 const CoreThreadContextContext = createContext<CoreThreadContextValue | null>(
@@ -451,8 +466,17 @@ function ParentThreadSummary({
   segments,
   isExpanded,
 }: ExperimentalThreadContextSegmentProps) {
-  const { parentThread, parentFocus } = useCoreThreadContext();
+  const { parentThread, parentFocus, compact } = useCoreThreadContext();
   if (parentThread === null) return null;
+  if (compact)
+    return (
+      <ComposerContextRow
+        icon={PARENT_SECTION_ICON[parentThread.relationship]}
+        title={<ThreadTitle title={parentThread.parentThreadTitle} inline />}
+        subline={PARENT_SECTION_COPY[parentThread.relationship].verb}
+        action={<NavLink to={parentThread.href}>Open</NavLink>}
+      />
+    );
   return segments.length === 1 ? (
     <ParentThreadInlineSegment section={parentThread} />
   ) : (
@@ -469,8 +493,8 @@ function ParentThreadDetails({
   segments,
   isExpanded,
 }: ExperimentalThreadContextSegmentProps) {
-  const { parentThread, parentFocus } = useCoreThreadContext();
-  if (parentThread === null || segments.length === 1) return null;
+  const { parentThread, parentFocus, compact } = useCoreThreadContext();
+  if (compact || parentThread === null || segments.length === 1) return null;
   return (
     <ParentThreadSectionBody
       section={parentThread}
@@ -566,6 +590,7 @@ function ReadOnlyContextBanner({
   expandedSegment,
   onToggleSegment,
 }: ReadOnlyContextBannerProps) {
+  const compact = useComposerContextSource() !== null;
   const isStatusExpanded =
     expandedSegment === STATUS_KEY && description !== null;
   const statusFocus = useDisclosureFocusHandoff(isStatusExpanded, () =>
@@ -586,6 +611,27 @@ function ReadOnlyContextBanner({
         onToggle={() => onToggleSegment(PARENT_THREAD_KEY)}
       />
     ) : null;
+  if (compact)
+    return (
+      <PromptStackCard
+        ariaLabel="Thread history"
+        context={{
+          label: statusLabel,
+          icon: iconName,
+          group: "attention",
+          tone: "attention",
+        }}
+      >
+        {parentSegment("summary")}
+        <ComposerContextRow
+          icon={iconName}
+          tone="attention"
+          title={statusLabel}
+          subline={description}
+          action={statusAction}
+        />
+      </PromptStackCard>
+    );
   return (
     <PromptStackCard
       ariaLabel="Thread history"
@@ -665,6 +711,7 @@ function WritableContextBanner({
   expandedSegment: string | null;
   onToggleSegment: (key: string) => void;
 }) {
+  const compact = useComposerContextSource() !== null;
   const { entries, observers } = useThreadContextSegments(
     input,
     coreThreadContextSegments,
@@ -704,16 +751,36 @@ function WritableContextBanner({
           className="overflow-hidden"
           style={{ minHeight: PROMPT_CONTEXT_BANNER_COLLAPSED_HEIGHT }}
         >
-          <div
-            className={cn(
-              "flex items-center gap-0.5 text-xs text-muted-foreground",
-              PROMPT_STACK_INLAY_INSET_CLASS,
-            )}
-          >
-            {entries.map((entry) => mount(entry, "summary"))}
-            {entries.map((entry) => mount(entry, "action"))}
-          </div>
-          {entries.map((entry) => mount(entry, "details"))}
+          {compact ? (
+            entries.map((entry) =>
+              entry.owner === "core" && entry.slot.id === "parent-thread" ? (
+                mount(entry, "summary")
+              ) : (
+                <ComposerContextRow
+                  key={threadContextSegmentKey(entry.slot)}
+                  icon="GitBranch"
+                  title={mount(entry, "summary")}
+                  action={mount(entry, "action")}
+                  subline={
+                    expandedSegment === threadContextSegmentKey(entry.slot)
+                      ? mount(entry, "details")
+                      : undefined
+                  }
+                />
+              ),
+            )
+          ) : (
+            <div
+              className={cn(
+                "flex items-center gap-0.5 text-xs text-muted-foreground",
+                PROMPT_STACK_INLAY_INSET_CLASS,
+              )}
+            >
+              {entries.map((entry) => mount(entry, "summary"))}
+              {entries.map((entry) => mount(entry, "action"))}
+            </div>
+          )}
+          {!compact && entries.map((entry) => mount(entry, "details"))}
         </PromptStackCard>
       ) : null}
     </>
@@ -734,7 +801,8 @@ export function ThreadPromptContextBanner({
     expandedSegment === PARENT_THREAD_KEY,
     () => onToggleSegment(PARENT_THREAD_KEY),
   );
-  const context: CoreThreadContextValue = { ...core, parentFocus };
+  const compact = useComposerContextSource() !== null;
+  const context: CoreThreadContextValue = { ...core, parentFocus, compact };
   if (isReadOnly) {
     const environmentGoneCopy = environmentGoneSection
       ? ENVIRONMENT_GONE_STATUS_COPY[environmentGoneSection.status]

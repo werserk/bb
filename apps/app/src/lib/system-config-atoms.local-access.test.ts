@@ -1,10 +1,12 @@
 import { createStore } from "jotai";
 import { QueryObserver } from "@tanstack/react-query";
 import type { ChangedMessage } from "@bb/domain";
+import type { PluginSignal } from "@bb/server-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   fetchHostStatus: vi.fn(),
+  onPluginSignal: vi.fn((_listener: (signal: PluginSignal) => void) => vi.fn()),
   onConnected: vi.fn(
     (
       _listener: (event: {
@@ -59,6 +61,7 @@ vi.mock("./ws", () => ({
   wsManager: {
     getConnectionState: () => "connected",
     onChanged: mocks.onChanged,
+    onPluginSignal: mocks.onPluginSignal,
     onConnected: mocks.onConnected,
   },
 }));
@@ -80,6 +83,7 @@ beforeEach(() => {
   mocks.fetchHostStatus.mockReset();
   mocks.onConnected.mockClear();
   mocks.onChanged.mockClear();
+  mocks.onPluginSignal.mockClear();
   mocks.fetchSdkSystemConfig.mockReset();
   mocks.fetchSdkSystemConfig.mockResolvedValue({
     hostDaemonPort: 38_887,

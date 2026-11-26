@@ -1,3 +1,5 @@
+import { createHelperService } from "./helper-service.js";
+import { emptyTaskState, type TaskMemory } from "./task-state.js";
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { createService } from "./controller.js";
@@ -17,7 +19,6 @@ const input = (): HelperRequest => ({
   token: randomUUID(),
   draft: "Fix this, preserving scope.",
   protectedMentions: [],
-  expectedContextRevision: null,
 });
 const answer = {
   kind: "helper",
@@ -135,61 +136,56 @@ it("accepts active thread context without waiting for completion", async () => {
   }
 });
 
-it.each([
-  "context",
-  "instructions",
-  "settings",
-  "cancel",
-  "caller",
-  "reset",
-  "dispose",
-])("rejects late helper results after %s", async (change) => {
-  const options: { contextBoundary?: number } = {};
-  const host = fixture(options);
-  let release!: () => void;
-  let started!: () => void;
-  const began = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const model = await installGenerator(host.bb, async () => {
-    started();
-    await new Promise<void>((resolve) => {
-      release = resolve;
+it.each(["cancel", "caller", "reset", "dispose"])(
+  "rejects late helper results after %s",
+  async (change) => {
+    const options: { contextBoundary?: number } = {};
+    const host = fixture(options);
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => {
+      started = resolve;
     });
-    return JSON.stringify(answer);
-  });
-  let settings = settingsSchema.parse({ model });
-  const service = createService(host.bb, () => settings);
-  const request = input();
-  const caller = new AbortController();
-  try {
-    const pending = service.helper(request, caller.signal);
-    await began;
-    if (change === "context") {
-      options.contextBoundary = 2;
-    } else if (change === "instructions")
-      host.bb.experimental_userInstructions.read = () => ({
-        kind: "ready",
-        content: "New owner instruction",
-        revision: "new",
+    const model = await installGenerator(host.bb, async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        release = resolve;
       });
-    else if (change === "settings")
-      settings = { ...settings, instructions: "New guidance" };
-    else if (change === "cancel") {
-      expect(service.cancel(request.requestId, "wrong")).toBe(false);
-      expect(service.cancel(request.requestId, request.token)).toBe(true);
-    } else if (change === "caller") caller.abort();
-    else if (change === "reset") service.reset();
-    else service.dispose();
-    release();
-    expect(await pending).toMatchObject({ kind: "unavailable" });
-  } finally {
-    service.dispose();
-    await host.harness.lifecycle.dispose();
-  }
-});
+      return JSON.stringify(answer);
+    });
+    let settings = settingsSchema.parse({ model });
+    const service = createService(host.bb, () => settings);
+    const request = input();
+    const caller = new AbortController();
+    try {
+      const pending = service.helper(request, caller.signal);
+      await began;
+      if (change === "context") {
+        options.contextBoundary = 2;
+      } else if (change === "instructions")
+        host.bb.experimental_userInstructions.read = () => ({
+          kind: "ready",
+          content: "New owner instruction",
+          revision: "new",
+        });
+      else if (change === "settings")
+        settings = { ...settings, instructions: "New guidance" };
+      else if (change === "cancel") {
+        expect(service.cancel(request.requestId, "wrong")).toBe(false);
+        expect(service.cancel(request.requestId, request.token)).toBe(true);
+      } else if (change === "caller") caller.abort();
+      else if (change === "reset") service.reset();
+      else service.dispose();
+      release();
+      expect(await pending).toMatchObject({ kind: "unavailable" });
+    } finally {
+      service.dispose();
+      await host.harness.lifecycle.dispose();
+    }
+  },
+);
 
-it("retains shared admission after clear/reset and rejects stale snapshots without inference", async () => {
+it("retains shared admission after clear/reset without resetting its rate limit", async () => {
   const host = fixture();
   let calls = 0;
   const model = await installGenerator(host.bb, async () => {
@@ -200,13 +196,6 @@ it("retains shared admission after clear/reset and rejects stale snapshots witho
     settingsSchema.parse({ model, enabled: true, maxRequestsPerHour: 1 }),
   );
   try {
-    expect(
-      await service.helper({
-        ...input(),
-        expectedContextRevision: "0".repeat(64),
-      }),
-    ).toEqual({ kind: "unavailable", reason: "stale" });
-    expect(calls).toBe(0);
     expect(await service.helper(input())).toMatchObject(answer);
     service.clearCache("thread");
     service.reset();
@@ -358,3 +347,45 @@ it("times out helper generation and releases the local helper lane without retri
     await host.harness.lifecycle.dispose();
   }
 });
+
+it.each(["message", "memory"])(
+  "returns its snapshot proposal when %s changes during generation",
+  async (change) => {
+    const options = { assistantText: "Before generation" };
+    const host = fixture(options);
+    let memory: TaskMemory | null = null;
+    const model = await installGenerator(host.bb, async () => {
+      if (change === "message")
+        options.assistantText = "New assistant message during generation";
+      else
+        memory = {
+          state: { ...emptyTaskState(), contextComplete: true },
+          sources: [],
+          boundary: null,
+        };
+      return JSON.stringify(answer);
+    });
+    const service = createHelperService(
+      host.bb,
+      () => settingsSchema.parse({ model }),
+      {
+        inspect: () => memory,
+        beginHelper: () => ({ admit: () => true, finish: () => undefined }),
+      },
+    );
+    try {
+      const before = await service.context("thread");
+      const result = await service.generate(input());
+      expect(result).toMatchObject({
+        ...answer,
+        contextRevision: before.revision,
+      });
+      expect((await service.context("thread")).revision).not.toBe(
+        before.revision,
+      );
+    } finally {
+      service.dispose();
+      await host.harness.lifecycle.dispose();
+    }
+  },
+);

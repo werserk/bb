@@ -212,3 +212,92 @@
     content: var(--promptbox-container-compact-placeholder);
   }
 }
+
+:where([data-promptbox]) {
+  --composer-editor-cap: 40dvh;
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :where([data-promptbox]) {
+    --composer-editor-cap: calc(5 * 1.7em + 1rem);
+  }
+}
+:where([data-promptbox]) .composer-editor-overflow {
+  position: relative;
+  padding: 4px 16px;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+:where([data-promptbox]) .composer-editor-overflow button {
+  color: var(--primary);
+}
+:where([data-promptbox]) .composer-editor-fade {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 28px;
+  background: linear-gradient(transparent, var(--background));
+}
+:where([data-promptbox][data-editor-expanded]) {
+  position: fixed;
+  inset: 8dvh max(24px, calc((100vw - 800px) / 2));
+  z-index: 47;
+  display: flex;
+  flex-direction: column;
+  height: 84dvh;
+  width: min(800px, calc(100vw - 48px));
+}
+:where([data-promptbox][data-editor-expanded]) [data-promptbox-layout] {
+  flex: 1;
+  min-height: 0;
+}
+:where([data-promptbox][data-editor-expanded]) [data-promptbox-main] {
+  display: flex;
+  flex-direction: column;
+}
+:where([data-promptbox][data-editor-expanded]) [data-promptbox-input-region] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+:where([data-promptbox][data-editor-expanded]) [data-promptbox-editor-scroll] {
+  flex: 1;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :where([data-promptbox][data-editor-expanded]) {
+    inset: 0;
+    height: var(--bb-shell-height, 100dvh);
+    border-radius: 0;
+    width: 100vw;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: var(--bb-safe-area-bottom, env(safe-area-inset-bottom));
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+:where([data-promptbox]) .composer-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+:where([data-promptbox]) .composer-editor-header button {
+  margin-left: auto;
+  color: var(--primary);
+}
+
+/* Plugin actions at the start of the draft line (Prompt Suggestion's ✦) push
+   the text and the ghost suggestion right. Unlayered so it wins over px-3. */
+[data-promptbox-input-region]:has(> [data-promptbox-leading-actions] button)
+  [data-promptbox-editor-scroll] {
+  padding-left: 2rem;
+}

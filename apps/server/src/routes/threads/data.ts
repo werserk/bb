@@ -1,3 +1,4 @@
+import { readQueueSnapshot } from "../../services/threads/queue-snapshot.js";
 import { extractThreadContextWindowUsage } from "@bb/thread-view";
 import {
   getAppSettings,
@@ -31,7 +32,7 @@ import { ApiError } from "../../errors.js";
 import { requirePublicThread } from "../../services/lib/entity-lookup.js";
 import { callHostRetryableOnlineRpc } from "../../services/hosts/online-rpc.js";
 import { requireThreadStorageTarget } from "../../services/threads/thread-storage.js";
-import { toThreadQueuedMessage } from "../../services/threads/thread-queued-messages.js";
+import { toThreadQueuedMessageWithMembership } from "../../services/threads/thread-queued-messages.js";
 import {
   isCompactionOfferEnabled,
   withCompactionOffer,
@@ -147,7 +148,7 @@ function parseThreadTimelinePage(
 }
 
 export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
-  const { get, patch } = typedRoutes<PublicApiSchema>(app, {
+  const { post, get, patch } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.threads;
@@ -359,11 +360,20 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     });
   });
 
+  post(routes.queueSnapshot, (context, payload) => {
+    const id = context.req.param("id");
+    requirePublicThread(deps.db, id);
+    return context.json(
+      readQueueSnapshot(deps.db, id, payload.knownAdmittedQueueIds),
+    );
+  });
   get(routes.queuedMessages, (context) => {
     const threadId = context.req.param("id");
     requirePublicThread(deps.db, threadId);
     return context.json(
-      listQueuedThreadMessages(deps.db, threadId).map(toThreadQueuedMessage),
+      listQueuedThreadMessages(deps.db, threadId).map((row) =>
+        toThreadQueuedMessageWithMembership(deps.db, row),
+      ),
     );
   });
 

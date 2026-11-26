@@ -18,6 +18,7 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -857,22 +858,25 @@ export function ProviderUsageStatusContent({
           <Icon name="ChevronDown" aria-hidden="true" className="size-4" />
         </button>
       </div>
-      <div
-        id={panelId}
-        role="tabpanel"
-        aria-label={
-          activeMachine === null
-            ? "Provider usage"
-            : isAllTab
-              ? activeMachine.displayName + " usage for all accounts"
-              : activeProvider === null
-                ? "Provider usage"
-                : activeMachine.displayName +
-                  " " +
-                  activeProvider.displayName +
-                  " usage"
-        }
-        className="min-h-0 overflow-y-auto p-2.5"
+      <ScrollArea
+        overlay
+        className="min-h-0"
+        viewportProps={{
+          id: panelId,
+          role: "tabpanel",
+          "aria-label":
+            activeMachine === null
+              ? "Provider usage"
+              : isAllTab
+                ? activeMachine.displayName + " usage for all accounts"
+                : activeProvider === null
+                  ? "Provider usage"
+                  : activeMachine.displayName +
+                    " " +
+                    activeProvider.displayName +
+                    " usage",
+          className: "max-h-[calc(20rem-2.25rem)] p-2.5",
+        }}
       >
         {notice !== null && notice.kind !== "loading" ? (
           <UsageNotice
@@ -909,7 +913,7 @@ export function ProviderUsageStatusContent({
             />
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

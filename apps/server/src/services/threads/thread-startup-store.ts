@@ -45,6 +45,15 @@ export const threadProvisionCommonPayloadSchema = z.object({
   execution: resolvedThreadExecutionOptionsSchema.nullable(),
   fork: threadForkDescriptorSchema.nullable().default(null),
   input: z.array(promptInputSchema),
+  clientSubmissions: z
+    .array(
+      z.object({
+        id: z.uuid(),
+        inputGroupIndex: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
+  sourceQueuedMessageIds: z.array(z.string()).optional(),
   inputGroups: z.array(z.array(promptInputSchema).min(1)).min(1).optional(),
   titleProvided: z.boolean(),
   seedWithoutRun: z.boolean().default(false),

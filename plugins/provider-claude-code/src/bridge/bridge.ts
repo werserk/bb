@@ -257,13 +257,14 @@ interface ThreadSession {
   commandListGeneration: number;
   toolOrigin: { turnId?: string; retired?: boolean };
   toolOriginTurnEnded: boolean;
-  resumedTurnCount: number;
+  toolOriginRotations: number;
   contextUsageCollector: ClaudeContextUsageCollector;
   session: SdkSession;
   attachment: ThreadAttachment;
   sessionSerial: number;
   closing: boolean;
   restartBeforeNextTurn: ClaudeSessionRestart | null;
+  replacement: Promise<ThreadSession | undefined> | null;
   launchedWithBypassPermissions: boolean;
   recoveryHintRaisedThisTurn: "authRequired" | "rateLimited" | null;
   streamEnded: boolean;
@@ -701,10 +702,12 @@ async function closeThreadSession(args: {
         await closeClaudeThreadSession(threadSession, args.graceful !== false);
       }
     })
-    .finally(() => {
+    .then(() => {
       if (threadAttachments.get(args.threadId) === attachment) {
         threadAttachments.delete(args.threadId);
       }
+    })
+    .finally(() => {
       closingSessions.delete(args.threadId);
     });
   closingSessions.set(args.threadId, closePromise);
@@ -968,11 +971,19 @@ function stampResumedTurnOrigin(
     ) {
       return delta;
     }
-    threadSession.toolOriginTurnEnded = false;
-    threadSession.resumedTurnCount += 1;
-    threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}-r${threadSession.resumedTurnCount}`;
-    return { ...delta, providerTurnId: threadSession.toolOrigin.turnId };
+    return { ...delta, providerTurnId: rotateToolOrigin(threadSession, "r") };
   });
+}
+
+function rotateToolOrigin(
+  threadSession: ThreadSession,
+  kind: "r" | "c",
+): string {
+  threadSession.toolOriginTurnEnded = false;
+  threadSession.toolOriginRotations += 1;
+  const turnId = `tool-origin-${threadSession.sessionSerial}-${kind}${threadSession.toolOriginRotations}`;
+  threadSession.toolOrigin.turnId = turnId;
+  return turnId;
 }
 
 function emitTerminalAccountErrorHint(
@@ -1254,13 +1265,14 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
     commandListGeneration: 0,
     toolOrigin,
     toolOriginTurnEnded: false,
-    resumedTurnCount: 0,
+    toolOriginRotations: 0,
     contextUsageCollector: new ClaudeContextUsageCollector(),
     session,
     attachment,
     sessionSerial,
     closing: false,
     restartBeforeNextTurn: null,
+    replacement: null,
     launchedWithBypassPermissions:
       attachment.sessionOptions.allowBypassPermissions &&
       isBypassPermissionsAvailable(),
@@ -1376,7 +1388,14 @@ function trackSdkAssistantPermissionEscalation(
 export function buildSessionTrackingHooks(
   threadIdRef: ThreadIdRef,
 ): NonNullable<SdkSessionOptions["hooks"]> {
-  const planTurnCheck = buildPlanTurnCheck();
+  const planTurnCheck = buildPlanTurnCheck({
+    hasOpenBackgroundTasks: () =>
+      threadAttachments
+        .get(threadIdRef.current)
+        ?.residentSession?.translator.hasOpenBackgroundTasks(
+          threadIdRef.current,
+        ) === true,
+  });
   const trackPermissionRequest: HookCallback = async (input, toolUseId) => {
     if (
       input.hook_event_name !== "PermissionRequest" ||
@@ -1544,7 +1563,9 @@ function buildTrackedSessionOptions(
   return sessionOptions;
 }
 
-function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
+async function replaceThreadSession(
+  args: ReplaceThreadSessionArgs,
+): Promise<ThreadSession | undefined> {
   args.threadSession.closing = true;
   resolvePendingSessionWork(args.threadSession, args.restart.reason);
   emitSessionReplacement({
@@ -1554,7 +1575,13 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
     threadId: args.threadId,
     threadSession: args.threadSession,
   });
-  args.threadSession.session.stop();
+  await args.threadSession.session.stopAndWait();
+  if (
+    threadAttachments.get(args.threadId) !== args.attachment ||
+    args.attachment.closing ||
+    args.attachment.residentSession !== args.threadSession
+  )
+    return undefined;
 
   const replacementSession = createThreadSession(args.attachment);
   args.attachment.residentSession = replacementSession;
@@ -1564,9 +1591,9 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
   return replacementSession;
 }
 
-function replaceThreadSessionBeforeNextTurn(
+async function replaceThreadSessionBeforeNextTurn(
   args: ReplaceThreadSessionBeforeNextTurnArgs,
-): ThreadSession | undefined {
+): Promise<ThreadSession | undefined> {
   const providerThreadId =
     args.attachment.providerThreadId ??
     args.threadSession.session.getSessionId();
@@ -1596,6 +1623,8 @@ async function getWritableThreadSession(
   if (!threadSession) {
     return undefined;
   }
+  if (threadSession.replacement) return threadSession.replacement;
+  if (threadSession.closing) return undefined;
   const replacement: ClaudeSessionRestart | null = threadSession.streamEnded
     ? {
         reason: "Thread session replaced after Claude SDK stream ended",
@@ -1603,9 +1632,11 @@ async function getWritableThreadSession(
       }
     : intent === "new-turn"
       ? (threadSession.restartBeforeNextTurn ??
-        (threadSession.toolOrigin.turnId !== undefined
+        (threadSession.toolOrigin.turnId !== undefined &&
+        !threadSession.toolOriginTurnEnded
           ? {
-              reason: "Claude tool query replaced at the turn boundary",
+              reason:
+                "Claude tool query replaced: a new turn arrived before its run ended",
               showRuntimeNote: false,
             }
           : null))
@@ -1613,12 +1644,13 @@ async function getWritableThreadSession(
   if (replacement === null) {
     return threadSession;
   }
-  return replaceThreadSessionBeforeNextTurn({
+  threadSession.replacement = replaceThreadSessionBeforeNextTurn({
     attachment,
     restart: replacement,
     threadId,
     threadSession,
   });
+  return threadSession.replacement;
 }
 
 function getAuthenticationFailureRestartReason(
@@ -1868,7 +1900,7 @@ async function closeClaudeThreadSession(
   if (graceful) {
     await threadSession.session.closeGracefully(THREAD_STOP_CLOSE_TIMEOUT_MS);
   } else {
-    threadSession.session.stop();
+    await threadSession.session.stopAndWait();
   }
 }
 
@@ -2720,6 +2752,12 @@ async function runTurnInput(
         ?.length ?? 0) > 0
     ) {
       threadSession.toolOrigin.turnId = `tool-origin-${threadSession.sessionSerial}`;
+    } else if (
+      intent === "new-turn" &&
+      threadSession.toolOrigin.turnId !== undefined &&
+      threadSession.toolOriginTurnEnded
+    ) {
+      rotateToolOrigin(threadSession, "c");
     }
     if (threadSession.toolOrigin.turnId !== undefined) {
       sendThreadDeltas(params.threadId, [

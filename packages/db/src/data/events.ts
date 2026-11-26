@@ -1488,8 +1488,55 @@ export function listEvents(db: DbConnection, options: ListEventsOptions) {
   return q.all();
 }
 
+export interface ListStoredEventRowsContainingArgs {
+  afterSequence?: number;
+  needles: readonly string[];
+  threadId: string;
+  type: ThreadEventType;
+  window: number;
+}
+
+export function listStoredEventRowsContaining(
+  db: DbQueryConnection,
+  args: ListStoredEventRowsContainingArgs,
+): StoredEventRow[] {
+  if (args.needles.length === 0 || args.window <= 0) return [];
+  const indexed = sql`${events} INDEXED BY events_thread_type_sequence_idx`;
+  const scope = and(
+    eq(events.threadId, args.threadId),
+    eq(events.type, args.type),
+    args.afterSequence === undefined
+      ? undefined
+      : gt(events.sequence, args.afterSequence),
+  );
+  const oldest = db
+    .select({ sequence: sql<number>`${events.sequence}` })
+    .from(indexed)
+    .where(scope)
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .offset(args.window - 1)
+    .get()?.sequence;
+  return db
+    .select(storedEventRowSqlFields(null))
+    .from(indexed)
+    .where(
+      and(
+        scope,
+        oldest === undefined ? undefined : gte(events.sequence, oldest),
+        or(
+          ...args.needles.map(
+            (needle) => sql`instr(${events.data}, ${needle}) > 0`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .all();
+}
+
 export function listStoredEventRows(
-  db: DbConnection,
+  db: DbQueryConnection,
   args: ListStoredEventRowsArgs,
 ): StoredEventRow[] {
   if (args.types?.length === 0) {

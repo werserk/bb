@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -9,7 +10,6 @@ import {
   type FocusEventHandler,
 } from "react";
 import { useComposedRefs } from "@radix-ui/react-compose-refs";
-import * as Popover from "@radix-ui/react-popover";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
@@ -21,9 +21,11 @@ import "./composer-context.css";
 function ContextBody({
   entry,
   visible,
+  onExpand,
 }: {
   entry: ComposerContextEntry;
   visible: boolean;
+  onExpand?: (element: HTMLElement) => void;
 }) {
   const target = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -33,8 +35,23 @@ function ContextBody({
       if (entry.element.parentNode === container) entry.element.remove();
     };
   }, [entry.element]);
+  useLayoutEffect(() => {
+    const node = target.current;
+    if (!node || !onExpand) return;
+    const click = (event: MouseEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button, a, input")
+      )
+        return;
+      onExpand(node);
+    };
+    node.addEventListener("click", click);
+    return () => node.removeEventListener("click", click);
+  }, [onExpand]);
   return (
     <section
+      data-context-id={entry.id}
       hidden={!visible}
       data-context-group={entry.group}
       data-context-tone={entry.tone}
@@ -66,13 +83,15 @@ export function ComposerContextDock({
   );
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const trigger = useRef<HTMLButtonElement | null>(null);
+  const trigger = useRef<HTMLElement | null>(null);
   const summaryButtons = useRef(new Map<string, HTMLButtonElement>());
   const panelId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const disclosure = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const helper = entries.find((entry) => entry.strip);
+  const facts = entries.filter((entry) => !entry.strip);
   const active = entries.find((entry) => entry.id === selected);
-  const prioritized = [...entries].sort(
+  const prioritized = [...facts].sort(
     (a, b) =>
       Number(Boolean(b.overview)) - Number(Boolean(a.overview)) ||
       Number(b.tone === "error") - Number(a.tone === "error") ||
@@ -85,10 +104,10 @@ export function ComposerContextDock({
   const bodyEntries = [
     ...(attention ? [attention] : []),
     ...(main ? [main] : []),
-    ...entries.filter((entry) => entry !== main && entry !== attention),
+    ...facts.filter((entry) => entry !== main && entry !== attention),
   ];
   const overview = active === undefined;
-  const open = (id: string | null, button: HTMLButtonElement) => {
+  const open = (id: string | null, button: HTMLElement) => {
     trigger.current = button;
     entries.find((entry) => entry.id === id)?.onReveal?.();
     if (id === null) {
@@ -97,15 +116,23 @@ export function ComposerContextDock({
     }
     setSelected(id);
     setExpanded(true);
+    requestAnimationFrame(() => {
+      const section = store?.panel.current?.querySelector<HTMLElement>(
+        `[data-context-id="${(id ?? "").replaceAll('"', '\\"')}"]`,
+      );
+      section?.scrollIntoView?.({ block: "nearest" });
+    });
   };
   const close = () => {
     setExpanded(false);
-    (trigger.current?.isConnected
+    const target = trigger.current?.isConnected
       ? trigger.current
-      : disclosure.current
-    )?.focus({ preventScroll: true });
+      : (root.current?.querySelector<HTMLElement>(
+          '[contenteditable="true"], textarea',
+        ) ?? summaryButtons.current.values().next().value);
+    target?.focus({ preventScroll: true });
   };
-  const toggleSection = (id: string, button: HTMLButtonElement) => {
+  const toggleSection = (id: string, button: HTMLElement) => {
     if (expanded && active?.id === id) {
       trigger.current = button;
       close();
@@ -124,8 +151,7 @@ export function ComposerContextDock({
           .find((item) => item.sourceId === sourceId);
         if (!entry) return;
         entry.onReveal?.();
-        trigger.current =
-          summaryButtons.current.get(entry.id) ?? disclosure.current;
+        trigger.current = summaryButtons.current.get(entry.id) ?? null;
         setSelected(entry.id);
         setExpanded(true);
       },
@@ -133,239 +159,190 @@ export function ComposerContextDock({
     });
   }, [store, onBlurCapture]);
   const hasFacts = entries.length > 0;
-  if (!hasFacts && expanded) {
+  const isOpen = expanded && hasFacts;
+  const escape = useRef<() => void>(() => {});
+  escape.current = () => {
+    helper?.strip?.onDismiss();
+    close();
+  };
+  // Panel sections are portals mounted from elsewhere in the React tree, so
+  // their key events bubble there, not here: listen on the document, first.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      escape.current();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen]);
+  useLayoutEffect(() => {
+    if (!expanded || active) return;
     setExpanded(false);
     setSelected(null);
-  }
-  const summaryEntries = [...entries]
-    .sort(
-      (a, b) =>
-        Number(b.tone === "error") * 2 +
-        Number(b.group === "attention") -
-        Number(a.tone === "error") * 2 -
-        Number(a.group === "attention"),
-    )
-    .slice(0, 5);
+    const target = trigger.current?.isConnected
+      ? trigger.current
+      : root.current?.querySelector<HTMLElement>(
+          '[contenteditable="true"], textarea',
+        );
+    target?.focus({ preventScroll: true });
+  }, [expanded, active]);
+  const summaryEntries = [...facts].sort(
+    (a, b) =>
+      Number(b.tone === "error") * 2 +
+      Number(b.group === "attention") -
+      Number(a.tone === "error") * 2 -
+      Number(a.group === "attention"),
+  );
   return (
-    <Popover.Root
-      open={expanded && hasFacts}
-      onOpenChange={setExpanded}
-      modal={false}
+    <div
+      ref={root}
+      className="composer-context-dock"
+      onBlurCapture={onBlurCapture}
+      onKeyDown={(event) => {
+        if (expanded && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }
+      }}
+      data-context-present={hasFacts || undefined}
+      data-context-expanded={isOpen || undefined}
     >
-      <div
-        className="composer-context-dock"
-        onBlurCapture={onBlurCapture}
-        onKeyDown={(event) => {
-          if (expanded && event.key === "Escape" && !event.defaultPrevented) {
-            event.preventDefault();
-            event.stopPropagation();
-            close();
-          }
-        }}
-        data-context-present={hasFacts || undefined}
-        data-context-expanded={(expanded && hasFacts) || undefined}
-      >
-        {sources}
-        <Popover.Portal>
-          <Popover.Content
-            side="top"
-            align="start"
-            sideOffset={-1}
-            avoidCollisions={false}
-            onOpenAutoFocus={(event) => event.preventDefault()}
-            onCloseAutoFocus={(event) => event.preventDefault()}
-            onInteractOutside={(event) => event.preventDefault()}
-            onEscapeKeyDown={(event) => {
-              event.preventDefault();
-              close();
-            }}
-            ref={store?.setPanel ?? panel}
-            id={panelId}
-            role="region"
-            aria-label="Thread context"
-            hidden={!expanded || !hasFacts}
-            className="composer-context-panel"
+      {sources}
+      {isOpen && (
+        <div
+          ref={store?.setPanel ?? panel}
+          id={panelId}
+          role="region"
+          aria-label="Thread context"
+          className="composer-context-panel"
+        >
+          <div
+            className={cn(
+              "composer-context-canvas",
+              overview && "composer-context-overview",
+            )}
+          >
+            {helper && <ContextBody entry={helper} visible />}
+            {bodyEntries.map((entry) => (
+              <ContextBody
+                key={entry.id}
+                entry={entry}
+                visible={active?.id === entry.id}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {hasFacts && (
+        <div
+          ref={setSummaryRef}
+          className="composer-context-strip"
+          data-context-helper={Boolean(helper) || undefined}
+          role="toolbar"
+          aria-label="Thread context summary"
+        >
+          {helper && !expanded && (
+            <div
+              className="composer-context-preview"
+              tabIndex={0}
+              role="group"
+              aria-label="Composer preview"
+              onKeyDown={(event) => {
+                if (
+                  event.target === event.currentTarget &&
+                  (event.key === "Enter" || event.key === " ")
+                ) {
+                  event.preventDefault();
+                  open(helper.id, event.currentTarget);
+                }
+              }}
+            >
+              <ContextBody
+                entry={helper}
+                visible
+                onExpand={(element) => open(helper.id, element)}
+              />
+            </div>
+          )}
+          <div
+            className="composer-context-tabs"
             onKeyDown={(event) => {
-              if (event.key === "Escape" && !event.defaultPrevented) {
-                event.preventDefault();
-                event.stopPropagation();
-                close();
-              }
+              const direction =
+                event.key === "ArrowRight"
+                  ? 1
+                  : event.key === "ArrowLeft"
+                    ? -1
+                    : 0;
+              if (!direction && event.key !== "Home" && event.key !== "End")
+                return;
+              const buttons = [
+                ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  "button",
+                ),
+              ];
+              const index =
+                event.target instanceof HTMLButtonElement
+                  ? buttons.indexOf(event.target)
+                  : -1;
+              if (index < 0) return;
+              event.preventDefault();
+              buttons[
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? buttons.length - 1
+                    : (index + direction + buttons.length) % buttons.length
+              ]?.focus();
             }}
           >
-            <div
-              className={cn(
-                "composer-context-canvas",
-                overview && "composer-context-overview",
-              )}
-            >
-              {bodyEntries.map((entry) => (
-                <ContextBody
-                  key={entry.id}
-                  entry={entry}
-                  visible={
-                    overview
-                      ? entry === main ||
-                        entry === attention ||
-                        (!main && !attention)
-                      : entry === active || entry === attention
-                  }
-                />
-              ))}
-            </div>
-            {overview && entries.length > summaryEntries.length && (
-              <nav
-                className="composer-context-more"
-                aria-label="More thread context sections"
-              >
-                {entries
-                  .filter((entry) => !summaryEntries.includes(entry))
-                  .map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => {
-                        if (disclosure.current)
-                          open(entry.id, disclosure.current);
-                      }}
-                    >
-                      <Icon
-                        name={entry.icon}
-                        className="size-3.5"
-                        aria-hidden
-                      />
-                      {entry.label}
-                      {entry.summary !== undefined && (
-                        <span>{entry.summary}</span>
-                      )}
-                    </button>
-                  ))}
-              </nav>
-            )}
-          </Popover.Content>
-        </Popover.Portal>
-        {hasFacts && (
-          <Popover.Anchor asChild>
-            <div
-              ref={setSummaryRef}
-              className="composer-context-strip"
-              role="toolbar"
-              aria-label="Thread context summary"
-            >
-              <div
-                className="composer-context-tabs"
-                onKeyDown={(event) => {
-                  const direction =
-                    event.key === "ArrowRight"
-                      ? 1
-                      : event.key === "ArrowLeft"
-                        ? -1
-                        : 0;
-                  if (!direction && event.key !== "Home" && event.key !== "End")
-                    return;
-                  const buttons = [
-                    ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                      "button",
-                    ),
-                  ];
-                  const index =
-                    event.target instanceof HTMLButtonElement
-                      ? buttons.indexOf(event.target)
-                      : -1;
-                  if (index < 0) return;
-                  event.preventDefault();
-                  buttons[
-                    event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? buttons.length - 1
-                        : (index + direction + buttons.length) % buttons.length
-                  ]?.focus();
-                }}
-              >
-                {summaryEntries.map((entry) => (
-                  <button
-                    type="button"
-                    key={entry.id}
-                    ref={(button) => {
-                      if (button) summaryButtons.current.set(entry.id, button);
-                      else summaryButtons.current.delete(entry.id);
-                    }}
-                    data-context-tone={entry.tone}
-                    data-context-category={entry.group}
-                    aria-label={
-                      entry.summary === undefined
-                        ? entry.label
-                        : `${entry.label}: ${entry.summary}`
-                    }
-                    aria-controls={panelId}
-                    aria-expanded={expanded && active?.id === entry.id}
-                    className={cn(
-                      entry.tone === "error"
-                        ? "text-destructive-text"
-                        : entry.tone === "attention"
-                          ? "text-attention"
-                          : "text-muted-foreground",
-                    )}
-                    title={`${expanded && active?.id === entry.id ? "Collapse" : "Show"} ${entry.label}`}
-                    onClick={(event) =>
-                      toggleSection(entry.id, event.currentTarget)
-                    }
-                  >
-                    <Icon
-                      name={entry.icon}
-                      aria-hidden
-                      className="size-3.5 shrink-0"
-                    />
-                    <span className="composer-context-label">
-                      {entry.label}
-                    </span>
-                    {entry.summary !== undefined && (
-                      <span className="composer-context-count">
-                        {entry.summary}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+            {summaryEntries.map((entry) => (
               <button
-                ref={disclosure}
                 type="button"
-                className="composer-context-disclosure"
-                aria-label="Toggle thread context"
-                aria-controls={panelId}
-                aria-expanded={expanded && hasFacts}
-                title={
-                  expanded ? "Collapse thread context" : "Show thread context"
-                }
-                onClick={(event) => {
-                  if (expanded) {
-                    trigger.current = event.currentTarget;
-                    close();
-                  } else {
-                    open(
-                      entries.length > summaryEntries.length
-                        ? null
-                        : (main?.id ?? attention?.id ?? null),
-                      event.currentTarget,
-                    );
-                  }
+                key={entry.id}
+                ref={(button) => {
+                  if (button) summaryButtons.current.set(entry.id, button);
+                  else summaryButtons.current.delete(entry.id);
                 }}
-              >
-                {entries.length > summaryEntries.length && (
-                  <span>+{entries.length - summaryEntries.length}</span>
+                data-context-tone={entry.tone}
+                data-context-category={entry.group}
+                aria-label={
+                  entry.summary === undefined
+                    ? entry.label
+                    : `${entry.label}: ${entry.summary}`
+                }
+                aria-controls={panelId}
+                aria-expanded={expanded && active?.id === entry.id}
+                className={cn(
+                  entry.tone === "error"
+                    ? "text-destructive-text"
+                    : entry.tone === "attention"
+                      ? "text-attention"
+                      : "text-muted-foreground",
                 )}
+                onClick={(event) =>
+                  toggleSection(entry.id, event.currentTarget)
+                }
+              >
                 <Icon
-                  name={expanded ? "ChevronUp" : "ChevronDown"}
+                  name={entry.icon}
                   aria-hidden
-                  className="size-3.5"
+                  className="size-3.5 shrink-0"
                 />
+                <span className="composer-context-label">{entry.label}</span>
+                {entry.summary !== undefined && (
+                  <span className="composer-context-count">
+                    {entry.summary}
+                  </span>
+                )}
               </button>
-            </div>
-          </Popover.Anchor>
-        )}
-        {children}
-      </div>
-    </Popover.Root>
+            ))}
+          </div>
+        </div>
+      )}
+      {children}
+    </div>
   );
 }

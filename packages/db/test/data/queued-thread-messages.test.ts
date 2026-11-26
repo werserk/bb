@@ -10,6 +10,7 @@ import {
   deleteClaimedQueuedThreadMessageBatchInTransaction,
   deleteQueuedThreadMessage,
   getQueuedThreadMessage,
+  hasOrdinaryQueuedThreadMessages,
   holdQueuedThreadMessageForEdit,
   listDueScheduledQueuedThreadMessages,
   listIdleThreadsWithQueuedMessages,
@@ -2439,6 +2440,140 @@ describe("queued thread messages", () => {
   });
 });
 
+
+// werserk fork: an ordinary row blocks a service turn only while it will
+// dispatch by itself. Each case pins one state (and the two wait kinds that
+// are excluded), so narrowing or widening the set fails here.
+describe("ordinary rows a service turn yields to", () => {
+  type Db = ReturnType<typeof createMigratedConnection>;
+  const cases: {
+    name: string;
+    state: string;
+    blocks: boolean;
+    seed: (db: Db, threadId: string) => string;
+  }[] = [
+    {
+      name: "queued with no wait",
+      state: "queued",
+      blocks: true,
+      seed: (db, threadId) =>
+        ordinaryRow(db, threadId, { waitingOn: null, sendAt: null }).id,
+    },
+    {
+      name: "waiting on the thread being busy",
+      state: "waiting",
+      blocks: true,
+      seed: (db, threadId) =>
+        ordinaryRow(db, threadId, {
+          waitingOn: { kind: "thread-busy" },
+          sendAt: null,
+        }).id,
+    },
+    {
+      name: "scheduled for later",
+      state: "scheduled",
+      blocks: true,
+      seed: (db, threadId) =>
+        ordinaryRow(db, threadId, {
+          waitingOn: { kind: "time" },
+          sendAt: Date.now() + 86_400_000,
+        }).id,
+    },
+    {
+      name: "failed with a retry booked",
+      state: "failed_retrying",
+      blocks: true,
+      seed: (db, threadId) => failRow(db, threadId, [86_400_000]),
+    },
+    {
+      name: "claimed by a dispatch",
+      state: "claimed",
+      blocks: true,
+      seed: (db, threadId) => {
+        const row = ordinaryRow(db, threadId, {
+          waitingOn: { kind: "thread-busy" },
+          sendAt: null,
+        });
+        expect(
+          claimQueuedThreadMessageGroup(db, noopNotifier, row.id, {
+            kind: "explicit-send",
+          }),
+        ).not.toBeNull();
+        return row.id;
+      },
+    },
+    {
+      name: "failed with its retries exhausted",
+      state: "failed_exhausted",
+      blocks: false,
+      seed: (db, threadId) => failRow(db, threadId, []),
+    },
+    {
+      name: "Not sent (superseded)",
+      state: "waiting",
+      blocks: false,
+      seed: (db, threadId) =>
+        ordinaryRow(db, threadId, {
+          waitingOn: { kind: "superseded" },
+          sendAt: null,
+        }).id,
+    },
+    {
+      name: "waiting on provisioning",
+      state: "waiting",
+      blocks: false,
+      seed: (db, threadId) =>
+        ordinaryRow(db, threadId, {
+          waitingOn: { kind: "provisioning" },
+          sendAt: null,
+        }).id,
+    },
+  ];
+
+  function ordinaryRow(
+    db: Db,
+    threadId: string,
+    wait: Pick<
+      Parameters<typeof createQueuedThreadMessage>[2],
+      "waitingOn" | "sendAt"
+    >,
+  ) {
+    return createQueuedThreadMessage(db, noopNotifier, {
+      threadId,
+      content: defaultInput,
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      ...wait,
+      payload: { kind: "inline" },
+      systemNotice: null,
+    });
+  }
+
+  function failRow(db: Db, threadId: string, retryDelaysMs: number[]) {
+    const row = ordinaryRow(db, threadId, {
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+    });
+    setQueuedThreadMessageFailureReason(db, noopNotifier, {
+      id: row.id,
+      threadId,
+      failureReason: "The message could not be sent.",
+      now: Date.now(),
+      retryDelaysMs,
+    });
+    return row.id;
+  }
+
+  it.each(cases)("$name: blocks = $blocks", ({ state, blocks, seed }) => {
+    const { db, thread } = setup();
+    const id = seed(db, thread.id);
+    expect(getQueuedThreadMessage(db, id)?.state).toBe(state);
+    expect(hasOrdinaryQueuedThreadMessages(db, thread.id)).toBe(blocks);
+    db.$client.close();
+  });
+});
 
 describe("service queue provenance", () => {
   it("persists a dedicated nullable descriptor and puts owner input first", () => {

@@ -5,6 +5,7 @@ import {
 export function fixture(
   options: {
     queued?: number;
+    assistantText?: string;
     noHistory?: boolean;
     contextBoundary?: number;
     threadStatus?: "idle" | "active";
@@ -69,7 +70,14 @@ export function fixture(
             ? []
             : options.turnRow
               ? [
-                  ...messages,
+                  ...messages.map((message) =>
+                    message.role === "assistant"
+                      ? {
+                          ...message,
+                          text: options.assistantText ?? message.text,
+                        }
+                      : message,
+                  ),
                   {
                     id: "summary",
                     kind: "turn" as const,
@@ -87,7 +95,11 @@ export function fixture(
                 ]
               : messages.map((message) =>
                   message.role === "assistant"
-                    ? { ...message, turnId: options.turnId ?? "turn" }
+                    ? {
+                        ...message,
+                        text: options.assistantText ?? message.text,
+                        turnId: options.turnId ?? "turn",
+                      }
                     : message,
                 ),
           contextBoundarySeq: options.contextBoundary ?? null,

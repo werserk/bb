@@ -125,6 +125,13 @@ describe("parent system message dispatch", () => {
             turnRequestEventDataSchema.parse(JSON.parse(event.data)),
           )
           .filter((event) => event.initiator === "system");
+        expect(
+          requests.every(
+            (request) =>
+              request.clientSubmissions === undefined &&
+              request.sourceQueuedMessageIds === undefined,
+          ),
+        ).toBe(true);
         expect(requests).toEqual([
           expect.objectContaining({
             input,

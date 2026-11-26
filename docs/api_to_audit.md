@@ -4641,6 +4641,11 @@ up to 200 records and readRevision-bound cursors; SDK `threads.questions.open`
 and CLI `bb thread questions list --open` expose the same read. Invalid cursors
 refuse 400; changed open identity/revision or archive state refuses 409. Schema
 and question rows are unchanged; installed consumer verification remains pending.
+`threads.plans` accepts optional `known` (at most 40 thread id → `readRevision`
+entries, valid only for the server process that returned them) and lists each
+thread whose opaque `readRevision` (over its events including rewrites, status,
+open-question summary, failed queued sends and attention interactions) still
+matches under `unchanged` as `{revision, readRevision}` instead of `plans`.
 
 Core callers: ThreadScreen → ThreadPlanCard → ThreadPlanSteps → useThreadPlans; public SDK `threads.plans` and `bb thread plan` use the same server `readThreadPlan` projection. Questions use UserQuestionAnswerForm, the native draft key and resolveThreadPendingInteractionMutationOptions. One presentation owner per interaction is selected across foreground overlay/panel/native fallback. Unsupported inputs retain native controls. Skip preserves the pending interaction and its draft; Stop remains native chat control. Failure and needs_input come from authoritative own facts, with no historical/descendant failure roll-up.
 
@@ -4649,7 +4654,6 @@ Stabilization requires independent review, native/plugin custody and focus hando
 `experimental_focusThreadPlan({threadId,interactionId?,questionId?})` is an independently optional synchronous app capability. It returns true when an existing visible overlay accepts reveal/focus, preferring the focused pane. Pending questions are checked against current native IDs and payloads; stale/foreign IDs, hidden overlays and panel-only mounts return false. Repeated requests preserve mounted editor drafts. Without an ID it focuses a current failed step or disclosure. An explicit questionId is separate from native IDs: a pending native interaction takes precedence; otherwise the owning chat re-reads that persistent record and reveals its native card, with an end-of-timeline fallback when the marker is unloaded. Read failures refuse navigation with Retry. Acceptance is synchronous; record loading and focus finish asynchronously. It never resolves a question. Native QuestionNavigator and this API share QuestionNavigationProvider.navigate. Core caller: ThreadPlanSteps focus props and the SDK registry both call the same useThreadPlanFocus controller. Stabilization requires installed split-pane visibility, repeated focus/draft handoff and fallback tests; callers must retain guarded native Open when absent or false.
 
 `ThreadPlanStepsProps.focusSerial?: number` is a positive request counter scoped to the mounted component. Each changed positive value, including wrapping to an earlier value, requests focus once: `focusInteractionId` selects an exact pending native question; no ID selects the current failed step or disclosure. The controller waits for the relevant plan/question data before consuming the request, refuses hidden/stale/foreign targets, and does not replay consumed requests on refresh or resize. Legacy ID-only requests remain supported. Core caller: ThreadPlanSteps overlay and panel share useThreadPlanFocus, ThreadTodoCard and the native editor with the SDK component. Stabilization also requires compiled one-shot/repeat/resize coverage and installed native Escape handoff.
-
 
 ## Thread fixed-tab continuity identity
 
@@ -4733,7 +4737,6 @@ preserves previous answer custody. Exactly-once here concerns durable native
 submission, not proof that a model read or obeyed the text. UI delivery and
 closure states remain distinct, and old records show Attribution unavailable.
 
-
 Question resolution conflicts carry `details.current` when a question snapshot is
 available to the authorized caller (revision, closure and immutable winning
 attribution); the native tool preserves that structured ApiError body. Target
@@ -4780,3 +4783,27 @@ Core callers: native title/commit helpers use the same dispatcher admission/canc
 - `ComposerCustomization.experimental_inlinePanels` registers scoped components inside the composer border above the draft. `ExperimentalComposerContributions.experimental_InlinePanels` is the host renderer used by the bundled Composer on expanded and compact layouts. The host applies the same plugin ownership, crash boundaries, scope filtering, generation identity and customization suppression as toolbar actions. Prompt Suggestion is the first caller; no independent floating overlay is created.
 - `experimental_ComposerSuggestionController.experimental_suspend()` clears pending/displayed ghost suggestions and returns an idempotent release function. Nested holders keep the controller ineligible until all release; disposal never becomes eligible on release. The current context snapshot remains available to a manual preview. Core's existing begin/show/accept and keyboard/Send paths all consult that same controller eligibility.
 - Stabilization requires desktop/compact inline rendering checks, scope/disposal coverage, multiple mounted composer isolation, nested suspension coverage and adoption by another consumer. Draft application continues through the existing shared `PluginComposerApi.replace` updater with an immutable-snapshot guard; this adds no submission or draft-write path.
+
+
+## Composer context preview
+
+`experimental_ComposerContextStrip` renders a scoped plugin preview from an existing composer inline panel into the host context strip, or at the top of its expanded panel. The element is moved without remounting the plugin. `onAccept` handles unmodified Tab from the editor; `onDismiss` handles Escape before panel dismissal. `experimental_ComposerSuggestionController.experimental_handleContextPreviewKey` delegates the editor key after menus and IME have handled it; native and bundled composer use this same path. Native counters and previews share the same dock and focus path. Prompt Suggestion is the first caller. Audit keyboard precedence, multiple composers, lifecycle cleanup and narrow layouts before stabilization. No conversation revision gates apply to manual snapshot proposals; draft/composer identity and protected mentions remain guarded.
+
+## threads.experimental_releaseIdle
+
+Conditionally release a thread runtime through POST /v1/threads/:id/release-idle.
+Returns validated released/busy/unknown with a diagnostic reason; pending work
+and interactions are preserved. A released result does not prove external jobs
+or locks ended. CLI `bb thread release-idle` uses this SDK method. Native idle
+cleanup and explicit Stop use the same runtime conditional release primitive;
+explicit Stop retains its separate interruption and question cancellation policy.
+Stabilization requires cross-environment start/steer/rewind race coverage,
+question preservation, unknown-host coverage and SDK/CLI contract parity.
+
+## Composer context preview visibility
+
+`ExperimentalComposerRootProps.experimental_onContextPreview` asks a renderer to expose the native strip whenever it contains an active plugin preview. Core `ComposerRoot` observes the same context store used by native counters and `experimental_ComposerContextStrip`; the bundled Composer collapses its expanded editor through this callback. Preview generation and draft acceptance stay plugin-owned. Stabilization requires multiple-renderer coverage, preview lifecycle and expanded-editor focus/selection checks. The bundled Composer is the current renderer caller; Prompt Suggestion exercises it through the public strip.
+
+## Composer editor actions
+
+`ComposerCustomization.actions[].experimental_placement: "editor"` places a plugin action at the start of the draft line instead of the action row; `ExperimentalComposerContributions.experimental_EditorActions` is the host renderer the bundled Composer mounts there on expanded layouts, and the editor text indents only while that slot holds a button. The host applies the same plugin ownership, crash boundary, scope filtering and suppression as toolbar actions. Prompt Suggestion's ✦ is the first caller: a click asks for a new proposal and Tab accepts it. Audit focus order, touch sizes and multiple editor actions before stabilization.

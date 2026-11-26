@@ -252,13 +252,61 @@ export async function listSystemProviderInfosForHost(
     .map((registration) => registration.info);
 }
 
+const hostLookupEpisodes = new WeakMap<object, Map<string, string | null>>();
+
+function hostLookupEpisodeKey(hostId: string | null, error: ApiError): string {
+  const details = error.body.details;
+  const reason =
+    details !== null &&
+    typeof details === "object" &&
+    "reason" in details &&
+    typeof details.reason === "string"
+      ? details.reason
+      : null;
+  return JSON.stringify([hostId, error.body.code, reason]);
+}
+
+function logHostLookupFailure(
+  deps: LoggedWorkSessionDeps,
+  hostId: string | null,
+  error: ApiError,
+): void {
+  let episodes = hostLookupEpisodes.get(deps.db);
+  if (episodes === undefined) {
+    episodes = new Map();
+    hostLookupEpisodes.set(deps.db, episodes);
+  }
+  const key = hostLookupEpisodeKey(hostId, error);
+  const level = episodes.has(key) ? "debug" : "warn";
+  episodes.set(key, hostId);
+  deps.logger[level](
+    expectedFallbackErrorLogFields(error),
+    "Failed to resolve host for provider discovery",
+  );
+}
+
+function endHostLookupEpisodes(
+  deps: LoggedWorkSessionDeps,
+  hostId: string,
+): void {
+  const episodes = hostLookupEpisodes.get(deps.db);
+  if (episodes === undefined) return;
+  for (const [key, episodeHostId] of episodes) {
+    if (episodeHostId === null || episodeHostId === hostId)
+      episodes.delete(key);
+  }
+}
+
 function resolveSystemProviderInfosPlan(
   deps: LoggedWorkSessionDeps,
   query: ListSystemProviderInfosRequest = {},
 ): ResolveSystemProviderInfosPlanResult {
+  let lookupHostId: string | null = null;
   try {
     const hostId = resolveSystemLookupHostId(deps, query);
+    lookupHostId = hostId;
     requireConnectedHostSession(deps, hostId);
+    endHostLookupEpisodes(deps, hostId);
     return {
       hostId,
       hostLookupError: null,
@@ -272,10 +320,7 @@ function resolveSystemProviderInfosPlan(
       throw error;
     }
     if (!isSuspendedHostUnavailableError(error)) {
-      deps.logger.warn(
-        expectedFallbackErrorLogFields(error),
-        "Failed to resolve host for provider discovery",
-      );
+      logHostLookupFailure(deps, lookupHostId, error);
     }
     return {
       hostId: null,

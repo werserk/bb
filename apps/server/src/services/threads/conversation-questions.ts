@@ -578,6 +578,13 @@ export async function answerConversationQuestion(
   }
   return accepted.question;
 }
+/** An agent resolving a question that its own thread published. */
+function isSelfWithdrawal(
+  actor: QuestionResolutionActor,
+  question: Pick<ConversationQuestion, "threadId">,
+): boolean {
+  return actor.kind === "agent" && actor.threadId === question.threadId;
+}
 export async function closeConversationQuestion(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: VersionedQuestionRef & { action: "dismiss" | "withdraw" },
@@ -590,16 +597,17 @@ export async function closeConversationQuestion(
     deps.db,
     args.threadId,
     call?.invocation ?? null,
-    () => {
+    (actor) => {
       publicThread(deps.db, args.threadId, true);
       const question = rowToQuestion(deps.db, questionRow(deps.db, args));
       requireRevision(question, args.revision);
-      return question;
+      return { question, self: isSelfWithdrawal(actor, question) };
     },
   );
   const execution =
     args.action === "withdraw" &&
-    (before.status === "open" || before.status === "answered")
+    !before.self &&
+    (before.question.status === "open" || before.question.status === "answered")
       ? await buildExecutionOptions(deps, {}, { threadId: args.threadId })
       : null;
   const accepted = await withQuestionResolutionActor(
@@ -632,11 +640,11 @@ export async function closeConversationQuestion(
                 "Question resolution operationId was reused with different content",
                 current,
               );
-            return { question: current, created: false };
+            return { question: current, created: false, delivered: false };
           }
           const status = args.action === "dismiss" ? "dismissed" : "withdrawn";
           if (!call && current.status === status)
-            return { question: current, created: false };
+            return { question: current, created: false, delivered: false };
           if (call?.invocation && current.status !== "open")
             conflict(`Question is ${current.status}`, current);
           const row =
@@ -663,7 +671,10 @@ export async function closeConversationQuestion(
             answers: null,
           };
           let deliveryId: string | null = null;
-          if (args.action === "withdraw") {
+          // An agent withdrawing its own question already knows; the notice
+          // would only wake it to explain what it just did. The card records
+          // the withdrawal, and nothing is delivered.
+          if (args.action === "withdraw" && !isSelfWithdrawal(actor, current)) {
             ensureThreadQueueIsWritable(thread);
             if (!execution)
               conflict(
@@ -709,7 +720,11 @@ export async function closeConversationQuestion(
             request,
             attribution: { ...attribution, deliveryId },
           });
-          return { question: rowToQuestion(tx, row), created: true };
+          return {
+            question: rowToQuestion(tx, row),
+            created: true,
+            delivered: deliveryId !== null,
+          };
         },
         { behavior: "immediate" },
       ),
@@ -720,7 +735,7 @@ export async function closeConversationQuestion(
       ["interactions-changed", "queue-changed"],
       { projectId: publicThread(deps.db, args.threadId, true).projectId },
     );
-    if (args.action === "withdraw")
+    if (accepted.delivered)
       requestQueuedMessageDispatch(deps, {
         kind: "thread-ready",
         threadId: args.threadId,

@@ -1,3 +1,5 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
+import { useComposerContextSource } from "../context/composer-context";
 import { useState } from "react";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { useResumeHost } from "@/hooks/mutations/host-mutations";
@@ -84,6 +86,35 @@ export function ThreadMachineStatusBanner({
     setIsExpanded((current) => !current),
   );
   const expandable = detail !== null;
+  const compact = useComposerContextSource() !== null;
+  if (compact)
+    return (
+      <PromptStackCard
+        ariaLabel="Machine status"
+        context={{
+          label: "Machine status",
+          icon: "AlertCircle",
+          group: "attention",
+          tone: "attention",
+        }}
+      >
+        <div role={detail ? "alert" : "status"}>
+          <ComposerContextRow
+            icon="AlertCircle"
+            tone="attention"
+            title={status}
+            subline={detail}
+            action={
+              phase === "suspended" ? (
+                <button type="button" onClick={onResume}>
+                  {detail ? "Retry" : "Resume"}
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
+      </PromptStackCard>
+    );
   return (
     <PromptStackCard
       ariaLabel="Machine status"

@@ -107,6 +107,58 @@ function createFetchQueue(
 }
 
 describe("@bb/sdk", () => {
+  for (const status of ["released", "busy", "unknown"] as const) {
+    it(`validates idle release ${status} from the shared route`, async () => {
+      const result = {
+        status,
+        reason:
+          status === "released"
+            ? "runtime_released"
+            : status === "busy"
+              ? "pending_work"
+              : "release_unconfirmed",
+      };
+      const queue = createFetchQueue([{ body: result }]);
+      const sdk = createBbSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://bb.test",
+          fetch: queue.fetch,
+          runtime: "node",
+        }),
+      });
+      expect(
+        await sdk.threads.experimental_releaseIdle({ threadId: "thr_idle" }),
+      ).toEqual(result);
+      expect(queue.requests[0]).toMatchObject({
+        method: "POST",
+        url: "http://bb.test/api/v1/threads/thr_idle/release-idle",
+      });
+    });
+  }
+
+  for (const baseUrl of ["http://bb.test", "http://bb.test/"]) {
+    it(`reads the pending send overlay capability from the api route for ${baseUrl}`, async () => {
+      const queue = createFetchQueue([
+        { body: { pendingSendOverlay: { version: 1 } } },
+      ]);
+      const sdk = createBbSdk({
+        transport: createHttpTransport({
+          baseUrl,
+          fetch: queue.fetch,
+          runtime: "node",
+        }),
+      });
+      expect(await sdk.system.pendingSendOverlay()).toEqual({
+        pendingSendOverlay: { version: 1 },
+      });
+      expect(queue.requests).toHaveLength(1);
+      expect(queue.requests[0]).toMatchObject({
+        method: "GET",
+        url: "http://bb.test/api/v1/capabilities/pending-send-overlay",
+      });
+    });
+  }
+
   it("pages prompt history with an opaque cursor", async () => {
     const response = {
       entries: [
@@ -1404,6 +1456,36 @@ describe("@bb/sdk", () => {
     );
     expect(JSON.parse(queue.requests[1]?.bodyText ?? "{}")).toEqual({
       visibility: "hidden",
+    });
+  });
+
+  it("forwards known plan revisions only when given", async () => {
+    const queue = createFetchQueue([
+      { body: { plans: {}, errors: {} } },
+      { body: { plans: {}, errors: {}, unchanged: {} } },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await sdk.threads.plans({ threadIds: ["thr_aaaaaaaaaa"] });
+    await sdk.threads.plans({
+      threadIds: ["thr_aaaaaaaaaa"],
+      known: { thr_aaaaaaaaaa: "token" },
+    });
+
+    expect(queue.requests[0]).toMatchObject({
+      method: "POST",
+      url: "http://bb.test/api/v1/threads/plans",
+      bodyText: JSON.stringify({ threadIds: ["thr_aaaaaaaaaa"] }),
+    });
+    expect(JSON.parse(queue.requests[1]?.bodyText ?? "{}")).toEqual({
+      threadIds: ["thr_aaaaaaaaaa"],
+      known: { thr_aaaaaaaaaa: "token" },
     });
   });
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  experimental_ComposerContextStrip as ComposerContextStrip,
   useComposer,
   useRpc,
   type experimental_ComposerSuggestionController,
@@ -55,13 +56,15 @@ function HelperAction({
     panel.getSnapshot,
     panel.getSnapshot,
   );
+  // Sits before the draft line: a click asks for a new proposal, Tab accepts.
   return (
     <button
       type="button"
       aria-label="Prompt helper"
-      title="Prompt helper"
+      title="New suggestion · Tab accepts"
       aria-expanded={state.open}
-      className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+      onMouseDown={(event) => event.preventDefault()}
+      className="flex h-full w-5 shrink-0 items-center justify-center rounded text-[0.85em] leading-none text-subtle-foreground transition-colors hover:text-foreground aria-expanded:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-ring"
       onClick={() => panel.change(!state.open)}
     >
       <span aria-hidden="true">✦</span>
@@ -159,19 +162,12 @@ function HelperPreview({
         throw new Error(
           "This draft is too long. Prompt helper accepts up to 12,000 characters.",
         );
-      const context = await rpc.call("helperContext", { threadId });
-      if (!attached) return;
-      if (!context.revision)
-        throw new Error(
-          "Thread context is unavailable. Try again when it is ready.",
-        );
       const response = await rpc.call("helper", {
         threadId,
         requestId,
         token,
         draft: encoded.text,
         protectedMentions: encoded.protectedMentions,
-        expectedContextRevision: context.revision,
       });
       if (!attached) return;
       setResult(response);
@@ -183,9 +179,7 @@ function HelperPreview({
           );
         setReplacement(decoded);
       } else if (response.kind === "unavailable") {
-        throw new Error(
-          `Prompt helper is unavailable (${response.reason.replaceAll("_", " ")}). Check the configured model or try again.`,
-        );
+        throw new Error(helperReason(response.reason));
       }
     };
     void run()
@@ -216,17 +210,7 @@ function HelperPreview({
       return;
     setApplying(true);
     try {
-      const context = await rpc.call("helperContext", {
-        threadId: composer.scope.threadId,
-      });
       if (!fresh()) return;
-      if (context.revision !== result.contextRevision) {
-        setError(
-          "The conversation changed. Try again with the latest context.",
-        );
-        setReplacement(null);
-        return;
-      }
       applied.current = false;
       composer.replace((current) => {
         if (!fresh() || current !== captured.draft) return current;
@@ -250,79 +234,106 @@ function HelperPreview({
       if (alive.current) setApplying(false);
     }
   };
+  const ready = !loading && !applying && !stale && replacement !== null;
   return (
-    <section
-      aria-label="Prompt helper preview"
-      className="m-2 rounded-lg border border-border bg-muted/30 p-3 text-sm"
-      onMouseDown={(event) => event.stopPropagation()}
+    <ComposerContextStrip
+      onAccept={ready ? () => void apply() : undefined}
+      onDismiss={dismiss}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <strong>
-          {captured.draft.text.trim() ? "Improved request" : "Next step"}
-        </strong>
-        <button
-          type="button"
-          onClick={dismiss}
-          className="rounded px-2 py-1 text-muted-foreground hover:text-foreground"
+      <section
+        aria-label="Prompt helper preview"
+        className="flex min-w-0 items-start gap-2 text-sm"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <span
+          title={
+            result?.kind === "helper" && result.advice
+              ? result.advice
+              : "Prompt helper"
+          }
+          className="shrink-0 text-muted-foreground"
+          aria-label={
+            result?.kind === "helper" && result.advice
+              ? result.advice
+              : "Prompt helper advice"
+          }
         >
-          Dismiss
-        </button>
-      </div>
-      {loading ? (
-        <p role="status" className="text-muted-foreground">
-          Preparing a proposal…
-        </p>
-      ) : null}
-      {replacement ? (
-        <p className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words">
-          {replacement.text}
-        </p>
-      ) : null}
-      {result?.kind === "helper" && result.advice ? (
-        <div className="mt-3 border-t border-border pt-2">
-          <strong>Advice</strong>
-          <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
-            {result.advice}
-          </p>
+          ✦
+        </span>
+        <div className="min-w-0 flex-1">
+          {loading ? <span role="status">Preparing a proposal…</span> : null}
+          {replacement && !stale && !error ? (
+            <span data-prompt-helper-text="" className="block truncate">
+              {replacement.text}
+            </span>
+          ) : null}
+          {result?.kind === "none" ? (
+            <span>
+              No useful next step is supported by the current conversation.
+            </span>
+          ) : null}
+          {stale ? (
+            <span role="status">Your draft moved on. </span>
+          ) : error ? (
+            <span role="alert">{error} </span>
+          ) : null}
+          {!loading && (stale || error || result?.kind === "none") ? (
+            <button
+              type="button"
+              className="underline"
+              onClick={(event) => {
+                event.stopPropagation();
+                retry();
+              }}
+            >
+              Refresh
+            </button>
+          ) : null}
         </div>
-      ) : null}
-      {result?.kind === "none" ? (
-        <p className="text-muted-foreground">
-          No useful next step is supported by the current conversation.
-        </p>
-      ) : null}
-      {error ? (
-        <p role="alert" className="mt-2 text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {stale ? (
-        <p role="status" className="mt-2 text-muted-foreground">
-          Your draft or composer changed. Try again to update this proposal.
-        </p>
-      ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={loading || applying || stale || !replacement}
-          onClick={() => void apply()}
-          className="rounded-md bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50"
-        >
-          {applying
-            ? "Checking…"
-            : captured.draft.text.trim()
-              ? "Replace draft"
-              : "Insert"}
-        </button>
-        <button
-          type="button"
-          disabled={applying}
-          onClick={retry}
-          className="rounded-md border border-border px-3 py-2 disabled:opacity-50"
-        >
-          Try again
-        </button>
-      </div>
-    </section>
+        {ready ? (
+          <button
+            type="button"
+            aria-label="Replace draft"
+            title="Replace draft · Tab"
+            className="shrink-0 text-xs text-muted-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              void apply();
+            }}
+          >
+            Tab
+          </button>
+        ) : null}
+      </section>
+    </ComposerContextStrip>
   );
+}
+
+function helperReason(reason: string) {
+  switch (reason) {
+    case "stale":
+      return "The conversation moved on while preparing. Refresh?";
+    case "timeout":
+      return "Preparing the proposal timed out. Try again.";
+    case "busy":
+      return "Prompt helper is busy. Try again shortly.";
+    case "not_configured":
+      return "Choose a model in Prompt Suggestion settings to use Prompt helper.";
+    case "cancelled":
+      return "Preparing the proposal was cancelled.";
+    case "rate_limited":
+      return "Prompt helper reached its request limit. Try again later.";
+    case "ineligible":
+      return "Thread context is unavailable. Try again when it is ready.";
+    case "invalid_mentions":
+      return "The proposal could not preserve your mentions. Try again.";
+    case "output_truncated":
+      return "The proposal was cut short. Try again.";
+    case "invalid_input":
+      return "This draft could not be prepared. Check its length and mentions.";
+    case "duplicate_request":
+      return "This proposal is already being prepared.";
+    default:
+      return `Prompt helper failed (${reason.replaceAll("_", " ")}). Try again.`;
+  }
 }

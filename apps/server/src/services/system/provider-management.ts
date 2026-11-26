@@ -8,6 +8,10 @@ import type { SystemProviderCatalogEntry } from "@bb/server-contract";
 import type { ServerAppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import type { PluginService } from "../plugins/plugin-service.js";
+import {
+  configChanged,
+  notifyConfigChangedIfChanged,
+} from "./config-change.js";
 
 export function providerManagementCatalog(
   deps: Pick<ServerAppDeps, "providerRegistry">,
@@ -45,15 +49,25 @@ export function providerManagementCatalog(
   });
 }
 
+function providerManagementState(
+  deps: Pick<ServerAppDeps, "db" | "providerRegistry">,
+  plugins: Pick<PluginService, "list" | "providerCatalog">,
+) {
+  return {
+    catalog: providerManagementCatalog(deps, plugins),
+    disabledProviderIds: getDisabledProviderIds(deps.db),
+    defaultProviderId: getAppSettings(deps.db).defaultProviderId,
+  };
+}
+
 export async function setProviderEnabled(
   deps: Pick<ServerAppDeps, "db" | "providerRegistry" | "hub">,
   plugins: Pick<PluginService, "list" | "providerCatalog" | "setEnabled">,
   id: string,
   enabled: boolean,
 ): Promise<SystemProviderCatalogEntry[]> {
-  const provider = providerManagementCatalog(deps, plugins).find(
-    (entry) => entry.id === id,
-  );
+  const before = providerManagementState(deps, plugins);
+  const provider = before.catalog.find((entry) => entry.id === id);
   if (provider === undefined)
     throw new ApiError(404, "provider_not_found", `Unknown provider "${id}".`);
   if (enabled && !provider.pluginEnabled) {
@@ -77,6 +91,7 @@ export async function setProviderEnabled(
   if (!enabled && current.defaultProviderId === id) {
     setAppSettings(deps.db, { ...current, defaultProviderId: null });
   }
-  deps.hub.notifySystem(["config-changed"]);
-  return providerManagementCatalog(deps, plugins);
+  const after = providerManagementState(deps, plugins);
+  notifyConfigChangedIfChanged(deps.hub, configChanged(before, after));
+  return after.catalog;
 }

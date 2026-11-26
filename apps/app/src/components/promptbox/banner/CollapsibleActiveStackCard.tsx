@@ -1,3 +1,5 @@
+import { ComposerContextRow } from "../context/ComposerContextRow";
+import { useComposerContextSource } from "../context/composer-context";
 import type { ReactNode } from "react";
 import {
   PROMPT_STACK_CARD_ROW_HEIGHT,
@@ -59,67 +61,105 @@ export function CollapsibleActiveStackCard({
   dismiss,
   children,
 }: CollapsibleActiveStackCardProps) {
+  const compact = useComposerContextSource() !== null;
   const activity = isActive ? "active" : "pending";
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
   return (
     <PromptStackCard
       ariaLabel={cardAriaLabel}
       context={{ label: cardAriaLabel, icon: iconName, group: "work" }}
-      onContextReveal={() => {
-        if (!isExpanded) onToggle();
-      }}
+      onContextReveal={
+        compact
+          ? undefined
+          : () => {
+              if (!isExpanded) onToggle();
+            }
+      }
       className="overflow-hidden"
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
-      <div
-        role="group"
-        aria-label={controlsAriaLabel}
-        className={HEADER_GROUP_CLASS}
-      >
-        <button
-          ref={focus.triggerRef}
-          type="button"
-          id={toggleId}
-          aria-expanded={isExpanded}
-          aria-controls={bodyId}
-          aria-label={toggleAriaLabel}
-          onClick={focus.onTriggerClick}
-          className={cn(
-            HEADER_BUTTON_CLASS,
-            PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-          )}
+      {compact ? (
+        <ComposerContextRow
+          icon={iconName}
+          tone={isActive ? "working" : undefined}
+          title={title}
+          action={
+            <button
+              ref={focus.triggerRef}
+              id={toggleId}
+              type="button"
+              aria-label={toggleAriaLabel}
+              aria-expanded={isExpanded}
+              aria-controls={bodyId}
+              onClick={focus.onTriggerClick}
+            >
+              {isExpanded ? "Hide details" : "Details"}
+            </button>
+          }
+          secondary={
+            dismiss ? (
+              <button
+                type="button"
+                aria-label={dismiss.ariaLabel}
+                disabled={dismiss.isPending}
+                onClick={dismiss.onDismiss}
+              >
+                Dismiss
+              </button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <div
+          role="group"
+          aria-label={controlsAriaLabel}
+          className={HEADER_GROUP_CLASS}
         >
-          <Icon
-            name={iconName}
-            className={activityIconClass(activity, "size-3.5 shrink-0")}
-            aria-hidden="true"
-          />
-          <span
-            className={activityTextClass(
-              activity,
-              "min-w-0 flex-1 truncate text-left",
+          <button
+            ref={focus.triggerRef}
+            type="button"
+            id={toggleId}
+            aria-expanded={isExpanded}
+            aria-controls={bodyId}
+            aria-label={toggleAriaLabel}
+            onClick={focus.onTriggerClick}
+            className={cn(
+              HEADER_BUTTON_CLASS,
+              PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
             )}
           >
-            {title}
-          </span>
-          <PromptStackHoverChevron isExpanded={isExpanded} />
-        </button>
-        {dismiss ? (
-          <button
-            type="button"
-            aria-label={dismiss.ariaLabel}
-            onClick={dismiss.onDismiss}
-            disabled={dismiss.isPending}
-            className={DISMISS_BUTTON_CLASS}
-          >
             <Icon
-              name={dismiss.isPending ? "Loading" : "X"}
-              className={cn("size-3.5", dismiss.isPending && "animate-spin")}
+              name={iconName}
+              className={activityIconClass(activity, "size-3.5 shrink-0")}
               aria-hidden="true"
             />
+            <span
+              className={activityTextClass(
+                activity,
+                "min-w-0 flex-1 truncate text-left",
+              )}
+            >
+              {title}
+            </span>
+            <PromptStackHoverChevron isExpanded={isExpanded} />
           </button>
-        ) : null}
-      </div>
+          {dismiss ? (
+            <button
+              type="button"
+              aria-label={dismiss.ariaLabel}
+              onClick={dismiss.onDismiss}
+              disabled={dismiss.isPending}
+              className={DISMISS_BUTTON_CLASS}
+            >
+              <Icon
+                name={dismiss.isPending ? "Loading" : "X"}
+                className={cn("size-3.5", dismiss.isPending && "animate-spin")}
+                aria-hidden="true"
+              />
+            </button>
+          ) : null}
+        </div>
+      )}
       <AnimatedDisclosureBody
         id={bodyId}
         labelledBy={toggleId}

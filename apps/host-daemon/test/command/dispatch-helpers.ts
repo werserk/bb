@@ -275,6 +275,10 @@ export function createFakeRuntime() {
       state.steeredTurnInstructions = args.instructions;
       return { status: "steered" };
     },
+    isThreadBusy: () => false,
+    async releaseIdleThread(args) {
+      return this.stopThread(args);
+    },
     async stopThread(args) {
       state.stoppedThreadId = args.threadId;
       activeTurnsByThreadId.delete(args.threadId);

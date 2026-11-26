@@ -15,7 +15,7 @@ import {
   type ExperimentalComposerPromptAction as PromptBoxAction,
 } from "@get-bb/plugin-sdk/app";
 import { Icon, type IconName } from "@/components/ui/icon";
-import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@/components/ui/coarse-pointer-sizing";
+import { COMPOSER_ICON_BUTTON_CLASS } from "./composer-sizing";
 import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@/components/ui/chrome-style-tokens";
 
 type PromptBoxActionKind = PromptBoxAction["kind"];
@@ -133,7 +133,7 @@ export function PromptBoxActionsMenu({
           variant="ghost"
           aria-label="Prompt actions"
           className={cn(
-            COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+            COMPOSER_ICON_BUTTON_CLASS,
             CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
             "-ml-1.5",
           )}

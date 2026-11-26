@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createPluginArtifact,
   deletePluginArtifact,
@@ -214,6 +214,139 @@ describe("normalized plugin persistence", () => {
 
     expect(deleteInstalledPlugin(db, "retained")).toBe(true);
     expect(listPluginArtifacts(db, "retained")).toHaveLength(1);
+  });
+
+  describe("plugin KV prefix list", () => {
+    function store(pluginId: string, keys: readonly string[]): void {
+      for (const key of keys) setPluginKvValue(db, pluginId, key, "value");
+    }
+
+    it("Non-ASCII prefix", () => {
+      store("kv-plugin", [
+        "проект/1",
+        "проектб/2",
+        "проеку/x",
+        "😀/3",
+        "😁/4",
+      ]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "проект")).toEqual([
+        "проект/1",
+        "проектб/2",
+      ]);
+      expect(listPluginKvKeys(db, "kv-plugin", "😀")).toEqual(["😀/3"]);
+    });
+
+    it("Case-sensitive prefix", () => {
+      store("kv-plugin", ["Abc/1", "abc/2", "ABC/3"]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "abc")).toEqual(["abc/2"]);
+      expect(listPluginKvKeys(db, "kv-plugin", "Abc")).toEqual(["Abc/1"]);
+    });
+
+    it("Empty prefix", () => {
+      store("kv-plugin", ["b", "a/1", "\u{10ffff}"]);
+      store("other-plugin", ["a/2"]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "")).toEqual([
+        "a/1",
+        "b",
+        "\u{10ffff}",
+      ]);
+      expect(listPluginKvKeys(db, "kv-plugin")).toEqual([
+        "a/1",
+        "b",
+        "\u{10ffff}",
+      ]);
+    });
+
+    it("Lone surrogate in a key", () => {
+      store("kv-plugin", [
+        "x\ud800/1",
+        "x\u{fffd}/2",
+        "x\ud801/3",
+        "x\u{d7ff}/4",
+        "y/5",
+      ]);
+      const replaced = "x\u{fffd}\u{fffd}\u{fffd}";
+
+      expect(listPluginKvKeys(db, "kv-plugin", "x\ud800")).toEqual([
+        `${replaced}/1`,
+      ]);
+      expect(listPluginKvKeys(db, "kv-plugin", "x\u{d7ff}")).toEqual([
+        "x\u{d7ff}/4",
+      ]);
+      expect(listPluginKvKeys(db, "kv-plugin", "x")).toEqual([
+        "x\u{d7ff}/4",
+        `${replaced}/1`,
+        `${replaced}/3`,
+        "x\u{fffd}/2",
+      ]);
+    });
+
+    it("does not match a lone high surrogate against an astral character", () => {
+      store("kv-plugin", [
+        "x\ud83d/1",
+        "x\u{1f600}/2",
+        "x\ud800\udbff/3",
+        "x\ud800\u{e000}/4",
+      ]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "x\ud83d")).toHaveLength(1);
+      expect(
+        listPluginKvKeys(db, "kv-plugin", "x\ud800\udbff"),
+      ).toHaveLength(1);
+    });
+
+    it("Code-point order", () => {
+      store("kv-plugin", ["p/\u{1f600}", "p/\u{e000}", "p/\u{ffff}", "p/z"]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "p/")).toEqual([
+        "p/z",
+        "p/\u{e000}",
+        "p/\u{ffff}",
+        "p/\u{1f600}",
+      ]);
+    });
+
+    it("keeps keys that continue with U+10FFFF and stops at the successor", () => {
+      store("kv-plugin", ["a", "a\u{10ffff}", "a\u{10ffff}z", "b", "ab"]);
+
+      expect(listPluginKvKeys(db, "kv-plugin", "a")).toEqual([
+        "a",
+        "ab",
+        "a\u{10ffff}",
+        "a\u{10ffff}z",
+      ]);
+      expect(listPluginKvKeys(db, "kv-plugin", "\u{10ffff}")).toEqual([]);
+    });
+
+    it("Index range", () => {
+      store("kv-plugin", ["abc/1"]);
+      const sources: string[] = [];
+      const prepare = db.$client.prepare.bind(db.$client);
+      const spy = vi
+        .spyOn(db.$client, "prepare")
+        .mockImplementation((source: string) => {
+          sources.push(source);
+          return prepare(source);
+        });
+      try {
+        expect(listPluginKvKeys(db, "kv-plugin", "abc")).toEqual(["abc/1"]);
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(sources).toHaveLength(1);
+      const plan = db.$client
+        .prepare(`EXPLAIN QUERY PLAN ${sources[0]}`)
+        .all("kv-plugin", "abc", "abd") as { detail: string }[];
+      expect(plan.map((row) => row.detail)).toEqual([
+        expect.stringMatching(
+          /^SEARCH plugin_kv USING .*\(plugin_id=\? AND key>\? AND key<\?\)$/u,
+        ),
+      ]);
+    });
   });
 
   it("matches LIKE metacharacters in key and path prefixes literally", () => {

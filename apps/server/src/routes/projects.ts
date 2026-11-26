@@ -6,6 +6,7 @@ import {
   setMachineEnvironmentVariable,
   deleteMachineEnvironmentVariable,
 } from "../services/machines/environment-storage.js";
+import { notifyConfigChangedIfChanged } from "../services/system/config-change.js";
 import { getGateAuthKind } from "../request-context.js";
 import {
   countProjectSources,
@@ -54,10 +55,7 @@ import {
   requirePublicProject,
   requirePublicStandardProject,
 } from "../services/lib/entity-lookup.js";
-import {
-  isWindowsHostPath,
-  PROMPT_HISTORY_ENTRY_LIMIT,
-} from "@bb/domain";
+import { isWindowsHostPath, PROMPT_HISTORY_ENTRY_LIMIT } from "@bb/domain";
 import { toThreadListEntryResponses } from "../services/threads/thread-runtime-display.js";
 import { callHostRetryableOnlineRpc } from "../services/hosts/online-rpc.js";
 import {
@@ -365,8 +363,12 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Machine credentials cannot change project environment settings",
       );
     const project = requirePublicProject(deps.db, context.req.param("id"));
-    await deleteMachineEnvironmentVariable(deps.db, payload.name, project.id);
-    deps.hub.notifySystem(["config-changed"]);
+    const { changed } = await deleteMachineEnvironmentVariable(
+      deps.db,
+      payload.name,
+      project.id,
+    );
+    notifyConfigChangedIfChanged(deps.hub, changed);
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -380,13 +382,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Machine credentials cannot change project environment settings",
       );
     const project = requirePublicProject(deps.db, context.req.param("id"));
-    await setMachineEnvironmentVariable(
+    const { changed } = await setMachineEnvironmentVariable(
       deps.db,
       deps.config.dataDir,
       payload,
       project.id,
     );
-    deps.hub.notifySystem(["config-changed"]);
+    notifyConfigChangedIfChanged(deps.hub, changed);
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -400,13 +402,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Machine credentials cannot change project environment settings",
       );
     const project = requirePublicProject(deps.db, context.req.param("id"));
-    await replaceMachineEnvironment(
+    const { changed } = await replaceMachineEnvironment(
       deps.db,
       deps.config.dataDir,
       payload,
       project.id,
     );
-    deps.hub.notifySystem(["config-changed"]);
+    notifyConfigChangedIfChanged(deps.hub, changed);
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );

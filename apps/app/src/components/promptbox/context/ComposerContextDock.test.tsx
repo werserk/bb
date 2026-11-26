@@ -15,6 +15,7 @@ import {
   ComposerContextItem,
   useComposerContextStore,
 } from "./composer-context";
+import { ComposerContextStrip } from "./ComposerContextStrip";
 import { ComposerContextDock } from "./ComposerContextDock";
 
 afterEach(cleanup);
@@ -137,7 +138,7 @@ it("keeps native provider context and local detail state while the panel is clos
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  const toggle = screen.getByRole("button", { name: "Toggle thread context" });
+  const toggle = screen.getByRole("button", { name: "Queue" });
   fireEvent.click(toggle);
   fireEvent.click(screen.getByRole("button", { name: "Native queue 0" }));
   fireEvent.keyDown(toggle, { key: "Escape" });
@@ -154,7 +155,7 @@ it("leaves Escape in the editor alone when the disclosure is closed", () => {
   expect(document.activeElement).toBe(draft);
 });
 
-it("keeps plan and native questions in the overview even when other sources mount first", () => {
+it("shows only the selected section even when attention and other sources mount first", () => {
   render(
     <ComposerContextProvider>
       <ComposerContextSources>
@@ -200,15 +201,13 @@ it("keeps plan and native questions in the overview even when other sources moun
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Toggle thread context" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
   expect(screen.getByText("Preferred plan").closest("section")?.hidden).toBe(
     false,
   );
   expect(
     screen.getByText("Native question links").closest("section")?.hidden,
-  ).toBe(false);
+  ).toBe(true);
   expect(screen.getByText("Children detail").closest("section")?.hidden).toBe(
     true,
   );
@@ -281,18 +280,16 @@ it("toggles the selected summary, switches sections and preserves draft and clic
   expect((draft as HTMLTextAreaElement).value).toBe("Unsaved draft");
 });
 
-it("labels counted sections and keeps attention visible while switching", () => {
+it("labels counted sections and keeps attention hidden until selected", () => {
   render(<Fixture />);
   const plan = screen.getByRole("button", { name: "Plan: 2/6" });
-  expect(plan.textContent).toContain("Plan");
+  expect(plan.getAttribute("aria-label")).toBe("Plan: 2/6");
   fireEvent.click(plan);
-  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Retry questions" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Queue: 3" }));
-  expect(screen.getByRole("button", { name: "Retry questions" })).toBeTruthy();
-  const disclosure = screen.getByRole("button", {
-    name: "Toggle thread context",
-  });
-  fireEvent.click(disclosure);
+  expect(screen.queryByRole("button", { name: "Retry questions" })).toBeNull();
+  const disclosure = screen.getByRole("button", { name: "Queue: 3" });
+  fireEvent.keyDown(disclosure, { key: "Escape" });
   expect(document.activeElement).toBe(disclosure);
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
 });
@@ -370,18 +367,64 @@ it("opens overflow sections and returns Escape focus to the external disclosure"
       </ComposerContextDock>
     </ComposerContextProvider>,
   );
-  const disclosure = screen.getByRole("button", {
-    name: "Toggle thread context",
-  });
-  expect(disclosure.textContent).toContain("+2");
-  fireEvent.click(disclosure);
-  const overflow = screen.getByRole("navigation", {
-    name: "More thread context sections",
-  });
-  fireEvent.click(within(overflow).getByRole("button", { name: "Context 6" }));
+  expect(
+    screen.queryByRole("button", { name: "Toggle thread context" }),
+  ).toBeNull();
+  const counter = screen.getByRole("button", { name: "Context 6" });
+  fireEvent.click(counter);
   const action = screen.getByRole("button", { name: "Action 6" });
   action.focus();
   fireEvent.keyDown(action, { key: "Escape" });
   expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
-  expect(document.activeElement).toBe(disclosure);
+  expect(document.activeElement).toBe(counter);
+});
+
+it("moves one mounted plugin preview between strip and panel and routes Tab/Escape from the editor", () => {
+  const accept = vi.fn();
+  const dismiss = vi.fn();
+  const mounted = vi.fn();
+  function Preview() {
+    useLayoutEffect(mounted, []);
+    return <span>Snapshot proposal</span>;
+  }
+  render(
+    <ComposerContextProvider>
+      <ComposerContextDock>
+        <ComposerContextStrip onAccept={accept} onDismiss={dismiss}>
+          <Preview />
+        </ComposerContextStrip>
+        <textarea aria-label="Draft" />
+      </ComposerContextDock>
+    </ComposerContextProvider>,
+  );
+  expect(
+    screen.getByText("Snapshot proposal").closest(".composer-context-strip"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByText("Snapshot proposal"));
+  expect(
+    screen.getByText("Snapshot proposal").closest(".composer-context-panel"),
+  ).toBeTruthy();
+  expect(mounted).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Tab" });
+  expect(accept).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+  expect(dismiss).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+});
+
+it("connects each counter to its panel and closes it from the same tab", () => {
+  render(<Fixture />);
+  const plan = screen.getByRole("button", { name: "Plan: 2/6" });
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(plan);
+  const panel = screen.getByRole("region", { name: "Thread context" });
+  expect(plan.getAttribute("aria-controls")).toBe(panel.id);
+  expect(panel.querySelector("header")).toBeNull();
+  expect(
+    within(panel).queryByRole("button", { name: "Retry questions" }),
+  ).toBeNull();
+  fireEvent.click(plan);
+  expect(screen.queryByRole("region", { name: "Thread context" })).toBeNull();
+  expect(plan.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(plan);
 });

@@ -1347,6 +1347,7 @@ const TEST_COMPOSER_CONTRIBUTIONS: ExperimentalComposerContributions = {
   sendMenuItems: [],
   Actions: TestComposerPluginActions,
   experimental_InlinePanels: TestComposerPluginActions,
+  experimental_EditorActions: TestComposerPluginActions,
   Popup: TestComposerPluginPopup,
   MenuEntry: TestComposerMenuEntry,
 };
@@ -1905,6 +1906,21 @@ const testPluginSdkApp = {
   experimental_Diff: TestDiff,
   experimental_InfoSection: TestInfoSection,
   experimental_CollapsibleStackCard: TestCollapsibleStackCard,
+  experimental_ComposerContextStrip: ({ children, onAccept, onDismiss }) => (
+    <section
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onDismiss();
+        } else if (event.key === "Tab" && !event.shiftKey && onAccept) {
+          event.preventDefault();
+          onAccept();
+        }
+      }}
+    >
+      {children}
+    </section>
+  ),
   experimental_DetailRow: TestDetailRow,
   experimental_ThreadContextCardRow: TestThreadContextCardRow,
   experimental_PanelTabIcon: TestPanelTabIcon,

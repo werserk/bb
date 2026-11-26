@@ -1,4 +1,8 @@
 import {
+  assertSubmissionNotAdmitted,
+  submissionAdmissionFloor,
+} from "./submission-admission.js";
+import {
   getLatestThreadSequence,
   getNonDestroyedHostByLaunchKey,
 } from "@bb/db";
@@ -61,6 +65,9 @@ import { recordAcceptedPromptHistoryEntry } from "../prompt-history.js";
 
 interface RequestThreadProvisionArgs {
   author: DispatchAuthor;
+  inputGroups?: PromptInput[][];
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   dispatchProvenance?: TurnRequestEventData["dispatchProvenance"];
   serviceTurn?: ServiceTurnDescriptor;
   environmentIntent: ThreadProvisionEnvironmentIntent;
@@ -83,6 +90,8 @@ interface RequestThreadTargetReprovisionArgs {
   environment: EnvironmentRow;
   execution: ResolvedThreadExecutionOptions;
   input: PromptInput[];
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   inputGroups?: PromptInput[][];
   initiator: ThreadTurnInitiator;
   originPluginId: string | null;
@@ -305,61 +314,83 @@ export function requestThreadProvision(
   deps: Pick<AppDeps, "db" | "hub">,
   args: RequestThreadProvisionArgs,
 ): ThreadProvisionContext {
-  return deps.db.transaction(() => {
-    const { initiator, senderThreadId } = args.author;
-    const target: TurnRequestTarget = { kind: "thread-start" };
-    const request = appendClientTurnEvent(deps, {
-      threadId: args.thread.id,
-      environmentId: args.thread.environmentId,
-      type: "client/turn/requested",
-      serviceTurn: args.serviceTurn,
-      ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-      ...(args.dispatchProvenance !== undefined
-        ? { dispatchProvenance: args.dispatchProvenance }
-        : {}),
-      input: args.input,
-      execution: args.execution,
-      initiator,
-      originPluginId: args.originPluginId,
-      senderThreadId,
-      requestMethod: "thread/start",
-      source: "spawn",
-      target,
-    });
-    recordAcceptedPromptHistoryEntry(deps, {
-      thread: args.thread,
-      input: args.input,
-      initiator,
-      target,
-      requestSequence: request.sequence,
-    });
-    appendClientTurnEvent(deps, {
-      threadId: args.thread.id,
-      environmentId: args.thread.environmentId,
-      type: "client/thread/start",
-      initiator,
-      requestMethod: "thread/start",
-      source: "spawn",
-    });
+  return deps.db.transaction(
+    () => {
+      const { initiator, senderThreadId } = args.author;
+      const target: TurnRequestTarget = { kind: "thread-start" };
+      for (const entry of args.sourceQueuedMessageIds?.length || args.retryOf
+        ? []
+        : (args.clientSubmissions ?? []))
+        assertSubmissionNotAdmitted(
+          deps.db,
+          args.thread.id,
+          entry.id,
+          submissionAdmissionFloor(deps.db, args.thread.id, entry.id),
+        );
+      const request = appendClientTurnEvent(deps, {
+        threadId: args.thread.id,
+        environmentId: args.thread.environmentId,
+        type: "client/turn/requested",
+        serviceTurn: args.serviceTurn,
+        clientSubmissions: args.clientSubmissions,
+        sourceQueuedMessageIds: args.sourceQueuedMessageIds,
+        ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+        ...(args.dispatchProvenance !== undefined
+          ? { dispatchProvenance: args.dispatchProvenance }
+          : {}),
+        input: args.input,
+        ...(args.inputGroups !== undefined
+          ? { inputGroups: args.inputGroups }
+          : {}),
+        execution: args.execution,
+        initiator,
+        originPluginId: args.originPluginId,
+        senderThreadId,
+        requestMethod: "thread/start",
+        source: "spawn",
+        target,
+      });
+      recordAcceptedPromptHistoryEntry(deps, {
+        thread: args.thread,
+        input: args.input,
+        initiator,
+        target,
+        requestSequence: request.sequence,
+      });
+      appendClientTurnEvent(deps, {
+        threadId: args.thread.id,
+        environmentId: args.thread.environmentId,
+        type: "client/thread/start",
+        initiator,
+        requestMethod: "thread/start",
+        source: "spawn",
+      });
 
-    const context = createThreadStartup({
-      clientRequestId: request.requestId,
-      environmentIntent: args.environmentIntent,
-      execution: args.execution,
-      fork: args.fork,
-      input: args.providerInput ?? args.input,
-      initiator,
-      seedWithoutRun: args.startedOnBehalfOf !== null,
-      titleProvided: args.titleProvided,
-    });
-    saveThreadProvisionContext({
-      replace: true,
-      db: deps.db,
-      threadId: args.thread.id,
-      context,
-    });
-    return context;
-  });
+      const context = createThreadStartup({
+        clientRequestId: request.requestId,
+        environmentIntent: args.environmentIntent,
+        execution: args.execution,
+        fork: args.fork,
+        input: args.providerInput ?? args.input,
+        clientSubmissions: args.clientSubmissions,
+        sourceQueuedMessageIds: args.sourceQueuedMessageIds,
+        ...(args.inputGroups !== undefined
+          ? { inputGroups: args.inputGroups }
+          : {}),
+        initiator,
+        seedWithoutRun: args.startedOnBehalfOf !== null,
+        titleProvided: args.titleProvided,
+      });
+      saveThreadProvisionContext({
+        replace: true,
+        db: deps.db,
+        threadId: args.thread.id,
+        context,
+      });
+      return context;
+    },
+    { behavior: "immediate" },
+  );
 }
 
 export function requestThreadEnvironmentRestore(
@@ -407,43 +438,48 @@ export function requestThreadTargetReprovision(
   deps: Pick<AppDeps, "db" | "hub">,
   args: RequestThreadTargetReprovisionArgs,
 ): ThreadProvisionContext {
-  return deps.db.transaction(() => {
-    const request = appendReprovisionTurnRequest(deps, args);
-    const context = createThreadStartup({
-      clientRequestId: request.requestId,
-      environmentIntent:
-        args.environment.status === "error" &&
-        args.environment.path !== null &&
-        args.environment.teardownStatus === null
-          ? { type: "reuse", environmentId: args.environment.id }
-          : {
-              type: "provider",
-              environmentProviderId: args.provider.environmentProviderId,
-              machine: {
-                type: "existing",
-                hostId: args.environment.hostId,
+  return deps.db.transaction(
+    () => {
+      const request = appendReprovisionTurnRequest(deps, args);
+      const context = createThreadStartup({
+        clientRequestId: request.requestId,
+        environmentIntent:
+          args.environment.status === "error" &&
+          args.environment.path !== null &&
+          args.environment.teardownStatus === null
+            ? { type: "reuse", environmentId: args.environment.id }
+            : {
+                type: "provider",
+                environmentProviderId: args.provider.environmentProviderId,
+                machine: {
+                  type: "existing",
+                  hostId: args.environment.hostId,
+                },
+                inputs: args.provider.selection.inputs,
+                selectionResolved: true,
               },
-              inputs: args.provider.selection.inputs,
-              selectionResolved: true,
-            },
-      execution: args.execution,
-      fork: null,
-      input: args.input,
-      ...(args.inputGroups !== undefined
-        ? { inputGroups: args.inputGroups }
-        : {}),
-      initiator: args.initiator,
-      seedWithoutRun: false,
-      titleProvided: true,
-    });
-    saveThreadProvisionContext({
-      replace: true,
-      db: deps.db,
-      threadId: args.thread.id,
-      context,
-    });
-    return context;
-  });
+        execution: args.execution,
+        fork: null,
+        input: args.input,
+        clientSubmissions: args.clientSubmissions,
+        sourceQueuedMessageIds: args.sourceQueuedMessageIds,
+        ...(args.inputGroups !== undefined
+          ? { inputGroups: args.inputGroups }
+          : {}),
+        initiator: args.initiator,
+        seedWithoutRun: false,
+        titleProvided: true,
+      });
+      saveThreadProvisionContext({
+        replace: true,
+        db: deps.db,
+        threadId: args.thread.id,
+        context,
+      });
+      return context;
+    },
+    { behavior: "immediate" },
+  );
 }
 
 function appendReprovisionTurnRequest(
@@ -453,6 +489,18 @@ function appendReprovisionTurnRequest(
   const requestId = createClientTurnRequestId();
   const request = deps.db.transaction(
     (tx) => {
+      if (
+        !args.sourceQueuedMessageIds?.length &&
+        !args.deferredFromRequestId &&
+        args.retryOf === undefined
+      )
+        for (const entry of args.clientSubmissions ?? [])
+          assertSubmissionNotAdmitted(
+            tx,
+            args.thread.id,
+            entry.id,
+            submissionAdmissionFloor(deps.db, args.thread.id, entry.id),
+          );
       args.beforeRequestAppendInTransaction?.({ tx });
       const request =
         appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
@@ -465,6 +513,8 @@ function appendReprovisionTurnRequest(
             deferredFromRequestId: args.deferredFromRequestId,
             serviceTurn: args.serviceTurn,
             ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+            clientSubmissions: args.clientSubmissions,
+            sourceQueuedMessageIds: args.sourceQueuedMessageIds,
             input: args.input,
             ...(args.inputGroups !== undefined
               ? { inputGroups: args.inputGroups }

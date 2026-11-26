@@ -1,4 +1,5 @@
 import { prepareCachedQuery } from "../connection.js";
+import { clientSubmissionQueueId } from "@bb/domain";
 import { requireQuestionResponseDeliverable } from "./conversation-questions.js";
 import { markQuestionResolutionSubmitted } from "./question-resolution-events.js";
 import { encodeQueuedMessagePayload } from "./queued-message-payload.js";
@@ -72,6 +73,7 @@ import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
 import { liveThread } from "./threads.js";
 
 export interface CreateQueuedThreadMessageInput {
+  clientSubmissionId?: string;
   serviceTurn?: ServiceTurnDescriptor;
   threadId: string;
   content: PromptInput[];
@@ -838,7 +840,7 @@ export function createQueuedThreadMessageInTransaction(
     input.threadId,
     projectAttachmentPaths(input.content),
   );
-  const id = createQueuedThreadMessageId();
+  const id = input.clientSubmissionId === undefined ? createQueuedThreadMessageId() : clientSubmissionQueueId(input.clientSubmissionId);
   const lastQueuedMessage = getLastQueuedThreadMessage(tx, input.threadId);
   const sortKey = lastQueuedMessage
     ? createOrderKeyAfter({ previousKey: lastQueuedMessage.sortKey })
@@ -1404,6 +1406,23 @@ function notOrdinaryTurnEndQueuedThreadMessage() {
   );
 }
 
+/**
+ * werserk fork: the states of a row that leaves the queue without the user
+ * acting. A drain claims it, its booked retry re-sends it, or it is already
+ * in flight (a stale claim is released). A `failed_exhausted` row is never
+ * claimed automatically again: only the user resends or deletes it.
+ */
+const SELF_DISPATCHING_QUEUED_MESSAGE_STATES = [
+  ...QUEUED_MESSAGE_AUTOMATICALLY_DRAINABLE_STATES,
+  "failed_retrying",
+  "claimed",
+] as const satisfies readonly QueuedMessageState[];
+
+/**
+ * werserk fork: the ordinary rows a service turn yields to, defined by
+ * whether the row will dispatch by itself. Yielding to a row that only the
+ * user can move held the service turn until the user acted.
+ */
 function ordinaryQueuedMessagesForThread(
   db: DbQueryConnection,
   threadId: string | typeof threads.id,
@@ -1412,7 +1431,30 @@ function ordinaryQueuedMessagesForThread(
   return db
     .select({ id: ordinary.id })
     .from(ordinary)
-    .where(and(eq(ordinary.threadId, threadId), isNull(ordinary.serviceTurn)));
+    .where(
+      and(
+        eq(ordinary.threadId, threadId),
+        isNull(ordinary.serviceTurn),
+        inArray(ordinary.state, [...SELF_DISPATCHING_QUEUED_MESSAGE_STATES]),
+        // A `superseded` retry rests in `waiting`, but its wait is never
+        // cleared automatically: the user sends or deletes it.
+        //
+        // A `provisioning` wait does end by itself, when this thread is
+        // provisioned. On a thread with no environment only its first
+        // dispatch does that; when the waiting service turn is that dispatch,
+        // yielding would be a cycle that keeps the thread pending forever.
+        // A thread already provisioning holds the service turn on the same
+        // wait, and readiness clears every provisioning wait before either
+        // row is retried, so ordinary rows still go first.
+        or(
+          isNull(ordinary.waitingOn),
+          notInArray(sql<string>`json_extract(${ordinary.waitingOn}, '$.kind')`, [
+            "provisioning",
+            "superseded",
+          ]),
+        ),
+      ),
+    );
 }
 
 export function hasOrdinaryQueuedThreadMessages(

@@ -46,9 +46,27 @@ interface OptionalServerFieldGroup {
   reason: string;
 }
 
-const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 47;
+const OPTIONAL_SERVER_FIELD_GROUP_LIMIT = 48;
 
 const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
+  {
+    reason:
+      "Submission membership and admission receipts are additive; legacy requests, persisted events and rollback servers omit them.",
+    fields: [
+      "sendMessageRequestSchema.clientSubmissionId",
+      "sendQueuedMessageResponseSchema.command",
+      "sendQueuedMessageResponseSchema.queuedMessage.clientSubmissionIds",
+      "sendQueuedMessageResponseSchema.requested",
+      "sendQueuedMessageResponseSchema.sourceQueuedMessageIds",
+      "sendQueuedMessageResponseSchema.submissionIds",
+      "threadTimelineResponseSchema.rows.clientSubmissionIds",
+      "threadTimelineResponseSchema.rows.sourceQueuedMessageIds",
+      "threadTimelineResponseSchema.rows.submissionRequestId",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.clientSubmissionIds",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.sourceQueuedMessageIds",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.submissionRequestId",
+    ],
+  },
   {
     reason:
       "Service descriptors and human inspection options are additive; older persisted rows have none. Plan identifiers, reasons and actors are optional native provider facts; plans from providers or older rows without them omit the identifiers. Plan staleness is absent until a later root turn provides stale evidence.",
@@ -2059,6 +2077,34 @@ describe("server-contract clients", () => {
     });
   });
 
+  it("bounds known plan revisions on the plans request", () => {
+    const schema = contract.publicApiRoutes.threads.plans.request.schema;
+    const id = "thr_aaaaaaaaaa";
+    const alphabet = "23456789abcdefghijkmnpqrstuvwxyz";
+    const ids = (count: number) =>
+      Array.from(
+        { length: count },
+        (_, i) =>
+          `thr_aaaaaaaa${alphabet[Math.floor(i / 32)]}${alphabet[i % 32]}`,
+      );
+    expect(schema.safeParse({ threadIds: [id] }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        threadIds: [id],
+        known: Object.fromEntries(ids(40).map((key) => [key, "a".repeat(128)])),
+      }).success,
+    ).toBe(true);
+    for (const known of [
+      Object.fromEntries(ids(41).map((key) => [key, "token"])),
+      { "not-a-thread": "token" },
+      { [id]: "" },
+      { [id]: "a".repeat(129) },
+      { [id]: 1 },
+      [],
+    ])
+      expect(schema.safeParse({ threadIds: [id], known }).success).toBe(false);
+  });
+
   it("keeps contract optional fields on an explicit allowlist", () => {
     const optionalFieldPaths = collectOptionalFieldPaths({
       apiErrorSchema: contract.apiErrorSchema,
@@ -2234,5 +2280,39 @@ describe("environment provider contracts", () => {
         hostId: "host_1",
       }),
     ).toEqual({ projectId: "proj_1", hostId: "host_1" });
+  });
+});
+it("keeps legacy admission decoders and excludes submission identity from edit requests", () => {
+  const id = crypto.randomUUID();
+  expect(
+    contract.sendMessageResponseSchema.parse({ ok: true, delivery: "sent" }),
+  ).toEqual({ ok: true, delivery: "sent" });
+  expect(
+    contract.sendMessageRequestSchema.parse({
+      input: [{ type: "text", text: "same", mentions: [] }],
+      mode: "auto",
+      clientSubmissionId: id,
+    }),
+  ).toMatchObject({ clientSubmissionId: id });
+  expect(
+    contract.editMessageRequestSchema.safeParse({
+      input: [{ type: "text", text: "same", mentions: [] }],
+      operationId: "edit-operation",
+      clientSubmissionId: id,
+      expectedRequestSequence: 1,
+    }).success,
+  ).toBe(false);
+});
+
+describe("send message client submission identity", () => {
+  it("normalizes UUID casing at ingress so dedup keys match", () => {
+    const parsed = sendMessageRequestSchema.parse({
+      clientSubmissionId: "0A1B2C3D-0000-4000-8000-ABCDEF012345",
+      mode: "auto",
+      input: [{ type: "text", text: "hello", mentions: [] }],
+    });
+    expect(parsed.clientSubmissionId).toBe(
+      "0a1b2c3d-0000-4000-8000-abcdef012345",
+    );
   });
 });

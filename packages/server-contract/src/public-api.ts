@@ -1,3 +1,9 @@
+import type { ThreadReleaseIdleResult } from "./api/threads.js";
+import {
+  queueSnapshotRequestSchema,
+  type QueueSnapshotRequest,
+  type QueueSnapshotResponse,
+} from "./api/threads.js";
 import {
   conversationQuestionPublicationInputSchema,
   conversationQuestionAnswerSchema,
@@ -1466,6 +1472,14 @@ export const publicApiRoutes = {
       request: jsonRequest<PathId, RetryTurnRequest>(retryTurnRequestSchema),
       response: jsonResponse<RetryTurnResponse>(),
     }),
+    queueSnapshot: defineRoute({
+      path: "/threads/:id/queue-snapshot",
+      method: "post",
+      request: jsonRequest<PathId, QueueSnapshotRequest>(
+        queueSnapshotRequestSchema,
+      ),
+      response: jsonResponse<QueueSnapshotResponse>(),
+    }),
     queuedMessages: defineRoute({
       path: "/threads/:id/queued-messages",
       method: "get",
@@ -1555,6 +1569,12 @@ export const publicApiRoutes = {
       method: "delete",
       request: noRequest<PathThreadAndQueuedMessage>(),
       response: jsonResponse<{ ok: true }>(),
+    }),
+    releaseIdle: defineRoute({
+      path: "/threads/:id/release-idle",
+      method: "post",
+      request: noRequest<PathId>(),
+      response: jsonResponse<ThreadReleaseIdleResult>(),
     }),
     stop: defineRoute({
       path: "/threads/:id/stop",
@@ -1652,7 +1672,10 @@ export const publicApiRoutes = {
     plans: defineRoute({
       path: "/threads/plans",
       method: "post",
-      request: jsonRequest<{}, { threadIds: string[] }>(
+      request: jsonRequest<
+        {},
+        { threadIds: string[]; known?: Record<string, string> }
+      >(
         planZ
           .object({
             threadIds: planZ
@@ -1662,6 +1685,17 @@ export const publicApiRoutes = {
                   .regex(/^thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/),
               )
               .max(40),
+            known: planZ
+              .record(
+                planZ
+                  .string()
+                  .regex(/^thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/),
+                planZ.string().min(1).max(128),
+              )
+              .refine((known) => Object.keys(known).length <= 40, {
+                message: "At most 40 known plan revisions",
+              })
+              .optional(),
           })
           .strict(),
       ),

@@ -1,3 +1,4 @@
+import { resolveThreadHostCommandEnvironment } from "./thread-command-environment.js";
 import { recoverRefusedOwnerInputInTransaction } from "./deferred-steer.js";
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
@@ -1100,6 +1101,8 @@ export async function prepareReadyThreadTurnCommand(
 export function settleThreadStopCommandResult(
   args: SettleThreadStopCommandResultArgs,
 ): CommandResultSideEffectsResult {
+  if (args.command.intent === "release-idle")
+    return emptyCommandResultSideEffects();
   if (args.command.intent === "interrupt") {
     rememberStopAwaitingDaemon(args);
   }
@@ -1769,6 +1772,37 @@ export function requestThreadStopForCurrentState(
   ) {
     requestPreStartThreadStop(deps, thread);
   }
+}
+
+export async function releaseIdleThreadForCurrentState(
+  deps: RequestThreadStopForCurrentStateDeps,
+  threadId: string,
+): Promise<import("@bb/server-contract").ThreadReleaseIdleResult> {
+  const thread = getThread(deps.db, threadId);
+  if (!thread) return { status: "unknown", reason: "thread_unavailable" };
+  if (
+    (thread.status !== "idle" && thread.status !== "error") ||
+    getActiveTurnId(deps, threadId) !== null ||
+    hasActiveThreadProvisioningContext(deps, threadId) ||
+    deps.pendingInteractions.listPendingThreadInteractions(threadId).length > 0
+  ) {
+    return { status: "busy", reason: "pending_work" };
+  }
+  const environment = resolveThreadHostCommandEnvironment({
+    db: deps.db,
+    thread,
+  });
+  if (!environment) return { status: "unknown", reason: "host_unavailable" };
+  const args = manualThreadStopArgs(threadId, environment);
+  const outcome = await runAwaitedThreadStopCommand(deps, {
+    command: buildThreadStopCommand({ ...args, intent: "release-idle" }),
+    hostId: args.hostId,
+  });
+  if (outcome.failure || !outcome.result)
+    return { status: "unknown", reason: "release_unconfirmed" };
+  return outcome.result.activeTurnRetained === true
+    ? { status: "busy", reason: "pending_work" }
+    : { status: "released", reason: "runtime_released" };
 }
 
 export async function stopThreadForCurrentState(

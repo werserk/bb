@@ -270,6 +270,10 @@ function createFakeRuntime(): AgentRuntime {
     async steerTurn() {
       return { status: "steered" };
     },
+    isThreadBusy: () => false,
+    async releaseIdleThread(args) {
+      return this.stopThread(args);
+    },
     async stopThread() {
       return { providerCheckpointId: null };
     },

@@ -600,9 +600,12 @@ describe("provider model catalog store", () => {
       expect(modelIds(first)).toEqual(["claude-code-model"]);
       expect(modelIds(second)).toEqual(["claude-code-model"]);
       expect(host.listRequests()).toHaveLength(2);
-      held.resolve(catalogAnswer(modelList("claude-next")));
+      held.resolve(
+        catalogAnswer(modelList("claude-code-model", "claude-next")),
+      );
       await vi.waitFor(async () => {
         expect(modelIds(await host.read("claude-code"))).toEqual([
+          "claude-code-model",
           "claude-next",
         ]);
       });
@@ -610,7 +613,9 @@ describe("provider model catalog store", () => {
       expect(pushes).toEqual([host.hostId]);
 
       host.clock.now += MINUTE;
-      host.setAnswer(() => catalogAnswer(modelList("claude-next")));
+      host.setAnswer(() =>
+        catalogAnswer(modelList("claude-code-model", "claude-next")),
+      );
       await host.read("claude-code");
       await vi.waitFor(() => {
         expect(host.listRequests()).toHaveLength(3);
@@ -1198,7 +1203,7 @@ describe("provider model catalog store", () => {
             `${providerId}-after`,
           ]);
         });
-        expect(host.listRequests(providerId)).toHaveLength(2);
+        expect(host.listRequests(providerId)).toHaveLength(3);
       }
     });
   });
@@ -1328,6 +1333,306 @@ describe("provider model catalog store", () => {
       } finally {
         setServerMoveFrozen(harness.db, false);
       }
+    });
+  });
+});
+
+function models(count: number) {
+  return modelList(
+    ...Array.from({ length: count }, (_, index) => `m${index + 1}`),
+  );
+}
+
+function setupPushHost(harness: TestAppHarness, id: string) {
+  const logLines = captureLogLines(harness);
+  const host = setupCatalogHost(harness, { id });
+  let pushes: string[] = [];
+  return {
+    host,
+    logLines,
+    pushes: () => pushes,
+    async start(answer: HostRpcHandlerResult) {
+      host.setAnswer(() => answer);
+      await host.read("codex");
+      await settleTimers();
+      pushes = capturePushes(harness);
+    },
+    async refresh(answer: HostRpcHandlerResult) {
+      const settled = logLines(SETTLED).length;
+      host.setAnswer(() => answer);
+      host.clock.now += MINUTE;
+      await host.read("codex");
+      await vi.waitFor(() => {
+        expect(logLines(SETTLED)).toHaveLength(settled + 1);
+      });
+      await settleTimers();
+    },
+    storedIds() {
+      const row = getStoredProviderModelCatalog(harness.db, {
+        hostId: host.hostId,
+        providerId: "codex",
+        scopeKey: "",
+      });
+      return (JSON.parse(row?.modelsJson ?? "[]") as { model: string }[]).map(
+        (model) => model.model,
+      );
+    },
+    async offered() {
+      return modelIds(await host.read("codex"));
+    },
+  };
+}
+
+async function withCodexToken(
+  run: (setToken: (token: string | null) => void) => Promise<void>,
+): Promise<void> {
+  let token: string | null = "token-a";
+  setPluginAgentContributions({
+    listSkillRootContributions: () => [],
+    listAgentTools: () => [],
+    listInstructionContributions: () => [],
+    findAgentTool: () => undefined,
+    resolveMention: async () => ({ ok: false, error: "unused" }),
+    invokeAgentTool: async () => ({ success: false, contentItems: [] }),
+    resolveProviderEnv: async ({ providerId }) => ({
+      entries:
+        providerId !== "codex" || token === null
+          ? []
+          : [
+              {
+                name: "CODEX_POOL_AUTH_TOKEN",
+                value: token,
+                source: { plugin: "account-pool" },
+                reason: "pooled",
+              },
+            ],
+    }),
+  });
+  try {
+    await run((next) => {
+      token = next;
+    });
+  } finally {
+    setPluginAgentContributions(undefined);
+  }
+}
+
+describe("provider model catalog pushes", () => {
+  it("Re-key with the same models: sends no push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-rekey-same");
+      await withCodexToken(async (setToken) => {
+        await push.start(catalogAnswer(models(10)));
+        setToken("token-b");
+        await push.refresh(catalogAnswer(models(10)));
+        expect(push.host.listRequests("codex")).toHaveLength(2);
+        expect(push.pushes()).toEqual([]);
+        expect(push.logLines(SETTLED).at(-1)).toMatchObject({
+          outcome: "success",
+          changed: false,
+        });
+      });
+    });
+  });
+
+  it("Routed to direct: sends one push when the new identity returns different models", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-routed-direct");
+      await withCodexToken(async (setToken) => {
+        await push.start(catalogAnswer(modelList("routed-a", "routed-b")));
+        setToken(null);
+        await push.refresh(catalogAnswer(modelList("direct-a")));
+        expect(push.pushes()).toEqual([push.host.hostId]);
+        expect(await push.offered()).toEqual(["direct-a"]);
+      });
+    });
+  });
+
+  it("Re-key with fewer models: applies at once and sends one push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-rekey-fewer");
+      await withCodexToken(async (setToken) => {
+        await push.start(catalogAnswer(models(17)));
+        setToken(null);
+        await push.refresh(catalogAnswer(models(8)));
+        expect(push.storedIds()).toEqual(models(8).map((model) => model.model));
+        expect(push.pushes()).toEqual([push.host.hostId]);
+        expect(await push.offered()).toHaveLength(8);
+      });
+    });
+  });
+
+  it("Silent re-key, then flapping shrink is held", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-silent-rekey");
+      await withCodexToken(async (setToken) => {
+        await push.start(catalogAnswer(models(17)));
+        setToken("token-b");
+        await push.refresh(catalogAnswer(models(17)));
+        await push.refresh(catalogAnswer(models(8)));
+        expect(push.storedIds()).toHaveLength(17);
+        await push.refresh(catalogAnswer(models(17)));
+        expect(push.pushes()).toEqual([]);
+        expect(await push.offered()).toHaveLength(17);
+        expect(push.host.listRequests("codex")).toHaveLength(4);
+        expect(
+          push
+            .logLines(SETTLED)
+            .map(({ held, changed }) => [held ?? false, changed]),
+        ).toEqual([
+          [false, true],
+          [false, false],
+          [true, false],
+          [false, false],
+        ]);
+      });
+    });
+  });
+
+  it("Reasoning discovered: sends one push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-reasoning");
+      push.host.setAnswer((command) =>
+        catalogAnswer(
+          modelList("a").map((model) => ({
+            ...model,
+            reasoningDiscovery: command.selectedModel ? "known" : "unknown",
+            supportedReasoningEfforts: command.selectedModel
+              ? model.supportedReasoningEfforts
+              : [],
+          })),
+        ),
+      );
+      await push.host.read("codex");
+      await settleTimers();
+      const pushes = capturePushes(harness);
+
+      const response = await push.host.read("codex", undefined, "a");
+      await settleTimers();
+
+      expect(response.models[0]?.reasoningDiscovery).toBe("known");
+      expect(pushes).toEqual([push.host.hostId]);
+      await push.host.read("codex", undefined, "a");
+      await settleTimers();
+      expect(pushes).toEqual([push.host.hostId]);
+    });
+  });
+
+  it("Flapping model set: keeps offering 10 models without a push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-flapping");
+      await push.start(catalogAnswer(models(10)));
+      await push.refresh(catalogAnswer(models(9)));
+      expect(push.storedIds()).toHaveLength(10);
+      expect(push.logLines(SETTLED).at(-1)).toMatchObject({
+        outcome: "success",
+        modelCount: 9,
+        held: true,
+        changed: false,
+      });
+      await push.refresh(catalogAnswer(models(10)));
+      expect(push.pushes()).toEqual([]);
+      expect(await push.offered()).toHaveLength(10);
+      expect(push.host.listRequests("codex")).toHaveLength(3);
+    });
+  });
+
+  it("Confirmed removal: the second agreeing refresh applies 9 models and sends one push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-confirmed");
+      await push.start(catalogAnswer(models(10)));
+      await push.refresh(catalogAnswer(models(9)));
+      expect(push.pushes()).toEqual([]);
+      await push.refresh(catalogAnswer(models(9)));
+      expect(push.pushes()).toEqual([push.host.hostId]);
+      expect(push.storedIds()).toHaveLength(9);
+      expect(await push.offered()).toHaveLength(9);
+    });
+  });
+
+  it("Shrinking further: a different shrink replaces the held one until it is confirmed", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-shrinking");
+      await push.start(catalogAnswer(models(10)));
+      await push.refresh(catalogAnswer(models(9)));
+      await push.refresh(catalogAnswer(models(8)));
+      expect(push.storedIds()).toHaveLength(10);
+      expect(push.pushes()).toEqual([]);
+      await push.refresh(catalogAnswer(models(8)));
+      expect(push.pushes()).toEqual([push.host.hostId]);
+      expect(await push.offered()).toHaveLength(8);
+    });
+  });
+
+  it("Growth: applies 10 models at once and sends one push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-growth");
+      await push.start(catalogAnswer(models(9)));
+      await push.refresh(catalogAnswer(models(10)));
+      expect(push.pushes()).toEqual([push.host.hostId]);
+      expect(await push.offered()).toHaveLength(10);
+    });
+  });
+
+  it.each([
+    { label: "Logged out", code: "auth_required" },
+    { label: "Missing executable", code: "missing_executable" },
+  ])(
+    "$label: applies the error at once and sends one push",
+    async ({ code }) => {
+      await withTestHarness(async (harness) => {
+        const push = setupPushHost(harness, `host-push-${code}`);
+        await push.start(catalogAnswer(models(10)));
+        await push.refresh(errorAnswer(code));
+        expect(push.pushes()).toEqual([push.host.hostId]);
+        const response = await push.host.read("codex");
+        expect(response.modelLoadError?.code).toBe(code);
+        expect(response.models).toEqual([]);
+      });
+    },
+  );
+
+  it("Repeated missing executable after reconnect: sends no push", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-missing-reconnect");
+      await withCodexToken(async (setToken) => {
+        await push.start(catalogAnswer(models(10)));
+        await push.refresh(errorAnswer("missing_executable"));
+        expect(push.pushes()).toEqual([push.host.hostId]);
+
+        harness.hub.unregisterDaemon(push.host.sessionId);
+        const nextRequests = push.host.connect(
+          seedSession(harness.deps, push.host.hostId).id,
+        );
+        setToken(null);
+        await push.refresh(errorAnswer("missing_executable"));
+
+        expect(nextRequests("codex")).toHaveLength(1);
+        expect(push.pushes()).toEqual([push.host.hostId]);
+        expect(push.logLines(SETTLED).at(-1)).toMatchObject({
+          outcome: "missing_executable",
+          changed: false,
+        });
+      });
+    });
+  });
+
+  it("clears a held shrink when a session seeds the catalog", async () => {
+    await withTestHarness(async (harness) => {
+      const push = setupPushHost(harness, "host-push-seed-hold");
+      await push.start(catalogAnswer(models(10)));
+      await push.refresh(catalogAnswer(models(9)));
+      await push.host.store.remember(harness.deps, {
+        hostId: push.host.hostId,
+        provider: requireRegistration(harness, "codex").info,
+        cwd: null,
+        models: models(10),
+        selectedOnlyModels: [],
+      });
+      await push.refresh(catalogAnswer(models(9)));
+      expect(push.logLines(SETTLED).at(-1)).toMatchObject({ held: true });
+      expect(push.storedIds()).toHaveLength(10);
+      expect(push.pushes()).toEqual([]);
     });
   });
 });

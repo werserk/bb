@@ -70,18 +70,28 @@ authority for exactly-once delivery, manual-stop pauses and plugin waits.
 Answer acceptance and native idle transitions request this same drain; the
 existing periodic idle recovery remains a fallback for missed process-local
 signals. Idle service drains and idle discovery share the admission rule
-that any ordinary queued row takes priority, including an exhausted failure
-and a claimed row; these blocked service rows remain untouched. By-id readiness
-wakes still run admission and convert a cleared plugin or host wait into an
-idle-drainable thread-busy wait when ordinary work blocks delivery. This keeps
+that an ordinary queued row which will dispatch by itself takes priority:
+one that is queued, scheduled, waiting, has a retry booked
+(`failed_retrying`) or is claimed; these blocked service rows remain
+untouched. Two kinds of row that only the user can move are not blockers,
+because yielding to them held the service turn until the user sent or
+deleted the row: an exhausted failure (`failed_exhausted`), which is never
+claimed automatically again, and a Not sent (`superseded`) retry, which rests
+in `waiting` on a wait nothing clears. A row waiting on `provisioning` is not
+a blocker either: on a thread with no environment only its first dispatch
+ends that wait, and on a pending plugin thread that dispatch is the queued
+service turn (yielding to it left a replaced WProjects coordinator pending
+forever). On a thread already provisioning the service turn waits on the
+same condition, and readiness clears every provisioning wait before rows are
+retried, so ordinary rows still go first. By-id readiness wakes still run
+admission and convert a cleared plugin or host wait into an idle-drainable
+thread-busy wait when ordinary work blocks delivery. This keeps
 one-shot readiness signals effective after the blocker leaves. Native queue
 removal requests a readiness wake immediately. A claim carries its pre-claim
 public wait facts only in memory, so requeueing to the same state, wait and
 schedule does not emit `message.queued`; creation and changed waits still do.
 This prevents bookkeeping retries from driving project-state rebuilds without
 changing message priority, queue storage or public contracts.
-
-
 
 ### Thread lifecycle ownership
 
@@ -471,7 +481,6 @@ AI Gateway is an optional plugin over that API, with GET models and non-streamin
 
 Prompt Suggestion reports its scoped RPC lifecycle through the shared suggestion controller. Pending/error changes preserve composer snapshot identity so rendering cannot restart inference. Core Composer renders a loading placeholder and spinner, clears it on none/cancellation, and exposes failure/timeout details without blocking input. Request IDs and snapshots prevent stale completions from replacing a newer state. Settings show enabled status, model, reasoning and requested speed; requested speed is not proof of upstream service tier.
 
-
 ### Goal-oriented Prompt Suggestion
 
 The server plugin owns preparation, a bounded foreground-interest cache, a foreground inference queue, an independent post-completion memory lane and one shared process-local one-hour admission ledger. UI, CLI and RPC use that coordinator; browser focus does not own leased background generation. Native lifecycle events wake authoritative eligibility reads, and tagged RPC invalidation delivers state without polling. Foreground generation returns only a short suggestion/none. After settlement, a separately admitted memory request refreshes source-linked task state, visible only through inspect. Memory never blocks the foreground promise, reserves the final hourly request for foreground work, and cancels on new demand or invalidated context. Both roles use the same model/effort/tier and full owner instructions; role-specific contracts and output caps differ. No permanent agent or transcript database is added. Thread history remains authoritative, explicit context resets invalidate memory, and unknown goal context stays incomplete.
@@ -481,7 +490,6 @@ Owner principles come from the same raw instruction reader as core thread compos
 Prompt Helper reuses this coordinator and shared AI dispatcher for explicit draft assistance. Its toolbar action opens an `experimental_inlinePanels` contribution inside the native composer; one mount-scoped suspension lease pauses automatic ghost suggestions. The helper treats the captured draft as an unsent proposal, preserves protected mention tokens, and returns primary text plus separate optional advice. It uses full owner instructions and source-linked task memory without writing the draft into that memory. A shared hourly admission ledger counts helper requests even when automatic suggestions are disabled. Immutable draft identity and mounted composer scope fence edits locally; server semantic context revisions fence generation and explicit application. Core and plugins share the same composer replacement adapter. No submission is performed, and attachments stay owned by the composer. See [the implementation plan](superpowers/plans/2026-11-17-prompt-helper-implementation.md) for the accepted scope and verification.
 
 Pi performs provider translation and credential access on the host. Generic session affinity and exact reasoning are capability-checked in the shared dispatcher; OpenRouter latency routing belongs to Pi's server-side native-generation settings and is translated on the host. Host protocol 269 includes those options, capabilities and applied-routing receipt, plus the ACP plugin's direct OpenRouter host commands. AI Gateway and Prompt Suggestion use the same native generation path; neither stores provider keys.
-
 
 The ACP plugin also owns `opencode-openrouter`, a stateless shared text service.
 Its server registration selects lowest-latency routing and exposes exact model
@@ -494,3 +502,50 @@ be disabled. The bounded, cancellable transport rejects tools, refusals and
 unknown finish reasons, does not retry or run an agent loop, and reports only
 upstream model/usage evidence. No additional SDK surface or credential store is
 introduced; host protocol 269 gates the new commands on enrolled machines.
+
+### Composer context previews
+
+ComposerContextDock displays the existing source registrations as compact accessible counters. Each counter toggles only its section in a flat panel with a named header and close action; arrow/Home/End navigation and Escape retain pane-local focus. Questions navigate to their native chat card. The public experimental_ComposerContextStrip moves a plugin-owned inline preview between strip and panel without remounting or regenerating it. The host routes Tab/Escape to the active preview. ComposerRoot's experimental_onContextPreview callback exposes that same native strip by collapsing the expanded editor when a plugin preview appears. Core sources share a flat icon/title/action/subline row; queued messages expose their full controls on Edit, and plans show step segments with completed steps collapsed. A persistent portal container moves the same mounted form above app stacking contexts only while expanded, retaining focus/selection and shared plugin portal scope. The composer caps long drafts at five lines on narrow/coarse screens or 40dvh on desktop; Expand preserves its editor, attachments and send controls in a full-screen mobile or tall desktop form. Prompt Suggestion generates from a captured conversation snapshot and validates only cancellation, output and protected mentions on completion; application protects draft and composer identity. Conversation and memory changes do not invalidate a manual proposal. Empty-draft helper activation accepts an existing ghost through the shared suggestion controller.
+
+### Conditional native runtime release
+
+Thread idle release is serialized with retained start/submit/rewind work by the
+runtime manager's thread control lane across environments. The runtime refuses
+active, pending or background work and orders new operations after asynchronous
+release. The idle reaper uses the same conditional runtime primitive with its
+additional age policy. `release-idle` has no manual Stop settlement side effects;
+ordinary Stop may still interrupt and cancel interactions. Protocol 270 requires
+updated daemons for these strengthened semantics.
+
+Claude SDK input waits for the captured Query initialization before entering the
+prompt iterator; closure rejects readiness waiters. Iterator consumption remains
+a handoff, not proof that native execution accepted or completed the prompt.
+
+Claude resident session replacement tracks the actual host child process on every
+spawn, independently of optional I/O recording. A new query waits for the previous
+child to close, rather than interpreting SDK abort or iterator completion as process
+termination. Concurrent replacements share the same handoff; Stop invalidates it
+before a successor can start. Termination timeouts retain closing ownership and
+reject new work until a later close proves the previous child has exited. This
+keeps inherited native account locks authoritative during same-session continuation.
+
+### Pending owner sends
+
+[Pending send overlay](pending-send-overlay.md) documents the app-lifetime
+presentation owner, per-action submission identity, per-group requested-event
+associations, queue lineage and bounded membership snapshots. Local sends compose
+after authoritative timeline merging and queue reads; they do not enter those
+caches. Legacy handoff requires a joint post-receipt timeline/queue read. Optional
+session recovery uses exclusive Web Locks with cancellable reload acquisition.
+No database migration, index, daemon protocol or dependency change is introduced.
+
+### Pending-send identity boundary
+
+The production app query client binds `pending-send-identity.ts` before render.
+The built-in account plugin remains the identity authority: its existing status
+RPC initializes journal scope and its account realtime signals clear custody on
+logout, pairing/account changes and credential revocation. Reconnect checks status;
+network loss preserves pending sends. Unknown identity disables journal restoration.
+The pending owner fences old reads and mutation receipts by scope generation and
+keeps account identity in the journal key. See [pending send overlay](pending-send-overlay.md)
+for causal legacy handoff, lock ownership and review dispositions.

@@ -30,8 +30,14 @@ export interface ThreadPlanView {
   ownAttention: PlanOwnAttention;
   attentionInteractionIds: readonly string[];
   unboundInteractionIds: readonly string[];
+  readRevision?: string;
+}
+export interface ThreadPlanUnchanged {
+  revision: number;
+  readRevision: string;
 }
 export interface ThreadPlansReadResponse {
   plans: Record<string, ThreadPlanView>;
   errors: Record<string, string>;
+  unchanged?: Record<string, ThreadPlanUnchanged>;
 }

@@ -376,6 +376,28 @@ export function registerOrganizationCommands(
       }),
     );
   queue
+    .command("snapshot <threadId> [queueIds...]")
+    .description(
+      "Read queue presence and bounded request lineage for up to 200 admitted queue IDs",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(
+        async (
+          threadId: string,
+          queueIds: string[],
+          opts: { json?: boolean },
+        ) => {
+          const result = await createCliBbSdk(getUrl()).threads.queueSnapshot({
+            threadId,
+            knownAdmittedQueueIds: queueIds,
+          });
+          if (outputJson(opts, result)) return;
+          console.log(JSON.stringify(result, null, 2));
+        },
+      ),
+    );
+  queue
     .command("create <threadId> [message]")
     .description("Create a queued message with text and attachments")
     .option("--model <model>", "Model override for the queued message")

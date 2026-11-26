@@ -1,3 +1,4 @@
+import { composePendingSends } from "../cache-owners/pending-send-owner";
 import { MutationObserver, type QueryClient } from "@tanstack/react-query";
 import type { ThreadQueuedMessage } from "@bb/domain";
 import type {
@@ -399,6 +400,9 @@ describe("thread runtime mutations", () => {
     expect(
       queryClient.getQueryData(threadQueuedMessagesQueryKey("thread-1")),
     ).toEqual([provisioningQueuedMessage]);
+    expect(composePendingSends(queryClient, "thread-1").queue).toEqual([
+      provisioningQueuedMessage,
+    ]);
     expect(
       queryClient.getQueryData<ThreadTimelineResponse>(
         threadTimelineQueryKey("thread-1"),
@@ -437,9 +441,9 @@ describe("thread runtime mutations", () => {
 
     expect(
       queryClient
-        .getQueryData<
-          ThreadQueuedMessage[]
-        >(threadQueuedMessagesQueryKey("thread-1"))
+        .getQueryData<ThreadQueuedMessage[]>(
+          threadQueuedMessagesQueryKey("thread-1"),
+        )
         ?.map((queuedMessage) => queuedMessage.id),
     ).toEqual(["qmsg-2"]);
   });
@@ -463,4 +467,221 @@ describe("thread runtime mutations", () => {
       threadId: "thread-1",
     });
   });
+});
+it.each([
+  [400, "failed"],
+  [408, "unconfirmed"],
+] as const)("keeps HTTP %s delivery state %s", async (status, state) => {
+  const queryClient = createTestQueryClient();
+  vi.mocked(sdk.threads.send).mockRejectedValueOnce(
+    new BbHttpError({
+      status,
+      code: "invalid_request",
+      message: "Request did not complete",
+      body: { message: "Request did not complete" },
+    }),
+  );
+  const mutation = new MutationObserver(
+    queryClient,
+    sendThreadMessageMutationOptions(queryClient),
+  );
+  await expect(
+    mutation.mutate({
+      id: "thread-1",
+      mode: "auto",
+      input: [{ type: "text", text: "owner", mentions: [] }],
+    }),
+  ).rejects.toThrow();
+  const { pendingSendOwner } =
+    await import("../cache-owners/pending-send-owner");
+  expect(pendingSendOwner(queryClient).list("thread-1")[0]?.state).toBe(state);
+  expect(sdk.threads.send).toHaveBeenCalledTimes(1);
+});
+it("keeps custody when a typed command receipt echoes another submission", async () => {
+  const client = createTestQueryClient(),
+    id = crypto.randomUUID();
+  vi.mocked(sdk.threads.send).mockResolvedValueOnce({
+    ok: true,
+    delivery: "sent",
+    command: true,
+    submissionIds: [crypto.randomUUID()],
+  });
+  const mutation = new MutationObserver(
+    client,
+    sendThreadMessageMutationOptions(client),
+  );
+  await expect(
+    mutation.mutate({
+      id: "thread-1",
+      clientSubmissionId: id,
+      mode: "auto",
+      input: [{ type: "text", text: "/clear", mentions: [] }],
+    }),
+  ).rejects.toThrow("Unrecognized submission receipt");
+  const { pendingSendOwner } =
+    await import("../cache-owners/pending-send-owner");
+  expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+    { id, state: "unconfirmed" },
+  ]);
+});
+it("rejects conflicting identity without changing the active send", async () => {
+  const client = createTestQueryClient(),
+    id = crypto.randomUUID();
+  const response = createDeferredPromise<{ ok: true; delivery: "sent" }>();
+  vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+  const options = sendThreadMessageMutationOptions(client);
+  const original = new MutationObserver(client, options).mutate({
+    id: "thread-1",
+    clientSubmissionId: id,
+    mode: "auto",
+    input: [{ type: "text", text: "original", mentions: [] }],
+  });
+  await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+  try {
+    await expect(
+      new MutationObserver(client, options).mutate({
+        id: "thread-1",
+        clientSubmissionId: id,
+        mode: "auto",
+        input: [{ type: "text", text: "conflict", mentions: [] }],
+      }),
+    ).rejects.toThrow("Conflicting submission identity");
+    const { pendingSendOwner } =
+      await import("../cache-owners/pending-send-owner");
+    expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+      { id, state: "sending", row: { text: "original" } },
+    ]);
+    expect(sdk.threads.send).toHaveBeenCalledTimes(1);
+  } finally {
+    response.resolve({ ok: true, delivery: "sent" });
+    await original;
+  }
+});
+it("resolves the accepted-turn prediction when an error arrives after the account scope changed", async () => {
+  const client = createTestQueryClient();
+  client.setQueryData(
+    threadQueryKey("thread-1"),
+    makeThreadResponseFixture({
+      id: "thread-1",
+      status: "idle",
+      runtime: { displayStatus: "idle" },
+    }),
+  );
+  const response = createDeferredPromise<never>();
+  vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+  const settled = new MutationObserver(
+    client,
+    sendThreadMessageMutationOptions(client),
+  )
+    .mutate({
+      id: "thread-1",
+      clientSubmissionId: crypto.randomUUID(),
+      mode: "auto",
+      input: [{ type: "text", text: "scope change", mentions: [] }],
+    })
+    .catch(() => undefined);
+  await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+  const displayStatus = () =>
+    client.getQueryData<ThreadResponse>(threadQueryKey("thread-1"))?.runtime
+      ?.displayStatus;
+  expect(displayStatus()).not.toBe("idle");
+  const { clearPendingSendScope } =
+    await import("../cache-owners/pending-send-owner");
+  clearPendingSendScope(client);
+  response.reject(new Error("network down"));
+  await settled;
+  expect(displayStatus()).toBe("idle");
+});
+it.each([
+  [
+    "a definite rejection is recorded and restores the draft with a new id",
+    () =>
+      new BbHttpError({
+        status: 422,
+        code: "invalid_request",
+        message: "rejected",
+        body: { error: "rejected" },
+      }),
+    "failed",
+    false,
+  ],
+  [
+    "a network error without an owned journal restores the draft bound to the same id",
+    () => Error("network"),
+    "unconfirmed",
+    true,
+  ],
+] as const)(
+  "after an in-flight scope change, %s",
+  async (_name, error, state, bound) => {
+    const client = createTestQueryClient(),
+      id = crypto.randomUUID();
+    const response = createDeferredPromise<never>();
+    vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+    const settled = new MutationObserver(
+      client,
+      sendThreadMessageMutationOptions(client),
+    )
+      .mutate({
+        id: "thread-1",
+        clientSubmissionId: id,
+        mode: "auto",
+        input: [{ type: "text", text: "scope change", mentions: [] }],
+      })
+      .catch(() => undefined);
+    await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+    const {
+      clearPendingSendScope,
+      pendingSendDraftId,
+      pendingSendOwner,
+      settleFailedPendingSend,
+    } = await import("../cache-owners/pending-send-owner");
+    clearPendingSendScope(client);
+    expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+      { id, state: "sending" },
+    ]);
+    response.reject(error());
+    await settled;
+    expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+      { id, state },
+    ]);
+    const draft = { text: "scope change", mentions: [], attachments: [] };
+    const restore = vi.fn(() => true);
+    expect(
+      settleFailedPendingSend(client, "thread-1", id, restore, draft),
+    ).toBe(true);
+    expect(restore).toHaveBeenCalledOnce();
+    expect(pendingSendOwner(client).list("thread-1")).toEqual([]);
+    expect(pendingSendDraftId("thread-1", draft) === id).toBe(bound);
+  },
+);
+
+it("a send whose onMutate throws never reaches the server and leaves the live entry with that id untouched", async () => {
+  const client = createTestQueryClient(),
+    id = crypto.randomUUID();
+  const response = createDeferredPromise<never>();
+  vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
+  const send = (text: string) =>
+    new MutationObserver(client, sendThreadMessageMutationOptions(client))
+      .mutate({
+        id: "thread-1",
+        clientSubmissionId: id,
+        mode: "auto",
+        input: [{ type: "text", text, mentions: [] }],
+      })
+      .catch((error: unknown) => error);
+  const first = send("first");
+  await vi.waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+  expect(await send("different")).toEqual(
+    expect.objectContaining({ message: "Conflicting submission identity" }),
+  );
+  expect(sdk.threads.send).toHaveBeenCalledTimes(1);
+  const { pendingSendOwner } =
+    await import("../cache-owners/pending-send-owner");
+  expect(pendingSendOwner(client).list("thread-1")).toMatchObject([
+    { id, state: "sending" },
+  ]);
+  expect(pendingSendOwner(client).outcome("thread-1", id)).toBeUndefined();
+  response.reject(Error("network"));
+  await first;
 });

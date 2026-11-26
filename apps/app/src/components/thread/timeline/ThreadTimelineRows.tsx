@@ -1,3 +1,4 @@
+import { PendingSendPresentationContext } from "./pending-send-presentation";
 import {
   createContext,
   memo,
@@ -858,6 +859,7 @@ const ConversationRowContent = memo(function ConversationRowContent({
   mobileActionDisplay,
   streaming,
 }: ConversationRowContentProps) {
+  const pendingSendPresentation = useContext(PendingSendPresentationContext);
   const composerHost = usePluginComposerHost();
   const {
     canSpawnChild,
@@ -1020,6 +1022,7 @@ const ConversationRowContent = memo(function ConversationRowContent({
           threadId={row.threadId}
           turnRequest={row.turnRequest}
         />
+        {pendingSendPresentation?.(row.id)}
       </>
     );
   }
@@ -1753,9 +1756,7 @@ function TimelineRowView({
   }
 
   if (isOwnerPostRow(row)) {
-    return (
-      <OwnerPostRow projectId={staticContext.projectId} row={row} />
-    );
+    return <OwnerPostRow projectId={staticContext.projectId} row={row} />;
   }
 
   const sentThreadMessage =

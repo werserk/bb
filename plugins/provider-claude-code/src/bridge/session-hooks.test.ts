@@ -26,7 +26,7 @@ it("session hooks stop an agent with an open plan once and release it after", as
     ...common,
     hook_event_name: "PostToolUse",
     tool_name: "mcp__bb-bridge__bb_update_plan",
-    tool_input: { plan: [{ step: "Do it", status: "in_progress" }] },
+    tool_input: { plan: [{ step: "Do it", status: "pending" }] },
     tool_response: "ok",
     tool_use_id: "tu",
   } as HookInput);

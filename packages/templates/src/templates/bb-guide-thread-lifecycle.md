@@ -11,12 +11,17 @@ Lifecycle commands require an explicit thread ID or --self.
 
 Lifecycle:
 
+  bb thread release-idle [id]              Release only an idle runtime; returns released, busy, or unknown
   bb thread stop [id]                      Stop work and release the agent runtime
   bb thread compact [id]                   Request compaction of an idle or errored thread's context
   bb thread clear [id]                     Clear model context for an idle or failed thread
   bb thread cancel-plan [id]               Exit the provider's active Plan mode
   bb thread clear-goal [id]                Clear the provider's Goal
     --self                                 Target current thread
+
+  release-idle preserves pending questions and work, and never escalates to Stop.
+  A disconnected or unconfirmed host returns unknown. It does not prove external
+  jobs or locks have ended. SDK: threads.experimental_releaseIdle({ threadId }).
 
   cancel-plan and clear-goal wait for the provider to confirm.
   `thread compact` enqueues the same structured /compact turn used by the

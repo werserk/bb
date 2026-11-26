@@ -326,6 +326,11 @@ function buildClientUserMessage({
 
   return {
     kind: "user",
+    submissionRequestId: decoded.requestId,
+    clientSubmissionIds: decoded.clientSubmissions
+      ?.filter((entry) => entry.inputGroupIndex === inputGroupIndex)
+      .map((entry) => entry.id),
+    sourceQueuedMessageIds: decoded.sourceQueuedMessageIds,
     id: messageId(
       decoded.threadId,
       "user-seed",

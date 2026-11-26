@@ -256,9 +256,22 @@ function parseRegions(
     NonNullable<ComposerCustomization["actions"]>[number]
   >(`${kind}.actions`, registration.actions, onRejected, (entryKind, value) => {
     const entry = value as Record<string, unknown> | null;
+    const placement = entry?.experimental_placement;
+    if (
+      placement !== undefined &&
+      placement !== "toolbar" &&
+      placement !== "editor"
+    ) {
+      throw new Error(
+        `${entryKind}: "experimental_placement" must be "toolbar" or "editor" when set`,
+      );
+    }
     return {
       id: requireSlotId(entryKind, entry?.id),
       component: requireComponent(entryKind, entry?.component),
+      ...(placement !== undefined
+        ? { experimental_placement: placement }
+        : {}),
     };
   });
   const inlinePanels = parseContributionArray<

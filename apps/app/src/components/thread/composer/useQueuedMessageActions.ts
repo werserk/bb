@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PromptInput, ThreadQueuedMessage } from "@bb/domain";
 import type {
   SendQueuedMessageMode,
@@ -23,6 +23,13 @@ import {
 import type { QueuedMessageReorderRequest } from "@/lib/queued-message-reorder";
 import { BbHttpError } from "@/lib/sdk";
 import type { InlineQueuedMessageEditState } from "./useInlineQueuedMessageEditing";
+
+function isThreadMutationPending(
+  mutation: { isPending: boolean; variables?: { id: string } },
+  threadId: string,
+) {
+  return mutation.isPending && mutation.variables?.id === threadId;
+}
 
 type QueuedMessageSendGuard = "current-head" | "exists" | "none";
 
@@ -103,8 +110,16 @@ export function useQueuedMessageActions({
     action: QueuedMessageProcessingAction;
     id: string;
   } | null>(null);
+  const currentUi = useRef({
+    threadId,
+    editSessionId: inlineEditingQueuedMessage?.editSessionId,
+  });
   const queuedMessagesRef = useRef<readonly ThreadQueuedMessage[]>([]);
-  queuedMessagesRef.current = queuedMessages;
+  const editSessionId = inlineEditingQueuedMessage?.editSessionId;
+  useLayoutEffect(() => {
+    currentUi.current = { threadId, editSessionId };
+    queuedMessagesRef.current = queuedMessages;
+  });
 
   const displayedProcessingQueuedMessage = useMemo(
     () =>
@@ -121,6 +136,7 @@ export function useQueuedMessageActions({
 
   const sendQueuedMessageById = useCallback(
     async ({ guard, messageId, mode }: SendQueuedMessageByIdArgs) => {
+      if (currentUi.current.threadId !== threadId) return;
       if (
         guard !== "none" &&
         !queuedMessagesRef.current.some((message) => message.id === messageId)
@@ -134,25 +150,26 @@ export function useQueuedMessageActions({
         return;
       }
 
-      setProcessingQueuedMessage({ id: messageId, action: "send" });
+      const operation = { id: messageId, action: "send" } as const;
+      setProcessingQueuedMessage(operation);
       try {
         await sendQueuedMessage.mutateAsync({
           id: threadId,
           mode,
           queuedMessageId: messageId,
         });
-        onSendSuccess?.();
+        if (currentUi.current.threadId === threadId) onSendSuccess?.();
         if (
           mode === "steer" ||
           sendProcessingPersistence === "clear-on-settle"
         ) {
           setProcessingQueuedMessage((current) =>
-            current?.id === messageId ? null : current,
+            current === operation ? null : current,
           );
         }
       } catch (error) {
         setProcessingQueuedMessage((current) =>
-          current?.id === messageId ? null : current,
+          current === operation ? null : current,
         );
         throw reportMutationError({
           error,
@@ -168,7 +185,10 @@ export function useQueuedMessageActions({
     if (
       !inlineEditingQueuedMessage ||
       activeComposerDraftInput.length === 0 ||
-      updateQueuedMessage.isPending
+      currentUi.current.threadId !== threadId ||
+      currentUi.current.editSessionId !==
+        inlineEditingQueuedMessage.editSessionId ||
+      isThreadMutationPending(updateQueuedMessage, threadId)
     ) {
       return;
     }
@@ -181,12 +201,16 @@ export function useQueuedMessageActions({
       dismissInlineQueuedMessageEditor();
       return;
     }
-    const { expectedUpdatedAt, ownerThreadId, queuedMessageId } =
+    const { editSessionId, expectedUpdatedAt, ownerThreadId, queuedMessageId } =
       inlineEditingQueuedMessage;
     const queuedMessage = queuedMessagesRef.current.find(
       (message) => message.id === queuedMessageId,
     );
-    setProcessingQueuedMessage({ id: queuedMessageId, action: "edit" });
+    const ownsEditor = () =>
+      currentUi.current.threadId === ownerThreadId &&
+      currentUi.current.editSessionId === editSessionId;
+    const operation = { id: queuedMessageId, action: "edit" } as const;
+    setProcessingQueuedMessage(operation);
     try {
       await updateQueuedMessage.mutateAsync({
         expectedUpdatedAt,
@@ -195,10 +219,16 @@ export function useQueuedMessageActions({
         queuedMessageId,
         ...changedExecutionFields(inlineEditingQueuedMessage, queuedMessage),
       });
-      onSaveSuccess?.();
-      dismissInlineQueuedMessageEditor();
+      if (ownsEditor()) {
+        onSaveSuccess?.();
+        dismissInlineQueuedMessageEditor();
+      }
     } catch (error) {
-      if (error instanceof BbHttpError && error.status === 404) {
+      if (
+        error instanceof BbHttpError &&
+        error.status === 404 &&
+        ownsEditor()
+      ) {
         dismissInlineQueuedMessageEditor();
       }
       showMutationErrorToast({
@@ -208,7 +238,7 @@ export function useQueuedMessageActions({
       });
     } finally {
       setProcessingQueuedMessage((current) =>
-        current?.id === queuedMessageId ? null : current,
+        current === operation ? null : current,
       );
     }
   }, [
@@ -238,7 +268,8 @@ export function useQueuedMessageActions({
 
   const handleDeleteQueuedMessage = useCallback(
     (queuedMessageId: string) => {
-      setProcessingQueuedMessage({ id: queuedMessageId, action: "delete" });
+      const operation = { id: queuedMessageId, action: "delete" } as const;
+      setProcessingQueuedMessage(operation);
       void deleteQueuedMessage
         .mutateAsync({
           id: threadId,
@@ -253,7 +284,7 @@ export function useQueuedMessageActions({
         })
         .finally(() => {
           setProcessingQueuedMessage((current) =>
-            current?.id === queuedMessageId ? null : current,
+            current === operation ? null : current,
           );
         });
     },
@@ -297,16 +328,19 @@ export function useQueuedMessageActions({
   );
 
   const queuedMessageActionPending =
-    deleteQueuedMessage.isPending ||
-    reorderQueuedMessage.isPending ||
-    setQueuedMessageGroupBoundary.isPending ||
-    sendQueuedMessage.isPending ||
-    updateQueuedMessage.isPending;
+    isThreadMutationPending(deleteQueuedMessage, threadId) ||
+    isThreadMutationPending(reorderQueuedMessage, threadId) ||
+    isThreadMutationPending(setQueuedMessageGroupBoundary, threadId) ||
+    isThreadMutationPending(sendQueuedMessage, threadId) ||
+    isThreadMutationPending(updateQueuedMessage, threadId);
 
   return {
     processingQueuedMessage: displayedProcessingQueuedMessage,
     queuedMessageActionPending,
-    isUpdateQueuedMessagePending: updateQueuedMessage.isPending,
+    isUpdateQueuedMessagePending: isThreadMutationPending(
+      updateQueuedMessage,
+      threadId,
+    ),
     sendQueuedMessageById,
     handleSaveInlineQueuedMessage,
     handleChangeQueuedMessageSendTime,

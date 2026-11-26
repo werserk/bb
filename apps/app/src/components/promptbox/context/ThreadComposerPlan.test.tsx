@@ -167,3 +167,36 @@ it("does not present a running spinner while the agent is idle and removes archi
   });
   expect(screen.queryByRole("button", { name: "Plan: 0/1" })).toBeNull();
 });
+
+it("segments every plan step, collapses done steps and keeps the current step visible", () => {
+  facts.view!.current!.items = [
+    {
+      id: "done",
+      text: "Captured snapshot",
+      status: "completed",
+      interactionIds: [],
+    },
+    {
+      id: "current",
+      text: "Inspect layout",
+      status: "in_progress",
+      interactionIds: [],
+    },
+    { id: "next", text: "Verify", status: "pending", interactionIds: [] },
+  ];
+  render(<Fixture />);
+  fireEvent.click(screen.getByRole("button", { name: "Plan: 1/3" }));
+  expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+    "1",
+  );
+  expect(screen.getByRole("progressbar").children.length).toBe(3);
+  expect(screen.queryByLabelText("completed: Captured snapshot")).toBeNull();
+  expect(screen.getByLabelText("in_progress: Inspect layout")).toBeTruthy();
+  const done = screen.getByRole("button", { name: "✓ 1 done ▸" });
+  expect(done.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(done);
+  expect(done.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByLabelText("completed: Captured snapshot")).toBeTruthy();
+  fireEvent.click(done);
+  expect(screen.queryByLabelText("completed: Captured snapshot")).toBeNull();
+});

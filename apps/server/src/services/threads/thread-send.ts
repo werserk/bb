@@ -1,3 +1,7 @@
+import {
+  assertSubmissionNotAdmitted,
+  submissionAdmissionFloor,
+} from "./submission-admission.js";
 import type { ServiceTurnDescriptor } from "@bb/domain";
 import {
   getEnvironment,
@@ -95,6 +99,8 @@ type TextPromptInput = Extract<PromptInput, { type: "text" }>;
 type SendThreadMessageTrigger = "auto-dispatch" | "user";
 
 type SendThreadMessagePayload = SendMessageRequest & {
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   inputGroups?: PromptInput[][];
 };
 
@@ -174,6 +180,8 @@ interface AppendAndQueueSendThreadMessageArgs {
   execution: ResolvedThreadExecutionOptions;
   initiator: ThreadTurnInitiator;
   input: PromptInput[];
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   inputGroups?: PromptInput[][];
   originPluginId: string | null;
   queueInTransaction: SendThreadMessageQueueRequest;
@@ -439,6 +447,8 @@ function appendAndQueueSendThreadMessageInTransaction({
   input,
   inputGroups,
   originPluginId,
+  clientSubmissions,
+  sourceQueuedMessageIds,
   queueInTransaction,
   requestId,
   senderThreadId,
@@ -451,6 +461,18 @@ function appendAndQueueSendThreadMessageInTransaction({
     (tx) => {
       assertThreadHostAcceptsWork(tx, thread);
       beforeAppendInTransaction?.({ tx });
+      if (
+        !sourceQueuedMessageIds?.length &&
+        deferredFromRequestId === undefined &&
+        retryOf === undefined
+      )
+        for (const entry of clientSubmissions ?? [])
+          assertSubmissionNotAdmitted(
+            tx,
+            thread.id,
+            entry.id,
+            submissionAdmissionFloor(db, thread.id, entry.id),
+          );
       const appended =
         appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
           tx,
@@ -466,6 +488,8 @@ function appendAndQueueSendThreadMessageInTransaction({
             ...(serviceTurn ? { serviceTurn } : {}),
             ...(retryOf !== undefined ? { retryOf } : {}),
             input,
+            clientSubmissions,
+            sourceQueuedMessageIds,
             ...(inputGroups !== undefined ? { inputGroups } : {}),
             execution,
             initiator,
@@ -671,6 +695,12 @@ async function sendThreadMessageWithoutContextClear(
       inputGroups,
       originPluginId: args.originPluginId,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      clientSubmissions:
+        payload.clientSubmissions ??
+        (payload.clientSubmissionId
+          ? [{ id: payload.clientSubmissionId, inputGroupIndex: 0 }]
+          : undefined),
+      sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
       senderThreadId,
       ...(args.systemNotice !== undefined
         ? {
@@ -762,6 +792,12 @@ async function sendThreadMessageWithoutContextClear(
       input,
       inputGroups,
       originPluginId: args.originPluginId,
+      clientSubmissions:
+        payload.clientSubmissions ??
+        (payload.clientSubmissionId
+          ? [{ id: payload.clientSubmissionId, inputGroupIndex: 0 }]
+          : undefined),
+      sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
       queueInTransaction: ({ tx }) => {
         const dispatchKind = command.mode;
         const currentThread = getThread(tx, thread.id);
@@ -871,6 +907,12 @@ async function sendThreadMessageWithoutContextClear(
     input,
     inputGroups,
     originPluginId: args.originPluginId,
+    clientSubmissions:
+      payload.clientSubmissions ??
+      (payload.clientSubmissionId
+        ? [{ id: payload.clientSubmissionId, inputGroupIndex: 0 }]
+        : undefined),
+    sourceQueuedMessageIds: payload.sourceQueuedMessageIds,
     queueInTransaction: () => {
       return { activeThread: null };
     },

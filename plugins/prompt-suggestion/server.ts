@@ -130,7 +130,6 @@ export default async function plugin(bb: BbPluginApi) {
                   token: input.options.token ?? randomUUID(),
                   draft: input.options.draft ?? "",
                   protectedMentions: [],
-                  expectedContextRevision: null,
                 }),
               ),
             ),

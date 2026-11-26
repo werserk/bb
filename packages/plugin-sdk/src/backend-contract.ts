@@ -187,6 +187,7 @@ export interface PluginKvStorage {
   get<T>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Keys that start with `prefix`, case-sensitive, in code-point order. */
   list(prefix?: string): Promise<string[]>;
 }
 

@@ -39,7 +39,7 @@ export const promptAreaMocks = {
     getCurrent: vi.fn(),
     mentions: [] as PromptTextMention[],
     updateAttachments: vi.fn(),
-    restoreIfEmpty: vi.fn(),
+    restoreIfEmpty: vi.fn(() => true),
     setDraft: vi.fn(),
     setTextAndMentions: vi.fn(),
     storageKey: "bb.promptbox.contents-proj_1-thr_1-3",
@@ -603,10 +603,7 @@ vi.mock("@/hooks/useThreadCreationOptions", async () => {
         reasoningOptions: promptAreaMocks.unknownReasoning
           ? []
           : [{ value: "medium", label: "Medium" }],
-        resolveReasoningForModel: (
-          _model: string,
-          reasoningLevel: string,
-        ) => ({
+        resolveReasoningForModel: (_model: string, reasoningLevel: string) => ({
           reasoningLevel,
           reasoningOptions: [{ value: reasoningLevel, label: reasoningLevel }],
         }),

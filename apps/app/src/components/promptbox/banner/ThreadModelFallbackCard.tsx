@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ThreadTimelineModelFallback } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
+import { ComposerContextRow } from "../context/ComposerContextRow";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { rawStringLocalStorage } from "@/lib/browser-storage";
 
@@ -56,37 +56,30 @@ export function ThreadModelFallbackCard({
       }}
       className="overflow-hidden"
     >
-      <div
-        role="status"
-        aria-live="polite"
-        className="flex min-h-8 items-center gap-1.5 px-3 py-1.5 text-xs"
-      >
-        <Icon
-          name="AlertTriangle"
-          className="size-3.5 shrink-0 text-warning-text"
-          aria-hidden="true"
+      <div role="status" aria-live="polite">
+        <ComposerContextRow
+          icon="AlertTriangle"
+          tone="attention"
+          title="Model fallback"
+          subline={
+            <>
+              Switched from {modelLabel(fallback.originalModel)} to{" "}
+              {modelLabel(fallback.fallbackModel)}
+            </>
+          }
+          action={
+            <button
+              type="button"
+              aria-label="Dismiss model fallback"
+              onClick={() => {
+                rawStringLocalStorage.setItem(storageKey, occurrence);
+                setDismissedOccurrence(occurrence);
+              }}
+            >
+              Dismiss
+            </button>
+          }
         />
-        <span className="shrink-0 font-medium text-foreground">
-          Model fallback
-        </span>
-        <span
-          className="min-w-0 flex-1 truncate text-muted-foreground"
-          title={fallback.message}
-        >
-          Switched from {modelLabel(fallback.originalModel)} to{" "}
-          {modelLabel(fallback.fallbackModel)}
-        </span>
-        <button
-          type="button"
-          aria-label="Dismiss model fallback"
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground"
-          onClick={() => {
-            rawStringLocalStorage.setItem(storageKey, occurrence);
-            setDismissedOccurrence(occurrence);
-          }}
-        >
-          <Icon name="X" className="size-3.5" aria-hidden="true" />
-        </button>
       </div>
     </PromptStackCard>
   );

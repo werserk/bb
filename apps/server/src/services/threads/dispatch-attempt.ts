@@ -261,7 +261,11 @@ export type DispatchAttemptSource =
 
 export interface DispatchAttemptArgs {
   thread: Thread;
-  payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
+  payload: SendMessageRequest & {
+    inputGroups?: PromptInput[][];
+    clientSubmissions?: import("@bb/domain").TurnRequestEventData["clientSubmissions"];
+    sourceQueuedMessageIds?: string[];
+  };
   source: DispatchAttemptSource;
   /**
    * The start context creation just wrote, on the attempt that is creating the
@@ -472,6 +476,7 @@ async function runDispatchAttempt(
   const queuedMessage: QueuedDispatchMessage = {
     serviceTurn: payload.serviceTurn,
     input: payload.input,
+    clientSubmissionId: payload.clientSubmissionId,
     execution,
     senderThreadId,
     origin: args.origin,
@@ -482,9 +487,7 @@ async function runDispatchAttempt(
     deliveryMode: run.deliveryMode,
   };
 
-  const retriesGoFirst = getExperiments(
-    deps.db,
-  ).resumeThreadsAfterRestart;
+  const retriesGoFirst = getExperiments(deps.db).resumeThreadsAfterRestart;
   const waitOn = (
     waitingOn: QueuedMessageWaitingOn,
     sendAt: number | null,
@@ -767,13 +770,7 @@ async function runDispatchAttempt(
       // for a thread that is gone. Reporting a dispatch here would tell the
       // caller their message went when it went nowhere.
       const current = getThread(deps.db, thread.id);
-      return reattemptDispatchForThreadChange(
-        deps,
-        args,
-        current,
-        run,
-        waitOn,
-      );
+      return reattemptDispatchForThreadChange(deps, args, current, run, waitOn);
     }
     await launchAdmittedThread(deps, admission);
     return { kind: "dispatched" };
@@ -925,7 +922,11 @@ interface AdmitPendingThreadArgs {
   };
   claimed: ClaimedQueuedThreadMessageRow[] | null;
   originPluginId: string | null;
-  payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
+  payload: SendMessageRequest & {
+    inputGroups?: PromptInput[][];
+    clientSubmissions?: import("@bb/domain").TurnRequestEventData["clientSubmissions"];
+    sourceQueuedMessageIds?: string[];
+  };
   respectManualStopPause: boolean;
   retryOf: TurnRequestRetryMarker | undefined;
   /** Creation's own record; null on a re-attempt, which reads it back. */
@@ -1019,6 +1020,13 @@ async function admitPendingThread(
           fork: startContext.fork,
           input: args.payload.input,
           originPluginId: args.originPluginId,
+          inputGroups: args.payload.inputGroups,
+          clientSubmissions:
+            args.payload.clientSubmissions ??
+            (args.payload.clientSubmissionId
+              ? [{ id: args.payload.clientSubmissionId, inputGroupIndex: 0 }]
+              : undefined),
+          sourceQueuedMessageIds: args.payload.sourceQueuedMessageIds,
           ...(startContext.providerInput === undefined
             ? {}
             : { providerInput: startContext.providerInput }),
@@ -1071,9 +1079,17 @@ async function launchAdmittedThread(
  * queue drain has always used to replay a frozen tuple.
  */
 function resolveExecutionIntoPayload(
-  payload: SendMessageRequest & { inputGroups?: PromptInput[][] },
+  payload: SendMessageRequest & {
+    inputGroups?: PromptInput[][];
+    clientSubmissions?: import("@bb/domain").TurnRequestEventData["clientSubmissions"];
+    sourceQueuedMessageIds?: string[];
+  },
   execution: ResolvedThreadExecutionOptions,
-): SendMessageRequest & { inputGroups?: PromptInput[][] } {
+): SendMessageRequest & {
+  inputGroups?: PromptInput[][];
+  clientSubmissions?: import("@bb/domain").TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
+} {
   return {
     ...payload,
     model: execution.model,

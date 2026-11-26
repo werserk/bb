@@ -92,6 +92,8 @@ interface ClientTurnRequestedEventArgs {
   execution: ResolvedThreadExecutionOptions;
   initiator: ThreadTurnInitiator;
   input: PromptInput[];
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   inputGroups?: PromptInput[][];
   originPluginId: string | null;
   requestMethod: "thread/start" | "turn/start";
@@ -210,6 +212,8 @@ function buildClientTurnRequestedEventData(
   return {
     ...buildClientTurnBaseEventData(args),
     requestId,
+    clientSubmissions: args.clientSubmissions,
+    sourceQueuedMessageIds: args.sourceQueuedMessageIds,
     ...(args.questionResponse !== undefined
       ? { questionResponse: args.questionResponse }
       : {}),

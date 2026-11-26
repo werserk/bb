@@ -98,6 +98,10 @@ import {
 import { environmentProviderMachineAvailability } from "../services/environments/provider-machine-availability.js";
 import { machineProviderAcceptsEmptyInputs } from "../services/machines/provider-availability.js";
 import { requirePublicProject } from "../services/lib/entity-lookup.js";
+import {
+  configChanged,
+  notifyConfigChangedIfChanged,
+} from "../services/system/config-change.js";
 
 const LEADING_ENVIRONMENT_PROVIDER_IDS: readonly string[] = [
   "project-checkout",
@@ -157,6 +161,9 @@ export function registerSystemRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.system;
+  app.get("/capabilities/pending-send-overlay", (context) =>
+    context.json({ pendingSendOverlay: { version: 1 } }),
+  );
   app.get("/capabilities/service-turns", (context) =>
     context.json({ serviceTurns: { version: 1 } }),
   );
@@ -257,6 +264,11 @@ export function registerSystemRoutes(
       showUnhandledProviderEvents: settings.showDiagnosticEvents,
     };
   }
+  function globalMachineEnvironmentWritten(changed: boolean) {
+    if (notifyConfigChangedIfChanged(deps.hub, changed))
+      deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
+  }
+
   post(routes.setMachineEnvironmentVariable, async (context, payload) => {
     if (getGateAuthKind(context) === "machine")
       throw new ApiError(
@@ -264,14 +276,13 @@ export function registerSystemRoutes(
         "forbidden",
         "Machine credentials cannot change global environment settings",
       );
-    await setMachineEnvironmentVariable(
+    const { changed } = await setMachineEnvironmentVariable(
       deps.db,
       deps.config.dataDir,
       payload,
       null,
     );
-    deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
-    deps.hub.notifySystem(["config-changed"]);
+    globalMachineEnvironmentWritten(changed);
     return context.json(await machineEnvironmentView(deps.db));
   });
 
@@ -282,9 +293,12 @@ export function registerSystemRoutes(
         "forbidden",
         "Machine credentials cannot change global environment settings",
       );
-    await deleteMachineEnvironmentVariable(deps.db, payload.name, null);
-    deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
-    deps.hub.notifySystem(["config-changed"]);
+    const { changed } = await deleteMachineEnvironmentVariable(
+      deps.db,
+      payload.name,
+      null,
+    );
+    globalMachineEnvironmentWritten(changed);
     return context.json(await machineEnvironmentView(deps.db));
   });
 
@@ -298,14 +312,18 @@ export function registerSystemRoutes(
         "forbidden",
         "Machine credentials cannot change global environment settings",
       );
-    await replaceMachineEnvironment(deps.db, deps.config.dataDir, payload);
-    deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
-    deps.hub.notifySystem(["config-changed"]);
+    const { changed } = await replaceMachineEnvironment(
+      deps.db,
+      deps.config.dataDir,
+      payload,
+    );
+    globalMachineEnvironmentWritten(changed);
     return context.json(await machineEnvironmentView(deps.db));
   });
 
   put(routes.generalSettings, (context, payload) => {
     const { showUnhandledProviderEvents, ...settings } = payload;
+    const before = compatibleGeneralSettings();
     const current = getAppSettings(deps.db);
     const diagnosticValue =
       "showDiagnosticEvents" in settings
@@ -346,8 +364,9 @@ export function registerSystemRoutes(
       deps.telemetry.capture({ name: "telemetry_disabled" });
     }
     deps.telemetry.setEnabled(updatedSettings.telemetryEnabled);
-    deps.hub.notifySystem(["config-changed"]);
-    return context.json(compatibleGeneralSettings());
+    const after = compatibleGeneralSettings();
+    notifyConfigChangedIfChanged(deps.hub, configChanged(before, after));
+    return context.json(after);
   });
 
   get(routes.setupGuide, async (context) => {
@@ -377,15 +396,19 @@ export function registerSystemRoutes(
   });
 
   put(routes.keyboardSettings, (context, payload) => {
+    const before = getAppKeybindingOverrides(deps.db);
     setAppKeybindingOverrides(deps.db, payload);
-    deps.hub.notifySystem(["config-changed"]);
-    return context.json(getAppKeybindingOverrides(deps.db));
+    const after = getAppKeybindingOverrides(deps.db);
+    notifyConfigChangedIfChanged(deps.hub, configChanged(before, after));
+    return context.json(after);
   });
 
   put(routes.experiments, (context, payload) => {
+    const before = getExperiments(deps.db);
     setExperiments(deps.db, payload);
-    deps.hub.notifySystem(["config-changed"]);
-    return context.json(getExperiments(deps.db));
+    const after = getExperiments(deps.db);
+    notifyConfigChangedIfChanged(deps.hub, configChanged(before, after));
+    return context.json(after);
   });
 
   async function requireKnownTheme(themeId: string): Promise<void> {
@@ -410,8 +433,16 @@ export function registerSystemRoutes(
   put(routes.appearance, async (context, payload) => {
     const { themeId, faviconColor } = payload;
     await requireKnownTheme(themeId);
+    const storedAppearance = () => ({
+      themeId: getStoredThemeId(deps.db),
+      faviconColor: getStoredFaviconColor(deps.db),
+    });
+    const before = storedAppearance();
     setStoredAppearance(deps.db, { themeId, faviconColor });
-    deps.hub.notifySystem(["config-changed"]);
+    notifyConfigChangedIfChanged(
+      deps.hub,
+      configChanged(before, storedAppearance()),
+    );
     return context.json(await resolveSelectedTheme(themeId, faviconColor));
   });
 

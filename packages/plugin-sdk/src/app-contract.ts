@@ -2108,6 +2108,13 @@ export interface ExperimentalCollapsibleStackCardDismiss {
   onDismiss(): Promise<void>;
 }
 
+/** Plugin-owned preview in the composer context strip and expanded panel. */
+export interface ExperimentalComposerContextStripProps {
+  children: ReactNode;
+  onAccept?(): void;
+  onDismiss(): void;
+}
+
 /**
  * Props of the host-owned `experimental_CollapsibleStackCard`: bb's
  * collapsible card for the stack above a thread's composer, the one bb's Plan
@@ -3263,6 +3270,8 @@ export interface ExperimentalComposerEditorVoice {
 
 /** Props of `experimental_ComposerRoot`. */
 export interface ExperimentalComposerRootProps {
+  /** Expose the native context strip when a plugin preview becomes available. */
+  experimental_onContextPreview?: () => void;
   /** The composer's outermost element. */
   rootRef: RefObject<HTMLElement | null>;
   editor: ExperimentalComposerEditor;
@@ -3384,6 +3393,8 @@ export interface ExperimentalComposerContributions {
   readonly Actions: ComponentType;
   /** Render inside the composer border above the draft, on every layout. */
   readonly experimental_InlinePanels: ComponentType;
+  /** Actions registered with `experimental_placement: "editor"`, for the start of the draft line. */
+  readonly experimental_EditorActions?: ComponentType;
   readonly Popup: ComponentType<ExperimentalComposerPopupProps>;
   readonly MenuEntry: ComponentType<ExperimentalComposerMenuEntryProps>;
 }
@@ -4339,7 +4350,15 @@ export interface ComposerCustomization {
   id: string;
   /** Composer kinds where this customization is active; omit for all kinds. */
   scopes?: readonly PluginComposerScope["kind"][];
-  actions?: readonly { id: string; component: ComponentType }[];
+  actions?: readonly {
+    id: string;
+    component: ComponentType;
+    /**
+     * Where the composer shows the action: its action row (default) or at the
+     * start of the draft line, before the text or ghost suggestion. Experimental.
+     */
+    experimental_placement?: "toolbar" | "editor";
+  }[];
   /** Inline panels inside the composer border, above its editable draft. */
   experimental_inlinePanels?: readonly {
     id: string;
@@ -4642,6 +4661,8 @@ export interface experimental_ComposerSuggestionEvent {
 export interface experimental_ComposerSuggestionController {
   /** Suspend ghost suggestions until the idempotent release function is called. */
   experimental_suspend(): () => void;
+  /** Called by composer editors after their menus handle the key. Never submits. */
+  experimental_handleContextPreviewKey?(key: "Tab" | "Escape"): boolean;
   getSnapshot(): experimental_ComposerSuggestionState;
   subscribe(listener: () => void): () => void;
   experimental_begin(
@@ -6336,6 +6357,8 @@ export interface PluginSdkApp {
    * thread-scoped composer banner with `chrome: "bare"`. Experimental: see
    * docs/api_to_audit.md.
    */
+  /** A scoped composer preview, moved between the context strip and panel without remounting. */
+  experimental_ComposerContextStrip: ComponentType<ExperimentalComposerContextStripProps>;
   experimental_CollapsibleStackCard: ComponentType<ExperimentalCollapsibleStackCardProps>;
   /**
    * The thread Info tab's label and value row (see

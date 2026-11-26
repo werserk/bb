@@ -7,7 +7,7 @@ import {
 } from "@bb/server-contract";
 import { ApiError } from "../errors.js";
 import type { AppDeps } from "../types.js";
-import { toThreadQueuedMessage } from "../services/threads/thread-queued-messages.js";
+import { toThreadQueuedMessageWithMembership } from "../services/threads/thread-queued-messages.js";
 
 /**
  * The cross-thread queue list.
@@ -31,7 +31,7 @@ export function registerQueueRoutes(app: Hono, deps: AppDeps): void {
         ...(query.waitHolder !== undefined
           ? { waitHolder: query.waitHolder }
           : {}),
-      }).map(toThreadQueuedMessage),
+      }).map((row) => toThreadQueuedMessageWithMembership(deps.db, row)),
     );
   });
 }

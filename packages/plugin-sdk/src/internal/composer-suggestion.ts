@@ -31,6 +31,7 @@ export interface ComposerSuggestionInput {
 export function createComposerSuggestionController(
   replace: (text: string) => void,
   canUse: () => boolean = () => true,
+  previewKey: (key: "Tab" | "Escape") => boolean = () => false,
 ) {
   let revision = 0;
   const suspensions = new Set<symbol>();
@@ -97,6 +98,7 @@ export function createComposerSuggestionController(
     if (cause) emit("dismissed", old?.requestId ?? null, cause);
   };
   const controller: experimental_ComposerSuggestionController = {
+    experimental_handleContextPreviewKey: previewKey,
     experimental_suspend() {
       const token = Symbol();
       suspensions.add(token);

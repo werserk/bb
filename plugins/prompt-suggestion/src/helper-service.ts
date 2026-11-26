@@ -18,7 +18,10 @@ import type { Settings } from "./settings.js";
 export function createHelperService(
   bb: BbPluginApi,
   getSettings: () => Settings,
-  coordinator: ReturnType<typeof createCoordinator>,
+  coordinator: Pick<
+    ReturnType<typeof createCoordinator>,
+    "inspect" | "beginHelper"
+  >,
 ) {
   const active = new Map<
     string,
@@ -104,11 +107,6 @@ export function createHelperService(
           return (outcome = unavailable(
             signal.aborted ? "cancelled" : "ineligible",
           ));
-        if (
-          input.expectedContextRevision !== null &&
-          prepared.revision !== input.expectedContextRevision
-        )
-          return (outcome = unavailable("stale"));
         if (!input.draft.trim() && prepared.context.messages.length === 0)
           return (outcome = {
             kind: "none",
@@ -136,13 +134,10 @@ export function createHelperService(
             result.advice?.includes("<<BB_MENTION_"))
         )
           return (outcome = unavailable("invalid_mentions"));
-        const current = await prepare(input.threadId, signal);
         if (signal.aborted)
           return (outcome = unavailable(
             deadline.aborted ? "timeout" : "cancelled",
           ));
-        if (!current || current.revision !== prepared.revision)
-          return (outcome = unavailable("stale"));
         return (outcome = { ...result, contextRevision: prepared.revision });
       } catch (error) {
         return (outcome = unavailable(

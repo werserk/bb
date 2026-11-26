@@ -1,3 +1,8 @@
+import { sql } from "drizzle-orm";
+import {
+  waitForQueuedCommand,
+  reportQueuedCommandError,
+} from "../helpers/commands.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,11 +12,14 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   claimQueuedThreadMessageGroup,
+  createQueuedThreadMessage,
   environments,
   getLatestThreadSequence,
   getThread,
   listEvents,
+  listIdleThreadsWithQueuedMessages,
   listQueuedThreadMessages,
+  setQueuedThreadMessageFailureReason,
   setThreadExecutionOverride,
 } from "@bb/db";
 import type { ThreadQueuedMessage } from "@bb/domain";
@@ -95,7 +103,11 @@ function recordTurnFailedAnnouncements(): string[] {
   return announced;
 }
 
-function seedFailableThread(harness: TestAppHarness, hostId: string) {
+function seedFailableThread(
+  harness: TestAppHarness,
+  hostId: string,
+  clientSubmissionId?: string,
+) {
   const { host } = seedHostSession(harness.deps, { id: hostId });
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
@@ -117,6 +129,12 @@ function seedFailableThread(harness: TestAppHarness, hostId: string) {
     providerThreadId: `provider-${hostId}`,
     threadId: thread.id,
   });
+  if (clientSubmissionId) {
+    const event = turnRequests(harness, thread.id)[0]!;
+    harness.db.run(
+      sql`UPDATE events SET data=${JSON.stringify({ ...JSON.parse(event.data), clientSubmissions: [{ id: clientSubmissionId, inputGroupIndex: 0 }] })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+    );
+  }
   return {
     environment,
     host,
@@ -377,6 +395,111 @@ async function drainRecoveries(
 }
 
 describe("the turn.failed announcement", () => {
+  it("retains the actual first prompt after startup rejects before acceptance", async () => {
+    await withTestHarness(async (harness) => {
+      const { project, environment } = seedFailableThread(
+        harness,
+        "host-first-init",
+      );
+      const text = "Original first prompt before initialization";
+      const response = await harness.app.request("/api/v1/threads", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          origin: "app",
+          projectId: project.id,
+          providerId: "codex",
+          model: "gpt-5",
+          input: [{ type: "text", text }],
+          environment: { type: "reuse", environmentId: environment.id },
+        }),
+      });
+      expect(response.status).toBe(201);
+      const created = z.object({ id: z.string() }).parse(await response.json());
+      const command = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.start" && command.threadId === created.id,
+      );
+      const requestId = lastTurnRequest(harness, created.id).requestId;
+      await reportQueuedCommandError(harness, command, {
+        errorCode: "command_failed",
+        errorMessage: "native cell busy before initialization",
+      });
+      failThread(harness, created.id);
+      expect(buildTurnFailedEvent(harness.db, created.id)?.inputAccepted).toBe(
+        false,
+      );
+      await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, created.id),
+        request: {
+          turnRequestId: requestId,
+          sendAt: Date.now() + 60_000,
+          reason: "Retry original first prompt",
+        },
+      });
+      await sweepPastResume(harness);
+      expect(lastTurnRequest(harness, created.id).input[0]?.text).toBe(text);
+    });
+  });
+
+  for (const mode of ["send", "drained-queue"] as const) {
+    it(`retains original ${mode} bytes after a pre-acceptance command failure`, async () => {
+      await withTestHarness(async (harness) => {
+        const { thread } = seedFailableThread(harness, `host-init-${mode}`);
+        if (mode === "send")
+          applyLoggedThreadLifecycleEvent(harness.deps, {
+            event: { type: "run.succeeded" },
+            threadId: thread.id,
+          });
+        const text = `Original ${mode} input, never accepted`;
+        await sendNewMessage(harness, { threadId: thread.id, text });
+        if (mode === "drained-queue") {
+          expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(
+            1,
+          );
+          applyLoggedThreadLifecycleEvent(harness.deps, {
+            event: { type: "run.succeeded" },
+            threadId: thread.id,
+          });
+          await runQueuedMessageDispatch(harness.deps, {
+            kind: "thread-ready",
+            threadId: thread.id,
+          });
+        }
+        const command = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            (command.type === "thread.start" ||
+              command.type === "turn.submit") &&
+            command.threadId === thread.id,
+        );
+        const requestId = lastTurnRequest(harness, thread.id).requestId;
+        await reportQueuedCommandError(harness, command, {
+          errorCode: "command_failed",
+          errorMessage: "native cell busy before initialization",
+        });
+        failThread(harness, thread.id);
+        expect(buildTurnFailedEvent(harness.db, thread.id)?.inputAccepted).toBe(
+          false,
+        );
+        await retryFailedTurn(harness.deps, {
+          thread: requireThread(harness, thread.id),
+          request: {
+            turnRequestId: requestId,
+            sendAt: Date.now() + 60_000,
+            reason: "Retry original",
+          },
+        });
+        await sweepPastResume(harness);
+        const retried = lastTurnRequest(harness, thread.id);
+        expect(retried.retryOfRequestId).toBe(requestId);
+        expect(retried.input[0]?.text).toBe(text);
+        expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      });
+    });
+  }
+
   it("carries the failed turn's ids and the provider's failure facts", async () => {
     await withTestHarness(async (harness) => {
       const { environment, requestId, thread } = seedFailableThread(
@@ -993,6 +1116,68 @@ describe("retrying a failed turn", () => {
       ).toMatchObject(resent);
     });
   });
+
+  it("retries a failed direct send with submission membership through a reprovision without re-checking admission", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-reprovision-member",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: WORKSPACE_PATH,
+      });
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: WORKSPACE_PATH,
+        environmentProviderId: "personal-workspace",
+        environmentProviderPluginId: "bb-plugin-environment-personal-workspace",
+        isGitRepo: false,
+      });
+      const thread = seedThread(harness.deps, {
+        environmentId: environment.id,
+        projectId: project.id,
+        status: "active",
+      });
+      seedThreadRuntimeState(harness.deps, {
+        environmentId: environment.id,
+        inputText: "Do the thing",
+        providerThreadId: "provider-reprovision-member",
+        threadId: thread.id,
+      });
+      const id = crypto.randomUUID();
+      const original = turnRequests(harness, thread.id)[0]!;
+      harness.db.run(
+        sql`UPDATE events SET data=${JSON.stringify({ ...JSON.parse(original.data), clientSubmissions: [{ id, inputGroupIndex: 0 }] })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+      );
+      harness.db
+        .update(environments)
+        .set({ status: "error" })
+        .where(eq(environments.id, environment.id))
+        .run();
+      failThread(harness, thread.id);
+
+      await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: null, sendAt: null, reason: "Retry" },
+      });
+
+      const requests = turnRequests(harness, thread.id).map(
+        (event) =>
+          JSON.parse(event.data) as {
+            clientSubmissions?: { id: string; inputGroupIndex: number }[];
+            retryAttempt?: number;
+          },
+      );
+      expect(requireThread(harness, thread.id).status).toBe("starting");
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toMatchObject({
+        retryAttempt: 2,
+        clientSubmissions: [{ id, inputGroupIndex: 0 }],
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    });
+  });
 });
 
 function liveQueue(harness: TestAppHarness, threadId: string) {
@@ -1143,6 +1328,193 @@ describe("a queued retry", () => {
         "Do something else",
         "Then this",
       ]);
+    });
+  });
+
+  it("does not hold back a service turn once it is Not sent", async () => {
+    await withTestHarness(async (harness) => {
+      const { requestId, thread } = seedFailableThread(
+        harness,
+        "host-not-blocking-service",
+      );
+      failThread(harness, thread.id);
+      await scheduleRetry(harness, { threadId: thread.id, requestId });
+      await sendNewMessage(harness, {
+        threadId: thread.id,
+        text: "Do something else",
+      });
+      const notSent = onlyQueuedRow(harness, thread.id);
+      expect(notSent.waitingOn).toEqual({ kind: "superseded" });
+      expect(
+        listQueuedThreadMessages(harness.db, thread.id).map(
+          (row) => row.serviceTurn,
+        ),
+      ).toEqual([null]);
+
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        event: { type: "run.succeeded" },
+        threadId: thread.id,
+      });
+      createQueuedThreadMessage(harness.db, harness.deps.hub, {
+        threadId: thread.id,
+        content: textInput("Check the background tasks"),
+        model: "gpt-5",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        serviceTier: "default",
+        waitingOn: { kind: "thread-busy" },
+        sendAt: null,
+        payload: { kind: "inline" },
+        systemNotice: null,
+        serviceTurn: {
+          version: 1,
+          visibility: "hidden",
+          reason: "coordinator-background",
+          origin: { pluginId: "wprojects", senderThreadId: null },
+        },
+      });
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual([
+        "Do the thing",
+        "Do something else",
+        "Check the background tasks",
+      ]);
+      expect(liveQueue(harness, thread.id)).toEqual([
+        expect.objectContaining({
+          id: notSent.id,
+          waitingOn: { kind: "superseded" },
+        }),
+      ]);
+    });
+  });
+});
+
+// werserk fork: a service turn yields only to ordinary rows that will leave
+// the queue by themselves. A row whose retries ran out (`failed_exhausted`) is
+// never claimed automatically again; only the user resends or deletes it, so
+// yielding to it held the service turn forever.
+describe("a service turn behind a failed ordinary row", () => {
+  function queueOrdinaryRow(harness: TestAppHarness, threadId: string) {
+    return createQueuedThreadMessage(harness.db, harness.deps.hub, {
+      threadId,
+      content: textInput("Ordinary follow-up"),
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+    });
+  }
+
+  function queueServiceTurn(harness: TestAppHarness, threadId: string) {
+    return createQueuedThreadMessage(harness.db, harness.deps.hub, {
+      threadId,
+      content: textInput("Check the background tasks"),
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+      serviceTurn: {
+        version: 1,
+        visibility: "hidden",
+        reason: "coordinator-background",
+        origin: { pluginId: "wprojects", senderThreadId: null },
+      },
+    });
+  }
+
+  async function failOrdinaryThenIdle(
+    harness: TestAppHarness,
+    hostId: string,
+    retryDelaysMs: readonly number[],
+  ) {
+    const { thread } = seedFailableThread(harness, hostId);
+    const ordinary = queueOrdinaryRow(harness, thread.id);
+    const failed = setQueuedThreadMessageFailureReason(
+      harness.db,
+      harness.deps.hub,
+      {
+        id: ordinary.id,
+        threadId: thread.id,
+        failureReason: "The message could not be sent.",
+        now: Date.now(),
+        retryDelaysMs,
+      },
+    );
+    applyLoggedThreadLifecycleEvent(harness.deps, {
+      event: { type: "run.succeeded" },
+      threadId: thread.id,
+    });
+    queueServiceTurn(harness, thread.id);
+    return { failed, thread };
+  }
+
+  it("is not held back by a row whose retries ran out", async () => {
+    await withTestHarness(async (harness) => {
+      const { failed, thread } = await failOrdinaryThenIdle(
+        harness,
+        "host-exhausted-not-blocking",
+        [],
+      );
+      expect(failed?.state).toBe("failed_exhausted");
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual([
+        "Do the thing",
+        "Check the background tasks",
+      ]);
+      expect(liveQueue(harness, thread.id)).toEqual([
+        expect.objectContaining({ id: failed?.id, state: "failed_exhausted" }),
+      ]);
+    });
+  });
+
+  it("still waits behind a row with a retry booked", async () => {
+    await withTestHarness(async (harness) => {
+      const { failed, thread } = await failOrdinaryThenIdle(
+        harness,
+        "host-retrying-blocking",
+        [60_000],
+      );
+      expect(failed?.state).toBe("failed_retrying");
+
+      expect(
+        listIdleThreadsWithQueuedMessages(harness.db).map(
+          (row) => row.threadId,
+        ),
+      ).not.toContain(thread.id);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(requestTexts(harness, thread.id)).toEqual(["Do the thing"]);
     });
   });
 });
@@ -1309,3 +1681,52 @@ describe("pooled provider retry integration", () => {
     });
   });
 });
+
+it.each([true, false])(
+  "preserves identified original membership in immediate retry (accepted %s)",
+  async (accepted) => {
+    await withTestHarness(async (harness) => {
+      const id = crypto.randomUUID();
+      const { environment, requestId, thread } = seedFailableThread(
+        harness,
+        `identified-retry-${accepted}`,
+        id,
+      );
+      const secondId = crypto.randomUUID();
+      const event = turnRequests(harness, thread.id)[0]!;
+      harness.db.run(
+        sql`UPDATE events SET data=${JSON.stringify({
+          ...JSON.parse(event.data),
+          clientSubmissions: [
+            { id, inputGroupIndex: 0 },
+            { id: secondId, inputGroupIndex: 1 },
+          ],
+          sourceQueuedMessageIds: ["q-first", "q-second"],
+        })} WHERE thread_id=${thread.id} AND type='client/turn/requested'`,
+      );
+      if (accepted)
+        seedInputAccepted(harness, {
+          environmentId: environment.id,
+          threadId: thread.id,
+          requestId,
+        });
+      failThread(harness, thread.id);
+      const result = await retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: null, reason: "Retry" },
+      });
+      expect(result.delivery).toBe("sent");
+      const retry = JSON.parse(turnRequests(harness, thread.id).at(-1)!.data);
+      expect(retry.clientSubmissions).toEqual([
+        { id, inputGroupIndex: 0 },
+        { id: secondId, inputGroupIndex: 0 },
+      ]);
+      expect(retry.sourceQueuedMessageIds).toEqual(["q-first", "q-second"]);
+      expect(
+        retry.input.every(
+          (input: { visibility?: string }) => input.visibility === "agent-only",
+        ),
+      ).toBe(true);
+    });
+  },
+);

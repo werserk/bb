@@ -39,6 +39,8 @@ interface DispatchTurnDuringReprovisionArgs {
   execution: ResolvedThreadExecutionOptions;
   initiator: ThreadTurnInitiator;
   input: PromptInput[];
+  clientSubmissions?: TurnRequestEventData["clientSubmissions"];
+  sourceQueuedMessageIds?: string[];
   inputGroups?: PromptInput[][];
   originPluginId: string | null;
   retryOf?: TurnRequestRetryMarker;
@@ -99,6 +101,8 @@ export async function dispatchTurnDuringReprovision(
       inputGroups: args.inputGroups,
       originPluginId: args.originPluginId,
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
+      clientSubmissions: args.clientSubmissions,
+      sourceQueuedMessageIds: args.sourceQueuedMessageIds,
       senderThreadId: args.senderThreadId,
       systemMessageKind: args.systemMessageKind,
       systemMessageSubject: args.systemMessageSubject,

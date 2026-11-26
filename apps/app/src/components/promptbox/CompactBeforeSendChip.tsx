@@ -1,8 +1,4 @@
 import { Button } from "@bb/shared-ui/button";
-import {
-  COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
-  COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
@@ -23,11 +19,15 @@ export interface CompactBeforeSendOffer {
 
 type CompactBeforeSendChoice = "compact" | "keep";
 
-const PILL_CLASS = "rounded-full border text-xs tabular-nums";
+// Same 28px/36px box as the composer's other actions; a quiet label, not a pill.
+const CHIP_BUTTON_CLASS =
+  "h-7 px-1.5 transition-all max-md:pointer-coarse:h-9 max-md:pointer-coarse:px-2.5";
+const ICON_BUTTON_CLASS = `size-auto ${CHIP_BUTTON_CLASS}`;
+const PILL_CLASS = "rounded-md text-xs font-medium tabular-nums";
 const COMPACT_TONE_CLASS =
-  "border-warning/20 bg-warning/5 text-warning-text hover:bg-warning/10 hover:text-warning-text aria-pressed:bg-warning/5 aria-pressed:text-warning-text aria-pressed:hover:bg-warning/10 data-[state=open]:bg-warning/10 data-[state=open]:text-warning-text";
+  "text-warning-text hover:bg-warning/10 hover:text-warning-text aria-pressed:bg-transparent aria-pressed:text-warning-text aria-pressed:hover:bg-warning/10 data-[state=open]:bg-warning/10 data-[state=open]:text-warning-text";
 const KEEP_TONE_CLASS =
-  "border-border text-muted-foreground hover:bg-state-hover hover:text-foreground";
+  "text-muted-foreground hover:bg-state-hover hover:text-foreground";
 
 export function CompactBeforeSendChip(offer: CompactBeforeSendOffer) {
   const isCompactViewport = useIsCompactViewport();
@@ -61,7 +61,7 @@ function CompactBeforeSendToggle({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onCompactFirstChange(!compactFirst)}
             className={cn(
-              COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS,
+              CHIP_BUTTON_CLASS,
               PILL_CLASS,
               "gap-1.5 [&_[data-icon-root]]:size-3.5",
               compactFirst ? COMPACT_TONE_CLASS : KEEP_TONE_CLASS,
@@ -129,7 +129,7 @@ function CompactBeforeSendPicker({
               : `Prompt cache expired: keeping all ${tokensLabel} tokens`
           }
           className={cn(
-            COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+            ICON_BUTTON_CLASS,
             compactFirst
               ? "text-warning-text hover:text-warning-text data-[state=open]:text-warning-text"
               : "text-muted-foreground hover:text-foreground",
