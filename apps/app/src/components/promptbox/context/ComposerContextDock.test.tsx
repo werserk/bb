@@ -404,6 +404,137 @@ describe("composer context sheet open and close", () => {
   });
 });
 
+describe("composer context selection", () => {
+  function Toggle({
+    present,
+    kind,
+    preview,
+    onDismiss,
+  }: {
+    present: boolean;
+    kind?: "queue";
+    preview?: boolean;
+    onDismiss?: () => void;
+  }) {
+    return (
+      <ComposerContextProvider>
+        <ComposerContextSources>
+          {present && (
+            <ComposerContextItem
+              id="q"
+              label="Queue"
+              summary="1"
+              icon="ListView"
+              group="queue"
+              kind={kind}
+            >
+              <p>Queued body</p>
+            </ComposerContextItem>
+          )}
+          <ComposerContextItem
+            id="plan"
+            label="Plan"
+            icon="ListTodo"
+            group="work"
+            kind="plan"
+          >
+            <p>Plan body</p>
+          </ComposerContextItem>
+        </ComposerContextSources>
+        <ComposerContextDock>
+          {preview && (
+            <ComposerContextStrip onDismiss={onDismiss ?? (() => {})}>
+              <span>Snapshot proposal</span>
+            </ComposerContextStrip>
+          )}
+          <textarea aria-label="Draft" />
+        </ComposerContextDock>
+      </ComposerContextProvider>
+    );
+  }
+
+  it("does not reopen when a vanished section returns", () => {
+    const { rerender } = render(<Toggle present />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    expect(screen.getByRole("region", REGION)).toBeTruthy();
+    rerender(<Toggle present={false} />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    rerender(<Toggle present />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: /^Queue/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("does not reopen when a vanished preview returns", () => {
+    const { rerender } = render(<Toggle present preview />);
+    fireEvent.click(screen.getByText("Snapshot proposal"));
+    expect(screen.getByRole("region", REGION)).toBeTruthy();
+    rerender(<Toggle present preview={false} />);
+    rerender(<Toggle present preview />);
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+  });
+
+  it("keeps the shown section when its group key is renamed", () => {
+    const { rerender } = render(<Toggle present />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    const before = document.querySelector("[data-context-section]")!;
+    const oldKey = (before as HTMLElement).dataset.contextSection;
+    rerender(<Toggle present kind="queue" />);
+    const after = document.querySelector<HTMLElement>("[data-context-section]");
+    expect(after?.dataset.contextSection).not.toBe(oldKey);
+    expect(screen.getByText("Queued body")).toBeTruthy();
+    const chip = screen.getByRole("button", { name: /^Queue/ });
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    // a later rename back still follows the sources
+    rerender(<Toggle present />);
+    expect(screen.getByText("Queued body")).toBeTruthy();
+  });
+
+  it("returns focus to the remounted chip on Escape without an input", () => {
+    function NoInput() {
+      return (
+        <ComposerContextProvider>
+          <ComposerContextSources>
+            <ComposerContextItem
+              id="plan"
+              label="Plan"
+              icon="ListTodo"
+              group="work"
+              kind="plan"
+            >
+              <p>Plan body</p>
+            </ComposerContextItem>
+          </ComposerContextSources>
+          <ComposerContextDock>
+            <span>no input</span>
+          </ComposerContextDock>
+        </ComposerContextProvider>
+      );
+    }
+    render(<NoInput />);
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+    fireEvent.keyDown(screen.getByRole("region", REGION), { key: "Escape" });
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Plan" }),
+    );
+  });
+
+  it("keeps the visible preview when Escape closes a chip section", () => {
+    const dismiss = vi.fn();
+    render(<Toggle present preview onDismiss={dismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Queue/ }));
+    expect(screen.getByText("Snapshot proposal")).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("region", REGION), { key: "Escape" });
+    expect(screen.queryByRole("region", REGION)).toBeNull();
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(screen.getByText("Snapshot proposal")).toBeTruthy();
+  });
+});
+
 describe("composer context sources", () => {
   it("removes settled contributions without leaving stale badges or losing the visible error", () => {
     function Settled() {

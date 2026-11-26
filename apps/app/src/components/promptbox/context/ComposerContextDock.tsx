@@ -233,17 +233,26 @@ export function ComposerContextDock({
   const setPanelRef = useComposedRefs(store?.setPanel, panel);
   const hasFacts = entries.length > 0;
   // A group's key can change when its source re-publishes (kind or label
-  // arrives later); follow the sources so the shown section stays shown.
-  const active = pick
-    ? (groups.find((group) => group.key === pick.key) ??
-      groups.find((group) =>
-        group.entries.some((entry) => pick.sourceIds.includes(entry.sourceId)),
-      ))
+  // arrives later): follow the sources. If they split across groups, or
+  // vanish, the selection is gone.
+  const byKey = pick
+    ? groups.find((group) => group.key === pick.key)
     : undefined;
+  const bySources =
+    pick && !byKey
+      ? groups.filter((group) =>
+          group.entries.some((entry) =>
+            pick.sourceIds.includes(entry.sourceId),
+          ),
+        )
+      : [];
+  const active = byKey ?? (bySources.length === 1 ? bySources[0] : undefined);
   const sectionKey = active?.key ?? null;
   // One part at a time: a chip's section, or the composer preview alone.
   const open =
     hasFacts && expanded && (pick === null ? Boolean(helper) : !!active);
+  const sectionRef = useRef<string | null>(null);
+  sectionRef.current = sectionKey;
 
   const focusInput = useCallback(() => {
     const input = dock.current?.querySelector<HTMLElement>(
@@ -260,8 +269,12 @@ export function ComposerContextDock({
       setExpanded(false);
       if (!returnFocus) return;
       if (focusInput()) return;
-      if (trigger.current?.isConnected)
-        trigger.current.focus({ preventScroll: true });
+      const chip = sectionRef.current
+        ? chipButtons.current.get(sectionRef.current)
+        : undefined;
+      (trigger.current?.isConnected ? trigger.current : chip)?.focus({
+        preventScroll: true,
+      });
     },
     [focusInput],
   );
@@ -313,7 +326,8 @@ export function ComposerContextDock({
 
   const escape = useRef<() => void>(() => {});
   escape.current = () => {
-    helper?.strip?.onDismiss();
+    // Only dismiss the preview when it is the part being shown.
+    if (sectionKey === null) helper?.strip?.onDismiss();
     close(true);
   };
   useEffect(() => {
@@ -337,9 +351,17 @@ export function ComposerContextDock({
     return () => observer.disconnect();
   }, [canvas, open, groups, helper]);
 
-  if (!hasFacts && expanded) {
+  if (expanded && !open) {
     setExpanded(false);
     setPick(null);
+  } else if (
+    pick &&
+    active &&
+    (active.key !== pick.key ||
+      active.entries.map((entry) => entry.sourceId).join() !==
+        pick.sourceIds.join())
+  ) {
+    setPick(pickOf(active));
   }
 
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -390,35 +412,35 @@ export function ComposerContextDock({
                 <ContextBody entry={helper} />
               </section>
             )}
-            {(active ? [active] : []).map((group) => (
+            {active && (
               <section
-                key={group.key}
-                data-context-section={group.key}
-                data-context-kind={group.kind}
-                data-context-tone={group.tone}
-                aria-labelledby={`${panelId}-${group.key}`}
+                key={active.key}
+                data-context-section={active.key}
+                data-context-kind={active.kind}
+                data-context-tone={active.tone}
+                aria-labelledby={`${panelId}-${active.key}`}
                 className="composer-context-section"
               >
                 <h3
-                  id={`${panelId}-${group.key}`}
+                  id={`${panelId}-${active.key}`}
                   data-context-heading=""
                   className="composer-context-heading"
                 >
-                  <span>{group.label}</span>
-                  {group.count !== undefined && (
+                  <span>{active.label}</span>
+                  {active.count !== undefined && (
                     <>
                       <span aria-hidden>·</span>
                       <span className="composer-context-heading-count">
-                        {group.count}
+                        {active.count}
                       </span>
                     </>
                   )}
                 </h3>
-                {group.entries.map((entry) => (
+                {active.entries.map((entry) => (
                   <ContextBody key={entry.id} entry={entry} />
                 ))}
               </section>
-            ))}
+            )}
           </div>
         </div>
       )}
