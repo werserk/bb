@@ -106,6 +106,13 @@ describe("spawn and configure", () => {
     expect(fork.tools).toEqual([]);
   });
 
+  it("drops the binding when its thread is deleted", async () => {
+    const host = await load(defaultRpc());
+    const { threadId } = await spawnBound(host);
+    await host.harness.behavior.emitThreadEvent("thread.deleted", { thread: makeThreadResponse({ id: threadId }) });
+    expect((await host.harness.behavior.runCli(["list"])).stdout).toBe("No bindings");
+  });
+
   it("an unbound thread gets no tools and a tool call refuses", async () => {
     const host = await load(defaultRpc());
     const config = await host.harness.behavior.resolveAgentConfiguration(context("thread-other", WORKER, "/srv/other"));

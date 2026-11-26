@@ -49,7 +49,7 @@ A binding maps a thread to `(worker host, scratch path)` and `(workspace host, r
 
 `bb.agents.configure` can run before step 5 returns. It then claims the binding whose `(worker host, scratch path)` matches the thread's environment, but only while `thread_id` is NULL, so a fork or side chat that shares the directory never gets one. Bindings are looked up by thread id only.
 
-`rebind` points a bound thread at another workspace: the next tool call goes there. `unbind` and `list` manage bindings; `exec --thread <id> -- <cmd>` runs a command through the same server path as `workspace_exec`, for testing Stop and connection loss without a model.
+`rebind` points a bound thread at another workspace: the next tool call goes there. Deleting the thread drops its binding. `unbind` and `list` manage bindings; `exec --thread <id> -- <cmd>` runs a command through the same server path as `workspace_exec`, for testing Stop and connection loss without a model.
 
 Two threads bound to one root, or parallel calls on one file, have no locking; `expected_sha256` is check-then-write, not atomic.
 

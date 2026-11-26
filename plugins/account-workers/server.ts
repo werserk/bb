@@ -94,6 +94,11 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
 
   bb.agents.configure((context) => configureThread(store, context));
 
+  bb.events.on("thread.deleted", ({ thread }) => {
+    const binding = store.byThread(thread.id);
+    if (binding !== null) store.remove(binding.id);
+  });
+
   async function resolveMachine(idOrName: string, signal?: AbortSignal) {
     const hosts = await bb.sdk.hosts.list({ signal });
     const matches = hosts.filter((h) => h.id === idOrName || h.name === idOrName);
