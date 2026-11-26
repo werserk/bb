@@ -7400,6 +7400,40 @@ describe("hub stop and OAuth refresh", () => {
     });
   });
 
+  it("starts no new OAuth refresh once the hub has stopped", async () => {
+    let clock = Date.now();
+    let refreshCalls = 0;
+    const fixture = await createOAuthRequestFixture(
+      "claude",
+      async (input) => {
+        if (String(input).endsWith("/oauth/token")) {
+          refreshCalls += 1;
+          return Response.json({ access_token: "oauth-late", expires_in: 3600 });
+        }
+        return Response.json({});
+      },
+      () => clock,
+    );
+    fixture.service.controller.abort();
+    await fixture.service.done;
+    clock += 2 * 60 * 60 * 1_000;
+    await fixture.host.harness.behavior.callRpc("account.refreshUsage", {
+      accountId: fixture.account.id,
+    });
+    expect(refreshCalls).toBe(0);
+    const store = new AccountStore(
+      fixture.host.bb.storage.kv,
+      path.join(fixture.dataDir, "plugins", fixture.host.bb.pluginId, "secrets", "accounts"),
+    );
+    expect(await store.readSecret(fixture.account.id)).toMatchObject({
+      accessToken: "oauth-old",
+    });
+    expect(
+      new QuotaStore(fixture.host.bb.storage.database()).get(fixture.account.id)
+        .error,
+    ).toBeNull();
+  });
+
   it("stops waiting for a hung refresh after the refresh drain bound", async () => {
     let refreshCalls = 0;
     const fixture = await createOAuthRequestFixture(

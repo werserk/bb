@@ -1318,6 +1318,13 @@ export class AccountPoolHub {
         }
         continue;
       }
+      // Once stopped, start no new refresh: the transport is about to close,
+      // and a rotated refresh token lost with it would force a re-login.
+      if (this.stopped.signal.aborted)
+        throw new TransientOAuthRefreshError(
+          "Account Pooler stopped; no new token refresh starts.",
+          0,
+        );
       const flight: Extract<SecretFlight, { kind: "refresh" }> = {
         kind: "refresh",
         use,

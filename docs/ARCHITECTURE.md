@@ -46,9 +46,10 @@ plugins/account-pool-prewarm. Tokens never enter code or test artifacts.
   invalidates the other and forces re-logins. Accounts imported by earlier
   builds are ordinary OAuth records and keep working unchanged; while their
   source CLI stays logged in and in use, it is still a second refresh owner.
-- **Stop keeps refreshes.** `hub.stop()` waits (bounded) for in-flight token
-  refreshes before the transport closes, so a reload or reinstall does not lose
-  a rotated refresh token.
+- **Stop keeps refreshes.** Once `hub.stop()` begins, no new token refresh
+  starts; refreshes already in flight get up to the refresh timeout plus 5 s to
+  finish and store the new token before the transport closes. A refresh still
+  running after that bound is cut off.
 - **Caller identity is still open.** Plugin RPC carries no caller identity, so
   every administrative call is trusted. Host exclusions and any future roles
   or thread policies guard against mistakes, not against a hostile caller.
