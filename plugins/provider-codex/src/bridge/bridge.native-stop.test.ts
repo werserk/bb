@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { createCodexAppServerConnection } from "./app-server-connection.js";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { experimental_createBridgeJsonRpcTestHarness as createHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import { FULL_ACCESS_SESSION_OPTIONS } from "./fake-codex-app-server-harness.js";
 
+beforeEach(() => vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "1"));
 afterEach(() => vi.unstubAllEnvs());
 
 it

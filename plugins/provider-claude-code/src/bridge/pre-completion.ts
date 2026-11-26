@@ -2,6 +2,22 @@ import { experimental_PRE_COMPLETION_LIMITS as limits } from "@get-bb/plugin-sdk
 import type { HookJSONOutput } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
+/**
+ * Provider-side activation is off unless the daemon (or the session
+ * environment) sets BB_PRE_COMPLETION_HOOKS to 1 or true. With it off the
+ * bridge does no config probe, hook install, restart or Stop round-trip.
+ */
+export const PRE_COMPLETION_HOOKS_ENV = "BB_PRE_COMPLETION_HOOKS";
+
+export function preCompletionHooksEnabled(
+  envVars?: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const value =
+    envVars?.[PRE_COMPLETION_HOOKS_ENV] ??
+    process.env[PRE_COMPLETION_HOOKS_ENV];
+  return value === "1" || value === "true";
+}
+
 const decisionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("allow") }).passthrough(),
   z.object({

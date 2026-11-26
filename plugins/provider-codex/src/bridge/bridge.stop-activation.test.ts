@@ -32,6 +32,7 @@ beforeEach(() => {
   writerLockPath = join(workspaceDir, "writer.lock");
   vi.stubEnv("CODEX_OPENAI_BASE_URL", "");
   vi.stubEnv("CODEX_POOL_AUTH_TOKEN", "");
+  vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "1");
   stubFakeCodexAppServer(scriptPath);
   harness = createHarness(handleLine);
 });
@@ -126,3 +127,44 @@ it.each(["recheck", "verify"])(
   },
   15000,
 );
+
+it("is inert when pre-completion hooks are off: no probe, hook, restart or config", async () => {
+  vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "");
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({ processLogPath, launchLogPath, requestLogPath }),
+  );
+  harness.sendRequest(1, "thread/start", {
+    threadId: "bb-activation-failure",
+    cwd: workspaceDir,
+    instructionMode: "append",
+    options: FULL_ACCESS_SESSION_OPTIONS,
+  });
+  expect((await harness.waitForResponse(1)).error).toBeUndefined();
+  expect(spawnedAppServerPids(processLogPath)).toHaveLength(1);
+  const launches = readFileSync(launchLogPath, "utf8").trim().split("\n");
+  expect(launches).toHaveLength(1);
+  expect(
+    z.object({ args: z.array(z.string()) }).parse(JSON.parse(launches[0])).args,
+  ).toEqual([scriptPath]);
+  const requests = readFileSync(requestLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) =>
+      z
+        .object({
+          method: z.string(),
+          params: z.record(z.string(), z.unknown()),
+        })
+        .parse(JSON.parse(line)),
+    );
+  expect(requests.filter((r) => r.method === "hooks/list")).toEqual([]);
+  expect(
+    requests.filter(
+      (r) => r.method === "config/read" && r.params.includeLayers === true,
+    ),
+  ).toEqual([]);
+  const start = requests.find((r) => r.method === "thread/start");
+  expect(start).toBeDefined();
+  expect(JSON.stringify(start?.params.config ?? {})).not.toMatch(/hooks|Stop/);
+}, 15000);

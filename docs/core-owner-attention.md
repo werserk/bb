@@ -205,3 +205,7 @@ question creation, process restart/reconnect/rollback and upgrade acceptance,
 Windows support, per-host deployment proof, reviewer-critical and reviewer-codex
 on the final SHA and owner-authorized core release. No full feature PASS or
 seven-day result is claimed. No merge, release, push or PR is implied.
+
+## Provider activation gate
+
+Provider-side activation is off by default. The Codex bridge (config probe, Stop-hook install, app-server restart) and the Claude bridge (Stop round-trip) act only when `BB_PRE_COMPLETION_HOOKS` is `1` or `true` in the daemon or session environment. With it unset, both bridges behave as before this feature. The server side stays opt-in per thread through `experimental_setPreCompletionPolicy`. A server experiment key was not used because experiments are not visible to the host daemon without a protocol change.

@@ -9,6 +9,7 @@ import { experimental_selectedSkillMentions as selectedSkillMentions } from "@ge
 import {
   codexStopHookConfigIsClear,
   createCodexStopHook,
+  preCompletionHooksEnabled,
   type CodexStopHook,
 } from "./pre-completion.js";
 import { createHash } from "node:crypto";
@@ -1473,7 +1474,11 @@ async function constructThreadSession(
   let connection = spawnSessionConnection();
   let initialized = false;
   let hookConfigClear = false;
+  const hooksEnabled = preCompletionHooksEnabled(
+    decoded.sessionOptions.envVars,
+  );
   try {
+    if (!hooksEnabled) throw new Error("pre-completion hooks are off");
     await initializeChild(connection);
     initialized = true;
     hookConfigClear = await codexStopHookConfigIsClear(
@@ -1571,7 +1576,9 @@ async function constructThreadSession(
       ...instructionOverrides,
       model: decoded.sessionOptions.model ?? undefined,
       serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
-      config: { ...preparedGitRoots.config, ...hookConfig },
+      config: session.stopHook
+        ? { ...preparedGitRoots.config, ...hookConfig }
+        : (preparedGitRoots.config ?? undefined),
       ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
     };
 

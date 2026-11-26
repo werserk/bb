@@ -4,7 +4,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+beforeEach(() => vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "1"));
+afterEach(() => vi.unstubAllEnvs());
 import type {
   SDKMessage,
   SDKUserMessage,
@@ -174,6 +177,7 @@ async function withResumedTurn(
     steer(expectedTurnId: string, clientRequestId: string): Promise<void>;
     callTool(): Promise<string>;
     checkStop(): Promise<{ origin: string; output: unknown }>;
+    checkStopInert(): Promise<{ output: unknown; roundTrips: number }>;
     callReserved(): Promise<unknown>;
     bbTurnId(origin: string): string | undefined;
     openAssembledTurnId(): string | undefined;
@@ -376,6 +380,27 @@ async function withResumedTurn(
         );
         return { origin: params.turnId, output: await outputPromise };
       },
+      checkStopInert: async () => {
+        const hook = calls[0]?.options.hooks?.Stop?.[0]?.hooks[0];
+        expect(hook).toBeDefined();
+        const before = bridge.messages.length;
+        const output = await hook!(
+          {
+            hook_event_name: "Stop",
+            stop_hook_active: false,
+            last_assistant_message: "Need your decision",
+            session_id: SESSION_ID,
+            transcript_path: "/unused",
+            cwd: workspaceDir,
+          },
+          undefined,
+          { signal: new AbortController().signal },
+        );
+        const roundTrips = bridge.messages
+          .slice(before)
+          .filter((m) => m.method === "item/tool/call").length;
+        return { output, roundTrips };
+      },
       callReserved: async () => {
         if (!clientConnected) {
           const server = calls[0]!.options.mcpServers!["bb-bridge"]!;
@@ -536,4 +561,14 @@ it("binds native Stop correction to the same assembled resumed turn and rejects 
       expect(openTurnIds()).toEqual([]);
     },
   );
+}, 60_000);
+
+it("does no Stop round-trip when pre-completion hooks are off", async () => {
+  vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "");
+  await withResumedTurn(async ({ checkStopInert, finishTurn }) => {
+    const { output, roundTrips } = await checkStopInert();
+    expect(roundTrips).toBe(0);
+    expect(output).not.toMatchObject({ decision: "block" });
+    await finishTurn();
+  });
 }, 60_000);

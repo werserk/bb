@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { preCompletionHooksEnabled } from "./pre-completion.js";
 import { experimental_PRE_COMPLETION_TOOL_NAME as PRE_COMPLETION_TOOL_NAME } from "@get-bb/plugin-sdk/provider-bridge";
 import { checkNativePreCompletion } from "./pre-completion.js";
 
@@ -1546,6 +1547,7 @@ export function buildSessionTrackingHooks(
               threadIdRef.current,
             )?.residentSession;
             if (
+              !preCompletionHooksEnabled() ||
               !session ||
               session.closing ||
               session.toolOrigin.retired ||
