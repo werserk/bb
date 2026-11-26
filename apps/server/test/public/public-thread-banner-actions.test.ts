@@ -287,8 +287,137 @@ describe("public thread banner actions", () => {
     });
   });
 
-  it("retains a legacy send during context clear and returns its native post-clear receipt", async () => {
+  it("rejects a send while an in-place context clear is in flight", async () => {
     await withTestHarness(async (harness) => {
+      const fixture = seedBannerFixture(harness, { status: "idle" });
+      seedThreadRuntimeState(harness.deps, {
+        environmentId: fixture.environmentId,
+        providerThreadId: "provider-thread-1",
+        threadId: fixture.threadId,
+      });
+      let finishStop: () => void = () => {};
+      const stopPending = new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+      const responder = registerHostRpcResponder(harness, {
+        hostId: fixture.hostId,
+        sessionId: fixture.sessionId,
+        handle: async ({ command }) => {
+          expect(command).toMatchObject({
+            type: "thread.stop",
+            threadId: fixture.threadId,
+          });
+          await stopPending;
+          return { ok: true, result: { providerCheckpointId: null } };
+        },
+      });
+
+      const clearResponsePending = harness.app.request(
+        `/api/v1/threads/${fixture.threadId}/context/clear`,
+        { method: "POST" },
+      );
+      await vi.waitFor(() => {
+        expect(responder.requests).toHaveLength(1);
+      });
+
+      const sendResponse = await harness.app.request(
+        `/api/v1/threads/${fixture.threadId}/send`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "start",
+            input: [{ type: "text", text: "race the clear", mentions: [] }],
+          }),
+        },
+      );
+      expect(sendResponse.status).toBe(409);
+      expect(await readJson(sendResponse)).toMatchObject({
+        message: "Thread context is being cleared",
+      });
+
+      finishStop();
+      expect((await clearResponsePending).status).toBe(200);
+      expect(
+        getLastStoredProviderThreadId(harness.db, fixture.threadId),
+      ).toBeNull();
+    });
+  });
+
+  it.each([false, true])(
+    "settles Plan cancellation with an early completion event: %s",
+    async (earlyCompletion) => {
+      await withTestHarness(async (harness) => {
+        const fixture = seedBannerFixture(harness, { status: "active" });
+        seedActivePlan(harness, fixture);
+        const responder = registerHostRpcResponder(harness, {
+          hostId: fixture.hostId,
+          sessionId: fixture.sessionId,
+          handle: async ({ command }) => {
+            expect(command).toMatchObject({
+              type: "thread.plan.cancel",
+              threadId: fixture.threadId,
+              expectedTurnId: "turn-plan-1",
+            });
+            if (earlyCompletion) {
+              const completion = await harness.app.request(
+                "/internal/session/events",
+                {
+                  method: "POST",
+                  headers: internalAuthHeaders(harness),
+                  body: JSON.stringify({
+                    sessionId: fixture.sessionId,
+                    eventGroups: groupHostDaemonEvents([
+                      {
+                        threadId: fixture.threadId,
+                        event: {
+                          type: "turn/completed",
+                          threadId: fixture.threadId,
+                          providerThreadId: "provider-thread-1",
+                          scope: turnScope("turn-plan-1"),
+                          status: "interrupted",
+                        },
+                      },
+                    ]),
+                  }),
+                },
+              );
+              expect(completion.status).toBe(200);
+              expect(getThread(harness.db, fixture.threadId)?.status).toBe(
+                "idle",
+              );
+            }
+            return { ok: true, result: { cancelled: true } };
+          },
+        });
+
+        const response = await harness.app.request(
+          `/api/v1/threads/${fixture.threadId}/plan/cancel`,
+          { method: "POST" },
+        );
+
+        expect(
+          response.status,
+          JSON.stringify(await readJson(response.clone())),
+        ).toBe(200);
+        expect(responder.requests).toHaveLength(1);
+        expect(getThread(harness.db, fixture.threadId)?.status).toBe("idle");
+        await expect(
+          readBannerActivity(harness, fixture),
+        ).resolves.toMatchObject({
+          activePlanModeCount: 0,
+        });
+        await expect(
+          readBannerActivity(harness, fixture),
+        ).resolves.toMatchObject({
+          activePlanModeCount: 0,
+        });
+      });
+    },
+  );
+
+  it("send intake on: retains a legacy send during context clear and returns its native post-clear receipt", async () => {
+    await withTestHarness({ sendIntake: true }, async (harness) => {
       const fixture = seedBannerFixture(harness, { status: "idle" });
       seedThreadRuntimeState(harness.deps, {
         environmentId: fixture.environmentId, providerThreadId: "provider-thread-1", threadId: fixture.threadId,

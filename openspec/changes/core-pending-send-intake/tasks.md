@@ -9,6 +9,7 @@ Checked items describe implementation or selected runtime coverage, not independ
 - [x] Add negotiated accepted/capability and typed minimal canonical read/revision actions; preserve truthful old receipts and post-seal custody on 409.
 - [ ] Publish actual generated schema/state/terminal/native-handoff/DB-WAL/writer-stop/packaged capability contract for C, explicitly distinguishing implementation facts from missing proof.
 - [ ] Run affected meaningful tests and required typecheck/build through Turbo, serial fresh load1<16 and nice19/ionice3; refusal stops the phase. Retain exact commands/exits/counts/logs and separately disclose matching-base failures.
+- [x] Gate the whole path behind the `sendIntake` experiment (default off) with the legacy route unchanged while off.
 - [x] Update architecture and capture a local review-candidate commit for the same reviewer; readiness remains partial. Do not implement B/C, package, run labs or release.
 
 Required failure scenarios: mixed legacy/modern ordering with delayed staging head; replay after payload compaction; cross-project source deletion after custody; stale epoch at each seam; committed handoff vs held HTTP/provider; compactFirst intermediate checkpoint; edit/cancel 409 preserves content; startup and DB-close boundaries. Exact runtime coverage and gaps must be reported, not inferred from source alone.

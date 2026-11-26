@@ -189,3 +189,19 @@ C supplies the separately reviewed managed rollback barrier and old-binary-open-
 
 - **WHEN** an incompatible target is considered with open custody or a release is requested
 - **THEN** the separately reviewed rollback barrier refuses unsafe rollback, its old-binary fixture remains required, and this specification grants no release authority
+
+### Requirement: Intake behind a server setting
+
+The core SHALL enforce these conditions:
+
+The intake path runs only while the server experiment `sendIntake` is on; it defaults off. With it off, the legacy send route keeps its in-memory submission guard and writes no intake row, and the admission, intake-read and intake-action routes answer 404 `intake_disabled`. Rows already stored are still recovered and delivered at startup whatever the setting.
+
+#### Scenario: Setting off
+
+- **WHEN** `sendIntake` is off and a send enters the legacy route
+- **THEN** it dispatches or queues exactly as before, no `thread_send_intakes` row is written, and the admission route answers 404 `intake_disabled`
+
+#### Scenario: Setting on
+
+- **WHEN** `sendIntake` is on and the same send enters
+- **THEN** it is stored as an intake row before preparation and ends transferred with its native handoff

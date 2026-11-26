@@ -854,18 +854,11 @@ describe("startup queue waits", () => {
         },
       });
       const queueChangedInTransactions: boolean[] = [];
-      const allQueueChangedInTransactions: boolean[] = [];
-      let previousQueueIds = listQueuedThreadMessages(harness.db, thread.id).map(row => row.id);
       const notifyThread = harness.hub.notifyThread.bind(harness.hub);
       vi.spyOn(harness.hub, "notifyThread").mockImplementation(
         (threadId, changes, metadata) => {
-          if (threadId === thread.id && changes.includes("queue-changed")) {
-            allQueueChangedInTransactions.push(harness.db.$client.inTransaction);
-            const ids = listQueuedThreadMessages(harness.db, thread.id).map(row => row.id);
-            if (ids.length !== previousQueueIds.length || ids.some((id, index) => id !== previousQueueIds[index])) {
-              queueChangedInTransactions.push(harness.db.$client.inTransaction);
-              previousQueueIds = ids;
-            }
+          if (changes.includes("queue-changed")) {
+            queueChangedInTransactions.push(harness.db.$client.inTransaction);
           }
           notifyThread(threadId, changes, metadata);
         },
@@ -999,8 +992,6 @@ describe("startup queue waits", () => {
           thread,
         }),
       ).resolves.toEqual({ ok: true, delivery: "sent" });
-      expect(allQueueChangedInTransactions.length).toBeGreaterThanOrEqual(2);
-      expect(allQueueChangedInTransactions.every(inTransaction => !inTransaction)).toBe(true);
     });
   });
 
@@ -2560,9 +2551,66 @@ it.each([
 );
 describe("pending send admission provenance", () => {
   it.each(["cold", "provider"] as const)(
-    "commits %s owner admission before the receipt and replays a retained repeat",
+    "commits %s owner admission before the receipt and rejects a retained repeat",
     async (kind) => {
       await withTestHarness(async (harness) => {
+        const fixture =
+          kind === "cold"
+            ? seedColdIdleThreadFixture({ harness, value: 9871 })
+            : seedProviderThreadFixture({ harness, value: 9872 });
+        const clientSubmissionId = crypto.randomUUID();
+        const payload = {
+          clientSubmissionId,
+          input: textInput("identical owner words"),
+          mode: "start" as const,
+          model: "gpt-5",
+          permissionMode: "full" as const,
+          reasoningLevel: "medium",
+          serviceTier: "default" as const,
+        };
+        const beforeRequests = listEvents(harness.db, {
+          threadId: fixture.thread.id,
+        }).filter((row) => row.type === "client/turn/requested").length;
+        const result = await acceptThreadSendRequest(harness.deps, {
+          thread: fixture.thread,
+          payload,
+        });
+        expect(result).toMatchObject({
+          delivery: "sent",
+          submissionIds: [clientSubmissionId],
+          requested: {
+            requestId: expect.any(String),
+            sequence: expect.any(Number),
+          },
+        });
+        const requested = listEvents(harness.db, {
+          threadId: fixture.thread.id,
+        }).filter((row) => row.type === "client/turn/requested");
+        expect(requested).toHaveLength(beforeRequests + 1);
+        expect(JSON.parse(requested.at(-1)!.data)).toMatchObject({
+          clientSubmissions: [{ id: clientSubmissionId, inputGroupIndex: 0 }],
+        });
+        await expect(
+          acceptThreadSendRequest(harness.deps, {
+            thread: fixture.thread,
+            payload,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: { code: "submission_already_admitted" },
+        });
+        expect(
+          listEvents(harness.db, { threadId: fixture.thread.id }).filter(
+            (row) => row.type === "client/turn/requested",
+          ),
+        ).toHaveLength(beforeRequests + 1);
+      });
+    },
+  );
+  it.each(["cold", "provider"] as const)(
+    "send intake on: commits %s owner admission before the receipt and replays a retained repeat",
+    async (kind) => {
+      await withTestHarness({ sendIntake: true }, async (harness) => {
         const fixture =
           kind === "cold"
             ? seedColdIdleThreadFixture({ harness, value: 9871 })
