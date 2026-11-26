@@ -1,0 +1,15 @@
+{
+  "sha256": "7581557bb54002e7a3ae2d0a68ac5545185dd0d546692900d0836fe80087a4d0",
+  "bytes": 1202035,
+  "core_baseline": "031c576eb893961ea6879f4f7e59f9c5efead236",
+  "candidate_status": "local commit; independent SPEC and QUALITY GREEN; not deployed",
+  "exports_checked": [
+    "bundled-types/bb-plugin-sdk.d.ts:experimental_releaseIdle"
+  ],
+  "pack_command": "npm pack --ignore-scripts --json --pack-destination <thread-storage>/candidate-sdk",
+  "published": false,
+  "archive_extra_paths": [],
+  "core_freeze_manifest_sha256": "0e377f843cab99f32d55deb20ae164ddc8292d313dbcf50538c421618635e255",
+  "declarations_match_frozen_build": true,
+  "core_commit": "7784e8a3c4002e324dcab7753b1ed6150f5c0d42"
+}
