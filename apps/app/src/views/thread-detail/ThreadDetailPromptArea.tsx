@@ -99,6 +99,7 @@ import {
   ThreadDetailsButton,
   ThreadEnvironmentSummary,
 } from "@/components/promptbox/ThreadEnvironmentSummary";
+import { useRunOnOpenThread } from "@/fork/run-on/useRunOnOpenThread";
 import type { MachineLabelHost } from "@/components/machines/MachineLabel";
 import type { MachineProviderPresentation } from "@/components/plugin/MachineProviderIcon";
 import type { WorkspaceCheckoutDisplay } from "@bb/shared-ui/lib/workspace-checkout-display";
@@ -1044,6 +1045,11 @@ export function ThreadDetailPromptArea({
     },
     [beginHandoff, isHandoffSelection],
   );
+  const runOn = useRunOnOpenThread({
+    threadId: thread.id,
+    projectId: thread.projectId,
+    environmentId: thread.environmentId,
+  });
   const { typeaheadConfig, promptActions } = useComposerTypeahead({
     projectId: thread.projectId,
     mentionsProjectId: projectId,
@@ -1056,6 +1062,7 @@ export function ThreadDetailPromptArea({
       selectedProviderId === thread.providerId ? providerCommands : null,
     builtinCommands: handoffCommands,
     resolveMentionLink,
+    mentionHostId: runOn.mentionHostId,
   });
   const {
     typeaheadConfig: inlineTypeaheadConfig,
@@ -1071,6 +1078,7 @@ export function ThreadDetailPromptArea({
     )?.composerActions,
     threadProviderCommands: providerCommands,
     resolveMentionLink,
+    mentionHostId: runOn.mentionHostId,
   });
   const runtimeDisplayStatus = thread.runtime.displayStatus;
   const compactionOfferAt = contextWindowUsage?.compactionOfferAt;
@@ -1960,11 +1968,16 @@ export function ThreadDetailPromptArea({
           environmentIcon={environmentIcon}
           environmentProviderName={environmentProviderName}
           environmentMachineProvider={environmentMachineProvider}
-          environmentCheckout={environmentCheckout}
+          environmentCheckout={runOn.checkout ?? environmentCheckout}
           onCreateNewThreadInEnvironment={onCreateNewThreadInEnvironment}
+          environmentOverride={runOn.chip}
+          rowItems={runOn.rowItems}
         />
       ) : null,
     [
+      runOn.checkout,
+      runOn.chip,
+      runOn.rowItems,
       environmentCheckout,
       environmentCompactLabel,
       environmentHost,
@@ -1978,6 +1991,13 @@ export function ThreadDetailPromptArea({
     ],
   );
   const compactEnvironmentSummary = useMemo(() => {
+    if (runOn.chip)
+      return (
+        <>
+          {runOn.chip}
+          {runOn.rowItems}
+        </>
+      );
     if (!onOpenThreadInfo) return null;
     if (environmentCheckout) {
       return (
@@ -1999,6 +2019,8 @@ export function ThreadDetailPromptArea({
     }
     return null;
   }, [
+    runOn.chip,
+    runOn.rowItems,
     environmentCheckout,
     environmentCompactLabel,
     environmentIcon,
@@ -2550,6 +2572,7 @@ export function ThreadDetailPromptArea({
     <>
       {sentMessageEditorPortal}
       {bottomContent}
+      {runOn.probe}
     </>
   );
 }

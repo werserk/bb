@@ -43,6 +43,11 @@ import type {
   ThreadPluginMetadataUpdateArgs,
 } from "@bb/sdk";
 import type { JsonValue } from "./json-value.js";
+import type {
+  ExperimentalComposerRunRowItemRegistration,
+  ExperimentalRunOnProviderRegistration,
+} from "./fork/run-on-contract.js";
+export type * from "./fork/run-on-contract.js";
 import type { PluginMentionTrigger } from "./backend-contract.js";
 
 /**
@@ -4236,6 +4241,14 @@ export interface PluginAppSlots {
    */
   experimental_machineProviderInputs(
     registration: PluginMachineProviderInputsRegistration,
+  ): void;
+  /** Fork-only: see fork/run-on-contract.ts. */
+  experimental_runOnProvider(
+    registration: ExperimentalRunOnProviderRegistration,
+  ): void;
+  /** Fork-only: see fork/run-on-contract.ts. */
+  experimental_composerRunRowItem(
+    registration: ExperimentalComposerRunRowItemRegistration,
   ): void;
 }
 

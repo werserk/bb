@@ -2200,6 +2200,8 @@ export interface CapturedPluginApp {
   timelineRenderers: PluginTimelineRendererRegistration[];
   environmentProviderInputs: PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs: PluginMachineProviderInputsRegistration[];
+  runOnProviders: import("../fork/run-on-contract.js").ExperimentalRunOnProviderRegistration[];
+  composerRunRowItems: import("../fork/run-on-contract.js").ExperimentalComposerRunRowItemRegistration[];
   contentScripts: PluginContentScriptRegistration[];
   threadDisplayPolicies: ExperimentalThreadDisplayPolicyResolver[];
 }

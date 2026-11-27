@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { Button } from "@bb/shared-ui/button";
 import {
   OPTION_BASE_CLASS_NAME,
@@ -63,6 +63,8 @@ interface ThreadEnvironmentSummaryProps {
   environmentMachineProvider?: MachineProviderPresentation | null;
   environmentCheckout?: WorkspaceCheckoutDisplay;
   onCreateNewThreadInEnvironment?: () => void;
+  environmentOverride?: ReactNode;
+  rowItems?: ReactNode;
 }
 
 export const ThreadEnvironmentSummary = memo(function ThreadEnvironmentSummary({
@@ -75,6 +77,8 @@ export const ThreadEnvironmentSummary = memo(function ThreadEnvironmentSummary({
   environmentMachineProvider,
   environmentCheckout,
   onCreateNewThreadInEnvironment,
+  environmentOverride,
+  rowItems,
 }: ThreadEnvironmentSummaryProps) {
   if (
     !projectName &&
@@ -98,7 +102,9 @@ export const ThreadEnvironmentSummary = memo(function ThreadEnvironmentSummary({
           className="h-6 min-w-0 max-w-[10rem] shrink"
         />
       ) : null}
-      {environmentHost ? (
+      {environmentOverride ? (
+        environmentOverride
+      ) : environmentHost ? (
         <MachineLabel
           host={environmentHost}
           machineProvider={environmentMachineProvider}
@@ -140,6 +146,7 @@ export const ThreadEnvironmentSummary = memo(function ThreadEnvironmentSummary({
           />
         </div>
       ) : null}
+      {rowItems}
       {environmentCheckout && checkoutCopyValue !== null ? (
         <Tooltip>
           <TooltipTrigger asChild>

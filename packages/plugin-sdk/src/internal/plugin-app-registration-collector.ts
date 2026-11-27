@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { z } from "zod";
 import { createModalHandle } from "./modal-handle.js";
+import * as runOn from "../fork/run-on-collector.js";
 import type {
   ExperimentalTabRegistration,
   ComposerCustomization,
@@ -312,7 +313,7 @@ export type CollectedPluginCommandRegistration =
       defaultShortcut: CollectedCommandShortcut;
     });
 
-export interface CollectedPluginAppRegistrations {
+export interface CollectedPluginAppRegistrations extends runOn.RunOnCollected {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
@@ -502,6 +503,7 @@ export function collectPluginAppRegistrations(
     timelineRenderers: [],
     environmentProviderInputs: [],
     machineProviderInputs: [],
+    ...runOn.emptyCollected(),
     contentScripts: [],
     threadDisplayPolicies: [],
   };
@@ -722,6 +724,7 @@ export function collectPluginAppRegistrations(
     commands: { register: registerCommand },
     slots: {
       ...legacySlotAliases,
+      ...runOn.slots(collected, onWarning),
       homepageSection(registration) {
         const kind = "slots.homepageSection";
         const id = requireSlotId(kind, registration?.id);

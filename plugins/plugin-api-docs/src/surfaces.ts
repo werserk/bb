@@ -1455,6 +1455,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginEnvironmentProviderInputsRegistration",
           "PluginEnvironmentProviderInputsProps",
           "PluginEnvironmentProviderInputsChange",
+          "ExperimentalRunOnProviderRegistration",
+          "ExperimentalComposerRunRowItemRegistration",
           "experimental_BranchPicker",
           "BranchPickerProps",
           "experimental_useBranches",

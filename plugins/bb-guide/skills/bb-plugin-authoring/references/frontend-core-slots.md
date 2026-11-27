@@ -395,3 +395,5 @@ run that contains a failed turn stays visible, and when the owner steers a run
 only the steered turn does. A system or agent steer into an owner turn never
 folds it. Stock bb
 has no such method: call `app.experimental_threadDisplayPolicy?.(...)`.
+
+Fork-only Run on picker slots: see [fork-run-on-slots.md](fork-run-on-slots.md).

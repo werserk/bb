@@ -7,6 +7,10 @@ import type { ProviderCommand } from "@bb/server-contract";
 import type { ProviderCommandSuggestion } from "@bb/client-core";
 import { buildProviderPromptActionProps } from "@bb/client-core";
 import { usePromptMentionTriggers } from "@/hooks/usePromptMentions";
+import {
+  runOnMentionOverride,
+  type RunOnMentionHost,
+} from "@/fork/run-on/mentions";
 
 interface UseComposerTypeaheadArgs {
   projectId: string;
@@ -21,6 +25,7 @@ interface UseComposerTypeaheadArgs {
   threadProviderCommands?: readonly ProviderCommand[] | null;
   builtinCommands?: readonly ProviderCommandSuggestion[];
   resolveMentionLink: PromptMentionLinkResolver;
+  mentionHostId?: RunOnMentionHost;
 }
 
 interface UseComposerTypeaheadResult {
@@ -39,6 +44,7 @@ export function useComposerTypeahead({
   threadProviderCommands,
   builtinCommands,
   resolveMentionLink,
+  mentionHostId,
 }: UseComposerTypeaheadArgs): UseComposerTypeaheadResult {
   const mentionTriggers = usePromptMentionTriggers();
   const providerPromptActions = useMemo(
@@ -57,6 +63,7 @@ export function useComposerTypeahead({
           currentThreadId,
           environmentId,
           threadStorageThreadId: currentThreadId,
+          ...runOnMentionOverride(mentionHostId),
         },
         resolveLink: resolveMentionLink,
       },
@@ -78,6 +85,7 @@ export function useComposerTypeahead({
       commandScope,
       currentThreadId,
       environmentId,
+      mentionHostId,
       mentionSourceProjectId,
       mentionTriggers,
       projectId,

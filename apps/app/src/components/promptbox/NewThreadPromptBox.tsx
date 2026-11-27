@@ -90,6 +90,8 @@ export interface NewThreadEnvironmentConfig {
   onSelectProvider?: EnvironmentPickerUIProps["onSelectProvider"];
   onSelectHost?: EnvironmentPickerUIProps["onSelectHost"];
   onSelectReuse?: EnvironmentPickerUIProps["onSelectReuse"];
+  runOn?: EnvironmentPickerUIProps["runOn"];
+  runRowItems?: ReactNode;
 }
 
 export interface NewThreadWorktreeConfig {
@@ -433,6 +435,7 @@ export function EnvironmentSlot({
         onSelectProvider={environment.onSelectProvider}
         onSelectHost={environment.onSelectHost}
         onSelectReuse={environment.onSelectReuse}
+        runOn={environment.runOn}
         className="shrink-0"
         muted
       />
@@ -452,6 +455,7 @@ export function EnvironmentSlot({
       {selectedProvider !== undefined && selectedProvider.inputs !== null
         ? environmentProviderInputsSlot
         : null}
+      {environment.runRowItems}
     </>
   );
 }

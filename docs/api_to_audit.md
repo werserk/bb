@@ -5255,3 +5255,21 @@ reservation and retained gap observations, and review of per-host capability
 reporting. See [the implemented contract](core-owner-attention.md). Method presence
 and source fixtures cannot establish runtime support or complete owner-attention
 coverage. No daemon protocol or migration change is made in this candidate.
+
+## Run on picker slots (fork)
+
+`app.slots.experimental_runOnProvider` and
+`app.slots.experimental_composerRunRowItem` are werserk/bb fork-only, typed in
+`packages/plugin-sdk/src/fork/run-on-contract.ts` and absent from npm
+`@get-bb/plugin-sdk`; plugins detect them at runtime. A Run on registration
+presents one of the plugin's own environment providers as `agent → workspace`
+choices; core accepts it only when the provider list entry for that id is
+owned by the registering plugin, one per provider. A row item may hold the
+send's single `pluginSubmission` (16 KB, one plugin per send). Both carry
+`version: 1`; other versions are skipped with a warning. Docs:
+`fork-run-on-slots.md`, design in `openspec/changes/core-run-on-picker`.
+
+Audit before stabilizing: the owner check against composed providers, the
+single-submission rule against `useComposer().submit({ experimental_data })`,
+clearing after a refused create, and whether `useChoices` should move to a
+server-side choices contract.
