@@ -430,6 +430,15 @@ describe("useRunOnOpenThread", () => {
     ).toContain("machine-a");
   });
 
+  it("turns host-bound mentions off when the workspace host is unknown", () => {
+    stubs.environment = workerEnvironment();
+    stubs.workspace = {
+      status: "ready",
+      workspace: { ...workspace, hostId: null, label: "elsewhere" },
+    };
+    expect(openThread().result.current.mentionHostId).toBeNull();
+  });
+
   it("keeps today's row for a stock thread", () => {
     stubs.environment = workerEnvironment(null);
     const { result } = openThread();
@@ -489,6 +498,17 @@ describe("useComposerTypeahead mention host", () => {
     });
 
     expect(config.command?.source).toMatchObject({ environmentId: "env-1" });
+  });
+
+  it("reads no files when the workspace host is unknown, not the primary host's", () => {
+    const config = typeahead(null);
+    expect(config.mention?.source).toEqual({
+      projectId: undefined,
+      currentThreadId: "t-1",
+      environmentId: null,
+      hostId: null,
+      threadStorageThreadId: "t-1",
+    });
   });
 
   it("keeps the stock source without Run on", () => {

@@ -1,3 +1,4 @@
+import type { RunOnMentionHost } from "./mentions";
 import {
   formatWorkspaceCheckoutDisplay,
   type WorkspaceCheckoutDisplay,
@@ -21,7 +22,7 @@ export interface RunOnOpenThread {
 
   checkout: WorkspaceCheckoutDisplay | undefined;
 
-  mentionHostId: string | null | undefined;
+  mentionHostId: RunOnMentionHost;
 }
 
 const NO_HOSTS: readonly RunOnHost[] = [];

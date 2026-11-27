@@ -7,6 +7,10 @@ import type { ProviderCommand } from "@bb/server-contract";
 import type { ProviderCommandSuggestion } from "@bb/client-core";
 import { buildProviderPromptActionProps } from "@bb/client-core";
 import { usePromptMentionTriggers } from "@/hooks/usePromptMentions";
+import {
+  runOnMentionOverride,
+  type RunOnMentionHost,
+} from "@/fork/run-on/mentions";
 
 interface UseComposerTypeaheadArgs {
   projectId: string;
@@ -21,7 +25,7 @@ interface UseComposerTypeaheadArgs {
   threadProviderCommands?: readonly ProviderCommand[] | null;
   builtinCommands?: readonly ProviderCommandSuggestion[];
   resolveMentionLink: PromptMentionLinkResolver;
-  mentionHostId?: string | null;
+  mentionHostId?: RunOnMentionHost;
 }
 
 interface UseComposerTypeaheadResult {
@@ -57,10 +61,9 @@ export function useComposerTypeahead({
         source: {
           projectId: mentionSourceProjectId,
           currentThreadId,
+          environmentId,
           threadStorageThreadId: currentThreadId,
-          ...(mentionHostId === undefined
-            ? { environmentId }
-            : { environmentId: null, hostId: mentionHostId }),
+          ...runOnMentionOverride(mentionHostId),
         },
         resolveLink: resolveMentionLink,
       },

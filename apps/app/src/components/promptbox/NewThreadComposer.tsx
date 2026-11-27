@@ -149,6 +149,7 @@ import {
   providerInputsScopeKey,
   useRunOnComposer,
 } from "@/fork/run-on/useRunOnComposer";
+import { runOnMentionOverride } from "@/fork/run-on/mentions";
 import {
   MACHINE_SERVER_ACCESS_TITLE,
   machineServerAccessBlockedReason,
@@ -1804,9 +1805,9 @@ export function NewThreadComposer({
     () => ({
       projectId: mentionSourceProjectId,
       environmentId: reuseEnvironmentId,
-      hostId:
-        runOn.mentionHostId === undefined ? projectHostId : runOn.mentionHostId,
+      hostId: projectHostId,
       threadStorageThreadId: panelThreadId ?? undefined,
+      ...runOnMentionOverride(runOn.mentionHostId),
     }),
     [
       mentionSourceProjectId,

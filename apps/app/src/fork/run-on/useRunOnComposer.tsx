@@ -1,3 +1,4 @@
+import type { RunOnMentionHost } from "./mentions";
 import { PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID } from "@bb/client-core";
 import { Icon } from "@bb/shared-ui/icon";
 import type { JsonValue } from "@get-bb/plugin-sdk";
@@ -51,7 +52,7 @@ export interface RunOnComposer {
 
   rowItems: ReactNode;
 
-  mentionHostId: string | null | undefined;
+  mentionHostId: RunOnMentionHost;
 
   submit: (
     extras: ComposerSubmitExtras,
