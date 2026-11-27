@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { JsonValue } from "@get-bb/plugin-sdk/app";
@@ -104,7 +104,6 @@ describe("new thread (5.3)", () => {
 
   it("picks a named account into the submission, with no thread RPC", async () => {
     const { slot, setSubmission } = draft("claude-code");
-    await waitFor(() => expect(setSubmission).toHaveBeenCalledWith(null));
     await openMenu(slot, /^Account: Auto$/u);
     expect(slot.getByText(DRAFT_TITLE)).toBeTruthy();
     expect(slot.queryByRole("menuitemradio", { name: /Codex X/u })).toBeNull();
@@ -163,9 +162,38 @@ describe("new thread (5.3)", () => {
       <ThreadAccountRunRowItem scope={scope("codex")} compact={false} setSubmission={setSubmission} />,
     );
     expect(await slot.findByRole("button", { name: "Account: Auto" })).toBeTruthy();
-    expect(setSubmission.mock.calls).toEqual([[null]]);
+    // Core drops this plugin's data on a provider change; the item adds nothing.
+    expect(setSubmission.mock.calls).toEqual([]);
     await openMenu(slot, /^Account: Auto$/u);
     expect(await slot.findByRole("menuitemradio", { name: /Codex X/u })).toBeTruthy();
+  });
+
+  it("a remount restores the pick from core's draft without writing it again", async () => {
+    let held: JsonValue | null = null;
+    const setSubmission = vi.fn((data: JsonValue | null) => {
+      held = data;
+      return true;
+    });
+    const first = renderItem({ scope: scope("claude-code"), compact: false, submission: held, setSubmission }, rpc);
+    await openMenu(first, /^Account: Auto$/u);
+    fireEvent.click(await first.findByRole("menuitemradio", { name: /Work A/u }));
+    await first.findByRole("button", { name: "Account: Work A" });
+    cleanup();
+    setSubmission.mockClear();
+    const again = renderItem({ scope: scope("claude-code"), compact: false, submission: held, setSubmission }, rpc);
+    expect(await again.findByRole("button", { name: "Account: Work A" })).toBeTruthy();
+    expect(setSubmission).not.toHaveBeenCalled();
+    expect(held).toEqual({ policy: { mode: "named", accountId: ID_A } });
+    await openMenu(again, /^Account: Work A$/u);
+    expect(again.getByRole("menuitemradio", { name: /Work A/u }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("a foreign plugin's draft (null for this item) mounts on Auto and is left alone", async () => {
+    const setSubmission = vi.fn((_data: JsonValue | null) => true);
+    const slot = renderItem({ scope: scope("claude-code"), compact: false, submission: null, setSubmission }, rpc);
+    expect(await slot.findByRole("button", { name: "Account: Auto" })).toBeTruthy();
+    await act(async () => {});
+    expect(setSubmission).not.toHaveBeenCalled();
   });
 
   it("a refused submission shows why and keeps Auto", async () => {

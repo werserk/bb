@@ -1,27 +1,13 @@
 import type { MessageDispatchHookContext, MessageDispatchHookDecision } from "@get-bb/plugin-sdk";
-import { z } from "zod";
 import type { ThreadAccountSetInput, ThreadAccountSetResult } from "./thread-account.js";
-import { ON_LIMIT_RULES, type PolicyCaller, type ThreadPolicy } from "./thread-policy.js";
+import type { PolicyCaller, ThreadPolicy } from "./thread-policy.js";
+import { dispatchAccountSchema, type DispatchAccount } from "./contracts.js";
 
 // The account a new thread's composer chose, applied on that thread's first
 // dispatch (docs/THREAD_ACCOUNT_V1.md, "New thread account"). It is a
 // decision that stores a policy, never a hold.
 
-export const dispatchAccountSchema = z
-  .object({
-    policy: z.discriminatedUnion("mode", [
-      z.object({ mode: z.literal("auto") }).strict(),
-      z
-        .object({
-          mode: z.literal("named"),
-          accountId: z.string().min(1).max(128),
-          onLimit: z.enum(ON_LIMIT_RULES).optional(),
-        })
-        .strict(),
-    ]),
-  })
-  .strict();
-export type DispatchAccount = z.infer<typeof dispatchAccountSchema>;
+export { dispatchAccountSchema, type DispatchAccount } from "./contracts.js";
 
 export interface DispatchAccountDeps {
   pluginId: string;

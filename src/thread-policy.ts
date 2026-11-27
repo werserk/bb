@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
-import type { PoolProvider } from "./contracts.js";
+import { ON_LIMIT_RULES, type OnLimit, type PoolProvider } from "./contracts.js";
 import {
   RECONCILE_BATCH,
   lookUpThreads,
@@ -12,8 +12,7 @@ import {
 // limit. No row means `auto` at revision 0. Every change bumps the revision,
 // so concurrent writers compare-and-set.
 
-export const ON_LIMIT_RULES = ["fallback-auto", "stop"] as const;
-export type OnLimit = (typeof ON_LIMIT_RULES)[number];
+export { ON_LIMIT_RULES, type OnLimit } from "./contracts.js";
 
 export type ThreadPolicy =
   | { mode: "auto"; revision: number; updatedAt: number | null }

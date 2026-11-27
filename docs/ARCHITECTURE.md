@@ -284,10 +284,14 @@ the U1 menu on the thread's own store. On a new thread `draft.ts` holds the
 choice locally, lists `account.list` for the thread's provider (`claude-code`
 to Claude, `codex` to Codex, hidden otherwise) with the same named-account rule
 `set` applies on the first dispatch, and hands the policy to core with
-`setSubmission` (null for Auto). It starts on Auto, and again on a project or
-provider change. `namedAccountState` and `pooledProvider` live in `quota.ts` and
-`contracts.ts` for this: the app cannot import `thread-policy.ts` or
-`thread-account.ts`, which load node-only modules.
+`setSubmission` (null for Auto). On mount it shows what core's draft holds for
+the pool (the `submission` prop), so a pick survives a remount; the data carries
+only the account id, so the name comes from the account list. Data the hook
+would not parse is cleared. Core drops the data on a project or provider
+change, so the chip then starts on Auto. `namedAccountState`, `pooledProvider`,
+`dispatchAccountSchema` and `ON_LIMIT_RULES` live in `quota.ts` and
+`contracts.ts` for this: the app cannot import `thread-policy.ts`,
+`thread-account.ts` or `dispatch-account.ts`, which load node-only modules.
 
 ## Audit log
 

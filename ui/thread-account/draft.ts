@@ -2,8 +2,7 @@
 // id. The choice stays local until the send, where it travels as this
 // plugin's submission; the message.dispatch hook applies it on the thread's
 // first dispatch (src/dispatch-account.ts, docs/THREAD_ACCOUNT_V1.md).
-import type { AccountSummary, PoolProvider } from "../../src/contracts.js";
-import type { DispatchAccount } from "../../src/dispatch-account.js";
+import { dispatchAccountSchema, type AccountSummary, type DispatchAccount, type PoolProvider } from "../../src/contracts.js";
 import { blockingResetAt, NAMED_LIMIT_THRESHOLD, namedAccountState } from "../../src/quota.js";
 import { setInputFor, type PickTarget } from "./pick.js";
 import { NOTE_MS, type ThreadAccountSnapshot } from "./store.js";
@@ -24,6 +23,8 @@ export const DRAFT_AUTO_DETAILS = "Auto. The pool picks the account and fails ov
 export const DRAFT_REFUSED_NOTE =
   "This send already carries another plugin's data, so the account stays Auto.";
 export const DRAFT_ACCOUNTS_ERROR_NOTE = "Could not read the pool's accounts.";
+/** A restored pin before the account list says its name. */
+export const DRAFT_PINNED_LABEL = "Pinned account";
 
 export function draftGet(provider: PoolProvider, policy: ThreadAccountGet["policy"]): ThreadAccountGet {
   return {
@@ -74,8 +75,24 @@ export function draftAccountList(
   };
 }
 
+/**
+ * Core's draft data carries only the account id, so a pin restored on mount
+ * takes its name from the account list: a placeholder until the list loads,
+ * the removed-account label when the list no longer has it.
+ */
+function labelled(snapshot: ThreadAccountSnapshot): ThreadAccountGet | null {
+  const get = snapshot.get;
+  if (get === null || get.policy.mode !== "named" || get.policy.accountLabel !== null) return get;
+  const { accountId } = get.policy;
+  const label =
+    snapshot.accounts === null
+      ? DRAFT_PINNED_LABEL
+      : (snapshot.accounts.accounts.find((item) => item.accountId === accountId)?.accountLabel ?? null);
+  return { ...get, policy: { ...get.policy, accountLabel: label } };
+}
+
 export function draftView(snapshot: ThreadAccountSnapshot, now: number): ThreadAccountView {
-  const view = threadAccountView({ get: snapshot.get, accounts: snapshot.accounts, error: null, dismissedId: null, now });
+  const view = threadAccountView({ get: labelled(snapshot), accounts: snapshot.accounts, error: null, dismissedId: null, now });
   return view.state === "auto-idle" ? { ...view, details: DRAFT_AUTO_DETAILS } : view;
 }
 
@@ -124,12 +141,28 @@ export class DraftAccountStore {
   }
 
   /**
-   * Mount: the chip starts on Auto, so core's draft must not keep a choice
-   * from an earlier mount that the chip no longer shows.
+   * Mount: show what core's draft holds for this plugin, so a pick survives a
+   * remount. Data the hook would not parse is cleared, so the chip and the
+   * send agree on Auto.
    */
-  start(): void {
-    this.submit(null);
-    this.held = false;
+  start(submission: unknown): void {
+    const parsed = dispatchAccountSchema.safeParse(submission);
+    const policy = parsed.success ? parsed.data.policy : null;
+    if (policy !== null && policy.mode === "named") {
+      this.held = true;
+      this.update({
+        get: draftGet(this.provider, {
+          mode: "named",
+          accountId: policy.accountId,
+          accountLabel: null,
+          onLimit: policy.onLimit ?? "fallback-auto",
+        }),
+      });
+    } else {
+      if (submission !== null && submission !== undefined) this.submit(null);
+      this.held = false;
+      this.update({ get: draftGet(this.provider, AUTO) });
+    }
     void this.fetchAccounts();
   }
 

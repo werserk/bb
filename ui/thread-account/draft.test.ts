@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAccountSchema, type DispatchAccount } from "../../src/dispatch-account.js";
 import {
   DRAFT_ACCOUNTS_ERROR_NOTE,
+  DRAFT_PINNED_LABEL,
   DRAFT_REFUSED_NOTE,
   DraftAccountStore,
   draftAccountList,
   draftView,
 } from "./draft.js";
 import { ID_A, ID_B, ID_C, summaries, summary, T0 } from "./fixtures.js";
+import { REMOVED_ACCOUNT } from "./view.js";
 
 afterEach(() => vi.useRealTimers());
 
@@ -53,10 +55,10 @@ describe("draftAccountList", () => {
 });
 
 describe("DraftAccountStore", () => {
-  it("starts on Auto at revision 0 with no thread, and clears core's draft", async () => {
+  it("starts on Auto at revision 0 with no thread when core holds nothing, and leaves core's draft alone", async () => {
     const { store, submit, load } = setup();
-    store.start();
-    expect(submit).toHaveBeenCalledWith(null);
+    store.start(null);
+    expect(submit).not.toHaveBeenCalled();
     expect(load).toHaveBeenCalledTimes(1);
     const get = store.getSnapshot().get;
     expect(get).toMatchObject({
@@ -73,7 +75,7 @@ describe("DraftAccountStore", () => {
 
   it("a named pick submits the policy the dispatch hook parses", async () => {
     const { store, submit } = setup();
-    store.start();
+    store.start(null);
     await store.pick({ kind: "named", accountId: ID_A, accountLabel: "Work A" });
     const data = lastSubmission(submit);
     expect(data).toEqual({ policy: { mode: "named", accountId: ID_A } });
@@ -85,6 +87,45 @@ describe("DraftAccountStore", () => {
       onLimit: "fallback-auto",
     });
     expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: "Work A" });
+  });
+
+  it("restores core's draft pin on mount and names it from the account list", async () => {
+    const { store, submit } = setup();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const load = vi.fn(async () => {
+      await gate;
+      return summaries();
+    });
+    store.setSources(submit, load);
+    store.start({ policy: { mode: "named", accountId: ID_A, onLimit: "stop" } });
+    expect(submit).not.toHaveBeenCalled();
+    expect(store.getSnapshot().get?.policy).toEqual({ mode: "named", accountId: ID_A, accountLabel: null, onLimit: "stop" });
+    expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: DRAFT_PINNED_LABEL });
+    release();
+    await vi.waitFor(() => expect(store.getSnapshot().accounts).not.toBeNull());
+    expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: "Work A" });
+    // The restored pin is core's data: a refused re-pick clears it.
+    submit.mockImplementation(() => false);
+    await store.pick({ kind: "on-limit", onLimit: "fallback-auto" });
+    expect(submit.mock.calls.at(-1)).toEqual([null]);
+  });
+
+  it("a restored pin the account list no longer has reads as removed", async () => {
+    const { store } = setup();
+    store.start({ policy: { mode: "named", accountId: "gone" } });
+    await vi.waitFor(() => expect(store.getSnapshot().accounts).not.toBeNull());
+    expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: REMOVED_ACCOUNT });
+    expect(store.getSnapshot().get?.policy).toMatchObject({ onLimit: "fallback-auto" });
+  });
+
+  it("clears draft data the dispatch hook would not parse and stays on Auto", () => {
+    for (const bad of [{ policy: { mode: "named" } }, { policy: { mode: "auto" } }, "x"]) {
+      const { store, submit } = setup();
+      store.start(bad);
+      expect(submit.mock.calls).toEqual([[null]]);
+      expect(store.getSnapshot().get?.policy).toEqual({ mode: "auto" });
+    }
   });
 
   it("an on-limit pick keeps the account and submits the rule", async () => {

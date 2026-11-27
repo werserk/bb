@@ -12,10 +12,16 @@ export interface ExperimentalComposerRunRowItemProps {
   /** At compact widths the item should render icon-first. */
   compact: boolean;
   /**
-   * New thread only. This plugin's data for the send's single
-   * `pluginSubmission`; null clears it. False when core refuses it.
+   * New thread only. The data core holds for this plugin in the draft, or
+   * null; read on mount to restore a pick after a remount.
    */
-  setSubmission?(data: JsonValue | null): boolean;
+  submission?: JsonValue | null;
+  /**
+   * New thread only. This plugin's data for the send's single
+   * `pluginSubmission`; null clears it. False when core refuses it. A plain
+   * function, safe to call detached.
+   */
+  setSubmission?: (data: JsonValue | null) => boolean;
 }
 
 export interface ExperimentalComposerRunRowItemRegistration {

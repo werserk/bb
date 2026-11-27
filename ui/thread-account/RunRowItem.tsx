@@ -105,10 +105,12 @@ function OpenThreadAccount({ threadId, compact }: { threadId: string; compact: b
 function DraftAccountChip({
   provider,
   compact,
+  submission,
   setSubmission,
 }: {
   provider: PoolProvider;
   compact: boolean;
+  submission: JsonValue | null | undefined;
   setSubmission: (data: JsonValue | null) => boolean;
 }) {
   const rpc = useRpc<typeof accountPoolRpcContract>();
@@ -116,29 +118,33 @@ function DraftAccountChip({
   const submit: SetSubmission = (data) => setSubmission(data as JsonValue | null);
   const load: LoadAccounts = () => rpc.call("account.list", null);
   const [store] = useState(() => new DraftAccountStore(provider, submit, load));
+  // Core's draft as it was at mount; later picks go through the store.
+  const [initial] = useState(submission);
   store.setSources(submit, load);
   useEffect(() => {
-    store.start();
+    store.start(initial);
     return () => store.stop();
-  }, [store]);
+  }, [store, initial]);
   useRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, () => store.onAccountsChanged());
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const account: PickerAccount = { store, snapshot, view: draftView(snapshot, Date.now()) };
   return <AccountChipMenu account={account} compact={compact} title={DRAFT_TITLE} codexNote={false} />;
 }
 
-export function ThreadAccountRunRowItem({ scope, compact, setSubmission }: ExperimentalComposerRunRowItemProps) {
+export function ThreadAccountRunRowItem({ scope, compact, submission, setSubmission }: ExperimentalComposerRunRowItemProps) {
   if (scope.kind === "thread") return <OpenThreadAccount threadId={scope.threadId} compact={compact} />;
   const provider = scope.providerId === null ? null : pooledProvider(scope.providerId);
   // Hidden for a provider the pool does not route, and where core cannot
   // carry the choice: the chip never shows an account the send would not use.
   if (provider === null || setSubmission === undefined) return null;
-  // A new key on a project or provider change starts a fresh draft on Auto.
+  // A new key on a project or provider change starts a fresh draft; core drops
+  // this plugin's data on those changes, so it mounts on Auto.
   return (
     <DraftAccountChip
       key={`${scope.projectId ?? ""}\u0000${scope.providerId}`}
       provider={provider}
       compact={compact}
+      submission={submission}
       setSubmission={setSubmission}
     />
   );
