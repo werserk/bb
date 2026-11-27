@@ -10,7 +10,7 @@ import {
 import { BindingStore, canonicalPath, isReleased, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
 import { safeDecide } from "./dispatch.js";
-import { accountWorkersAppContract, workspaceTag, type ThreadWorkspace, type WorkerChoice } from "./app-contract.js";
+import { accountWorkersAppContract, workspaceTag, type ThreadWorkspace, type WorkerChoice, type WorkspaceOption } from "./app-contract.js";
 import { noteProviderStart, resolveProjectWorkspace, WorkspaceProblem, workerProvider } from "./provider.js";
 import { ARCHIVE_UNDO_MS, isLive, Releaser, type ReleaseOutcome, type ThreadState } from "./release.js";
 import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
@@ -256,27 +256,46 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     }
   }
 
+  function workspacesFor<H extends { id: string }>(agent: H, hosts: H[], sources: { type: string; hostId: string; path: string }[]) {
+    return sources.flatMap((source) => {
+      const workspace = hosts.find((h) => h.id === source.hostId);
+      return source.type !== "local_path" || workspace === undefined || workspace.id === agent.id ? [] : [{ workspace, root: source.path }];
+    });
+  }
+
   bb.rpc.register(accountWorkersAppContract, {
     async choices({ projectId }) {
       const [hosts, sources] = await Promise.all([workspaceDeps.listHosts(), workspaceDeps.projectSources(projectId)]);
-      const byId = new Map(hosts.map((h) => [h.id, h]));
-      const choices: WorkerChoice[] = [];
-      for (const agent of hosts) {
-        for (const source of sources) {
-          const workspace = byId.get(source.hostId);
-          if (source.type !== "local_path" || workspace === undefined || workspace.id === agent.id) continue;
+      const choices: WorkerChoice[] = hosts.flatMap((agent) =>
+        workspacesFor(agent, hosts, sources).map(({ workspace, root }) => {
           const offline = [agent, workspace].find((h) => h.status !== "connected");
-          choices.push({
+          return {
             agentHostId: agent.id,
             agentHostName: agent.name,
             workspaceHostId: workspace.id,
             workspaceHostName: workspace.name,
-            root: source.path,
+            root,
             disabledReason: offline === undefined ? null : `${offline === agent ? "Worker" : "Workspace machine"} ${offline.name} is ${offline.status}`,
-          });
-        }
-      }
+          };
+        }),
+      );
       return { choices };
+    },
+    async workspaceOptions({ threadId }) {
+      const binding = store.byThread(threadId);
+      if (binding === null || binding.owner !== "provider") return { options: [] };
+      const thread = await bb.sdk.threads.get({ threadId });
+      const [hosts, sources] = await Promise.all([workspaceDeps.listHosts(), workspaceDeps.projectSources(thread.projectId)]);
+      const agent = hosts.find((h) => h.id === binding.workerHostId);
+      if (agent === undefined) return { options: [] };
+      const options: WorkspaceOption[] = workspacesFor(agent, hosts, sources).map(({ workspace, root }) => ({
+        workspaceHostId: workspace.id,
+        workspaceHostName: workspace.name,
+        root,
+        current: workspace.id === binding.workspaceHostId,
+        disabledReason: workspace.status === "connected" ? null : `Workspace machine ${workspace.name} is ${workspace.status}`,
+      }));
+      return { options };
     },
     async threadWorkspace({ threadId }) {
       const binding = store.byThread(threadId);

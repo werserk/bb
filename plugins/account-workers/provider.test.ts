@@ -280,6 +280,27 @@ describe("app RPCs", () => {
     );
     expect(spawned.exitCode).toBe(0);
     expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_cli" })).toEqual({ workspace: null });
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_cli" })).toEqual({ options: [] });
     await expect(host.harness.callRpc("rebind", { threadId: "thr_cli", workspaceHostId: WORKSPACE })).rejects.toThrow(/bound by spawn/);
+  });
+
+  it("offers the thread's workspace machines, marks the current one and the offline ones", async () => {
+    const host = await load(rpc());
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_none" })).toEqual({ options: [] });
+    await provider(host).create(createContext());
+    const option = { workspaceHostId: WORKSPACE, workspaceHostName: "workspace", root: ROOT, current: true, disabledReason: null };
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_new" })).toEqual({ options: [option] });
+    host.harness.sdk.stub("hosts.list", async () => hosts("disconnected"));
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_new" })).toEqual({
+      options: [{ ...option, disabledReason: "Workspace machine workspace is disconnected" }],
+    });
+    const other = makeHostResponse({ id: "host-other", name: "other", status: "connected" });
+    host.harness.sdk.stub("hosts.list", async () => [...hosts(), other]);
+    host.harness.sdk.stub("projects.get", async () => ({ id: "p1", sources: [...sources, { ...sources[0], id: "src2", hostId: "host-other", path: "/o" }] }) as never);
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_new" })).toEqual({
+      options: [option, { workspaceHostId: "host-other", workspaceHostName: "other", root: "/o", current: false, disabledReason: null }],
+    });
+    host.harness.sdk.stub("hosts.list", async () => hosts().filter((h) => h.id !== WORKER));
+    expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_new" })).toEqual({ options: [] });
   });
 });

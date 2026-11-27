@@ -7,18 +7,9 @@ import {
   type PluginEnvironmentProviderInputsProps,
 } from "@get-bb/plugin-sdk/app";
 import { accountWorkersAppContract, type WorkerChoice } from "./app-contract.js";
+import { readInputs, type WorkerInputsValue } from "./inputs.js";
 import { WORKER_PROVIDER_ID } from "./provider-id.js";
-
-interface WorkerInputsValue {
-  workspaceHostId: string;
-  root: string;
-}
-
-export function readInputs(value: JsonValue | null): WorkerInputsValue | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const { workspaceHostId, root } = value;
-  return typeof workspaceHostId === "string" && typeof root === "string" ? { workspaceHostId, root } : null;
-}
+import { registerRunOn } from "./run-on.js";
 
 const matches = (choice: WorkerChoice, inputs: WorkerInputsValue | null) =>
   inputs !== null && choice.workspaceHostId === inputs.workspaceHostId && choice.root === inputs.root;
@@ -98,4 +89,5 @@ export default definePluginApp((app) => {
     environmentProviderId: WORKER_PROVIDER_ID,
     component: WorkspaceInputs,
   });
+  registerRunOn(app.slots);
 });

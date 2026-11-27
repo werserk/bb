@@ -10,7 +10,7 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 
 ## From the new-thread picker
 
-Choose **On a worker** as the environment, the worker as the machine, and the workspace (the project's folder on another machine) in the control next to it. The thread starts with the same scratch directory and workspace tools as `spawn`; archiving or deleting it releases the scratch directory through BB's environment cleanup.
+Choose **On a worker** as the environment, the worker as the machine, and the workspace (the project's folder on another machine) in the control next to it. The thread starts with the same scratch directory and workspace tools as `spawn`; archiving or deleting it releases the scratch directory through BB's environment cleanup. On a BB build with the Run on picker, the worker and workspace pair is one row of that picker, and the open thread's environment menu has **Change workspace…** to move its tools to another machine with the project's source.
 
 ## For agents and scripts
 

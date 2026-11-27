@@ -30,6 +30,17 @@ const threadWorkspaceSchema = z
   .strict();
 export type ThreadWorkspace = z.infer<typeof threadWorkspaceSchema>;
 
+const workspaceOptionSchema = z
+  .object({
+    workspaceHostId: z.string(),
+    workspaceHostName: z.string(),
+    root: z.string(),
+    current: z.boolean(),
+    disabledReason: z.string().nullable(),
+  })
+  .strict();
+export type WorkspaceOption = z.infer<typeof workspaceOptionSchema>;
+
 export const accountWorkersAppContract = defineRpcContract({
   choices: {
     input: z.object({ projectId: z.string().min(1) }).strict(),
@@ -38,6 +49,11 @@ export const accountWorkersAppContract = defineRpcContract({
   threadWorkspace: {
     input: z.object({ threadId: z.string().min(1) }).strict(),
     output: z.object({ workspace: threadWorkspaceSchema.nullable() }).strict(),
+    tags: (input) => [workspaceTag(input.threadId)],
+  },
+  workspaceOptions: {
+    input: z.object({ threadId: z.string().min(1) }).strict(),
+    output: z.object({ options: z.array(workspaceOptionSchema) }).strict(),
     tags: (input) => [workspaceTag(input.threadId)],
   },
   rebind: {
