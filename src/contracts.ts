@@ -63,6 +63,15 @@ export interface AccountPoolConfigController {
 
 export const providerSchema = z.enum(["claude", "codex"]);
 export type PoolProvider = z.infer<typeof providerSchema>;
+
+/** The pool provider of a bb provider id; null when the pool does not route it. */
+export function pooledProvider(providerId: string): PoolProvider | null {
+  return providerId === "claude-code"
+    ? "claude"
+    : providerId === "codex"
+      ? "codex"
+      : null;
+}
 export const accountKindSchema = z.enum(["oauth", "api-key"]);
 export const modelFamilySchema = z.enum([
   "fable",

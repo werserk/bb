@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import type { UseThreadAccount } from "./hooks.js";
+import type { PickerAccount } from "./hooks.js";
 import type { ThreadAccountGet } from "./view.js";
 import {
   CODEX_PICKER_NOTE,
@@ -41,7 +41,7 @@ interface PendingConfirm {
 export type ChooseAccount = (target: PickTarget, returnFocus?: HTMLElement | null) => void;
 
 /** Pick handling shared by every picker of a thread: confirm, then `set`. */
-export function useAccountPick(account: UseThreadAccount): {
+export function useAccountPick(account: PickerAccount): {
   choose: ChooseAccount;
   pending: PendingConfirm | null;
   dialog: ReactNode;
@@ -176,8 +176,10 @@ function Heading({ children }: { children: ReactNode }) {
   return <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">{children}</div>;
 }
 
+export const THREAD_ACCOUNT_TITLE = "Account for this thread";
+
 export interface AccountMenuProps {
-  account: UseThreadAccount;
+  account: PickerAccount;
   choose: ChooseAccount;
   /** Called before Radix moves focus back to the trigger on close. */
   confirmPending: () => boolean;
@@ -185,10 +187,26 @@ export interface AccountMenuProps {
   align?: "start" | "end";
   /** Text above the lists: the row's details line. */
   header?: string;
+  /** Heading of the account list. */
+  title?: string;
+  /** Drawer title at compact widths. */
+  mobileTitle?: string;
+  /** The Codex session note; off where no session exists yet (a new thread). */
+  codexNote?: boolean;
 }
 
 /** A DropdownMenu with the picker content on the given trigger (asChild). */
-export function AccountMenu({ account, choose, confirmPending, trigger, align = "end", header }: AccountMenuProps) {
+export function AccountMenu({
+  account,
+  choose,
+  confirmPending,
+  trigger,
+  align = "end",
+  header,
+  title = THREAD_ACCOUNT_TITLE,
+  mobileTitle = title,
+  codexNote = true,
+}: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const baseId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -211,7 +229,7 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align={align}
-        mobileTitle="Account for this thread"
+        mobileTitle={mobileTitle}
         className="w-72 max-w-[calc(100vw-2rem)]"
         onCloseAutoFocus={(event) => {
           if (confirmPending()) event.preventDefault();
@@ -232,7 +250,7 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
         ) : null}
         {get === null || !view.canPick ? null : (
           <>
-            <Heading>Account for this thread</Heading>
+            <Heading>{title}</Heading>
             <div role="group" aria-label="Account" className="max-h-64 overflow-y-auto">
               <RadioRow
                 checked={get.policy.mode === "auto"}
@@ -278,7 +296,7 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
                 />
               ))}
             </div>
-            {get.provider === "codex" ? (
+            {codexNote && get.provider === "codex" ? (
               <>
                 <DropdownMenuSeparator />
                 <p className="flex gap-2 px-2 py-1.5 text-xs text-muted-foreground">

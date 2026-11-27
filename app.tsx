@@ -41,6 +41,12 @@ import { Button } from "@/components/ui/button";
 import { AccountCardRow } from "./ui/thread-account/AccountCardRow.js";
 import { LimitCard } from "./ui/thread-account/LimitCard.js";
 import {
+  RUN_ROW_ITEM_ID,
+  RUN_ROW_ITEM_ORDER,
+  ThreadAccountRunRowItem,
+} from "./ui/thread-account/RunRowItem.js";
+import { registerRunRowItem } from "./ui/thread-account/run-row-slot.js";
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -72,7 +78,6 @@ import type {
   FamilyQuota,
   LimitWindow,
   ModelFamily,
-  PoolAvailability,
   PoolProvider,
   PoolStatus,
 } from "./src/contracts.js";
@@ -2050,5 +2055,13 @@ export default definePluginApp((app) => {
     id: "thread-account",
     scopes: ["thread"],
     banners: [{ id: "limit", chrome: "card", component: LimitCard }],
+  });
+  // The account chip after Run on, in the new-thread and open-thread rows.
+  // Only a fork core with the run-row slot has it; stock skips it.
+  registerRunRowItem(app.slots, {
+    version: 1,
+    id: RUN_ROW_ITEM_ID,
+    order: RUN_ROW_ITEM_ORDER,
+    component: ThreadAccountRunRowItem,
   });
 });

@@ -338,3 +338,34 @@ export function retryAfterMilliseconds(
   const date = Date.parse(value);
   return Number.isNaN(date) ? 1_000 : Math.max(0, date - now);
 }
+
+// A named account is at its limit only at the real limit, not at the pool's
+// switch threshold (coordinator decision D1): the owner chose that account.
+export const NAMED_LIMIT_THRESHOLD = 1;
+
+export type NamedAccountState = "ok" | "deleted" | "unavailable" | "limit";
+
+// Why a named account cannot serve now. `unavailable` is temporary or the
+// owner's own switch (disabled, signed out, blocked, restricted) and never
+// changes the stored policy; `limit` and `deleted` may (D2).
+export function namedAccountState(
+  account: Account | null,
+  quota: AccountQuota | null,
+  family: ModelFamily | null,
+  now: number,
+): NamedAccountState {
+  if (account === null || quota === null) return "deleted";
+  if (
+    !account.enabled ||
+    quota.error !== null ||
+    (account.provider === "claude" && quota.accessBlocked !== null) ||
+    isUsageRestricted(quota, now)
+  )
+    return "unavailable";
+  if (hasExtraUsage(quota)) return "ok";
+  const exhausted =
+    family === null
+      ? isSharedQuotaExhausted(quota, NAMED_LIMIT_THRESHOLD, now)
+      : isQuotaExhausted(quota, family, NAMED_LIMIT_THRESHOLD, now);
+  return exhausted ? "limit" : "ok";
+}

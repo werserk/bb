@@ -274,6 +274,21 @@ reason ([contract](THREAD_ACCOUNT_V1.md#new-thread-account)). It answers at
 once and never waits, so it is not the retired native-cell hold; on a reattempt
 an equal stored policy makes it a no-op.
 
+The choice comes from the account chip in the composer's run row, after Run on
+(`ui/thread-account/RunRowItem.tsx`). Its slot,
+`app.slots.experimental_composerRunRowItem`, exists only on the fork core
+(openspec `core-run-on-picker`) and not in the plugin's SDK, so
+`run-row-slot.ts` declares the shapes locally and registers only when the slot
+is a function; a stock core shows nothing new. On an open thread the chip opens
+the U1 menu on the thread's own store. On a new thread `draft.ts` holds the
+choice locally, lists `account.list` for the thread's provider (`claude-code`
+to Claude, `codex` to Codex, hidden otherwise) with the same named-account rule
+`set` applies on the first dispatch, and hands the policy to core with
+`setSubmission` (null for Auto). It starts on Auto, and again on a project or
+provider change. `namedAccountState` and `pooledProvider` live in `quota.ts` and
+`contracts.ts` for this: the app cannot import `thread-policy.ts` or
+`thread-account.ts`, which load node-only modules.
+
 ## Audit log
 
 `src/audit-log.ts`, `pool_audit(id, ts, reason, provider, thread_id, host_id,

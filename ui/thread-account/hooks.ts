@@ -15,14 +15,22 @@ import {
   getStore,
   retainStore,
   type ThreadAccountCaller,
+  type ThreadAccountSnapshot,
   type ThreadAccountStore,
 } from "./store.js";
 import { threadAccountView, type ThreadAccountView } from "./view.js";
 
-export interface UseThreadAccount {
-  store: ThreadAccountStore;
-  snapshot: ReturnType<ThreadAccountStore["getSnapshot"]>;
+/** What a picker needs from a store: a thread's own, or a new thread's draft. */
+export type AccountPickStore = Pick<ThreadAccountStore, "pick" | "pickerOpened" | "pickerClosed" | "retry">;
+
+export interface PickerAccount {
+  store: AccountPickStore;
+  snapshot: ThreadAccountSnapshot;
   view: ThreadAccountView;
+}
+
+export interface UseThreadAccount extends PickerAccount {
+  store: ThreadAccountStore;
 }
 
 export function useThreadAccount(threadId: string): UseThreadAccount {
