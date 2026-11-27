@@ -248,6 +248,7 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
               {
                 ok: true,
                 delivery: "sent",
+                messageSequence: parsed.data.details.requested.sequence,
                 submissionIds: [variables.clientSubmissionId],
                 requested: parsed.data.details.requested,
               },

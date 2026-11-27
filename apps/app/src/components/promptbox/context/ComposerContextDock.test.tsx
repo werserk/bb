@@ -488,7 +488,6 @@ describe("composer context selection", () => {
     expect(screen.getByText("Queued body")).toBeTruthy();
     const chip = screen.getByRole("button", { name: /^Queue/ });
     expect(chip.getAttribute("aria-expanded")).toBe("true");
-    // a later rename back still follows the sources
     rerender(<Toggle present />);
     expect(screen.getByText("Queued body")).toBeTruthy();
   });

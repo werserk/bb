@@ -12,11 +12,6 @@ import {
 export const questionResponseClass =
   "ml-auto min-w-0 w-[calc(100%-0.75rem)] max-w-xl space-y-2 rounded-xl rounded-tr-sm border border-timeline-accent/30 bg-timeline-accent/14 px-3 pt-2.5 pb-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent";
 
-/**
- * A withdrawal is a fact about a card, not something the owner said, so it
- * sits left-aligned in neutral grey instead of the right-aligned accent bubble
- * an answer gets.
- */
 export const questionWithdrawnClass =
   "min-w-0 w-full max-w-xl space-y-2 rounded-xl border border-border bg-transparent px-3 pt-2.5 pb-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-timeline-accent";
 

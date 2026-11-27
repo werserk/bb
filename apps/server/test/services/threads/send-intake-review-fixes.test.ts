@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { sql, and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  getThreadSendIntake, listEvents, listQueuedThreadMessages, projectAttachments, recordProjectAttachment, reserveThreadSendIntake,
+  getThreadSendIntake, listQueuedThreadMessages, projectAttachments, recordProjectAttachment, reserveThreadSendIntake,
   setExperiments, getProjectAttachment,
 } from "@bb/db";
+import { listEvents } from "@bb/db/testing";
 import { createDeferredPromise } from "@bb/test-helpers";
 import type { SendMessageRequest } from "@bb/server-contract";
 import { deliverLegacyDeferredThreadMessages } from "../../../src/services/threads/legacy-deferred-messages.js";
@@ -60,7 +61,7 @@ describe("M2: an unfinished cross-project copy is reclaimed after restart", () =
         h.db.update(projectAttachments).set({ deletionClaimedAt: Date.now() }).where(and(eq(projectAttachments.projectId, project.id), eq(projectAttachments.storedPath, path))).run();
       reserveThreadSendIntake(h.db, { id, threadId: thread.id, clientSubmissionId: request.clientSubmissionId!, envelope: JSON.stringify(request), fingerprint: "orphan", now: Date.now() });
       const entered = createDeferredPromise<void>(); const held = createDeferredPromise<void>();
-      const service = createThreadSendIntakeService(h.deps, async () => { entered.resolve(); await held.promise; return { ok: true, delivery: "sent" }; });
+      const service = createThreadSendIntakeService(h.deps, async () => { entered.resolve(); await held.promise; return { ok: true, delivery: "sent", messageSequence: null }; });
       try {
         service.recover(); await entered.promise;
         const row = getThreadSendIntake(h.db, id)!;

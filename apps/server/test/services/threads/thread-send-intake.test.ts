@@ -35,7 +35,7 @@ describe("raw send intake custody", () => {
       const service = createThreadSendIntakeService(h.deps, async (_payload, _thread, auth) => {
         entered.resolve(); await held.promise;
         h.db.transaction(tx => commitSendIntake(tx, auth, { kind: "queue", id: auth.claim.id }));
-        return { ok: true, delivery: "sent" };
+        return { ok: true, delivery: "sent", messageSequence: null };
       });
       try {
         const request = payload();
@@ -61,7 +61,7 @@ describe("raw send intake custody", () => {
   it("refuses a retained service reference stopped before startup readiness without changing acknowledged custody", async () => {
     await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h);
-      const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+      const execute = vi.fn(async () => ({ ok: true, delivery: "sent", messageSequence: null } as const));
       const service = createThreadSendIntakeService(h.deps, execute, () => false);
       try {
         const row = await service.admit(payload(), thread);
@@ -80,7 +80,7 @@ describe("raw send intake custody", () => {
   it("settles deleted-thread legacy waiters only after the real cascade commits, even before readiness", async () => {
     await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seed(h);
-      const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+      const execute = vi.fn(async () => ({ ok: true, delivery: "sent", messageSequence: null } as const));
       const service = createThreadSendIntakeService(h.deps, execute, () => false);
       try {
         const head = await service.admit(payload(), thread);
@@ -115,7 +115,7 @@ describe("raw send intake custody", () => {
     await withTestHarness({ sendIntake: true }, async h => {
       const { host, project, thread } = seed(h);
       const other = seed(h);
-      const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+      const execute = vi.fn(async () => ({ ok: true, delivery: "sent", messageSequence: null } as const));
       const service = createThreadSendIntakeService(h.deps, execute, () => false);
       try {
         const row = await service.admit(payload(), thread);
@@ -165,7 +165,7 @@ describe("raw send intake custody", () => {
         model: "test", reasoningLevel: "medium", permissionMode: "full", serviceTier: "default",
         waitingOn: null, sendAt: null, payload: { kind: "inline" }, systemNotice: null,
       }));
-      const service = createThreadSendIntakeService(h.deps, async () => ({ ok: true, delivery: "sent" }));
+      const service = createThreadSendIntakeService(h.deps, async () => ({ ok: true, delivery: "sent", messageSequence: null }));
       try {
         await expect(service.admit(request, thread)).rejects.toMatchObject({ status: 409, body: { code: "submission_already_admitted" } });
         expect(readThreadSendIntakePage(h.db, thread.id, 0)).toHaveLength(0);
@@ -178,7 +178,7 @@ describe("raw send intake custody", () => {
       const { thread, project } = seed(h);
       recordProjectAttachment(h.db, { projectId: project.id, storedPath: "owned.bin", originalName: "owned.bin", mimeType: null, sizeBytes: 4, createdAt: 1, readyAt: 2 });
       const held = createDeferredPromise<void>();
-      const service = createThreadSendIntakeService(h.deps, async () => { await held.promise; return { ok: true, delivery: "sent" }; });
+      const service = createThreadSendIntakeService(h.deps, async () => { await held.promise; return { ok: true, delivery: "sent", messageSequence: null }; });
       try {
         const request: SendMessageRequest = { ...payload(), input: [{ type: "localFile", path: "owned.bin", sourceProjectId: project.id }] };
         expect(() => h.db.transaction(() => {
@@ -203,7 +203,7 @@ describe("raw send intake custody", () => {
       await mkdir(sourceDir, { recursive: true }); await writeFile(join(sourceDir, "asset.bin"), "source bytes");
       recordProjectAttachment(h.db, { projectId: source.id, storedPath: "asset.bin", originalName: "asset.bin", mimeType: null, sizeBytes: 12, createdAt: 1, readyAt: 2 });
       const held = createDeferredPromise<void>();
-      const service = createThreadSendIntakeService(h.deps, async () => { await held.promise; return { ok: true, delivery: "sent" }; });
+      const service = createThreadSendIntakeService(h.deps, async () => { await held.promise; return { ok: true, delivery: "sent", messageSequence: null }; });
       try {
         const request: SendMessageRequest = { ...payload(), input: [{ type: "localFile", path: "asset.bin", sourceProjectId: source.id }] };
         const row = await service.admit(request, thread);
@@ -229,7 +229,7 @@ describe("raw send intake custody", () => {
       recordProjectAttachment(h.db, { projectId: project.id, storedPath: path, originalName: "asset.bin", mimeType: null, sizeBytes: 19, createdAt: 1, readyAt: 2 });
       reserveThreadSendIntake(h.db, { id, threadId: thread.id, clientSubmissionId: request.clientSubmissionId!, envelope: JSON.stringify(request), fingerprint: "retained-original", now: Date.now() });
       const entered = createDeferredPromise<void>(); const held = createDeferredPromise<void>();
-      const service = createThreadSendIntakeService(h.deps, async () => { entered.resolve(); await held.promise; return { ok: true, delivery: "sent" }; });
+      const service = createThreadSendIntakeService(h.deps, async () => { entered.resolve(); await held.promise; return { ok: true, delivery: "sent", messageSequence: null }; });
       try {
         service.recover(); await entered.promise;
         expect(getThreadSendIntake(h.db, id)?.admissionReceipt).not.toBeNull();

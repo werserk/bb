@@ -31,7 +31,7 @@ import { useFaviconColorSync } from "./lib/favicon-color-preference";
 import { useDesktopThemeSync } from "./hooks/useDesktopThemeSync";
 import { usePluginFrontendBoot } from "./hooks/usePluginFrontendBoot";
 import { useCodeRendererPreloads } from "./hooks/useCodeRendererPreloads";
-import { markRouteContentPainted } from "./lib/route-content-paint";
+import { ScreenPaintSignal } from "./components/ScreenPaintSignal";
 import { useRememberPluginNavPanelChrome } from "@/lib/plugin-nav-panel-chrome";
 import { useWebSocket } from "./hooks/useWebSocket";
 import {
@@ -86,11 +86,7 @@ import { AppUpdateHost } from "./components/app-update/AppUpdateHost";
 import { PluginInstallJobsHost } from "./components/plugin/PluginInstallJobsHost";
 import { RouteLoadingSkeleton } from "./components/ui/route-loading-skeleton";
 import { ThreadTimelineLoadingSkeleton } from "./components/thread/timeline/ThreadTimelineLoadingSkeleton";
-import {
-  startSplitPreloading,
-  trackCriticalLoad,
-  whenCriticalLoadsSettled,
-} from "./lib/split-prefetch";
+import { trackCriticalLoad } from "./lib/split-prefetch";
 
 const SettingsView = lazy(() =>
   import("./views/SettingsView").then((m) => ({
@@ -272,21 +268,19 @@ export function HashNavigationScroll() {
 
     if (scrollToTarget()) return;
 
-    let observer: MutationObserver | null = null;
-    let timeoutId: number | null = null;
-    const stopWaiting = () => {
-      observer?.disconnect();
-      observer = null;
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    };
-    observer = new MutationObserver(() => {
+    const waiting: { timeoutId: number | null } = { timeoutId: null };
+    const observer = new MutationObserver(() => {
       if (scrollToTarget()) stopWaiting();
     });
+    const stopWaiting = () => {
+      observer.disconnect();
+      if (waiting.timeoutId !== null) {
+        window.clearTimeout(waiting.timeoutId);
+        waiting.timeoutId = null;
+      }
+    };
     observer.observe(document.body, { childList: true, subtree: true });
-    timeoutId = window.setTimeout(stopWaiting, HASH_NAVIGATION_WAIT_MS);
+    waiting.timeoutId = window.setTimeout(stopWaiting, HASH_NAVIGATION_WAIT_MS);
     return stopWaiting;
   }, [location]);
 
@@ -447,18 +441,10 @@ export function AppRoutes() {
             }
           />
         </Routes>
-        <RouteContentPaintSignal />
+        <ScreenPaintSignal />
       </Suspense>
     </AppLayout>
   );
-}
-
-function RouteContentPaintSignal() {
-  useEffect(() => {
-    void whenCriticalLoadsSettled().then(markRouteContentPainted);
-    startSplitPreloading();
-  }, []);
-  return null;
 }
 
 function PluginsRoute() {

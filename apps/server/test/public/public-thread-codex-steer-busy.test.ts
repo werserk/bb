@@ -11,11 +11,11 @@ import {
   environments,
   projectAttachmentThreads,
   getThread,
-  listEvents,
   listQueuedThreadMessages,
   listStoredThreadPromptHistoryRows,
   setThreadExecutionOverride,
 } from "@bb/db";
+import { listEvents } from "@bb/db/testing";
 import {
   threadScope,
   turnRequestEventDataSchema,
@@ -41,7 +41,8 @@ import {
 import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import { readDeferredSteerRequest } from "../../src/services/threads/deferred-steer.js";
 import { attemptDispatch } from "../../src/services/threads/dispatch-attempt.js";
-import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
+import { moveThreadStatus } from "../helpers/thread-status.js";
+import { runThreadLifecycleTransaction } from "../../src/services/threads/lifecycle/run.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
 import { settleTurnSubmitCommandResult } from "../../src/services/threads/thread-lifecycle.js";
 import { toThreadQueuedMessage } from "../../src/services/threads/thread-queued-messages.js";
@@ -187,10 +188,7 @@ function complete(
     scope: turnScope(turnId),
     data: { providerThreadId, status: "completed" },
   });
-  applyLoggedThreadLifecycleEvent(harness.deps, {
-    threadId,
-    event: { type: "run.succeeded" },
-  });
+  moveThreadStatus(harness.deps, { move: "run.succeeded", threadId });
 }
 
 function requests(harness: TestAppHarness, threadId: string) {
@@ -210,7 +208,7 @@ function replay(
     (tx) => {
       const result = settleTurnSubmitCommandResult({
         command,
-        deps: { db: tx, hub: harness.hub, logger: harness.deps.logger },
+        deps: { ...harness.deps, db: tx, hub: harness.hub },
         execution: { createdAt: Date.now(), hostId, id: "busy-execution" },
         report: {
           type: "turn.submit",
@@ -226,6 +224,19 @@ function replay(
     },
     { behavior: "immediate" },
   );
+}
+
+function trackSent(
+  harness: TestAppHarness,
+  threadId: string,
+  requestId: string,
+  hostId: string,
+) {
+  runThreadLifecycleTransaction(harness.deps, threadId, {
+    type: "request.sent",
+    request: { hostId, kind: "steer", requestId, syncTitle: false },
+    now: Date.now(),
+  });
 }
 
 afterEach(() => setPluginHookProvider(undefined));
@@ -274,7 +285,10 @@ it.each([false, true])(
       const { thread, environment, host, commands } = fixture(harness, () =>
         refusal(),
       );
-      expect(await send(harness, thread.id)).toEqual({ kind: "dispatched" });
+      expect(await send(harness, thread.id)).toEqual({
+        kind: "dispatched",
+        messageSequence: expect.any(Number),
+      });
       await expect
         .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
         .toBe(1);
@@ -289,9 +303,9 @@ it.each([false, true])(
         originPluginId: null,
         requestedBy: null,
       });
-      expect(replay(harness, commands[0]!, host.id).postCommitActions).toEqual(
-        [],
-      );
+      expect(
+        replay(harness, commands[0]!, host.id).postCommitActions,
+      ).toHaveLength(1);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
       setThreadExecutionOverride(harness.db, {
         threadId: thread.id,
@@ -342,7 +356,7 @@ it.each([false, true])(
           permissionMode: "accept-edits",
           permissionEscalation: "ask",
         },
-        target: { mode: "start" },
+        target: { mode: "auto", expectedTurnId: null },
       });
       expect(getThread(harness.db, thread.id)).toMatchObject({
         modelOverride: "gpt-6-pro",
@@ -355,9 +369,9 @@ it.each([false, true])(
         }),
       ).toHaveLength(historyCount);
       expect(seen).toEqual(hooks ? ["start-turn"] : []);
-      expect(replay(harness, commands[0]!, host.id).postCommitActions).toEqual(
-        [],
-      );
+      expect(
+        replay(harness, commands[0]!, host.id).postCommitActions,
+      ).toHaveLength(1);
       await runQueuedMessageDispatch(harness.deps, {
         kind: "idle-recovery",
         now: Date.now() + 240000,
@@ -415,10 +429,14 @@ it("does not queue a refusal that follows input acceptance", async () => {
       scope: turnScope(turnId),
       data: { providerThreadId, clientRequestId: commands[0]!.requestId },
     });
+    runThreadLifecycleTransaction(harness.deps, thread.id, {
+      type: "request.accepted",
+      requestId: commands[0]!.requestId,
+    });
     pending.resolve(refusal());
-    expect(replay(harness, commands[0]!, host.id).postCommitActions).toEqual(
-      [],
-    );
+    expect(
+      replay(harness, commands[0]!, host.id).postCommitActions,
+    ).toHaveLength(1);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
     expect(
@@ -757,7 +775,7 @@ it.each([false, true])(
       expect(
         replay(harness, commands[1]!, host.id, false, "competing_turn")
           .postCommitActions,
-      ).toEqual([]);
+      ).toHaveLength(1);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
       await runQueuedMessageDispatch(harness.deps, {
         kind: "idle-recovery",
@@ -773,10 +791,7 @@ it.each([false, true])(
         scope: turnScope("review-outer-turn"),
         data: { providerThreadId, status: "completed" },
       });
-      applyLoggedThreadLifecycleEvent(harness.deps, {
-        threadId: thread.id,
-        event: { type: "run.succeeded" },
-      });
+      moveThreadStatus(harness.deps, { move: "run.succeeded", threadId: thread.id });
       await runQueuedMessageDispatch(harness.deps, {
         kind: "thread-ready",
         threadId: thread.id,
@@ -846,6 +861,7 @@ it.each(["input", "groups", "execution", "provenance"])(
         scope: threadScope(),
         data: changed,
       });
+      trackSent(harness, thread.id, changed.requestId, host.id);
       replay(
         harness,
         {
@@ -897,6 +913,7 @@ it("restores a competing deferred request written without submission membership 
       scope: threadScope(),
       data: deferred,
     });
+    trackSent(harness, thread.id, deferred.requestId, host.id);
     replay(
       harness,
       {
@@ -1010,7 +1027,7 @@ it("injects a busy question response using the expected active turn and deduplic
   });
 });
 
-it.each(["provider has no inject support", "expected turn is stale"])(
+it.each(["provider has no inject support"])(
   "preserves a question response once when %s",
   async (reason) => {
     await withTestHarness(async (harness) => {
@@ -1124,6 +1141,64 @@ it.each(["provider has no inject support", "expected turn is stale"])(
     });
   },
 );
+
+it("redelivers a stale-turn question response into the running turn exactly once", async () => {
+  await withTestHarness(async (harness) => {
+    const { thread, commands } = fixture(harness, () => ({
+      ok: false,
+      errorCode: "stale_turn",
+      errorMessage: "expected turn is stale",
+    }));
+    const answer = questionResponseFixture(harness, thread.id);
+    const accepted = await answerConversationQuestion(harness.deps, answer);
+    await runQueuedMessageDispatch(harness.deps, {
+      kind: "thread-ready",
+      threadId: thread.id,
+    });
+    await expect.poll(() => commands.length).toBe(2);
+    await expect
+      .poll(() => readConversationQuestion(harness.deps, answer).delivery.kind)
+      .toBe("submitted");
+    expect(commands.map((command) => command.target)).toEqual([
+      { mode: "auto", expectedTurnId: turnId },
+      { mode: "auto", expectedTurnId: null },
+    ]);
+    expect(commands.map((command) => command.injectOnly)).toEqual([
+      true,
+      true,
+    ]);
+    expect(commands[1]).toMatchObject({
+      requestId: commands[0]!.requestId,
+      input: commands[0]!.input,
+    });
+    const answered = requests(harness, thread.id).filter(
+      (request) => request.questionResponse !== undefined,
+    );
+    expect(answered).toHaveLength(1);
+    expect(answered[0]).toMatchObject({
+      requestId: commands[1]!.requestId,
+      questionResponse: {
+        questionId: answer.questionId,
+        revision: answer.revision,
+        queuedMessageId: accepted.queuedMessageId,
+      },
+    });
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    expect(
+      (await answerConversationQuestion(harness.deps, answer)).queuedMessageId,
+    ).toBe(accepted.queuedMessageId);
+    await runQueuedMessageDispatch(harness.deps, {
+      kind: "thread-ready",
+      threadId: thread.id,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(commands).toHaveLength(2);
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    expect(readConversationQuestion(harness.deps, answer).delivery.kind).toBe(
+      "submitted",
+    );
+  });
+});
 
 it("does not deliver a restored question response after withdrawal", async () => {
   await withTestHarness(async (harness) => {

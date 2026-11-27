@@ -18,6 +18,28 @@ import {
 } from "@bb/db";
 import { sendMessageResponseSchema, type SendMessageResponse } from "@bb/server-contract";
 import type { SendIntakeAuthority } from "./send-intake-authority.js";
+
+/**
+ * Receipts stored before upstream made `messageSequence` required (fork builds
+ * up to desktop-v0.49) lack it on the `sent` arm. Read such a receipt as the
+ * request sequence it already carries (`requested.sequence` is the delivered
+ * message's event sequence), else null ("no message recorded"), instead of
+ * rejecting it as invalid and blocking the intake.
+ */
+function readStoredSendReceipt(outcome: unknown): SendMessageResponse {
+  if (
+    typeof outcome === "object" && outcome !== null &&
+    (outcome as { delivery?: unknown }).delivery === "sent" &&
+    !("messageSequence" in outcome)
+  ) {
+    const sequence = (outcome as { requested?: { sequence?: unknown } }).requested?.sequence;
+    return sendMessageResponseSchema.parse({
+      ...outcome,
+      messageSequence: typeof sequence === "number" ? sequence : null,
+    });
+  }
+  return sendMessageResponseSchema.parse(outcome);
+}
 import { deterministicIntakeError, encodeIntakeErrorOutcome, intakeBlockedError, readIntakeErrorOutcome } from "./send-intake-errors.js";
 import { onThreadContextMutationAvailable, ThreadContextMutationBusyError } from "./thread-context-mutation-guard.js";
 
@@ -63,7 +85,7 @@ export function createSendIntakeWorker(deps: IntakeWorkerDeps) {
         const rejection = readIntakeErrorOutcome(outcome);
         if (rejection) for (const listener of listeners) listener.reject(rejection);
         else {
-          const receipt = sendMessageResponseSchema.parse(outcome);
+          const receipt = readStoredSendReceipt(outcome);
           for (const listener of listeners) listener.resolve(receipt);
         }
       } catch {

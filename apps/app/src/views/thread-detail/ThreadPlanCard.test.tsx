@@ -87,8 +87,8 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      constructor(fn: () => void) {
-        facts.resize = fn;
+      constructor(fn: (entries: ResizeObserverEntry[]) => void) {
+        facts.resize = () => fn([]);
       }
       observe() {}
       disconnect() {}
@@ -212,8 +212,8 @@ it.each(["page", "panel", "embedded", "overlay"])(
     vi.stubGlobal(
       "ResizeObserver",
       class {
-        constructor(callback: () => void) {
-          facts.resize = callback;
+        constructor(callback: (entries: ResizeObserverEntry[]) => void) {
+          facts.resize = () => callback([]);
         }
         observe(element: Element) {
           observed.push(element);

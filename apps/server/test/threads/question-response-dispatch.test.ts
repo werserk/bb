@@ -3,10 +3,10 @@ import {
   getQueuedThreadMessage,
   classifyLocalQuestionAnswer,
   getThread,
-  listEvents,
   listQueuedThreadMessages,
   updateThread,
 } from "@bb/db";
+import { listEvents } from "@bb/db/testing";
 import {
   conversationQuestionPublicationSchema,
   parseQuestionResolutionNotice,
@@ -28,7 +28,7 @@ import {
   publishConversationQuestion,
   readConversationQuestion,
 } from "../../src/services/threads/conversation-questions.js";
-import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
+import { moveThreadStatus } from "../helpers/thread-status.js";
 import {
   createAutomaticQueuedMessageGroupEligibility,
   sendQueuedMessageNow,
@@ -113,10 +113,7 @@ function finishSource(
       status: "completed",
     },
   });
-  applyLoggedThreadLifecycleEvent(h.deps, {
-    threadId: fixture.thread.id,
-    event: { type: "run.succeeded" },
-  });
+  moveThreadStatus(h.deps, { move: "run.succeeded", threadId: fixture.thread.id });
 }
 /**
  * Makes a fresh coordinator thread the parent of the asking thread, so its

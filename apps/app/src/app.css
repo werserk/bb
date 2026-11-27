@@ -128,29 +128,31 @@
     scrollbar-color: var(--bb-scrollbar-thumb) transparent;
   }
 
-  *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
+  @media (hover: hover) and (pointer: fine) {
+    *::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
 
-  *::-webkit-scrollbar-track,
-  *::-webkit-scrollbar-corner {
-    background: transparent;
-  }
+    *::-webkit-scrollbar-track,
+    *::-webkit-scrollbar-corner {
+      background: transparent;
+    }
 
-  *::-webkit-scrollbar-thumb {
-    background-color: var(--bb-scrollbar-thumb);
-    border-radius: 9999px;
-  }
+    *::-webkit-scrollbar-thumb {
+      background-color: var(--bb-scrollbar-thumb);
+      border-radius: 9999px;
+    }
 
-  *::-webkit-scrollbar-thumb:hover {
-    background-color: var(--bb-scrollbar-thumb-hover);
-  }
+    *::-webkit-scrollbar-thumb:hover {
+      background-color: var(--bb-scrollbar-thumb-hover);
+    }
 
-  @supports selector(::-webkit-scrollbar) {
-    * {
-      scrollbar-width: auto;
-      scrollbar-color: auto;
+    @supports selector(::-webkit-scrollbar) {
+      * {
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+      }
     }
   }
 

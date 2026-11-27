@@ -20,15 +20,15 @@ export function QuestionHtmlPreview({
 }) {
   const theme = useFrameTheme();
   const frame = useRef<HTMLIFrameElement>(null);
-  const initialTheme = useRef(theme);
+  const [initialTheme] = useState(theme);
   const [contentHeight, setContentHeight] = useState<number>();
   const srcDoc = useMemo(
     () =>
       frameDocument(content, {
-        theme: initialTheme.current,
+        theme: initialTheme,
         baseHref: new URL(url, window.location.origin).href,
       }),
-    [content, url],
+    [content, url, initialTheme],
   );
   useEffect(() => {
     frame.current?.contentWindow?.postMessage(frameThemeMessage(theme), "*");

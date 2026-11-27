@@ -142,8 +142,16 @@ it("requires both reads after a legacy receipt, including identical sends", () =
       sequence: 0,
     });
   const before = owner.startRead();
-  owner.receipt("thread-1", "a", { ok: true, delivery: "sent" });
-  owner.receipt("thread-1", "b", { ok: true, delivery: "sent" });
+  owner.receipt("thread-1", "a", {
+    ok: true,
+    delivery: "sent",
+    messageSequence: null,
+  });
+  owner.receipt("thread-1", "b", {
+    ok: true,
+    delivery: "sent",
+    messageSequence: null,
+  });
   owner.applyLegacyJointRead("thread-1", before);
   expect(owner.list()).toHaveLength(2);
   const after = owner.startRead();
@@ -343,6 +351,7 @@ it("a late sent receipt cannot undo a newer deferral", () => {
   owner.receipt("thread-1", "a", {
     ok: true,
     delivery: "sent",
+    messageSequence: 10,
     requested: { requestId: "creq_0000000000", sequence: 10 },
   });
   expect(owner.list()[0]?.state).toBe("queued");
@@ -395,6 +404,7 @@ it("retains deferral and receipt fences across validated recovery", () => {
   owner.receipt("thread-1", "a", {
     ok: true,
     delivery: "sent",
+    messageSequence: 10,
     requested: { requestId: "creq_0000000000", sequence: 10 },
   });
   expect(owner.project("thread-1", [], []).queue).toHaveLength(1);
@@ -509,7 +519,7 @@ it("holds new legacy canonical pushes behind the same joint presentation fence",
   owner.receipt(
     "thread-1",
     "a",
-    { ok: true, delivery: "sent" },
+    { ok: true, delivery: "sent", messageSequence: null },
     { maxSeq: 10, queueIds: [] },
   );
   const push = userRow({ id: "legacy-native", sequence: 11 });

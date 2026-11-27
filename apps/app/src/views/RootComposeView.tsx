@@ -12,7 +12,7 @@ import { useRootComposePlacement } from "@/lib/root-compose-selection";
 import { useInitialPromptDraft } from "@/components/promptbox/mentions/initial-prompt-draft";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useSystemProviders } from "@/hooks/queries/system-queries";
+import { useProviderDirectory } from "@/hooks/queries/system-queries";
 import {
   findLocalPathProjectSourceForHost,
   type EnvironmentStatus,
@@ -75,7 +75,7 @@ import {
   createPanelActionDestination,
   usePluginNewThreadPanelActions,
 } from "@/components/plugin/PluginPanelActions";
-import { usePluginSlots } from "@/lib/plugin-slots";
+import { usePluginSlotKind } from "@/lib/plugin-slots";
 import { useCreateThread } from "@/hooks/mutations/thread-runtime-mutations";
 import {
   useEnvironmentTerminals,
@@ -572,7 +572,7 @@ function RootComposeSurface({
     if (initialPrompt === null || searchInitialDraft === undefined) return;
     setPromptDraft(searchInitialDraft);
     if (!isPointerCoarse) window.requestAnimationFrame(focusPromptBox);
-    navigate(
+    void navigate(
       getRootComposeRoutePath() + stripInitialPromptFromSearch(location.search),
       { replace: true, state: location.state },
     );
@@ -617,7 +617,7 @@ function RootComposeSurface({
     if (shouldStartComposingFromLocationState(location.state)) {
       window.requestAnimationFrame(focusPromptBox);
     }
-    navigate(getRootComposeRoutePath() + location.search, {
+    void navigate(getRootComposeRoutePath() + location.search, {
       replace: true,
       state: null,
     });
@@ -642,7 +642,7 @@ function RootComposeSurface({
     } else {
       restorePromptDraftIfEmpty(nextDraft);
     }
-    navigate(getRootComposeRoutePath() + location.search, {
+    void navigate(getRootComposeRoutePath() + location.search, {
       replace: true,
       state: { focusPrompt: true },
     });
@@ -669,7 +669,7 @@ function RootComposeSurface({
     () => buildMobileRecentThreads({ sidebarNavigation }),
     [sidebarNavigation],
   );
-  const systemProviders = useSystemProviders().data;
+  const systemProviders = useProviderDirectory().data;
   const mobileRecentProvidersById = useMemo(() => {
     const byId = new Map<string, ProviderInfo>();
     for (const provider of systemProviders ?? []) {
@@ -850,8 +850,9 @@ function RootComposeSurface({
     () => setShouldAutoFocusNewTab(false),
     [],
   );
-  const { newThreadPanelActions: rootPanelNewThreadPanelActions } =
-    usePluginSlots();
+  const rootPanelNewThreadPanelActions = usePluginSlotKind(
+    "newThreadPanelActions",
+  );
   const {
     browserTabs,
     activateTab,
@@ -1002,7 +1003,7 @@ function RootComposeSurface({
     (resource) => {
       if (resource.kind === "thread") {
         return () =>
-          navigate(
+          void navigate(
             getThreadRoutePath({
               projectId: resource.projectId ?? projectId,
               threadId: resource.threadId,
@@ -1010,7 +1011,8 @@ function RootComposeSurface({
           );
       }
       if (resource.kind === "project") {
-        return () => navigate(getProjectComposeRoutePath(resource.projectId));
+        return () =>
+          void navigate(getProjectComposeRoutePath(resource.projectId));
       }
       if (resource.kind !== "path" || resource.entryKind !== "file") {
         return null;

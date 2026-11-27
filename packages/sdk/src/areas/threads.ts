@@ -71,6 +71,8 @@ import type {
   ThreadTimelineReadResponse,
   ThreadTimelineResponse,
   ThreadContextResponse,
+  ThreadHeadStateQuery,
+  ThreadHeadStateResponse,
   ThreadWithIncludesResponse,
   TimelineTurnSummaryDetailsResponse,
   ThreadOpenFile,
@@ -212,6 +214,7 @@ export type ThreadInteractionCancelResult = PendingInteraction;
 export type ThreadEventsListResult = ThreadEventRow[];
 export type ThreadEventWaitResult = ThreadEventRow | null;
 export type ThreadContextResult = ThreadContextResponse;
+export type ThreadHeadStateResult = ThreadHeadStateResponse;
 export type ThreadTimelineResult = ThreadTimelineResponse;
 export type ThreadTimelineReadResult = ThreadTimelineReadResponse;
 export type ThreadArchiveResult = ThreadArchiveAllResponse;
@@ -803,6 +806,21 @@ export interface ThreadsArea {
   ): Promise<ThreadReleaseIdleResult>;
   tabs: ThreadTabsArea;
   context(args: ThreadStatusArgs): Promise<ThreadContextResult>;
+  /**
+   * The thread's head state: to-dos, provider slash commands, session options,
+   * extension states, plan prompt mode, model fallback, and context usage, as
+   * of its latest event. Read from the latest stored state events without
+   * building a timeline window; the latest timeline page embeds the same
+   * values. `pendingTodos` keeps the latest plan after its turn ends (marked
+   * `staleSince` once a later turn finishes) and drops plans from before the
+   * latest context clear unless the history-after-clear setting is on.
+   * `activePromptMode` is null unless the thread is active. State set by
+   * hidden service turns is left out unless `includeService` is `"true"`.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_headState(
+    args: ThreadStatusArgs & ThreadHeadStateQuery,
+  ): Promise<ThreadHeadStateResult>;
   timeline(
     args: ThreadTimelineArgs & { afterTag?: undefined },
   ): Promise<ThreadTimelineResult>;
@@ -990,9 +1008,6 @@ function timelineQuery(args: ThreadTimelineArgs): ThreadTimelineQuery {
       : {}),
     ...(args.includeNestedRows !== undefined
       ? { includeNestedRows: args.includeNestedRows }
-      : {}),
-    ...(args.summaryOnly !== undefined
-      ? { summaryOnly: args.summaryOnly }
       : {}),
     ...(args.segmentLimit !== undefined
       ? { segmentLimit: args.segmentLimit }
@@ -1822,6 +1837,19 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       return transport.readJson(
         transport.api.v1.threads[":id"].context.$get(
           { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async experimental_headState(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["head-state"].$get(
+          {
+            param: { id: input.threadId },
+            ...(input.includeService
+              ? { query: { includeService: input.includeService } }
+              : {}),
+          },
           ...signalRequestArgs(input.signal),
         ),
       );

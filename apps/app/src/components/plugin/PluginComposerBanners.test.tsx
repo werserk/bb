@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -19,15 +20,36 @@ import {
 import { ComposerBannersSlot } from "./PluginComposerBanners";
 import { resetAllCrashedPluginSlotsForTest } from "./PluginSlotMount";
 import { useComposerView } from "@/lib/plugin-sdk-hooks";
+import {
+  createComposerDraftStore,
+  PluginComposerViewProvider,
+  type ComposerDraftStore,
+  type PluginComposerStaticView,
+} from "./plugin-composer-host";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 
-function composerView(threadId: string, text = "") {
+function composerView(threadId: string): PluginComposerStaticView {
   return {
-    scope: { kind: "thread" as const, threadId },
-    layout: "expanded" as const,
-    draft: { text, isEmpty: text.length === 0, attachmentCount: 0 },
+    scope: { kind: "thread", threadId },
+    layout: "expanded",
     run: { isRunning: false, isSubmitting: false },
   };
+}
+
+function draftStore(text = ""): ComposerDraftStore {
+  return createComposerDraftStore({ text, mentions: [], attachments: [] });
+}
+
+function inComposer(
+  ui: ReactNode,
+  view = composerView("t1"),
+  draft = draftStore(),
+) {
+  return (
+    <PluginComposerViewProvider view={view} draft={draft}>
+      {ui}
+    </PluginComposerViewProvider>
+  );
 }
 
 function registrations(
@@ -69,7 +91,7 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
-    render(<ComposerBannersSlot view={composerView("t1")} />);
+    render(inComposer(<ComposerBannersSlot />));
 
     expect(
       screen
@@ -98,7 +120,7 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
-    render(<ComposerBannersSlot view={composerView("t1")} />);
+    render(inComposer(<ComposerBannersSlot />));
 
     expect(screen.queryByText("plugin isolated-plugin crashed")).toBeNull();
     expect(screen.getByText("healthy banner")).toBeDefined();
@@ -124,8 +146,13 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
-    const view = render(<ComposerBannersSlot view={composerView("t1")} />);
-    view.rerender(<ComposerBannersSlot view={composerView("t2")} />);
+    const draft = draftStore();
+    const view = render(
+      inComposer(<ComposerBannersSlot />, composerView("t1"), draft),
+    );
+    view.rerender(
+      inComposer(<ComposerBannersSlot />, composerView("t2"), draft),
+    );
 
     expect(mounted).toHaveBeenCalledTimes(2);
     expect(unmounted).toHaveBeenCalledTimes(1);
@@ -158,7 +185,7 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
-    render(<ComposerBannersSlot view={composerView("t1")} />);
+    render(inComposer(<ComposerBannersSlot />));
 
     expect(
       screen
@@ -184,25 +211,34 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
-    const first = composerView("t1", "draft one");
+    const draft = draftStore("draft one");
     const rendered = render(
       <MemoryRouter>
-        <ComposerBannersSlot view={first} />
+        {inComposer(<ComposerBannersSlot />, composerView("t1"), draft)}
       </MemoryRouter>,
     );
     expect(
       screen.getByText("thread:draft one:expanded:false:false"),
     ).toBeDefined();
 
+    act(() => {
+      draft.setDraft({ text: "draft two", mentions: [], attachments: [] });
+    });
+    expect(
+      screen.getByText("thread:draft two:expanded:false:false"),
+    ).toBeDefined();
+
     rendered.rerender(
       <MemoryRouter>
-        <ComposerBannersSlot
-          view={{
-            ...composerView("t1", "draft two"),
+        {inComposer(
+          <ComposerBannersSlot />,
+          {
+            ...composerView("t1"),
             layout: "zen",
             run: { isRunning: true, isSubmitting: true },
-          }}
-        />
+          },
+          draft,
+        )}
       </MemoryRouter>,
     );
     expect(screen.getByText("thread:draft two:zen:true:true")).toBeDefined();
@@ -219,17 +255,26 @@ describe("ComposerBannersSlot", () => {
       ]),
     );
 
+    const draft = draftStore();
     const view = render(
-      <ComposerBannersSlot view={composerView("t1")} ownerPlacement="before">
-        <div>BB row</div>
-      </ComposerBannersSlot>,
+      inComposer(
+        <ComposerBannersSlot ownerPlacement="before">
+          <div>BB row</div>
+        </ComposerBannersSlot>,
+        composerView("t1"),
+        draft,
+      ),
     );
     expect(view.container.textContent).toBe("BB rowPlugin row");
 
     view.rerender(
-      <ComposerBannersSlot view={composerView("t1")} ownerPlacement="after">
-        <div>BB row</div>
-      </ComposerBannersSlot>,
+      inComposer(
+        <ComposerBannersSlot ownerPlacement="after">
+          <div>BB row</div>
+        </ComposerBannersSlot>,
+        composerView("t1"),
+        draft,
+      ),
     );
     expect(view.container.textContent).toBe("Plugin rowBB row");
   });
@@ -265,11 +310,10 @@ it.each(["bare", "card"] as const)(
       await import("@/components/promptbox/context/composer-context");
     const { ComposerContextDock } =
       await import("@/components/promptbox/context/ComposerContextDock");
-    const { act } = await import("@testing-library/react");
     render(
       <ComposerContextProvider>
         <ComposerContextSources>
-          <ComposerBannersSlot view={composerView("t1")} />
+          {inComposer(<ComposerBannersSlot />)}
         </ComposerContextSources>
         <ComposerContextDock>
           <textarea aria-label="Draft" />

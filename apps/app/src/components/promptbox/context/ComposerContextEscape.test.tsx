@@ -16,8 +16,6 @@ import { ComposerContextStrip } from "./ComposerContextStrip";
 
 afterEach(cleanup);
 
-// The editor routes keys through the same chain as ComposerBox:
-// handleComposerSuggestionKey -> controller -> contextStore.previewKey.
 function Editor() {
   const store = useComposerContextStore();
   const [suggestions] = useState(

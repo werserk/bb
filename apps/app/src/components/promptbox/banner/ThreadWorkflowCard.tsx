@@ -128,7 +128,8 @@ export function ThreadWorkflowCard({
   const compact = useComposerContextSource() !== null;
   const bodyId = useId();
   const toggleId = useId();
-  const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+  const { triggerRef, collapseRef, onTriggerClick, onCollapseClick } =
+    useDisclosureFocusHandoff(isExpanded, onToggle);
   if (workflow.status !== "pending") {
     return null;
   }
@@ -159,13 +160,13 @@ export function ThreadWorkflowCard({
       style={{ minHeight: PROMPT_STACK_CARD_ROW_HEIGHT }}
     >
       <button
-        ref={focus.triggerRef}
+        ref={triggerRef}
         type="button"
         id={toggleId}
         aria-expanded={isExpanded}
         aria-controls={bodyId}
         aria-label={`Workflow: ${name}`}
-        onClick={focus.onTriggerClick}
+        onClick={onTriggerClick}
         className={cn(
           PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
           PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
@@ -180,8 +181,8 @@ export function ThreadWorkflowCard({
         isExpanded={isExpanded}
         collapsedBorder="none"
         collapseLabel={`Collapse workflow ${name}`}
-        collapseRef={focus.collapseRef}
-        onCollapse={focus.onCollapseClick}
+        collapseRef={collapseRef}
+        onCollapse={onCollapseClick}
       >
         <WorkflowWorkRowBody row={workflow} size="base" collapsiblePhases />
       </AnimatedDisclosureBody>

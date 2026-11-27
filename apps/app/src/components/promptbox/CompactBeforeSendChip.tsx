@@ -19,7 +19,6 @@ export interface CompactBeforeSendOffer {
 
 type CompactBeforeSendChoice = "compact" | "keep";
 
-// Same 28px/36px box as the composer's other actions; a quiet label, not a pill.
 const CHIP_BUTTON_CLASS =
   "h-7 px-1.5 transition-all max-md:pointer-coarse:h-9 max-md:pointer-coarse:px-2.5";
 const ICON_BUTTON_CLASS = `size-auto ${CHIP_BUTTON_CLASS}`;

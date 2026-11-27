@@ -21,7 +21,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { twMerge } from "tailwind-merge";
-import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { ThreadTimelineNavigationProvider } from "@/components/thread/timeline/ThreadTimelineNavigationContext";
 import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
@@ -35,9 +35,7 @@ vi.mock("@/lib/modal-host", async (importOriginal) => ({
   openCoreModal,
 }));
 
-beforeAll(() =>
-  Promise.all([LazyMarkdownHtml.preload(), LazyPluginMarkdown.preload()]),
-);
+await Promise.all([LazyMarkdownHtml.preload(), LazyPluginMarkdown.preload()]);
 
 afterEach(() => {
   cleanup();

@@ -78,11 +78,12 @@ import type {
   ExecutionPermissionConfig,
 } from "@/components/promptbox/ExecutionControls";
 import { PageShell } from "@/components/ui/page-shell.js";
+import { promptDraftToInput, queuedInputToDraft } from "@bb/client-core";
 import {
-  promptDraftToInput,
-  type PromptDraftState,
-  queuedInputToDraft,
-} from "@bb/client-core";
+  createComposerDraftStore,
+  type ComposerDraftStore,
+} from "@/components/plugin/plugin-composer-host";
+import { useComposerDraftFixture } from "@/test/fixtures/composer-draft";
 import type { WorkspaceStatus } from "bb-plugin-bb--git/contract";
 
 export default {
@@ -303,7 +304,6 @@ const usage: ThreadContextWindowUsage = {
 const typeaheadBase = makeTypeaheadConfig();
 
 const attachmentsBase: AttachmentsConfig = {
-  items: [],
   projectId: "proj_demo",
   isAttaching: false,
   error: null,
@@ -616,15 +616,13 @@ function Row({
   readOnly = false,
   contextHost = false,
 }: RowConfig) {
-  const [message, setMessage] = useState(initialMessage);
+  const draft = useComposerDraftFixture(initialMessage, initialMentions);
   const [queueExpanded, setQueueExpanded] = useState(true);
-  const [mentionRanges, setMentionRanges] =
-    useState<PromptTextMention[]>(initialMentions);
   const [storyQueuedMessages, setStoryQueuedMessages] = useState(
     initialQueuedMessages ?? [],
   );
   const [inlineEditingQueuedMessage, setInlineEditingQueuedMessage] = useState<{
-    draft: PromptDraftState;
+    draft: ComposerDraftStore;
     queuedMessageId: string;
     queuedMessageIndex: number;
   } | null>(null);
@@ -634,30 +632,6 @@ function Row({
   const resolvedCompactPlaceholder =
     promptPlaceholder ??
     getCompactFollowUpPromptPlaceholder(threadRuntimeDisplayStatus);
-  const handleChangeMessage = (
-    nextMessage: string,
-    nextMentions: PromptTextMention[],
-  ) => {
-    setMessage(nextMessage);
-    setMentionRanges(nextMentions);
-  };
-  const handleChangeInlineMessage = useCallback(
-    (nextMessage: string, nextMentions: PromptTextMention[]) => {
-      setInlineEditingQueuedMessage((current) =>
-        current
-          ? {
-              ...current,
-              draft: {
-                ...current.draft,
-                mentions: nextMentions,
-                text: nextMessage,
-              },
-            }
-          : current,
-      );
-    },
-    [],
-  );
   const dismissInlineEditor = useCallback(() => {
     setInlineEditingQueuedMessage(null);
   }, []);
@@ -668,7 +642,9 @@ function Row({
       );
       if (!queuedMessage) return;
       setInlineEditingQueuedMessage({
-        draft: queuedInputToDraft(queuedMessage.content),
+        draft: createComposerDraftStore(
+          queuedInputToDraft(queuedMessage.content),
+        ),
         queuedMessageId,
         queuedMessageIndex,
       });
@@ -677,7 +653,9 @@ function Row({
   );
   const handleSubmit = useCallback(() => {
     if (!inlineEditingQueuedMessage) return;
-    const input = promptDraftToInput(inlineEditingQueuedMessage.draft);
+    const input = promptDraftToInput(
+      inlineEditingQueuedMessage.draft.getCurrent(),
+    );
     if (input.length === 0) return;
     setStoryQueuedMessages((current) =>
       current.map((queuedMessage) =>
@@ -700,14 +678,11 @@ function Row({
                 stack={null}
                 composer={{
                   history: {
-                    currentDraft: inlineEditingQueuedMessage.draft,
                     entries: [],
                     onSelectEntry: noop,
                   },
                   isFollowUpSubmitting: false,
-                  message: inlineEditingQueuedMessage.draft.text,
-                  mentionRanges: inlineEditingQueuedMessage.draft.mentions,
-                  onChangeMessage: handleChangeInlineMessage,
+                  draft: inlineEditingQueuedMessage.draft,
                   onModifierSubmit: handleSubmit,
                   onSubmit: handleSubmit,
                   compactPromptPlaceholder: resolvedCompactPlaceholder,
@@ -736,7 +711,6 @@ function Row({
     [
       dismissInlineEditor,
       execution,
-      handleChangeInlineMessage,
       handleSubmit,
       inlineEditingQueuedMessage,
       permission,
@@ -795,18 +769,11 @@ function Row({
             ? null
             : {
                 history: {
-                  currentDraft: {
-                    text: message,
-                    mentions: mentionRanges,
-                    attachments: [],
-                  },
                   entries: historyEntries,
                   onSelectEntry: noop,
                 },
                 isFollowUpSubmitting,
-                message,
-                mentionRanges,
-                onChangeMessage: handleChangeMessage,
+                draft,
                 onModifierSubmit: noop,
                 onSubmit: noop,
                 compactPromptPlaceholder: resolvedCompactPlaceholder,
@@ -1245,6 +1212,10 @@ interface StoryOpenQuestion {
 const storyOpenQuestions: { current: readonly StoryOpenQuestion[] } = {
   current: [],
 };
+function stageStoryOpenQuestions(questions: readonly StoryOpenQuestion[]) {
+  storyOpenQuestions.current = questions;
+  installStoryQuestionFetch();
+}
 let storyFetchInstalled = false;
 function installStoryQuestionFetch() {
   if (storyFetchInstalled || typeof window === "undefined") return;
@@ -1313,16 +1284,17 @@ function ContextScene({
   width,
   timeline = false,
 }: ContextSceneConfig) {
-  storyOpenQuestions.current = Array.from({ length: questions }, (_, i) => ({
-    id: `question-${i}`,
-    title: [
-      "Принять видимые изменения #949 по превью?",
-      "Какой домен оставить для внешнего соревнования?",
-      "Включить автослияние после зелёного CI?",
-    ][i % 3]!,
-    createdAt: STORY_NOW - (i + 1) * 3_600_000,
-  }));
-  installStoryQuestionFetch();
+  stageStoryOpenQuestions(
+    Array.from({ length: questions }, (_, i) => ({
+      id: `question-${i}`,
+      title: [
+        "Принять видимые изменения #949 по превью?",
+        "Какой домен оставить для внешнего соревнования?",
+        "Включить автослияние после зелёного CI?",
+      ][i % 3]!,
+      createdAt: STORY_NOW - (i + 1) * 3_600_000,
+    })),
+  );
   const bannerKey = `${changes}-${parent}`;
   const composer = (
     <>
@@ -1376,7 +1348,7 @@ function ContextScene({
                       href: `/threads/child-${i}`,
                       needsOwnerAttention: i < children.waiting,
                       finished: i >= children.total,
-                      updatedAt: Date.now() - (i + 1) * 420_000,
+                      updatedAt: STORY_NOW - (i + 1) * 420_000,
                     }),
                   ),
                 }}

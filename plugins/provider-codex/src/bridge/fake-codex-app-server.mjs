@@ -444,7 +444,7 @@ async function handleRequest(message) {
   }
   switch (method) {
     case "initialize":
-      respond(id, {});
+      respond(id, script?.initializeResult ?? {});
       return;
     case "account/rateLimits/read":
       if (script?.rateLimitRead) {
@@ -711,7 +711,7 @@ async function handleRequest(message) {
             threadId: params.threadId,
             turn: { id: turnId, status: "inProgress" },
           });
-        }, LATE_TURN_START_DELAY_MS);
+        }, script?.lateStartDelayMs ?? LATE_TURN_START_DELAY_MS);
         return;
       }
       if (firstInputText(params.input) === RESPOND_THEN_EXIT_PROMPT_TEXT) {

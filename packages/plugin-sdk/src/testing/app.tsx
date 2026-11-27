@@ -114,6 +114,8 @@ import {
   type ExperimentalCollapsibleStackCardProps,
   type ExperimentalThreadInfoRowRegistration,
   type ExperimentalThreadInfoSectionRegistration,
+  type ExperimentalThreadHeaderRowRegistration,
+  type ExperimentalThreadHeaderTitleRegistration,
   type ExperimentalThreadContextCardRowRegistration,
   type ExperimentalThreadContextCardSectionRegistration,
   type ExperimentalThreadContextKind,
@@ -2026,18 +2028,24 @@ const testPluginSdkApp = {
   experimental_SidebarNavigationIcon: TestSidebarNavigationIcon,
   experimental_useSidebarThreadSplit(threadId): PluginSidebarThreadSplit {
     const env = useSlotEnv("experimental_useSidebarThreadSplit");
-    return useMemo(
-      () => ({
+    return useMemo(() => {
+      const panes =
+        env.sidebarSplitLayout?.panes.map((pane) => ({
+          paneId: pane.paneId,
+          rect: pane.rect,
+          isMe: pane.threadId === threadId,
+          isFocused: pane.isFocused,
+        })) ?? [];
+      return {
         splitProps: {
           onPointerDown: () => {
             env.sidebarActionCalls.push({ method: "open", threadId });
           },
         },
         isAvailable: true,
-        layout: null,
-      }),
-      [env, threadId],
-    );
+        layout: panes.some((pane) => pane.isMe) ? { panes } : null,
+      };
+    }, [env, threadId]);
   },
   useSidebarThreadDraft(threadId): PluginSidebarThreadDraftState {
     const env = useSlotEnv("useSidebarThreadDraft");
@@ -2173,6 +2181,8 @@ export interface CapturedPluginApp {
   threadInfoRows: ExperimentalThreadInfoRowRegistration[];
   threadRowMetadata: ExperimentalThreadRowMetadataRegistration<unknown>[];
   threadInfoSections: ExperimentalThreadInfoSectionRegistration[];
+  threadHeaderRows: ExperimentalThreadHeaderRowRegistration[];
+  threadHeaderTitles: ExperimentalThreadHeaderTitleRegistration[];
   threadContextCardRows: ExperimentalThreadContextCardRowRegistration[];
   threadContextCardSections: ExperimentalThreadContextCardSectionRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
@@ -2621,13 +2631,19 @@ export interface RenderSlotOptions<
 /** Host-originated inputs a slot test can drive deterministically. */
 export interface RenderedSlotBehaviorDrivers {
   /**
-   * Push a realtime event to `useRealtime(channel, …)` subscribers, wrapped
-   * in act. The payload is JSON-round-tripped like `bb.realtime.publish`.
+   * Invalidate the plugin's cached `useRpc` reads carrying any of `tags`, as a
+   * backend `bb.rpc.experimental_invalidate` does, wrapped in act. `null`
+   * invalidates every read, like `experimental_invalidateAll`. `pluginId`
+   * defaults to the rendered plugin.
    */
   experimental_invalidateRpc(
     tags: readonly string[] | null,
     pluginId?: string,
   ): Promise<void>;
+  /**
+   * Push a realtime event to `useRealtime(channel, …)` subscribers, wrapped
+   * in act. The payload is JSON-round-tripped like `bb.realtime.publish`.
+   */
   emitRealtime(channel: string, payload: unknown): Promise<void>;
   /** Drive the lifecycle of the same connection used by realtime events. */
   setRealtimeConnectionState(

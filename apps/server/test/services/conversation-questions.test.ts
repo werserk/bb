@@ -1,6 +1,7 @@
 import { createNodeBbSdk } from "@bb/sdk/node";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { createConversationQuestion } from "@bb/db";
+import { listEvents } from "@bb/db/testing";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
@@ -14,8 +15,7 @@ import {
   queuedThreadMessages,
   clearQueuedThreadMessageWaitingOn,
   setQueuedThreadMessageFailureReason,
-  listEvents,
-} from "@bb/db";
+  } from "@bb/db";
 import {
   conversationQuestionPublicationSchema,
   parseConversationQuestionMarker,

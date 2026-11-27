@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   createQueuedThreadMessageInTransaction,
+  createThread,
   getLatestThreadSequence,
   listQueuedThreadMessages,
   listStoredEventRows,
@@ -42,7 +43,7 @@ it("coalesces concurrent public submissions and rejects retained queue custody",
     const send = async () => {
       calls++;
       await wait;
-      return { ok: true as const, delivery: "sent" as const };
+      return { ok: true as const, delivery: "sent" as const, messageSequence: null };
     };
     const first = guardSubmission(h.db, thread.id, id, { input: "same" }, send);
     const second = guardSubmission(
@@ -292,7 +293,7 @@ it("measures bounded placements and fenced admission on aged histories", async (
                 },
                 { behavior: "immediate" },
               );
-              return { ok: true, delivery: "sent" };
+              return { ok: true, delivery: "sent", messageSequence: null };
             },
           ),
         ),
@@ -427,7 +428,19 @@ it("preserves forked request JSON without consuming source-thread custody", asyn
         projectId: project.id,
         status: "idle",
       }),
-      fork = seedThread(h.deps, { projectId: project.id, status: "idle" });
+      fork = createThread(h.db, h.hub, {
+        projectId: project.id,
+        providerId: "codex",
+        status: "pending",
+        startupContext: JSON.stringify({
+          kind: "pending",
+          environmentIntent: { type: "reuse", environmentId: "env_fork" },
+          fork: null,
+          historyCopy: "copying",
+          startedOnBehalfOf: null,
+          titleProvided: false,
+        }),
+      });
     const id = crypto.randomUUID();
     const data: import("@bb/domain").TurnRequestEventData = {
       requestId: createClientTurnRequestId(),
@@ -477,7 +490,7 @@ it("preserves forked request JSON without consuming source-thread custody", asyn
       order: "asc",
       limit: 100,
     });
-    copyForkSourceHistory(h.deps, {
+    await copyForkSourceHistory(h.deps, {
       fork,
       sourceThreadId: source.id,
       historyEndSequence: getLatestThreadSequence(h.db, {
@@ -666,7 +679,7 @@ it("rechecks a competing admission after the pre-check sequence under the write 
           },
           { behavior: "immediate" },
         );
-        return { ok: true, delivery: "sent" };
+        return { ok: true, delivery: "sent", messageSequence: null };
       }),
     ).rejects.toMatchObject({
       status: 409,

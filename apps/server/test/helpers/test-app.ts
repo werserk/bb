@@ -11,7 +11,6 @@ import {
   ensurePersonalProject,
   getAppSettings,
   getDisabledProviderIds,
-  getExperiments,
   setExperiments,
   getAutoAppUpdate,
   getSkippedAppUpdate,
@@ -19,6 +18,7 @@ import {
   setSkippedAppUpdate,
   listRunningThreads,
   setAppSettings,
+  startWalCheckpointer,
   type DbConnection,
 } from "@bb/db";
 import { defaultFeatureFlags } from "@bb/domain";
@@ -49,7 +49,6 @@ import {
 import { createAppVersionService } from "../../src/services/system/app-version.js";
 import { createBbAppManagedConfigReloader } from "../../src/services/system/bb-app-managed-config.js";
 import { createNoopTelemetryService } from "../../src/services/system/telemetry.js";
-import { createSetupGuideExperiment } from "../../src/services/system/setup-guide-experiment.js";
 import { TerminalSessionLifecycle } from "../../src/services/terminals/terminal-session-lifecycle.js";
 import { createLifecycleDedupers } from "../../src/lifecycle-dedupers.js";
 import type { ServerAppDeps, ServerRuntimeConfig } from "../../src/types.js";
@@ -321,7 +320,7 @@ export async function createTestAppHarness(
         mode: null,
         notifyChanged: notifyAppUpdateChanged,
         threadsResumeAfterRestart: () =>
-          getExperiments(db).resumeThreadsAfterRestart,
+          getAppSettings(db).resumeThreadsAfterRestart,
         sendHold: createAppUpdateSendHold({
           aiServices,
           config,
@@ -338,7 +337,6 @@ export async function createTestAppHarness(
           terminalSessions,
         }),
       }),
-    isEnabled: () => getExperiments(db).updateWhenIdle,
     logger,
     notifyChanged: notifyAppUpdateChanged,
     onChangedMessage: (listener) => hub.onChangedMessage(listener),
@@ -351,6 +349,7 @@ export async function createTestAppHarness(
       set: (key) => setSkippedAppUpdate(db, key),
     },
   });
+  const walCheckpointer = startWalCheckpointer({ logger });
   const deps: ServerAppDeps = {
     appUpdate,
     appVersion,
@@ -367,14 +366,6 @@ export async function createTestAppHarness(
           write: () => Promise.reject(new Error("no Windows PATH in tests")),
         },
       }),
-    setupGuideExperiment: await createSetupGuideExperiment({
-      dataDir,
-      fetch: () => Promise.reject(new Error("no PostHog in tests")),
-      flagTimeoutMs: 1_000,
-      logger,
-      override: null,
-      telemetry,
-    }),
     config,
     db,
     hub,
@@ -394,6 +385,7 @@ export async function createTestAppHarness(
     terminalSessions,
     watchInterests,
     sharedPorts,
+    walCheckpointer,
   };
   const { app, pluginCatalogService, pluginService, serverMove, startSendIntakes, stopSendIntakes } =
     createApp(deps);
@@ -416,6 +408,7 @@ export async function createTestAppHarness(
       clearAllThreadProvisionSchedules();
       setPluginEnvironmentProviderBridge(undefined);
       await pluginService.stop();
+      await walCheckpointer.stop();
       await rm(dataDir, {
         recursive: true,
         force: true,

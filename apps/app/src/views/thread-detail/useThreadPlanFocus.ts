@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useInsertionEffect,
   useRef,
   useState,
   type RefObject,
@@ -31,9 +32,11 @@ export function useThreadPlanFocus(facts: {
   const { props, view, interactions, interactionsLoading, ready } = facts;
   const navigation = useQuestionNavigation();
   const navigate = useRef(navigation?.navigate);
-  navigate.current = navigation?.navigate;
   const current = useRef(facts);
-  current.current = facts;
+  useInsertionEffect(() => {
+    navigate.current = navigation?.navigate;
+    current.current = facts;
+  });
   const [request, setRequest] = useState<{
     threadId: string;
     value: ThreadPlanFocusRequest;

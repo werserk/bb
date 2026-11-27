@@ -100,15 +100,16 @@ interface ThreadTimelineFromEventsBaseOptions {
 interface ThreadTimelineFromEventsOptions extends ThreadTimelineFromEventsBaseOptions {
   includeService?: boolean;
   includeNestedRows: boolean;
+  omitSettledDelegationChildRows: boolean;
 }
 
 interface BuildThreadTimelineFromEventsArgs {
   acceptedClientRequestContext: AcceptedClientRequestContext;
   contextWindowEvents: ThreadEventWithMeta[];
-  headStateEvents?: ThreadEventWithMeta[];
   events: ThreadEventWithMeta[];
   fold?: EventProjectionFold;
   options: ThreadTimelineFromEventsOptions;
+  serviceTurnContextEvents?: ThreadEventWithMeta[];
 }
 
 type ThreadTimelineProjectionOptions = Parameters<
@@ -192,6 +193,7 @@ type ThreadTimelineTurnDetailsFromEventsResult =
 interface BuildTimelineRowsOptions {
   completedTurnDisplay: CompletedTurnDisplay;
   includeNestedRows: boolean;
+  omitSettledDelegationChildRows: boolean;
   rowIdPrefix: string;
   summarizeShellCommands: boolean;
   workspaceRoot: string | null;
@@ -763,6 +765,18 @@ function convertMessage(
       ];
     case "delegation": {
       const base = buildTimelineRowBase(message, options.rowIdPrefix);
+      const childOptions: BuildTimelineRowsOptions = {
+        completedTurnDisplay: options.completedTurnDisplay,
+        includeNestedRows: true,
+        omitSettledDelegationChildRows: options.omitSettledDelegationChildRows,
+        rowIdPrefix: `${base.id}:child:`,
+        summarizeShellCommands: options.summarizeShellCommands,
+        workspaceRoot: options.workspaceRoot,
+      };
+      const omitChildRows =
+        options.omitSettledDelegationChildRows &&
+        base.turnId !== null &&
+        message.status !== "pending";
       return [
         {
           ...base,
@@ -777,15 +791,13 @@ function convertMessage(
           description: message.description ?? null,
           output: message.output,
           completedAt: message.completedAt,
-          childRows: filterDelegationChildRows(
-            buildTimelineRows(message.childProjection, {
-              completedTurnDisplay: options.completedTurnDisplay,
-              includeNestedRows: true,
-              rowIdPrefix: `${base.id}:child:`,
-              summarizeShellCommands: options.summarizeShellCommands,
-              workspaceRoot: options.workspaceRoot,
-            }),
-          ),
+          childRows: omitChildRows
+            ? hasDelegationChildRows(message.childProjection, childOptions)
+              ? null
+              : []
+            : filterDelegationChildRows(
+                buildTimelineRows(message.childProjection, childOptions),
+              ),
           ...rowPresentation(message),
         },
       ];
@@ -1199,6 +1211,27 @@ function materializeTimelinePlan(
   ];
 }
 
+function hasDelegationChildRows(
+  projection: EventProjection,
+  options: BuildTimelineRowsOptions,
+): boolean {
+  const rows: TimelineRow[] = [];
+  for (const entry of projection.entries) {
+    for (const item of planTimelineRows(
+      { ...projection, entries: [entry] },
+      options.completedTurnDisplay,
+      options.rowIdPrefix,
+    )) {
+      const from = Math.max(0, rows.length - 1);
+      appendRows(rows, materializeTimelinePlan(item, options));
+      for (let index = from; index < rows.length; index += 1) {
+        if (!isDelegationLifecycleChildRow(rows[index]!)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function buildTimelineRows(
   projection: EventProjection,
   options: BuildTimelineRowsOptions,
@@ -1218,32 +1251,55 @@ function buildTimelineRows(
   );
 }
 
+export function projectThreadTimelineEvents(
+  args: Pick<
+    BuildThreadTimelineFromEventsArgs,
+    "acceptedClientRequestContext" | "events" | "fold" | "options"
+  > & {
+    externalUserBoundarySeqsByTurnId?: ReadonlyMap<string, readonly number[]>;
+  },
+): EventProjection {
+  return args.fold === undefined
+    ? buildEventProjection(args.events, {
+        ...threadTimelineProjectionOptions(
+          args.acceptedClientRequestContext,
+          args.options,
+        ),
+        externalUserBoundarySeqsByTurnId: args.externalUserBoundarySeqsByTurnId,
+      })
+    : finishEventProjectionFold(
+        args.fold,
+        args.events,
+        args.externalUserBoundarySeqsByTurnId,
+      );
+}
+
 export function buildThreadTimelineFromEvents(
   args: BuildThreadTimelineFromEventsArgs,
 ): ThreadTimelineFromEventsResult {
+  return buildThreadTimelineFromProjection({
+    ...args,
+    projection: projectThreadTimelineEvents(args),
+  });
+}
+
+export function buildThreadTimelineFromProjection(
+  args: Omit<BuildThreadTimelineFromEventsArgs, "fold"> & {
+    projection: EventProjection;
+  },
+): ThreadTimelineFromEventsResult {
+  const { projection } = args;
   const classificationEvents = [
     ...args.events,
-    ...(args.headStateEvents ?? []),
+    ...(args.serviceTurnContextEvents ?? []),
     ...args.acceptedClientRequestContext.acceptedClientRequestEvents,
   ];
   const service = classifyServiceTurns(classificationEvents);
   const hideService = args.options.includeService !== true;
   const serviceCurrent = hideService && service.latestIsService;
-  const stateEvents = (
-    args.headStateEvents?.length
-      ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
-      : args.events
-  ).filter((event) => !hideService || !service.hides(event));
-  const projection =
-    args.fold === undefined
-      ? buildEventProjection(
-          args.events,
-          threadTimelineProjectionOptions(
-            args.acceptedClientRequestContext,
-            args.options,
-          ),
-        )
-      : finishEventProjectionFold(args.fold, args.events);
+  const stateEvents = hideService
+    ? args.events.filter((event) => !service.hides(event))
+    : args.events;
   const activeThinking = projection.state.activeThinking;
   const serviceThinking =
     hideService &&
@@ -1276,6 +1332,8 @@ export function buildThreadTimelineFromEvents(
       includeNestedRows:
         args.options.includeNestedRows ||
         (hideService && service.turnIds.size > 0),
+      omitSettledDelegationChildRows:
+        args.options.omitSettledDelegationChildRows,
       rowIdPrefix: ROOT_TIMELINE_ROW_ID_PREFIX,
       summarizeShellCommands: args.options.summarizeShellCommands,
       workspaceRoot: args.options.workspaceRoot,
@@ -1405,6 +1463,7 @@ export function buildThreadTimelineTurnDetailsFromEvents(
   const options: BuildTimelineRowsOptions = {
     completedTurnDisplay: args.options.completedTurnDisplay,
     includeNestedRows: true,
+    omitSettledDelegationChildRows: false,
     rowIdPrefix: ROOT_TIMELINE_ROW_ID_PREFIX,
     summarizeShellCommands: args.options.summarizeShellCommands,
     workspaceRoot: args.options.workspaceRoot,

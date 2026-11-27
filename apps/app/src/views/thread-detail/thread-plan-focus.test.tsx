@@ -133,8 +133,8 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      constructor(callback: () => void) {
-        facts.resize = callback;
+      constructor(callback: (entries: ResizeObserverEntry[]) => void) {
+        facts.resize = () => callback([]);
       }
       observe() {}
       disconnect() {}

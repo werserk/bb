@@ -15,6 +15,31 @@ import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { ThreadScreen, type ThreadScreenPresentation } from "./ThreadScreen";
 
+const timelineMock = vi.hoisted(() => ({
+  current: undefined as unknown,
+  listeners: new Set<() => void>(),
+}));
+
+function publishTimeline(value: unknown) {
+  timelineMock.current = value;
+  act(() => {
+    for (const listener of timelineMock.listeners) listener();
+  });
+}
+
+vi.mock("@/components/thread/timeline", async (importOriginal) => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    timelineMock.listeners.add(listener);
+    return () => timelineMock.listeners.delete(listener);
+  };
+  return {
+    ...(await importOriginal<typeof import("@/components/thread/timeline")>()),
+    useThreadTimelineController: () =>
+      useSyncExternalStore(subscribe, () => timelineMock.current),
+  };
+});
+
 vi.mock("@/hooks/queries/thread-queries", () => ({
   useChildThreads: () => ({ data: [] }),
   useThread: () => ({ data: undefined }),
@@ -77,11 +102,7 @@ it("keeps pending send controls on the full ThreadScreen while a send is unresol
     createQueryClientTestHarness();
   const owner = pendingSendOwner(client);
   const submissionId = "00000000-0000-4000-8000-000000000001";
-  function Screen({
-    timelineRows,
-  }: {
-    timelineRows: UseThreadTimelineControllerResult["timelineRows"];
-  }) {
+  function Screen() {
     return (
       <ThreadScreen
         composer={null}
@@ -90,7 +111,7 @@ it("keeps pending send controls on the full ThreadScreen while a send is unresol
         projectId={THREAD.projectId}
         resolveMentionLink={() => null}
         thread={THREAD}
-        timeline={{ ...TIMELINE, timelineRows }}
+        timelineEnabled
         timelineHost={{
           environmentHostName: null,
           includePluginMessageActions: false,
@@ -100,15 +121,19 @@ it("keeps pending send controls on the full ThreadScreen while a send is unresol
       />
     );
   }
-  const screenTree = () => (
-    <MemoryRouter>
-      <Wrapper>
-        <Screen
-          timelineRows={composePendingSends(client, THREAD.id, [], []).rows}
-        />
-      </Wrapper>
-    </MemoryRouter>
-  );
+  const screenTree = () => {
+    publishTimeline({
+      ...TIMELINE,
+      timelineRows: composePendingSends(client, THREAD.id, [], []).rows,
+    });
+    return (
+      <MemoryRouter>
+        <Wrapper>
+          <Screen />
+        </Wrapper>
+      </MemoryRouter>
+    );
+  };
   const view = render(screenTree());
   try {
     await act(async () => {
@@ -156,11 +181,7 @@ it("resends an unconfirmed send with the same submission id", async () => {
     createQueryClientTestHarness();
   const owner = pendingSendOwner(client);
   const submissionId = "00000000-0000-4000-8000-000000000002";
-  function Screen({
-    timelineRows,
-  }: {
-    timelineRows: UseThreadTimelineControllerResult["timelineRows"];
-  }) {
+  function Screen() {
     return (
       <ThreadScreen
         composer={null}
@@ -169,7 +190,7 @@ it("resends an unconfirmed send with the same submission id", async () => {
         projectId={THREAD.projectId}
         resolveMentionLink={() => null}
         thread={THREAD}
-        timeline={{ ...TIMELINE, timelineRows }}
+        timelineEnabled
         timelineHost={{
           environmentHostName: null,
           includePluginMessageActions: false,
@@ -179,15 +200,19 @@ it("resends an unconfirmed send with the same submission id", async () => {
       />
     );
   }
-  const screenTree = () => (
-    <MemoryRouter>
-      <Wrapper>
-        <Screen
-          timelineRows={composePendingSends(client, THREAD.id, [], []).rows}
-        />
-      </Wrapper>
-    </MemoryRouter>
-  );
+  const screenTree = () => {
+    publishTimeline({
+      ...TIMELINE,
+      timelineRows: composePendingSends(client, THREAD.id, [], []).rows,
+    });
+    return (
+      <MemoryRouter>
+        <Wrapper>
+          <Screen />
+        </Wrapper>
+      </MemoryRouter>
+    );
+  };
   const view = render(screenTree());
   try {
     await act(async () => {
@@ -269,6 +294,10 @@ it("after a reload offers Resend for a journaled request and Copy text otherwise
     const recovered = owner.parseRecovered(entry);
     if (recovered) owner.begin(recovered);
   }
+  publishTimeline({
+    ...TIMELINE,
+    timelineRows: composePendingSends(client, THREAD.id, [], []).rows,
+  });
   const view = render(
     <MemoryRouter>
       <Wrapper>
@@ -279,10 +308,7 @@ it("after a reload offers Resend for a journaled request and Copy text otherwise
           projectId={THREAD.projectId}
           resolveMentionLink={() => null}
           thread={THREAD}
-          timeline={{
-            ...TIMELINE,
-            timelineRows: composePendingSends(client, THREAD.id, [], []).rows,
-          }}
+          timelineEnabled
           timelineHost={{
             environmentHostName: null,
             includePluginMessageActions: false,

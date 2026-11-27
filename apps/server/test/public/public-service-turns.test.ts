@@ -14,7 +14,7 @@ import {
   seedTurnStarted,
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
-import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
+import { runThreadLifecycle } from "../../src/services/threads/lifecycle/finish.js";
 import { getThread, insertThreadPluginMetadata } from "@bb/db";
 
 it("keeps service input hidden while exposing a live turn timer", async () => {
@@ -137,9 +137,10 @@ it("keeps service input hidden while exposing a live turn timer", async () => {
       ).rows.length,
     ).toBeGreaterThan(0);
     const before = getThread(h.db, thread.id)!.latestAttentionAt;
-    applyLoggedThreadLifecycleEvent(h.deps, {
-      threadId: thread.id,
-      event: { type: "run.failed" },
+    await runThreadLifecycle(h.deps, thread.id, {
+      type: "turn.completed",
+      turnId: "service",
+      status: "failed",
     });
     expect(getThread(h.db, thread.id)).toMatchObject({
       status: "error",

@@ -61,7 +61,7 @@ it("keeps legacy steer custody until the joint post-receipt timeline and delayed
     applySendThreadMessageSuccess({
       queryClient: client,
       request,
-      result: { ok: true, delivery: "sent" },
+      result: { ok: true, delivery: "sent", messageSequence: null },
       transaction,
       realtimeConnected: true,
     });
@@ -173,7 +173,7 @@ it("does not hand identical legacy sends to a late pre-receipt read or a timelin
       applySendThreadMessageSuccess({
         queryClient: client,
         request: payload,
-        result: { ok: true, delivery: "sent" },
+        result: { ok: true, delivery: "sent", messageSequence: null },
         transaction,
         realtimeConnected: true,
       });
@@ -393,6 +393,7 @@ it("debounces 100 invalidations into one bounded handoff and keeps unresolved cu
   owner.receipt(request.id, entry.id, {
     ok: true,
     delivery: "sent",
+    messageSequence: 2,
     requested: { requestId: "creq_0000000000", sequence: 2 },
   });
   const timeline = vi
@@ -503,7 +504,11 @@ it("offers unresolved custody after a failed legacy handoff read", async () => {
   });
   const owner = pendingSendOwner(client),
     entry = owner.list()[0]!;
-  owner.receipt("thread-1", entry.id, { ok: true, delivery: "sent" });
+  owner.receipt("thread-1", entry.id, {
+    ok: true,
+    delivery: "sent",
+    messageSequence: null,
+  });
   const timeline = vi
     .spyOn(sdk.threads, "timeline")
     .mockRejectedValue(Error("offline"));
@@ -637,6 +642,7 @@ it("does not restore the draft once the owner has accepted the send", async () =
     owner.receipt(request.id, id, {
       ok: true,
       delivery: "sent",
+      messageSequence: 1,
       submissionIds: [id],
       requested: { requestId: "request-1", sequence: 1 },
     });
@@ -782,7 +788,11 @@ it("returns the server receipt when the account scope changes while the send is 
       queryClient: client,
       request,
     });
-    let accept!: (value: { ok: true; delivery: "sent" }) => void;
+    let accept!: (value: {
+      ok: true;
+      delivery: "sent";
+      messageSequence: null;
+    }) => void;
     const result = dispatchPendingSend(
       client,
       request.id,
@@ -796,15 +806,19 @@ it("returns the server receipt when the account scope changes while the send is 
     );
     await Promise.resolve();
     clearPendingSendScope(client);
-    accept({ ok: true, delivery: "sent" });
-    await expect(result).resolves.toEqual({ ok: true, delivery: "sent" });
+    accept({ ok: true, delivery: "sent", messageSequence: null });
+    await expect(result).resolves.toEqual({
+      ok: true,
+      delivery: "sent",
+      messageSequence: null,
+    });
     expect(pendingSendOwner(client).list(request.id)).toMatchObject([
       { state: "sending" },
     ]);
     applySendThreadMessageSuccess({
       queryClient: client,
       request,
-      result: { ok: true, delivery: "sent" },
+      result: { ok: true, delivery: "sent", messageSequence: null },
       transaction,
       realtimeConnected: true,
     });

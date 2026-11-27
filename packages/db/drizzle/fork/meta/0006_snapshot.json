@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ecb33b90-ca3e-4be8-8165-5031bb56866d",
-  "prevId": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
+  "id": "a67fbf3b-b746-448e-9c5a-c2bd74513181",
+  "prevId": "ecb33b90-ca3e-4be8-8165-5031bb56866d",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -1907,6 +1907,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "last_failure_label": {
+          "name": "last_failure_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "active_artifact_id": {
           "name": "active_artifact_id",
           "type": "text",
@@ -2806,6 +2813,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "rollback_candidate_label": {
+          "name": "rollback_candidate_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "rollback_source_fingerprint": {
           "name": "rollback_source_fingerprint",
           "type": "text",
@@ -3315,6 +3329,14 @@
             "host_id"
           ],
           "isUnique": true
+        },
+        "project_sources_default_project_idx": {
+          "name": "project_sources_default_project_idx",
+          "columns": [
+            "project_id"
+          ],
+          "isUnique": true,
+          "where": "\"project_sources\".\"is_default\" = 1"
         }
       },
       "foreignKeys": {
@@ -4227,6 +4249,66 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "sweep_item_failures": {
+      "name": "sweep_item_failures",
+      "columns": {
+        "sweep": {
+          "name": "sweep",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_key": {
+          "name": "item_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_failed_at": {
+          "name": "first_failed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "sweep_item_failures_sweep_item_key_pk": {
+          "columns": [
+            "sweep",
+            "item_key"
+          ],
+          "name": "sweep_item_failures_sweep_item_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "system_experiments": {
       "name": "system_experiments",
       "columns": {
@@ -4900,6 +4982,150 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "thread_purges": {
+      "name": "thread_purges",
+      "columns": {
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "thread_purges_requested_idx": {
+          "name": "thread_purges_requested_idx",
+          "columns": [
+            "requested_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "thread_purges_thread_id_threads_id_fk": {
+          "name": "thread_purges_thread_id_threads_id_fk",
+          "tableFrom": "thread_purges",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "thread_run_states": {
+      "name": "thread_run_states",
+      "columns": {
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "held_turn_id": {
+          "name": "held_turn_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "held_turn_status": {
+          "name": "held_turn_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_reason": {
+          "name": "stop_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_requested_at": {
+          "name": "stop_requested_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_sent_at": {
+          "name": "stop_sent_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_acked_at": {
+          "name": "stop_acked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "thread_run_states_stop_idx": {
+          "name": "thread_run_states_stop_idx",
+          "columns": [
+            "stop_requested_at"
+          ],
+          "isUnique": false,
+          "where": "\"thread_run_states\".\"stop_requested_at\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "thread_run_states_thread_id_threads_id_fk": {
+          "name": "thread_run_states_thread_id_threads_id_fk",
+          "tableFrom": "thread_run_states",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "thread_run_states_held_check": {
+          "name": "thread_run_states_held_check",
+          "value": "(\"thread_run_states\".\"held_turn_id\" IS NULL) = (\"thread_run_states\".\"held_turn_status\" IS NULL)"
+        },
+        "thread_run_states_stop_check": {
+          "name": "thread_run_states_stop_check",
+          "value": "(\"thread_run_states\".\"stop_reason\" IS NULL) = (\"thread_run_states\".\"stop_requested_at\" IS NULL) AND (\"thread_run_states\".\"stop_sent_at\" IS NULL OR \"thread_run_states\".\"stop_requested_at\" IS NOT NULL) AND (\"thread_run_states\".\"stop_acked_at\" IS NULL OR \"thread_run_states\".\"stop_requested_at\" IS NOT NULL)"
+        }
+      }
+    },
     "thread_search_segments": {
       "name": "thread_search_segments",
       "columns": {
@@ -5307,6 +5533,89 @@
         "thread_tabs_thread_id_threads_id_fk": {
           "name": "thread_tabs_thread_id_threads_id_fk",
           "tableFrom": "thread_tabs",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "thread_turn_requests": {
+      "name": "thread_turn_requests",
+      "columns": {
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "host_id": {
+          "name": "host_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sync_title": {
+          "name": "sync_title",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "thread_turn_requests_thread_idx": {
+          "name": "thread_turn_requests_thread_idx",
+          "columns": [
+            "thread_id",
+            "sent_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "thread_turn_requests_thread_id_threads_id_fk": {
+          "name": "thread_turn_requests_thread_id_threads_id_fk",
+          "tableFrom": "thread_turn_requests",
           "tableTo": "threads",
           "columnsFrom": [
             "thread_id"

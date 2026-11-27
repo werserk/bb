@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
+import { observeSharedResize } from "@bb/shared-ui/lib/shared-resize-observer";
 
 function heightOwner(root: HTMLElement): HTMLElement | null {
   for (
@@ -47,14 +48,14 @@ export function useThreadPlanLayout(
       );
     };
     resize();
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
-    observer?.observe(widthOwner);
-    if (available && available !== widthOwner) observer?.observe(available);
+    const stopObserving = observeSharedResize(
+      available ? [widthOwner, available] : widthOwner,
+      { read: () => undefined, write: resize },
+    );
     window.addEventListener("resize", resize);
     window.visualViewport?.addEventListener("resize", resize);
     return () => {
-      observer?.disconnect();
+      stopObserving();
       window.removeEventListener("resize", resize);
       window.visualViewport?.removeEventListener("resize", resize);
     };

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useInsertionEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -17,6 +18,7 @@ import { formatDiffCount } from "@bb/thread-view";
 import { ContextProgress } from "@bb/shared-ui/context-row";
 import { Icon } from "@bb/shared-ui/icon";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { observeSharedResize } from "@bb/shared-ui/lib/shared-resize-observer";
 import {
   useComposerContextStore,
   type ComposerContextEntry,
@@ -163,7 +165,6 @@ function GroupChip({
             ? "text-attention"
             : "text-muted-foreground",
       )}
-      title={`${selected ? "Collapse" : "Show"} ${group.label}`}
       onClick={(event) => onClick(event.currentTarget)}
     >
       {group.kind === "plan" && group.progress ? (
@@ -232,9 +233,6 @@ export function ComposerContextDock({
   const dock = useRef<HTMLDivElement>(null);
   const setPanelRef = useComposedRefs(store?.setPanel, panel);
   const hasFacts = entries.length > 0;
-  // A group's key can change when its source re-publishes (kind or label
-  // arrives later): follow the sources. If they split across groups, or
-  // vanish, the selection is gone.
   const byKey = pick
     ? groups.find((group) => group.key === pick.key)
     : undefined;
@@ -248,11 +246,9 @@ export function ComposerContextDock({
       : [];
   const active = byKey ?? (bySources.length === 1 ? bySources[0] : undefined);
   const sectionKey = active?.key ?? null;
-  // One part at a time: a chip's section, or the composer preview alone.
   const open =
     hasFacts && expanded && (pick === null ? Boolean(helper) : !!active);
   const sectionRef = useRef<string | null>(null);
-  sectionRef.current = sectionKey;
 
   const focusInput = useCallback(() => {
     const input = dock.current?.querySelector<HTMLElement>(
@@ -325,11 +321,13 @@ export function ComposerContextDock({
   }, [store, onBlurCapture]);
 
   const escape = useRef<() => void>(() => {});
-  escape.current = () => {
-    // Only dismiss the preview when it is the part being shown.
-    if (sectionKey === null) helper?.strip?.onDismiss();
-    close(true);
-  };
+  useInsertionEffect(() => {
+    sectionRef.current = sectionKey;
+    escape.current = () => {
+      if (sectionKey === null) helper?.strip?.onDismiss();
+      close(true);
+    };
+  });
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -345,10 +343,11 @@ export function ComposerContextDock({
     if (canvas && open) showFromTop(canvas);
   }, [canvas, open, sectionKey]);
   useEffect(() => {
-    if (!canvas || !open || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => fitRows(canvas));
-    for (const child of canvas.children) observer.observe(child);
-    return () => observer.disconnect();
+    if (!canvas || !open) return;
+    return observeSharedResize([...canvas.children], {
+      read: () => undefined,
+      write: () => fitRows(canvas),
+    });
   }, [canvas, open, groups, helper]);
 
   if (expanded && !open) {

@@ -13,7 +13,7 @@ import type { SendMessageRequest } from "@bb/server-contract";
 import { createThreadSendIntakeService } from "../../../src/services/threads/thread-send-intake.js";
 import { type SendIntakeAuthority, commitSendIntake } from "../../../src/services/threads/send-intake-authority.js";
 import { appendClientTurnEvent, appendThreadEvent, appendPreparedClientTurnRequestedEventWithNotificationInTransaction, createClientTurnRequestId } from "../../../src/services/threads/thread-events.js";
-import { applyLoggedThreadLifecycleEventInTransaction } from "../../../src/services/threads/lifecycle-outcome.js";
+import { runThreadLifecycleInTransaction } from "../../../src/services/threads/lifecycle/run.js";
 import { createThreadStartup, saveThreadProvisionContext } from "../../../src/services/threads/thread-startup-store.js";
 import { withTestHarness, type TestAppHarness } from "../../helpers/test-app.js";
 import { seedThreadFixture } from "../../helpers/seed.js";
@@ -33,7 +33,7 @@ async function failed(h: TestAppHarness, input: PromptInput[] = textInput("owned
   const key = `qsub_${id}`;
   const execute = vi.fn(async (_payload: SendMessageRequest, _thread: Thread, authority: SendIntakeAuthority) => {
     h.db.transaction(tx => commitSendIntake(tx, authority, { kind: "request", id: "next-native", sequence: 100 }));
-    return { ok: true, delivery: "sent" } as const;
+    return { ok: true, delivery: "sent", messageSequence: null } as const;
   });
   let ready = false;
   const service = createThreadSendIntakeService(h.deps, execute, () => ready);
@@ -135,8 +135,8 @@ describe("revisioned server-evidence intake recovery", () => {
         let current = getThreadSendIntake(h.db, f.key)!;
         expect((await f.service.mutate(f.thread.id, { id: f.key, revision: current.revision, action: { kind: "reconcile" } })).state).toBe("failed");
         h.db.transaction(tx => {
-          expect(applyLoggedThreadLifecycleEventInTransaction({ db: tx, logger: h.deps.logger },
-            { threadId: f.thread.id, event: { type: "run.preparing" } }).applied).toBe(true);
+          expect(runThreadLifecycleInTransaction({ db: tx, hub: h.deps.hub, logger: h.deps.logger },
+            f.thread.id, { type: "provisioning.started" }).refusal).toBeNull();
           saveThreadProvisionContext({ db: tx, threadId: f.thread.id, replace: true,
           context: createThreadStartup({ clientRequestId: intent.requestId, input: f.payload.input, execution,
             environmentIntent: { type: "reuse", environmentId: f.environment.id }, fork: null, initiator: "user", seedWithoutRun: false,
@@ -158,7 +158,7 @@ describe("revisioned server-evidence intake recovery", () => {
         const correlation = kind === "clear" ? `evt_${randomUUID()}` : createClientTurnRequestId();
         h.db.transaction(tx => checkpointThreadSendIntake(tx, f.claim, kind === "clear" ? { clearOperationId: correlation } : { compactRequestId: correlation }, Date.now()));
         f.stop(); f.service.stop();
-        const execute = vi.fn(async () => ({ ok: true, delivery: "sent" } as const));
+        const execute = vi.fn(async () => ({ ok: true, delivery: "sent", messageSequence: null } as const));
         const restarted = createThreadSendIntakeService(h.deps, execute);
         try {
           let current = getThreadSendIntake(h.db, f.key)!;

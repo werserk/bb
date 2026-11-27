@@ -342,7 +342,10 @@ export class PendingSendOverlay {
       } else {
         entry.legacyFence = ++this.clock;
         entry.legacyTimelineAfterSequence =
-          entry.afterSequence ?? legacyBaseline?.maxSeq;
+          entry.afterSequence ??
+          (receipt.messageSequence === null
+            ? legacyBaseline?.maxSeq
+            : receipt.messageSequence - 1);
         entry.legacyQueueBaselineIds ??= legacyBaseline?.queueIds;
       }
     }

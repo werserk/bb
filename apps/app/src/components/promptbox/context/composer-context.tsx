@@ -165,9 +165,11 @@ export function ComposerContextItem({
   useLayoutEffect(() => {
     if (!store || !element) return;
     const content = contentRef?.current;
-    let present = content ? content.hasChildNodes() : contentRef === undefined;
+    const seen = {
+      present: content ? content.hasChildNodes() : contentRef === undefined,
+    };
     const update = () => {
-      if (present)
+      if (seen.present)
         store.set({
           id,
           sourceId,
@@ -194,8 +196,8 @@ export function ComposerContextItem({
     if (!content) return;
     const observer = new MutationObserver(() => {
       const next = content.hasChildNodes();
-      if (next === present) return;
-      present = next;
+      if (next === seen.present) return;
+      seen.present = next;
       update();
     });
     observer.observe(content, { childList: true });

@@ -6,6 +6,10 @@ import {
 import { flushSync } from "react-dom";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import { Button } from "@bb/shared-ui/button";
+import {
+  observedBorderBoxBlockSize,
+  observeSharedResize,
+} from "@bb/shared-ui/lib/shared-resize-observer";
 import type { FollowUpSubmitMode, PromptDraftState } from "@bb/client-core";
 import {
   memo,
@@ -22,7 +26,6 @@ import {
   type Ref,
 } from "react";
 import type {
-  PromptTextMention,
   ThreadRuntimeDisplayStatus,
   ThreadTimelineActivePromptMode,
 } from "@bb/domain";
@@ -36,9 +39,10 @@ import {
   composerScopeIdentity,
   PluginComposerHostProvider,
   PluginComposerViewProvider,
+  type ComposerDraftSource,
+  type ComposerDraftStore,
   type PluginComposerHost,
-  usePluginComposerHostDraft,
-  usePluginComposerViewModel,
+  usePluginComposerStaticViewModel,
 } from "@/components/plugin/plugin-composer-host";
 import {
   ComposerExtensionHost,
@@ -120,6 +124,11 @@ function PromptBoxWithScrollAnchor({
   );
 }
 
+const NO_HOST_DRAFT: ComposerDraftSource = {
+  getCurrent: () => ({ text: "", mentions: [], attachments: [] }),
+  subscribeDraft: () => () => {},
+};
+
 const FOLLOW_UP_PROMPT_BOX_DEFAULT_MIN_HEIGHT = 60;
 const FOLLOW_UP_PROMPT_BOX_ELASTIC_TARGET_HEIGHT =
   FOLLOW_UP_PROMPT_BOX_DEFAULT_MIN_HEIGHT +
@@ -136,9 +145,7 @@ export type { FollowUpSubmitMode } from "@bb/client-core";
 export interface FollowUpComposerProps {
   history: HistoryConfig;
   isFollowUpSubmitting: boolean;
-  message: string;
-  mentionRanges: readonly PromptTextMention[];
-  onChangeMessage: (value: string, mentionRanges: PromptTextMention[]) => void;
+  draft: ComposerDraftStore;
   onModifierSubmit: (extras?: ComposerSubmitExtras) => void | Promise<void>;
   onSubmit: (extras?: ComposerSubmitExtras) => void | Promise<void>;
   onEscape?: () => void;
@@ -211,20 +218,18 @@ function FollowUpPromptBoxStackOnly({
   const contextStore = contextHost ? threadContextStore : null;
   const composerScope =
     pluginComposerScope ?? pluginComposerHost?.scope ?? null;
-  const hostDraft = usePluginComposerHostDraft(pluginComposerHost ?? null);
-  const composerView = usePluginComposerViewModel({
+  const composerView = usePluginComposerStaticViewModel({
     scope: composerScope ?? DEFAULT_COMPOSER_SCOPE,
     layout: "expanded",
-    text: hostDraft?.text ?? "",
-    attachmentCount: hostDraft?.attachments.length ?? 0,
     isRunning: false,
     isSubmitting: false,
   });
+  const hostDraft = pluginComposerHost ?? NO_HOST_DRAFT;
   if (!stack) {
     return null;
   }
   return (
-    <PluginComposerViewProvider value={composerView}>
+    <PluginComposerViewProvider view={composerView} draft={hostDraft}>
       <PluginComposerHostProvider value={pluginComposerHost ?? null}>
         <div data-promptbox-shell="" className="space-y-2">
           {contextStore ? (
@@ -288,16 +293,13 @@ function FollowUpPromptBoxWithComposer({
   const onStopRuntime =
     submitMode.kind === "queue" ? submitMode.onStop : undefined;
   const canStopRuntime = onStopRuntime !== undefined;
-  const attachmentCount = attachments.items?.length ?? 0;
   const composerScope =
     pluginComposerScope ?? pluginComposerHost?.scope ?? null;
   const [composerLayout, setComposerLayout] =
     useState<ComposerView["layout"]>("expanded");
-  const composerView = usePluginComposerViewModel({
+  const composerView = usePluginComposerStaticViewModel({
     scope: composerScope ?? DEFAULT_COMPOSER_SCOPE,
     layout: composerLayout,
-    text: composer.message,
-    attachmentCount,
     isRunning: canStopRuntime || isStopping,
     isSubmitting: composer.isFollowUpSubmitting,
   });
@@ -621,6 +623,7 @@ function FollowUpPromptBoxWithComposer({
   const extensionController = useComposerExtensionController({
     host: pluginComposerHost ?? null,
     view: composerView,
+    draft: composer.draft,
     collapseIfFocused,
     focusDefault,
   });
@@ -653,8 +656,7 @@ function FollowUpPromptBoxWithComposer({
   const { permissionDisplayOverride, permissionPickerDisabledByPlanMode } =
     usePromptModePermissionDisplay({
       execution,
-      value: composer.message,
-      mentionRanges: composer.mentionRanges,
+      draft: composer.draft,
       activePromptMode,
     });
   const permissionReadOnlyResolved =
@@ -712,19 +714,17 @@ function FollowUpPromptBoxWithComposer({
   useEffect(() => {
     const element = stackRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries.find((candidate) => candidate.target === element);
-      if (!entry) return;
-      const borderBoxSize = Array.isArray(entry.borderBoxSize)
-        ? entry.borderBoxSize[0]
-        : entry.borderBoxSize;
-      const measured = borderBoxSize?.blockSize ?? entry.contentRect.height;
-      if (lastStackHeightRef.current === measured) return;
-      flushSync(() => applyStackHeight(measured));
-      positionKeeper?.remeasure();
+    return observeSharedResize(element, {
+      read: (entry) =>
+        entry === undefined
+          ? element.offsetHeight
+          : (observedBorderBoxBlockSize(entry) ?? element.offsetHeight),
+      write: (measured) => {
+        if (lastStackHeightRef.current === measured) return;
+        flushSync(() => applyStackHeight(measured));
+        positionKeeper?.remeasure();
+      },
     });
-    observer.observe(element);
-    return () => observer.disconnect();
   }, [applyStackHeight, positionKeeper]);
   const elasticTextareaMinHeight =
     stack === null
@@ -753,9 +753,7 @@ function FollowUpPromptBoxWithComposer({
         onFocusCommand={extensionController.focus}
         voice={voice}
         minHeight={elasticTextareaMinHeight}
-        value={composer.message}
-        mentionRanges={composer.mentionRanges}
-        onChange={composer.onChangeMessage}
+        draft={composer.draft}
         onSubmit={composer.onSubmit}
         onEscape={composer.onEscape}
         textEffects={textEffects}

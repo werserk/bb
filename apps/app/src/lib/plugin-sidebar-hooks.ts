@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useStore } from "jotai";
 import {
   PERSONAL_PROJECT_ID,
@@ -20,9 +20,11 @@ import type {
 } from "@get-bb/plugin-sdk";
 import { useSidebarThreadShortcut as useHostSidebarThreadShortcut } from "@/components/sidebar/sidebarThreadShortcuts";
 import {
+  resolveThreadTitleDisplayText,
   useThreadTitleMentionResources,
   type ThreadTitleMentionResources,
 } from "@/components/thread/ThreadTitleMentions";
+import { getThreadDisplayTitle } from "./thread-title";
 import {
   usePromptDraftHasInput,
   usePromptDraftInputThreadIds,
@@ -44,7 +46,11 @@ import {
 } from "@/hooks/mutations/thread-state-mutations";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
 import { toPluginSidebarThread } from "./plugin-sidebar-threads";
-import { useSidebarThreadEntries } from "./sidebar-thread-entries";
+import {
+  useSidebarThreadEntries,
+  useSidebarThreadEntriesStore,
+  useSidebarThreadEntry,
+} from "./sidebar-thread-entries";
 import { useSetRootComposeProjectId } from "./root-compose-selection";
 import { openThreadInSplit } from "./split-layout/openThreadInSplit";
 import {
@@ -79,8 +85,8 @@ function hostNamesFor(
 const pluginSidebarThreadByEntry = new WeakMap<
   ThreadListEntry,
   {
-    hostNamesById: ReadonlyMap<string, string>;
-    titleResources: ThreadTitleMentionResources;
+    hostName: string | null;
+    displayTitle: string;
     thread: PluginSidebarThread;
   }
 >();
@@ -90,20 +96,24 @@ function toPluginSidebarThreadCached(
   hostNamesById: ReadonlyMap<string, string>,
   titleResources: ThreadTitleMentionResources,
 ): PluginSidebarThread {
+  const hostName =
+    entry.environmentHostId === null
+      ? null
+      : (hostNamesById.get(entry.environmentHostId) ?? entry.environmentHostId);
+  const displayTitle = resolveThreadTitleDisplayText(
+    getThreadDisplayTitle(entry),
+    titleResources,
+  );
   const cached = pluginSidebarThreadByEntry.get(entry);
   if (
     cached !== undefined &&
-    cached.hostNamesById === hostNamesById &&
-    cached.titleResources === titleResources
+    cached.hostName === hostName &&
+    cached.displayTitle === displayTitle
   ) {
     return cached.thread;
   }
   const thread = toPluginSidebarThread(entry, hostNamesById, titleResources);
-  pluginSidebarThreadByEntry.set(entry, {
-    hostNamesById,
-    titleResources,
-    thread,
-  });
+  pluginSidebarThreadByEntry.set(entry, { hostName, displayTitle, thread });
   return thread;
 }
 
@@ -257,21 +267,17 @@ export function useSidebarThreads(
     archived.data,
     archiveState,
   ]);
-  const previousRef = useRef<PluginSidebarThreadsState | null>(null);
-  return useMemo(() => {
-    const stable = stabilizePluginSidebarThreadsState(
-      previousRef.current,
-      next,
-    );
-    previousRef.current = stable;
-    return stable;
-  }, [next]);
-}
-
-export function useSidebarThreadEntry(
-  threadId: string,
-): ThreadListEntry | null {
-  return useSidebarThreadEntries().get(threadId) ?? null;
+  const [settled, setSettled] = useState<{
+    next: PluginSidebarThreadsState;
+    stable: PluginSidebarThreadsState;
+  } | null>(null);
+  if (settled !== null && settled.next === next) return settled.stable;
+  const stable = stabilizePluginSidebarThreadsState(
+    settled?.stable ?? null,
+    next,
+  );
+  setSettled({ next, stable });
+  return stable;
 }
 
 export function useSidebarThreadActions(): PluginSidebarThreadActions {
@@ -280,27 +286,27 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
   const isCompact = useIsCompactViewport();
   const setRootComposeProjectId = useSetRootComposeProjectId();
   const hostActions = useThreadActions();
-  const entriesById = useSidebarThreadEntries();
+  const entries = useSidebarThreadEntriesStore();
   const { mutateAsync: pinThreadAsync } = usePinThread();
   const { mutateAsync: unpinThreadAsync } = useUnpinThread();
   const { mutateAsync: updateThreadAsync } = useUpdateThread();
 
   const requireEntry = useCallback(
     (threadId: string): ThreadListEntry => {
-      const entry = entriesById.get(threadId);
-      if (entry === undefined) {
+      const entry = entries.get(threadId);
+      if (entry === null) {
         throw new Error(`Unknown thread: ${threadId}`);
       }
       return entry;
     },
-    [entriesById],
+    [entries],
   );
 
   return useMemo<PluginSidebarThreadActions>(
     () => ({
       open(threadId, options) {
-        const entry = entriesById.get(threadId);
-        if (entry === undefined) return;
+        const entry = entries.get(threadId);
+        if (entry === null) return;
         const { projectId } = entry;
         if (options?.split) {
           store.set(getThreadConversationCollapsedAtom(threadId), false);
@@ -372,7 +378,7 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
       },
     }),
     [
-      entriesById,
+      entries,
       hostActions,
       isCompact,
       navigate,

@@ -337,7 +337,10 @@ function applyUserTurnReadForEvent(
   if (args.type !== "client/turn/requested") {
     return null;
   }
-  if (args.data.initiator !== "user") {
+  if (
+    args.data.initiator !== "user" ||
+    args.data.originPluginId !== undefined
+  ) {
     return null;
   }
 

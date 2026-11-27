@@ -26,11 +26,22 @@ export interface SlowDbQueryLogger {
   info(fields: SlowDbQueryLogFields, message: string): void;
 }
 
+export interface DbSynchronousWorkTracker {
+  run<T>(label: () => string, work: () => T): T;
+  record(label: () => string, durationMs: number, cpuMs: number): void;
+}
+
+export interface QueryPlanExecutionObserver {
+  observeFirstExecution(source: string, params: readonly unknown[]): void;
+}
+
 export interface CreateConnectionOptions {
   slowQueryLogger?: SlowDbQueryLogger;
+  synchronousWorkTracker?: DbSynchronousWorkTracker;
   slowQueryThresholdMs?: number | (() => number);
   slowQueryDiagnosticsEnabled?: () => boolean;
   slowQueryWorkLabel?: () => string | null;
+  queryPlanObserver?: () => QueryPlanExecutionObserver | null;
 }
 
 export type DbConnection = ReturnType<typeof createConnection>;
@@ -100,12 +111,23 @@ export function rootConnectionOf(
   return rootConnections.get(db);
 }
 
+interface TransactionWorkState {
+  firstStatementSource: string | null;
+  firstWriteSource: string | null;
+  mode: TransactionMode;
+}
+
+type TransactionMode = "default" | "deferred" | "immediate" | "exclusive";
+
 interface SlowDbQueryConfig {
-  logger: SlowDbQueryLogger;
+  activeTransaction: TransactionWorkState | null;
+  logger: SlowDbQueryLogger | null;
   thresholdMs: number | (() => number);
   sampleWal: () => QueryDiagnosticsLogFields["wal"];
   diagnosticsEnabled: () => boolean;
   workLabel: () => string | null;
+  tracker: DbSynchronousWorkTracker | null;
+  queryPlanObserver: () => QueryPlanExecutionObserver | null;
 }
 
 interface TimedStatementOperationArgs<TValue> {
@@ -121,6 +143,8 @@ export const SQLITE_CACHE_SIZE_KIB = 262_144;
 export const SQLITE_MMAP_SIZE_BYTES = 1_073_741_824;
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const MAX_LOGGED_SQL_LENGTH = 1_000;
+const MAX_WORK_LABEL_SQL_LENGTH = 120;
+const SYNCHRONOUS_WORK_STATEMENT_FLOOR_MS = 1;
 const SQL_TRUNCATION_SUFFIX = "...";
 const SQL_STRING_LITERAL_PATTERN = /'(?:''|[^'])*'/gu;
 const SQL_WHITESPACE_PATTERN = /\s+/gu;
@@ -129,16 +153,50 @@ function roundDurationMs(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
 }
 
-function formatSqlForLog(source: string): string {
+function formatSqlForLog(
+  source: string,
+  maxLength = MAX_LOGGED_SQL_LENGTH,
+): string {
   const redacted = source.replace(SQL_STRING_LITERAL_PATTERN, "'?'");
   const normalized = redacted.replace(SQL_WHITESPACE_PATTERN, " ").trim();
-  if (normalized.length <= MAX_LOGGED_SQL_LENGTH) {
+  if (normalized.length <= maxLength) {
     return normalized;
   }
   return `${normalized.slice(
     0,
-    MAX_LOGGED_SQL_LENGTH - SQL_TRUNCATION_SUFFIX.length,
+    maxLength - SQL_TRUNCATION_SUFFIX.length,
   )}${SQL_TRUNCATION_SUFFIX}`;
+}
+
+function describeTransactionWork(state: TransactionWorkState): string {
+  const source = state.firstWriteSource ?? state.firstStatementSource;
+  const label = `db:transaction ${state.mode}`;
+  return source === null
+    ? label
+    : `${label}: ${formatSqlForLog(source, MAX_WORK_LABEL_SQL_LENGTH)}`;
+}
+
+function transactionWorkLabel(state: TransactionWorkState): () => string {
+  return () => describeTransactionWork(state);
+}
+
+function statementWorkLabel(
+  operation: SlowDbQueryOperation,
+  source: string,
+): () => string {
+  return () =>
+    `db:${operation} ${formatSqlForLog(source, MAX_WORK_LABEL_SQL_LENGTH)}`;
+}
+
+function noteTransactionStatement(
+  config: SlowDbQueryConfig,
+  source: string,
+  writes: boolean,
+): void {
+  const transaction = config.activeTransaction;
+  if (transaction === null) return;
+  transaction.firstStatementSource ??= source;
+  if (writes) transaction.firstWriteSource ??= source;
 }
 
 function runTimedStatementOperation<TValue>(
@@ -157,10 +215,24 @@ function runTimedStatementOperation<TValue>(
       typeof args.config.thresholdMs === "function"
         ? args.config.thresholdMs()
         : args.config.thresholdMs;
-    if (durationMs >= thresholdMs) {
+    const tracker = args.config.tracker;
+    if (
+      tracker !== null &&
+      args.operation !== "transaction" &&
+      durationMs >= SYNCHRONOUS_WORK_STATEMENT_FLOOR_MS
+    ) {
+      const cpu = threadCpuUsage(startedCpu);
+      tracker.record(
+        statementWorkLabel(args.operation, args.source),
+        durationMs,
+        (cpu.user + cpu.system) / 1_000,
+      );
+    }
+    const logger = args.config.logger;
+    if (logger !== null && durationMs >= thresholdMs) {
       const cpu = threadCpuUsage(startedCpu);
       const finishedUsage = startedUsage ? resourceUsage() : null;
-      args.config.logger.info(
+      logger.info(
         {
           bindingArgumentCount: args.bindingArgumentCount,
           durationMs: roundDurationMs(durationMs),
@@ -193,31 +265,41 @@ function instrumentStatement(
   const originalAll = statement.all.bind(statement);
   const originalGet = statement.get.bind(statement);
   const originalRun = statement.run.bind(statement);
+  const writes = !statement.readonly;
 
-  statement.all = (...params) =>
-    runTimedStatementOperation({
+  statement.all = (...params) => {
+    noteTransactionStatement(config, source, writes);
+    config.queryPlanObserver()?.observeFirstExecution(source, params);
+    return runTimedStatementOperation({
       bindingArgumentCount: params.length,
       config,
       operation: "all",
       source,
       work: () => originalAll(...params),
     });
-  statement.get = (...params) =>
-    runTimedStatementOperation({
+  };
+  statement.get = (...params) => {
+    noteTransactionStatement(config, source, writes);
+    config.queryPlanObserver()?.observeFirstExecution(source, params);
+    return runTimedStatementOperation({
       bindingArgumentCount: params.length,
       config,
       operation: "get",
       source,
       work: () => originalGet(...params),
     });
-  statement.run = (...params) =>
-    runTimedStatementOperation({
+  };
+  statement.run = (...params) => {
+    noteTransactionStatement(config, source, writes);
+    config.queryPlanObserver()?.observeFirstExecution(source, params);
+    return runTimedStatementOperation({
       bindingArgumentCount: params.length,
       config,
       operation: "run",
       source,
       work: () => originalRun(...params),
     });
+  };
 
   return statement;
 }
@@ -226,12 +308,18 @@ function instrumentSqliteClient(
   sqlite: Database.Database,
   options: CreateConnectionOptions,
 ): void {
-  if (!options.slowQueryLogger) {
+  if (
+    !options.slowQueryLogger &&
+    !options.synchronousWorkTracker &&
+    !options.queryPlanObserver
+  ) {
     return;
   }
 
   const config: SlowDbQueryConfig = {
-    logger: options.slowQueryLogger,
+    activeTransaction: null,
+    logger: options.slowQueryLogger ?? null,
+    tracker: options.synchronousWorkTracker ?? null,
     thresholdMs:
       options.slowQueryThresholdMs ?? DEFAULT_SLOW_DB_QUERY_LOG_THRESHOLD_MS,
     sampleWal: createWalSampler(
@@ -239,6 +327,7 @@ function instrumentSqliteClient(
     ),
     diagnosticsEnabled: options.slowQueryDiagnosticsEnabled ?? (() => false),
     workLabel: options.slowQueryWorkLabel ?? (() => null),
+    queryPlanObserver: options.queryPlanObserver ?? (() => null),
   };
   const originalExec = sqlite.exec.bind(sqlite);
   sqlite.exec = (source) =>
@@ -252,15 +341,33 @@ function instrumentSqliteClient(
   const originalTransaction = sqlite.transaction.bind(sqlite);
   sqlite.transaction = (fn) => {
     const original = originalTransaction(fn);
-    function wrap(mode: "default" | "deferred" | "immediate" | "exclusive") {
+    function wrap(mode: TransactionMode) {
       return function (this: unknown, ...params: Parameters<typeof original>) {
-        return runTimedStatementOperation({
-          bindingArgumentCount: params.length,
-          config,
-          operation: "transaction",
-          source: `TRANSACTION ${mode.toUpperCase()}`,
-          work: () => original[mode].apply(this, params),
-        });
+        const tracker = config.tracker;
+        const outerTransaction = config.activeTransaction;
+        const state: TransactionWorkState = {
+          firstStatementSource: null,
+          firstWriteSource: null,
+          mode,
+        };
+        config.activeTransaction = state;
+        try {
+          return runTimedStatementOperation({
+            bindingArgumentCount: params.length,
+            config,
+            operation: "transaction",
+            source: `TRANSACTION ${mode.toUpperCase()}`,
+            work:
+              tracker === null
+                ? () => original[mode].apply(this, params)
+                : () =>
+                    tracker.run(transactionWorkLabel(state), () =>
+                      original[mode].apply(this, params),
+                    ),
+          });
+        } finally {
+          config.activeTransaction = outerTransaction;
+        }
       };
     }
     const modes = {

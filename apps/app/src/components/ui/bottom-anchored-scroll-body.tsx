@@ -1,6 +1,7 @@
 import { ReadingScrollArea } from "./reading-scroll-area";
 import {
   createContext,
+  createRef,
   useCallback,
   useContext,
   useEffect,
@@ -9,12 +10,16 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useStore } from "jotai";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { observeSharedResize } from "@bb/shared-ui/lib/shared-resize-observer";
 import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { PAGE_SHELL_CONTENT_STYLE } from "./page-shell-content-style.js";
+import {
+  PAGE_CONTAINER_INSET_END_VARIABLE,
+  PAGE_SHELL_CONTENT_STYLE,
+} from "./page-shell-content-style.js";
 import { PAGE_SCROLL_TO_TOP_EVENT } from "@/lib/page-scroll-to-top";
 import { isIOSWebKit } from "@/lib/ios-webkit";
 import { threadTimelineScrollAnchorAtomFamily } from "@/lib/thread-timeline-scroll-anchor.js";
@@ -93,6 +98,36 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+function createBottomAnchoredScrollElements(): {
+  scrollAreaRef: RefObject<HTMLDivElement | null>;
+  pageContentRef: RefObject<HTMLDivElement | null>;
+  scrollFooterRef: RefObject<HTMLDivElement | null>;
+  scrollFloorRef: RefObject<HTMLDivElement | null>;
+  positionKeeper: ScrollPositionKeeper;
+} {
+  const scrollAreaRef = createRef<HTMLDivElement>();
+  const pageContentRef = createRef<HTMLDivElement>();
+  const scrollFooterRef = createRef<HTMLDivElement>();
+  const scrollFloorRef = createRef<HTMLDivElement>();
+  const positionKeeper = new ScrollPositionKeeper({
+    bottomThresholdPx: BOTTOM_ANCHOR_THRESHOLD_PX,
+    deferWritesWhileScrolling: isIOSWebKit(navigator),
+    getContentElement: () => pageContentRef.current,
+    getFloorElement: () => scrollFloorRef.current,
+    getFooterElement: () => scrollFooterRef.current,
+    getScrollElement: () => scrollAreaRef.current,
+    getTopLevelRows,
+    initiallyAttached: true,
+  });
+  return {
+    scrollAreaRef,
+    pageContentRef,
+    scrollFooterRef,
+    scrollFloorRef,
+    positionKeeper,
+  };
+}
+
 export function BottomAnchoredScrollBody({
   scrollAreaClassName,
   contentClassName,
@@ -105,11 +140,16 @@ export function BottomAnchoredScrollBody({
 }: BottomAnchoredScrollBodyProps) {
   const store = useStore();
   const isPointerCoarse = usePointerCoarse();
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [
+    {
+      scrollAreaRef,
+      pageContentRef,
+      scrollFooterRef,
+      scrollFloorRef,
+      positionKeeper,
+    },
+  ] = useState(createBottomAnchoredScrollElements);
   const scrollContentRef = useRef<HTMLDivElement>(null);
-  const pageContentRef = useRef<HTMLDivElement>(null);
-  const scrollFooterRef = useRef<HTMLDivElement>(null);
-  const scrollFloorRef = useRef<HTMLDivElement>(null);
   const hasFooter = Boolean(footer);
   const scrollAnchorCaptureThrottleRef = useRef<{
     lastWriteAt: number;
@@ -126,20 +166,9 @@ export function BottomAnchoredScrollBody({
   }, [scrollAnchorThreadId, store]);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
-  const getScrollElement = useCallback(() => scrollAreaRef.current, []);
-
-  const [positionKeeper] = useState(
-    () =>
-      new ScrollPositionKeeper({
-        bottomThresholdPx: BOTTOM_ANCHOR_THRESHOLD_PX,
-        deferWritesWhileScrolling: isIOSWebKit(navigator),
-        getContentElement: () => pageContentRef.current,
-        getFloorElement: () => scrollFloorRef.current,
-        getFooterElement: () => scrollFooterRef.current,
-        getScrollElement: () => scrollAreaRef.current,
-        getTopLevelRows,
-        initiallyAttached: true,
-      }),
+  const getScrollElement = useCallback(
+    () => scrollAreaRef.current,
+    [scrollAreaRef],
   );
 
   useLayoutEffect(
@@ -225,7 +254,7 @@ export function BottomAnchoredScrollBody({
       writeScrollAnchor();
       disconnect();
     };
-  }, [positionKeeper, writeScrollAnchor]);
+  }, [positionKeeper, scrollAreaRef, writeScrollAnchor]);
 
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
@@ -239,16 +268,18 @@ export function BottomAnchoredScrollBody({
     return () => {
       scrollArea.removeEventListener(PAGE_SCROLL_TO_TOP_EVENT, scrollToTop);
     };
-  }, [positionKeeper]);
+  }, [positionKeeper, scrollAreaRef]);
 
   useLayoutEffect(() => {
     const scrollArea = scrollAreaRef.current;
     const scrollFooter = scrollFooterRef.current;
     if (!scrollArea || !scrollFooter) return;
 
-    let clearScrollPaddingFrame: number | null = null;
+    const scheduled: { clearScrollPaddingFrame: number | null } = {
+      clearScrollPaddingFrame: null,
+    };
     const clearScrollPadding = () => {
-      clearScrollPaddingFrame = null;
+      scheduled.clearScrollPaddingFrame = null;
       scrollArea.style.removeProperty("scroll-padding-bottom");
     };
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -263,38 +294,41 @@ export function BottomAnchoredScrollBody({
         return;
       }
       scrollArea.style.scrollPaddingBottom = `${scrollFooter.getBoundingClientRect().height}px`;
-      clearScrollPaddingFrame ??= requestAnimationFrame(clearScrollPadding);
+      if (scheduled.clearScrollPaddingFrame === null) {
+        scheduled.clearScrollPaddingFrame =
+          requestAnimationFrame(clearScrollPadding);
+      }
     };
     window.addEventListener("keydown", handleKeyDown, true);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown, true);
-      if (clearScrollPaddingFrame !== null) {
-        cancelAnimationFrame(clearScrollPaddingFrame);
+      if (scheduled.clearScrollPaddingFrame !== null) {
+        cancelAnimationFrame(scheduled.clearScrollPaddingFrame);
       }
       scrollArea.style.removeProperty("scroll-padding-bottom");
     };
-  }, [hasFooter]);
+  }, [hasFooter, scrollAreaRef, scrollFooterRef]);
 
-  // The footer (composer, its context panel) is sticky over the end of the
-  // timeline. When it grows while the reader is not at the bottom, move the
-  // timeline up by the same amount so nothing slides under it.
   useLayoutEffect(() => {
     const scrollFooter = scrollFooterRef.current;
-    if (!scrollFooter || typeof ResizeObserver === "undefined") return;
-    let previous = scrollFooter.getBoundingClientRect().height;
-    const observer = new ResizeObserver(() => {
-      const height = scrollFooter.getBoundingClientRect().height;
-      const delta = height - previous;
-      previous = height;
-      const scrollArea = scrollAreaRef.current;
-      if (!scrollArea || Math.abs(delta) < 1 || positionKeeper.isAttached())
-        return;
-      positionKeeper.scrollTo(scrollArea.scrollTop + delta, "instant");
+    if (!scrollFooter) return;
+    const footer = { height: scrollFooter.getBoundingClientRect().height };
+    return observeSharedResize(scrollFooter, {
+      read: () => {
+        const height = scrollFooter.getBoundingClientRect().height;
+        const delta = height - footer.height;
+        footer.height = height;
+        return delta;
+      },
+      write: (delta) => {
+        const scrollArea = scrollAreaRef.current;
+        if (!scrollArea || Math.abs(delta) < 1 || positionKeeper.isAttached())
+          return;
+        positionKeeper.scrollTo(scrollArea.scrollTop + delta, "instant");
+      },
     });
-    observer.observe(scrollFooter);
-    return () => observer.disconnect();
-  }, [hasFooter, positionKeeper]);
+  }, [hasFooter, positionKeeper, scrollAreaRef, scrollFooterRef]);
 
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
@@ -305,7 +339,7 @@ export function BottomAnchoredScrollBody({
     });
     return () =>
       scrollArea.removeEventListener("scroll", captureScrollAnchorThrottled);
-  }, [captureScrollAnchorThrottled]);
+  }, [captureScrollAnchorThrottled, scrollAreaRef]);
 
   const bottomAnchorContextValue = useMemo<BottomAnchorContextValue>(
     () => ({
@@ -336,18 +370,18 @@ export function BottomAnchoredScrollBody({
             viewportRef={scrollAreaRef}
             viewportProps={{
               "data-page-scroll-viewport": "",
-              className: cn(
-                "thread-scrollbar @container/page min-h-0",
-                scrollAreaClassName,
-              ),
+              className: cn("thread-scrollbar min-h-0", scrollAreaClassName),
             }}
           >
             <div
               ref={scrollContentRef}
-              className="flex min-h-full min-w-0 flex-col"
+              className="@container/page flex min-h-full min-w-0 flex-col"
               style={
                 contentInsetEndPx
-                  ? { paddingInlineEnd: contentInsetEndPx }
+                  ? ({
+                      paddingInlineEnd: contentInsetEndPx,
+                      [PAGE_CONTAINER_INSET_END_VARIABLE]: `${contentInsetEndPx}px`,
+                    } as CSSProperties)
                   : undefined
               }
             >

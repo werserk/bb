@@ -4,6 +4,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { experimental_createBridgeJsonRpcTestHarness as createHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import {
+  experimental_trackChildProcesses,
+  type ExperimentalChildProcessTracker,
+} from "@get-bb/plugin-sdk/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -12,10 +16,10 @@ import {
 import {
   cleanupBridgeProcessTest,
   spawnedAppServerPids,
-  waitForAppServerChildrenToExit,
 } from "./bridge-process.test-support.js";
 
 let harness: ReturnType<typeof createHarness>;
+let children: ExperimentalChildProcessTracker | undefined;
 let workspaceDir: string;
 let processLogPath: string;
 let scriptPath: string;
@@ -33,6 +37,7 @@ beforeEach(() => {
   vi.stubEnv("CODEX_OPENAI_BASE_URL", "");
   vi.stubEnv("CODEX_POOL_AUTH_TOKEN", "");
   vi.stubEnv("BB_PRE_COMPLETION_HOOKS", "1");
+  children = experimental_trackChildProcesses();
   stubFakeCodexAppServer(scriptPath);
   harness = createHarness(handleLine);
 });
@@ -41,7 +46,7 @@ afterEach(async () => {
   await cleanupBridgeProcessTest({
     harness,
     workspaceDir,
-    processLogPath,
+    children,
     threadId: "bb-activation-failure",
     providerThreadId: "cleanup",
     cleanupId: 99,
@@ -73,7 +78,7 @@ it.each(["recheck", "verify"])(
     expect(response.error?.message).toContain(
       phase === "recheck" ? "Conflicting or unknown" : "not trusted",
     );
-    await waitForAppServerChildrenToExit(processLogPath);
+    await children?.waitForExit();
     expect(spawnedAppServerPids(processLogPath)).toHaveLength(2);
     expect(existsSync(writerLockPath)).toBe(false);
     const launches = readFileSync(launchLogPath, "utf8")

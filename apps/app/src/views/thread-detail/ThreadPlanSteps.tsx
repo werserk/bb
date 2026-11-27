@@ -35,19 +35,20 @@ function NativeWaitingRow({
   focusRequest?: ThreadPlanFocusRequest;
 }) {
   const [expanded, setExpanded] = useState(!narrow);
-  const previousNarrow = useRef(narrow);
+  const [previousNarrow, setPreviousNarrow] = useState(narrow);
   const trigger = useRef<HTMLButtonElement>(null);
   const focused = useOptionalPaneContext()?.isFocused ?? true;
-  useEffect(() => {
-    if (narrow && !previousNarrow.current) setExpanded(false);
-    previousNarrow.current = narrow;
-  }, [narrow]);
+  if (previousNarrow !== narrow) {
+    setPreviousNarrow(narrow);
+    if (narrow) setExpanded(false);
+  }
   useEffect(() => {
     if (
       focusRequest?.interactionId !== interaction.id ||
       !focusRequest.consumeReveal()
     )
       return;
+    // oxlint-disable-next-line react/set-state-in-effect
     setExpanded(true);
   }, [focusRequest, interaction.id]);
   return (

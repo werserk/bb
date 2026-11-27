@@ -94,7 +94,7 @@ it("clears custody across account payloads via mocked ws/sdk and fences old rece
       queryClient: client,
       request,
       transaction,
-      result: { ok: true, delivery: "sent" },
+      result: { ok: true, delivery: "sent", messageSequence: null },
       realtimeConnected: true,
     });
     resolve(status("a", 1));
@@ -263,7 +263,11 @@ it("adopts initial account status without losing a send or rejecting its admitte
       queryClient: h.client,
       request,
     });
-    let resolve!: (value: { ok: true; delivery: "sent" }) => void;
+    let resolve!: (value: {
+      ok: true;
+      delivery: "sent";
+      messageSequence: null;
+    }) => void;
     const dispatched = dispatchPendingSend(
       h.client,
       request.id,
@@ -271,9 +275,11 @@ it("adopts initial account status without losing a send or rejecting its admitte
       request,
       [],
       () =>
-        new Promise<{ ok: true; delivery: "sent" }>((done) => {
-          resolve = done;
-        }),
+        new Promise<{ ok: true; delivery: "sent"; messageSequence: null }>(
+          (done) => {
+            resolve = done;
+          },
+        ),
     );
     await Promise.resolve();
     const entry = pendingSendOwner(h.client).list()[0];
@@ -281,8 +287,12 @@ it("adopts initial account status without losing a send or rejecting its admitte
     await Promise.resolve();
     await Promise.resolve();
     expect(pendingSendOwner(h.client).list()[0]).toBe(entry);
-    resolve({ ok: true, delivery: "sent" });
-    await expect(dispatched).resolves.toEqual({ ok: true, delivery: "sent" });
+    resolve({ ok: true, delivery: "sent", messageSequence: null });
+    await expect(dispatched).resolves.toEqual({
+      ok: true,
+      delivery: "sent",
+      messageSequence: null,
+    });
     const timeline = vi
       .spyOn(sdk.threads, "timeline")
       .mockImplementation(() => new Promise(() => {}));
@@ -297,6 +307,7 @@ it("adopts initial account status without losing a send or rejecting its admitte
         result: {
           ok: true,
           delivery: "sent",
+          messageSequence: 12,
           requested: { requestId: "creq_0000000000", sequence: 12 },
         },
         realtimeConnected: true,

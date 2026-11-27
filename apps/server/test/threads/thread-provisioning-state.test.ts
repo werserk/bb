@@ -3,11 +3,10 @@ import {
   createEnvironment,
   createProject,
   createThread,
-  listEvents,
   noopNotifier,
   upsertHost,
 } from "@bb/db";
-import { createMigratedConnection } from "@bb/db/testing";
+import { createMigratedConnection, listEvents } from "@bb/db/testing";
 import { getThreadProvisionContext } from "../../src/services/threads/thread-startup-store.js";
 import {
   requestThreadProvision,
@@ -53,7 +52,7 @@ describe("thread provisioning state", () => {
           ? [{ id: crypto.randomUUID(), inputGroupIndex: 0 }]
           : undefined;
 
-      const context = requestThreadProvision(
+      const { context } = requestThreadProvision(
         { db, hub },
         {
           originPluginId: null,
@@ -124,7 +123,7 @@ it("keeps grouped queue provenance in reprovision and its restored startup conte
     { id: crypto.randomUUID(), inputGroupIndex: 2 },
   ];
   const aliases = ["deferred-a", "legacy-b"];
-  const context = requestThreadTargetReprovision(
+  const { context } = requestThreadTargetReprovision(
     { db, hub },
     {
       thread,

@@ -12,6 +12,7 @@ const options = {
   includeDiagnosticOperations: false,
   isLatestPage: true,
   includeNestedRows: false,
+  omitSettledDelegationChildRows: false,
   summarizeShellCommands: true,
   threadStatus: "active",
   threadName: "",

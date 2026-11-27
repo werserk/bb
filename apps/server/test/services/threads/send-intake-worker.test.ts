@@ -35,7 +35,7 @@ function fixture(execute: Parameters<typeof createSendIntakeWorker>[0]["execute"
   };
   return { db, thread, project, worker, add, report };
 }
-const sent = { ok: true, delivery: "sent" } as const;
+const sent = { ok: true, delivery: "sent", messageSequence: null } as const;
 
 describe("send intake worker", () => {
   it("does not claim or schedule recovery until actual startup readiness", async () => {
@@ -101,9 +101,10 @@ describe("send intake worker", () => {
       prepare: async () => {}, notify: vi.fn(), report: vi.fn() });
     cleanups.push(restarted.stop);
     restarted.recover();
-    await expect(restarted.wait("released")).resolves.toEqual(sent);
+    const custody = { ...sent, messageSequence: 1 };
+    await expect(restarted.wait("released")).resolves.toEqual(custody);
     held.resolve(); await finished.promise;
-    await expect(restarted.wait("released")).resolves.toEqual(sent);
+    await expect(restarted.wait("released")).resolves.toEqual(custody);
     expect(stoppedAfterRelease).toBe(true);
     expect(getThreadSendIntake(f.db, "released")).toEqual(before);
     expect(execute).not.toHaveBeenCalled();

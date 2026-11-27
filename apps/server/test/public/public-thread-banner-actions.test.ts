@@ -1,4 +1,9 @@
-import { getLastStoredProviderThreadId, getThread, getThreadSendIntake, listEvents, listThreadSendIntakes } from "@bb/db";
+import {
+  getLastStoredProviderThreadId,
+  getThread,
+  getThreadSendIntake,
+  listThreadSendIntakes,
+} from "@bb/db";
 import {
   encodeClientTurnRequestIdNumber,
   threadScope,
@@ -24,6 +29,7 @@ import {
   seedTurnStarted,
 } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+import { listEvents } from "@bb/db/testing";
 
 interface BannerFixture {
   environmentId: string;
@@ -460,7 +466,7 @@ describe("public thread banner actions", () => {
         expect((await clearResponsePending).status).toBe(200);
         const response = await sendResponsePending;
         expect(response.status).toBe(200);
-        expect(await readJson(response)).toEqual({ ok: true, delivery: "sent" });
+        expect(await readJson(response)).toEqual({ ok: true, delivery: "sent", messageSequence: expect.any(Number) });
         await vi.waitFor(() => expect(responder.requests.filter(({ command }) => command.type === "thread.start")).toHaveLength(1));
         const events = listEvents(harness.db, { threadId: fixture.threadId });
         const requests = events.filter(row => row.type === "client/turn/requested");

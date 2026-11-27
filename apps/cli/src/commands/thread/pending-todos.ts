@@ -15,12 +15,11 @@ export async function fetchThreadPendingTodos(
   args: FetchThreadPendingTodosArgs,
 ): Promise<ThreadTimelinePendingTodos | null> {
   try {
-    const response = await args.sdk.threads.timeline({
+    const headState = await args.sdk.threads.experimental_headState({
       threadId: args.threadId,
-      summaryOnly: "true",
       ...(args.includeService ? { includeService: "true" as const } : {}),
     });
-    return response.pendingTodos;
+    return headState.pendingTodos;
   } catch {
     return null;
   }

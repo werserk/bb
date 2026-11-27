@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useId,
+  useInsertionEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -260,7 +261,7 @@ function Instance({
   identity: string | null;
   scope: string;
 }) {
-  const [, setOutlet] = useState<Outlet | null>(null);
+  const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [lastOutlet, setLastOutlet] = useState<Outlet | null>(null);
   const [demanded, setDemanded] = useState(false);
 
@@ -274,13 +275,11 @@ function Instance({
   );
   const pane = useOptionalPaneContext();
   const currentHost = useRef({ threadId, focused: pane?.isFocused ?? true });
-  currentHost.current = { threadId, focused: pane?.isFocused ?? true };
   const tabId = createPluginFixedPanelTab({
     pluginId: slot.pluginId,
     tabId: slot.id,
   }).id;
   const bodyThreadId = state?.threadId ?? threadId;
-  const outlet = currentOutlet.current;
   const current = state !== null;
   const selected =
     current &&
@@ -308,7 +307,10 @@ function Instance({
   });
   const { container, parking } = placement;
   const latestPlacement = useRef(placement);
-  latestPlacement.current = placement;
+  useInsertionEffect(() => {
+    currentHost.current = { threadId, focused: pane?.isFocused ?? true };
+    latestPlacement.current = placement;
+  });
   const entry = useMemo<Entry>(
     () => ({
       retained: identity !== null,
@@ -360,7 +362,11 @@ function Instance({
       <div ref={parking} data-retained-fixed-tab={slot.id} />
       {identity !== null && demanded && frame
         ? createPortal(
-            frame.frame(
+            <FramedTab
+              frame={frame.frame}
+              allowed={allowed}
+              active={attached && threadId === bodyThreadId}
+            >
               <PluginTabScope
                 slot={slot}
                 instanceId={JSON.stringify([scope, identity])}
@@ -383,14 +389,27 @@ function Instance({
                     />
                   </TabVisibleContext.Provider>
                 </FixedTabTargetScope>
-              </PluginTabScope>,
-              allowed,
-            ),
+              </PluginTabScope>
+            </FramedTab>,
             container,
           )
         : null}
     </>
   );
+}
+
+function FramedTab({
+  frame,
+  allowed,
+  active,
+  children,
+}: {
+  frame: Frame;
+  allowed: () => boolean;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return frame(children, allowed, active);
 }
 
 function OutletBinding({

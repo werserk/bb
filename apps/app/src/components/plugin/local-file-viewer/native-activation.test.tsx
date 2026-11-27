@@ -330,6 +330,7 @@ function RetainedRelay({ allowed }: { allowed: () => boolean }) {
   return frame(
     <PluginMarkdown content="[report](/workspace/report.md)" />,
     allowed,
+    true,
   );
 }
 

@@ -25,7 +25,7 @@ export function useRetainedThreadTabFrame() {
   const selection = useContext(SelectionAddToChatContext);
   const provider = useContext(ThreadProviderContext);
   return useMemo(
-    () => (children: ReactNode, allowed: () => boolean) => {
+    () => (children: ReactNode, allowed: () => boolean, active: boolean) => {
       const panel = {
         ...host.panel,
         getTabs: () =>
@@ -109,12 +109,12 @@ export function useRetainedThreadTabFrame() {
           }
         >
           <ThreadTimelineNavigationContext.Provider
-            value={allowed() ? guardedTimeline : null}
+            value={active ? guardedTimeline : null}
           >
             <AppNavigationHostProvider capabilities={capabilities}>
               <ThreadProviderContext.Provider value={provider}>
                 <MarkdownLocalFileOpenTargetsContext.Provider
-                  value={allowed() ? targets : []}
+                  value={active ? targets : []}
                 >
                   <MarkdownLocalFileContextMenuContext.Provider
                     value={guardedMenu}

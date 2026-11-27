@@ -13,7 +13,7 @@ import { BrowserRouter } from "react-router-dom";
 import type { TiptapEditorHTMLElement } from "@tiptap/core";
 import { afterEach, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
-import { ComposerBox } from "@/components/promptbox/ComposerBox";
+import { ControlledComposerBox } from "@/test/fixtures/controlled-composer-box";
 import { registerComposerPlugin } from "@/test/fixtures/composer-plugin";
 import { resetPluginSlotStoreForTest } from "@/lib/plugin-slots";
 import { testTypeaheadConfig } from "@/test/fixtures/composer-search";
@@ -72,13 +72,15 @@ let storageKey = "";
 let modalMounts = 0;
 function Composer({ place }: { place: string }) {
   const draft = usePromptDraftStorage(scope);
-  storageKey = draft.storageKey;
+  useEffect(() => {
+    storageKey = draft.storageKey;
+  }, [draft.storageKey]);
   useEffect(() => {
     if (place === "modal") modalMounts += 1;
   }, [place]);
   return (
     <div data-testid={`${place}-composer`}>
-      <ComposerBox
+      <ControlledComposerBox
         surface="thread"
         value={draft.text}
         mentionRanges={draft.mentions}

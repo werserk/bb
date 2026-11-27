@@ -114,11 +114,20 @@ export function QuestionNavigationProvider({
     setFeedback(null);
     setFallbackQuestionId(null);
   }, []);
-  useEffect(() => {
-    clear();
+  const [route, setRoute] = useState({ routeKey, threadId });
+  if (route.routeKey !== routeKey || route.threadId !== threadId) {
+    setRoute({ routeKey, threadId });
+    setPending(false);
+    setRequest(null);
+    setError(null);
+    setFeedback(null);
+    setFallbackQuestionId(null);
     setSuppressedRouteKey(null);
+  }
+  useEffect(() => {
+    abort.current?.abort();
     return () => abort.current?.abort();
-  }, [routeKey, threadId, clear]);
+  }, [routeKey, threadId]);
   const navigate = useCallback(
     async (
       questionId: string,

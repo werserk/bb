@@ -118,6 +118,7 @@ it("resends a send lost before the server after a reload with the same submissio
   const resent = vi.spyOn(sdk.threads, "send").mockResolvedValueOnce({
     ok: true,
     delivery: "sent",
+    messageSequence: 7,
     submissionIds: [id],
     requested: { requestId: "creq_23456789ab" as never, sequence: 7 },
   });

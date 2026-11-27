@@ -17,7 +17,8 @@ import {
   type ThreadEvent,
   type ThreadTurnInitiator,
 } from "@bb/domain";
-import { applyTurnCompletedEvent } from "../../src/internal/turn-completed-events.js";
+import { announceThreadStatusChange } from "../../src/services/threads/lifecycle/finish.js";
+import { runThreadLifecycleInTransaction } from "../../src/services/threads/lifecycle/run.js";
 import { setPluginThreadEventEmitter } from "../../src/services/plugins/plugin-thread-events.js";
 import type { PluginThreadEventEmitter } from "../../src/services/plugins/plugin-service.js";
 import {
@@ -33,7 +34,7 @@ const PLUGIN_ID = "attention-plugin";
 
 interface Setup {
   db: DbConnection;
-  deps: Parameters<typeof applyTurnCompletedEvent>[0];
+  deps: Parameters<typeof announceThreadStatusChange>[0];
   threadId: string;
 }
 
@@ -62,7 +63,6 @@ function setup(): Setup {
     deps: {
       db,
       hub: new NotificationHub(),
-      logger: testLogger,
       providerRegistry,
     },
     threadId: thread.id,
@@ -166,13 +166,22 @@ function completeTurn(
     { type: "turn/completed" }
   >["status"] = "completed",
 ): void {
-  applyTurnCompletedEvent(s.deps, {
-    type: "turn/completed",
-    threadId: s.threadId,
-    providerThreadId: "provider-bg",
-    scope: turnScope(turnId),
-    status,
-  });
+  // The persisted lifecycle's turn completion, then its synchronous status
+  // announcement (the same pair `internal/events.ts` runs for `turn/completed`).
+  const outcome = s.db.transaction(
+    (tx) =>
+      runThreadLifecycleInTransaction(
+        { db: tx, hub: noopNotifier, logger: testLogger },
+        s.threadId,
+        { type: "turn.completed", turnId, status },
+      ),
+    { behavior: "immediate" },
+  );
+  if (outcome.statusChanged && outcome.thread !== null) {
+    announceThreadStatusChange(s.deps, outcome.thread, {
+      attentionSkipped: outcome.attentionSkipped === true,
+    });
+  }
 }
 
 function attentionAt(s: Setup): number {

@@ -373,6 +373,8 @@ export interface AgentRuntime {
 
   getActiveTurnId(threadId: string): string | null;
 
+  getActiveTurnRequestIds(threadId: string): string[];
+
   waitForActiveTurn(
     threadId: string,
     args: WaitForActiveTurnArgs,

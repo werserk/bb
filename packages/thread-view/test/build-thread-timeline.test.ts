@@ -739,6 +739,7 @@ function buildContextWindowUsage(
     options: {
       completedTurnDisplay: "collapse",
       includeNestedRows: false,
+      omitSettledDelegationChildRows: false,
       includeDiagnosticOperations: false,
       summarizeShellCommands: true,
       isLatestPage: true,
@@ -762,6 +763,7 @@ function buildTimelineRows(
     options: {
       completedTurnDisplay: "collapse",
       includeNestedRows: true,
+      omitSettledDelegationChildRows: false,
       includeDiagnosticOperations: false,
       summarizeShellCommands: true,
       isLatestPage: true,
@@ -965,6 +967,7 @@ describe("buildThreadTimelineFromEvents", () => {
           completedTurnDisplay: "collapse",
           includeDiagnosticOperations: true,
           includeNestedRows: true,
+          omitSettledDelegationChildRows: false,
           isLatestPage: true,
           summarizeShellCommands: true,
           threadName: "",
@@ -998,6 +1001,7 @@ describe("buildThreadTimelineFromEvents", () => {
             completedTurnDisplay: "collapse",
             includeDiagnosticOperations: false,
             includeNestedRows: true,
+            omitSettledDelegationChildRows: false,
             isLatestPage: true,
             summarizeShellCommands,
             threadName: "",
@@ -1155,6 +1159,7 @@ describe("buildThreadTimelineFromEvents", () => {
         options: {
           completedTurnDisplay: "collapse",
           includeNestedRows: true,
+          omitSettledDelegationChildRows: false,
           includeDiagnosticOperations: false,
           summarizeShellCommands: true,
           isLatestPage: true,
@@ -1192,6 +1197,7 @@ describe("buildThreadTimelineFromEvents", () => {
       options: {
         completedTurnDisplay: "collapse",
         includeNestedRows: true,
+        omitSettledDelegationChildRows: false,
         includeDiagnosticOperations: false,
         summarizeShellCommands: true,
         isLatestPage: true,
@@ -1226,6 +1232,7 @@ describe("buildThreadTimelineFromEvents", () => {
       options: {
         completedTurnDisplay: "collapse",
         includeNestedRows: true,
+        omitSettledDelegationChildRows: false,
         includeDiagnosticOperations: false,
         summarizeShellCommands: true,
         isLatestPage: true,
@@ -1543,6 +1550,7 @@ describe("buildThreadTimelineFromEvents", () => {
       options: {
         completedTurnDisplay: "collapse",
         includeNestedRows: true,
+        omitSettledDelegationChildRows: false,
         includeDiagnosticOperations: false,
         summarizeShellCommands: true,
         isLatestPage: true,
@@ -3396,6 +3404,7 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
     options: {
       completedTurnDisplay: "collapse",
       includeNestedRows: true,
+      omitSettledDelegationChildRows: false,
       includeDiagnosticOperations: false,
       summarizeShellCommands: true,
       isLatestPage: true,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ConversationQuestion, FrozenQuestionFile } from "@bb/domain";
 import { VoiceInputTextareaProvider } from "@bb/shared-ui/voice-input-textarea";
@@ -312,23 +312,33 @@ export function ConversationQuestionCard({
   const link = useQuestionLinkState(questionId, "answer");
   const headingId = `${questionCardId(threadId, questionId)}${snapshot ? "-snapshot" : ""}-heading`;
 
-  useEffect(() => {
+  const navigationFacts = {
+    request: navigation?.request,
+    feedback: navigation?.feedback,
+    pending: navigation?.pending,
+    error: navigation?.error,
+  };
+  const [seenNavigation, setSeenNavigation] = useState<
+    typeof navigationFacts | null
+  >(null);
+  if (
+    seenNavigation === null ||
+    seenNavigation.request !== navigationFacts.request ||
+    seenNavigation.feedback !== navigationFacts.feedback ||
+    seenNavigation.pending !== navigationFacts.pending ||
+    seenNavigation.error !== navigationFacts.error
+  ) {
+    setSeenNavigation(navigationFacts);
     if (
-      navigation?.request?.elementId === questionCardId(threadId, questionId) ||
-      (navigation?.feedback?.questionId === questionId &&
-        navigation.feedback.kind === "question" &&
-        !navigation.pending &&
-        !navigation.error)
+      navigationFacts.request?.elementId ===
+        questionCardId(threadId, questionId) ||
+      (navigationFacts.feedback?.questionId === questionId &&
+        navigationFacts.feedback.kind === "question" &&
+        !navigationFacts.pending &&
+        !navigationFacts.error)
     )
       setExpanded(true);
-  }, [
-    navigation?.request,
-    navigation?.feedback,
-    navigation?.pending,
-    navigation?.error,
-    threadId,
-    questionId,
-  ]);
+  }
   const answerLink =
     question?.response != null ? (
       <button

@@ -621,7 +621,7 @@ export function applyCreateThreadResult({
     projectId: request.projectId,
   });
   if (hasUnmanagedCheckoutIntent(request)) {
-    queryClient.invalidateQueries({
+    void queryClient.invalidateQueries({
       queryKey: projectSourceBranchesQueryKeyPrefix(request.projectId),
     });
   }
@@ -953,7 +953,9 @@ export function applyQueuedMessageSendResult({
     pendingSendOwner(queryClient).receipt(
       request.id,
       transaction.optimisticRowId,
-      result,
+      result.delivery === "sent"
+        ? { ...result, messageSequence: null }
+        : result,
       {
         maxSeq:
           queryClient.getQueryData<ThreadTimelineResponse>(

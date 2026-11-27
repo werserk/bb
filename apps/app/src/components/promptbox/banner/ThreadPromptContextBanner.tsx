@@ -52,6 +52,7 @@ import {
   activityTextClass,
 } from "@bb/shared-ui/activity-row-styles";
 import { cn } from "@bb/shared-ui/lib/utils";
+import { useSecondTick } from "@/hooks/useSecondTick";
 import { useThreadContextKind } from "@/components/plugin/PluginThreadContextCard";
 import { Icon, type IconName } from "@bb/shared-ui/icon";
 import {
@@ -250,6 +251,7 @@ function ParentThreadInlineSegment({
             aria-hidden="true"
           />
         }
+        // oxlint-disable-next-line bb/no-native-title-with-aria-label
         title={
           <>
             <span className="font-normal text-muted-foreground">
@@ -343,6 +345,7 @@ function ChildThreadContextRow({
   item: ThreadPromptChildThreadItem;
   finished: boolean;
 }) {
+  const now = useSecondTick();
   return (
     <ContextRow
       as={NavLink}
@@ -363,7 +366,7 @@ function ChildThreadContextRow({
       age={
         item.updatedAt === undefined
           ? undefined
-          : formatRelativeTime({ timestamp: item.updatedAt, now: Date.now() })
+          : formatRelativeTime({ timestamp: item.updatedAt, now })
       }
       action={<ContextRowAction>Open ↗</ContextRowAction>}
     />
@@ -467,7 +470,8 @@ function ActiveChildThreadsCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+  const { triggerRef, onTriggerClick, collapseRef, onCollapseClick } =
+    useDisclosureFocusHandoff(isExpanded, onToggle);
   const compact = useComposerContextSource() !== null;
   const allItems = childThreadsSection.items;
   const items = allItems.filter((item) => !item.finished);
@@ -508,13 +512,13 @@ function ActiveChildThreadsCard({
       className="overflow-hidden"
     >
       <button
-        ref={focus.triggerRef}
+        ref={triggerRef}
         type="button"
         id={SECTION_IDS.childThreads.toggle}
         aria-expanded={isExpanded}
         aria-controls={SECTION_IDS.childThreads.body}
         aria-label={`${items.length} active ${childThreadNoun(items.length)} · ${waiting} needs you`}
-        onClick={focus.onTriggerClick}
+        onClick={onTriggerClick}
         className={activityRowClass(
           "active",
           cn(
@@ -546,11 +550,11 @@ function ActiveChildThreadsCard({
       >
         {list}
         <PromptStackCollapseRow
-          buttonRef={focus.collapseRef}
+          buttonRef={collapseRef}
           className="rounded-none"
           controlsId={SECTION_IDS.childThreads.body}
           label={`Collapse ${items.length} ${childThreadNoun(items.length)}`}
-          onCollapse={focus.onCollapseClick}
+          onCollapse={onCollapseClick}
         />
       </AnimatedBody>
     </PromptStackCard>

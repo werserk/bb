@@ -36,8 +36,14 @@ export function sealSendIntake(db: DbConnection, intake: SendIntakeAuthority | u
   if (intake) db.transaction(tx => sealThreadSendIntake(tx, intake.claim, Date.now(), stage), { behavior: "immediate" });
 }
 
+/**
+ * `messageSequence` is the delivered message's thread event sequence for the
+ * default `sent` receipt: a request handoff carries it; a startup handoff gets
+ * it from the caller (the provisioned request's sequence); a clear has none.
+ */
 export function commitSendIntake(tx: DbTransaction, intake: SendIntakeAuthority | undefined,
-  handoff: ThreadSendIntakeHandoff, receipt?: SendMessageResponse): void {
+  handoff: ThreadSendIntakeHandoff, receipt?: SendMessageResponse,
+  messageSequence: number | null = handoff.kind === "request" ? handoff.sequence : null): void {
   if (!intake) return;
   assertSendIntake(tx, intake);
   const now = Date.now();
@@ -48,7 +54,7 @@ export function commitSendIntake(tx: DbTransaction, intake: SendIntakeAuthority 
   }
   const id = intake.claim.clientSubmissionId;
   const nativeReceipt: SendMessageResponse = receipt ?? {
-    ok: true, delivery: "sent",
+    ok: true, delivery: "sent", messageSequence,
     ...(id === null ? {} : { submissionIds: [id] }),
     ...(handoff.kind === "request" && id !== null ? { requested: { requestId: handoff.id, sequence: handoff.sequence } } : {}),
     ...(handoff.kind === "clear" && id !== null ? { command: true } : {}),

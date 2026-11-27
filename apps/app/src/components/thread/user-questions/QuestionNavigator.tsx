@@ -32,8 +32,6 @@ export function QuestionNavigator({
   const navigation = useQuestionNavigation();
   const anchor = useBottomAnchoredScroll();
   const windowSize = useRef({ threadId, pages: 1 });
-  if (windowSize.current.threadId !== threadId)
-    windowSize.current = { threadId, pages: 1 };
   const query = useQuery({
     queryKey: [...conversationQuestionsQueryKey(threadId), "open"],
     queryFn: async ({ signal }) => {
@@ -42,7 +40,10 @@ export function QuestionNavigator({
           ...(await readOpenQuestionWindow({
             open: sdk.threads.questions.open,
             threadId,
-            pages: windowSize.current.pages,
+            pages:
+              windowSize.current.threadId === threadId
+                ? windowSize.current.pages
+                : 1,
             signal,
           })),
           legacy: false,
@@ -158,6 +159,7 @@ export function QuestionNavigator({
                 <div role="listitem" key={question.id}>
                   <ContextRow
                     glyph={<ContextRowGlyph kind="question" />}
+                    // oxlint-disable-next-line bb/no-native-title-with-aria-label
                     title={questionTitle(question.publication)}
                     age={questionTime(question.createdAt)}
                     aria-label={questionTitle(question.publication)}
@@ -182,7 +184,13 @@ export function QuestionNavigator({
                     className="ml-2 underline"
                     disabled={query.isFetching}
                     onClick={() => {
-                      windowSize.current.pages++;
+                      windowSize.current = {
+                        threadId,
+                        pages:
+                          (windowSize.current.threadId === threadId
+                            ? windowSize.current.pages
+                            : 1) + 1,
+                      };
                       void query.refetch();
                     }}
                   >

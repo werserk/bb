@@ -1,4 +1,12 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { PromptInput, ThreadQueuedMessage } from "@bb/domain";
 import type {
   SendQueuedMessageMode,
@@ -90,6 +98,113 @@ function changedExecutionFields(
   };
 }
 
+type ProcessingQueuedMessage =
+  UseQueuedMessageActionsResult["processingQueuedMessage"];
+type SetProcessingQueuedMessage = Dispatch<
+  SetStateAction<ProcessingQueuedMessage>
+>;
+
+async function sendQueuedMessageWithProcessing({
+  messageId,
+  mode,
+  threadId,
+  sendProcessingPersistence,
+  sendQueuedMessage,
+  onSendSuccess,
+  isCurrentThread,
+  setProcessingQueuedMessage,
+}: {
+  messageId: string;
+  mode: SendQueuedMessageMode;
+  threadId: string;
+  sendProcessingPersistence: UseQueuedMessageActionsArgs["sendProcessingPersistence"];
+  sendQueuedMessage: Pick<
+    ReturnType<typeof useSendThreadQueuedMessage>,
+    "mutateAsync"
+  >;
+  onSendSuccess: (() => void) | undefined;
+  isCurrentThread: () => boolean;
+  setProcessingQueuedMessage: SetProcessingQueuedMessage;
+}): Promise<void> {
+  const operation = { id: messageId, action: "send" } as const;
+  setProcessingQueuedMessage(operation);
+  try {
+    await sendQueuedMessage.mutateAsync({
+      id: threadId,
+      mode,
+      queuedMessageId: messageId,
+    });
+    if (isCurrentThread()) onSendSuccess?.();
+    if (mode === "steer" || sendProcessingPersistence === "clear-on-settle") {
+      setProcessingQueuedMessage((current) =>
+        current === operation ? null : current,
+      );
+    }
+  } catch (error) {
+    setProcessingQueuedMessage((current) =>
+      current === operation ? null : current,
+    );
+    throw reportMutationError({
+      error,
+      fallbackMessage: "Failed to send queued message",
+      lifecycleOperation: "send_queued_message",
+    });
+  }
+}
+
+async function saveInlineQueuedMessage({
+  edit,
+  queuedMessage,
+  input,
+  updateQueuedMessage,
+  onSaveSuccess,
+  dismissInlineQueuedMessageEditor,
+  ownsEditor,
+  setProcessingQueuedMessage,
+}: {
+  edit: InlineQueuedMessageEditState;
+  queuedMessage: ThreadQueuedMessage | undefined;
+  input: PromptInput[];
+  updateQueuedMessage: Pick<
+    ReturnType<typeof useUpdateThreadQueuedMessage>,
+    "mutateAsync"
+  >;
+  onSaveSuccess: (() => void) | undefined;
+  dismissInlineQueuedMessageEditor: () => void;
+  ownsEditor: () => boolean;
+  setProcessingQueuedMessage: SetProcessingQueuedMessage;
+}): Promise<void> {
+  const { expectedUpdatedAt, ownerThreadId, queuedMessageId } = edit;
+  const operation = { id: queuedMessageId, action: "edit" } as const;
+  setProcessingQueuedMessage(operation);
+  try {
+    await updateQueuedMessage.mutateAsync({
+      expectedUpdatedAt,
+      id: ownerThreadId,
+      input,
+      queuedMessageId,
+      ...changedExecutionFields(edit, queuedMessage),
+    });
+    if (ownsEditor()) {
+      onSaveSuccess?.();
+      dismissInlineQueuedMessageEditor();
+    }
+  } catch (error) {
+    if (error instanceof BbHttpError && error.status === 404 && ownsEditor()) {
+      dismissInlineQueuedMessageEditor();
+    }
+    showMutationErrorToast({
+      error,
+      fallbackMessage: "Failed to update queued message",
+      lifecycleOperation: "update_queued_message",
+    });
+  } finally {
+    setProcessingQueuedMessage((current) =>
+      current === operation ? null : current,
+    );
+  }
+}
+
 export function useQueuedMessageActions({
   threadId,
   queuedMessages,
@@ -106,16 +221,12 @@ export function useQueuedMessageActions({
   const reorderQueuedMessage = useReorderThreadQueuedMessage();
   const setQueuedMessageGroupBoundary =
     useSetThreadQueuedMessageGroupBoundary();
-  const [processingQueuedMessage, setProcessingQueuedMessage] = useState<{
-    action: QueuedMessageProcessingAction;
-    id: string;
-  } | null>(null);
-  const currentUi = useRef({
-    threadId,
-    editSessionId: inlineEditingQueuedMessage?.editSessionId,
-  });
-  const queuedMessagesRef = useRef<readonly ThreadQueuedMessage[]>([]);
+  const [processingQueuedMessage, setProcessingQueuedMessage] =
+    useState<ProcessingQueuedMessage>(null);
   const editSessionId = inlineEditingQueuedMessage?.editSessionId;
+  const currentUi = useRef({ threadId, editSessionId });
+  const queuedMessagesRef =
+    useRef<readonly ThreadQueuedMessage[]>(queuedMessages);
   useLayoutEffect(() => {
     currentUi.current = { threadId, editSessionId };
     queuedMessagesRef.current = queuedMessages;
@@ -150,33 +261,16 @@ export function useQueuedMessageActions({
         return;
       }
 
-      const operation = { id: messageId, action: "send" } as const;
-      setProcessingQueuedMessage(operation);
-      try {
-        await sendQueuedMessage.mutateAsync({
-          id: threadId,
-          mode,
-          queuedMessageId: messageId,
-        });
-        if (currentUi.current.threadId === threadId) onSendSuccess?.();
-        if (
-          mode === "steer" ||
-          sendProcessingPersistence === "clear-on-settle"
-        ) {
-          setProcessingQueuedMessage((current) =>
-            current === operation ? null : current,
-          );
-        }
-      } catch (error) {
-        setProcessingQueuedMessage((current) =>
-          current === operation ? null : current,
-        );
-        throw reportMutationError({
-          error,
-          fallbackMessage: "Failed to send queued message",
-          lifecycleOperation: "send_queued_message",
-        });
-      }
+      await sendQueuedMessageWithProcessing({
+        messageId,
+        mode,
+        threadId,
+        sendProcessingPersistence,
+        sendQueuedMessage,
+        onSendSuccess,
+        isCurrentThread: () => currentUi.current.threadId === threadId,
+        setProcessingQueuedMessage,
+      });
     },
     [onSendSuccess, sendProcessingPersistence, sendQueuedMessage, threadId],
   );
@@ -201,46 +295,23 @@ export function useQueuedMessageActions({
       dismissInlineQueuedMessageEditor();
       return;
     }
-    const { editSessionId, expectedUpdatedAt, ownerThreadId, queuedMessageId } =
-      inlineEditingQueuedMessage;
     const queuedMessage = queuedMessagesRef.current.find(
-      (message) => message.id === queuedMessageId,
+      (message) => message.id === inlineEditingQueuedMessage.queuedMessageId,
     );
-    const ownsEditor = () =>
-      currentUi.current.threadId === ownerThreadId &&
-      currentUi.current.editSessionId === editSessionId;
-    const operation = { id: queuedMessageId, action: "edit" } as const;
-    setProcessingQueuedMessage(operation);
-    try {
-      await updateQueuedMessage.mutateAsync({
-        expectedUpdatedAt,
-        id: ownerThreadId,
-        input: activeComposerDraftInput,
-        queuedMessageId,
-        ...changedExecutionFields(inlineEditingQueuedMessage, queuedMessage),
-      });
-      if (ownsEditor()) {
-        onSaveSuccess?.();
-        dismissInlineQueuedMessageEditor();
-      }
-    } catch (error) {
-      if (
-        error instanceof BbHttpError &&
-        error.status === 404 &&
-        ownsEditor()
-      ) {
-        dismissInlineQueuedMessageEditor();
-      }
-      showMutationErrorToast({
-        error,
-        fallbackMessage: "Failed to update queued message",
-        lifecycleOperation: "update_queued_message",
-      });
-    } finally {
-      setProcessingQueuedMessage((current) =>
-        current === operation ? null : current,
-      );
-    }
+    const editingSessionId = inlineEditingQueuedMessage.editSessionId;
+    await saveInlineQueuedMessage({
+      edit: inlineEditingQueuedMessage,
+      queuedMessage,
+      input: activeComposerDraftInput,
+      updateQueuedMessage,
+      onSaveSuccess,
+      dismissInlineQueuedMessageEditor,
+      ownsEditor: () =>
+        currentUi.current.threadId ===
+          inlineEditingQueuedMessage.ownerThreadId &&
+        currentUi.current.editSessionId === editingSessionId,
+      setProcessingQueuedMessage,
+    });
   }, [
     activeComposerDraftInput,
     dismissInlineQueuedMessageEditor,

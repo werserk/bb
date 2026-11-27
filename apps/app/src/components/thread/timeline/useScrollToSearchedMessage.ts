@@ -1,7 +1,6 @@
 import {
   createContext,
   createElement,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -269,6 +268,19 @@ function searchTargetAppliesToThread(
   );
 }
 
+function createLocationKeyReader(initialLocationKey: string): {
+  read: () => string;
+  write: (locationKey: string) => void;
+} {
+  let current = initialLocationKey;
+  return {
+    read: () => current,
+    write: (locationKey) => {
+      current = locationKey;
+    },
+  };
+}
+
 export function SearchMessageLocationProvider({
   threadId,
   children,
@@ -282,11 +294,13 @@ export function SearchMessageLocationProvider({
       ? navigation.request
       : null;
   const activeLocationKey = localTarget?.locationKey ?? locationKey;
-  const locationKeyRef = useRef(activeLocationKey);
+  const [locationKeyReader] = useState(() =>
+    createLocationKeyReader(activeLocationKey),
+  );
   useLayoutEffect(() => {
-    locationKeyRef.current = activeLocationKey;
-  }, [activeLocationKey]);
-  const readLocationKey = useCallback(() => locationKeyRef.current, []);
+    locationKeyReader.write(activeLocationKey);
+  }, [activeLocationKey, locationKeyReader]);
+  const readLocationKey = locationKeyReader.read;
   const searchTarget = readSearchMessageTarget(location.state);
   const messageLinkTarget = parseMessageLink(
     `${location.pathname}${location.search}${location.hash}`,
@@ -474,7 +488,7 @@ export function useScrollToSearchedMessage(
     if (renderedTarget === null) {
       return;
     }
-    let frame: number;
+    const scheduled = { frame: 0 };
     let frameCount = 0;
     let stableFrameCount = 0;
     let previousGeometry: string | null = null;
@@ -512,12 +526,12 @@ export function useScrollToSearchedMessage(
         onRevealComplete?.(targetLocationKey);
         return;
       }
-      frame = requestAnimationFrame(revealTarget);
+      scheduled.frame = requestAnimationFrame(revealTarget);
     };
 
-    frame = requestAnimationFrame(revealTarget);
+    scheduled.frame = requestAnimationFrame(revealTarget);
     return () => {
-      cancelAnimationFrame(frame);
+      cancelAnimationFrame(scheduled.frame);
     };
   }, [
     bottomAnchor,

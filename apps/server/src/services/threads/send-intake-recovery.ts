@@ -34,7 +34,7 @@ export function findSendIntakeHandoffProof(tx: DbTransaction, row: ThreadSendInt
     const event = findThreadSendIntakeClearCompletion(tx, row);
     if (!event) return null;
     const clear = systemOperationEventDataSchema.parse(JSON.parse(event.data));
-    const receipt: SendMessageResponse = { ok: true, delivery: "sent", ...ids, ...(row.clientSubmissionId === null ? {} : { command: true }) };
+    const receipt: SendMessageResponse = { ok: true, delivery: "sent", messageSequence: null, ...ids, ...(row.clientSubmissionId === null ? {} : { command: true }) };
     return { handoff: { kind: "clear", id: clear.operationId }, receipt: JSON.stringify(receipt) };
   }
   const standaloneCompact = isStandaloneBuiltinCompactCommand(payload.input);
@@ -49,7 +49,7 @@ export function findSendIntakeHandoffProof(tx: DbTransaction, row: ThreadSendInt
     if (startup?.request.clientRequestId !== request.requestId &&
       !hasThreadSendIntakeProviderAcceptance(tx, row.threadId, request.requestId, event.sequence)) return null;
   }
-  const receipt: SendMessageResponse = { ok: true, delivery: "sent", ...ids,
+  const receipt: SendMessageResponse = { ok: true, delivery: "sent", messageSequence: event.sequence, ...ids,
     ...(row.clientSubmissionId === null ? {} : { requested: { requestId: request.requestId, sequence: event.sequence } }) };
   return { handoff: request.target.kind === "thread-start" ? { kind: "startup", id: request.requestId } :
     { kind: "request", id: request.requestId, sequence: event.sequence }, receipt: JSON.stringify(receipt) };

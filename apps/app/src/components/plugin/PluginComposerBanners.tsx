@@ -4,35 +4,25 @@ import {
   useComposerContextSource,
 } from "@/components/promptbox/context/composer-context";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ComposerView } from "@get-bb/plugin-sdk";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { useResolvedComposerBanners } from "./composer-slot-hooks";
 import { PluginSlotMount } from "./PluginSlotMount";
 import {
   composerScopeIdentity,
-  PluginComposerViewProvider,
   useOptionalPluginComposerStaticView,
 } from "./plugin-composer-host";
 
 export function ComposerBannersSlot({
-  view,
   children,
   ownerPlacement = "after",
 }: {
-  view?: ComposerView;
   children?: ReactNode;
   ownerPlacement?: "before" | "after";
 }) {
-  return view === undefined ? (
+  return (
     <ComposerBannerRows ownerPlacement={ownerPlacement}>
       {children}
     </ComposerBannerRows>
-  ) : (
-    <PluginComposerViewProvider value={view}>
-      <ComposerBannerRows ownerPlacement={ownerPlacement}>
-        {children}
-      </ComposerBannerRows>
-    </PluginComposerViewProvider>
   );
 }
 

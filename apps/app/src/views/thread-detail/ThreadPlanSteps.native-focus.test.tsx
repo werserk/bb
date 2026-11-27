@@ -24,6 +24,11 @@ import { createThreadPlanFocusRequest } from "./thread-plan-focus";
 const facts = vi.hoisted(() => ({
   stop: vi.fn(),
   stopping: false,
+  stoppingListeners: new Set<() => void>(),
+  setStopping(value: boolean) {
+    facts.stopping = value;
+    for (const listener of facts.stoppingListeners) listener();
+  },
   resolve: vi.fn(),
   composerFocus: vi.fn(),
 }));
@@ -75,9 +80,19 @@ vi.mock("@/hooks/mutations/thread-interaction-mutations", () => ({
     error: null,
   }),
 }));
-vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
-  useStopThread: () => ({ mutateAsync: facts.stop, isPending: facts.stopping }),
-}));
+vi.mock("@/hooks/mutations/thread-runtime-mutations", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    facts.stoppingListeners.add(listener);
+    return () => facts.stoppingListeners.delete(listener);
+  };
+  return {
+    useStopThread: () => ({
+      mutateAsync: facts.stop,
+      isPending: useSyncExternalStore(subscribe, () => facts.stopping),
+    }),
+  };
+});
 const question: PendingInteraction = {
   id: "native-input",
   threadId: "native",
@@ -445,13 +460,13 @@ it("locks both answer and cancel while the stop mutation is pending", () => {
     />
   );
   const view = render(custodyHost(body()));
-  fireEvent.change(screen.getByRole("textbox", {name: "Answer answer"}), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Answer answer" }), {
     target: { value: "An answer" },
   });
   expect(
     screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
   ).toBe(false);
-  facts.stopping = true;
+  act(() => facts.setStopping(true));
   view.rerender(custodyHost(body()));
   expect(
     screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),
@@ -459,7 +474,7 @@ it("locks both answer and cancel while the stop mutation is pending", () => {
   expect(
     screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled"),
   ).toBe(true);
-  facts.stopping = false;
+  act(() => facts.setStopping(false));
   view.rerender(custodyHost(body()));
   expect(
     screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled"),

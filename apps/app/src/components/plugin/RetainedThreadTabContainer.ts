@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { observeSharedResize } from "@bb/shared-ui/lib/shared-resize-observer";
 
 type Placement = { element: HTMLDivElement };
 type ScrollPosition = {
@@ -10,6 +11,21 @@ type ScrollPosition = {
   offsetLeft: number;
 };
 type Anchor = { element: HTMLElement | null; bounds: DOMRect; rect: DOMRect };
+
+function setContainerStyle(container: HTMLDivElement, cssText: string) {
+  container.style.cssText = cssText;
+}
+
+function presentContainer(
+  container: HTMLDivElement,
+  { tabId, live, bridge }: { tabId: string; live: boolean; bridge: boolean },
+) {
+  container.dataset.retainedFixedTabBody = tabId;
+  container.className = "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-panel";
+  container.hidden = !live && !bridge;
+  container.inert = !live;
+  container.setAttribute("aria-hidden", String(!live));
+}
 
 function viewportRect() {
   return new DOMRect(0, 0, window.innerWidth, window.innerHeight);
@@ -98,15 +114,10 @@ export function useRetainedThreadTabContainer({
       parking.current.append(container);
   };
   useLayoutEffect(() => {
-    const live = attached && outlet?.element.isConnected;
-    container.dataset.retainedFixedTabBody = tabId;
-    container.className =
-      "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-panel";
-    container.hidden = !live && !bridge;
-    container.inert = !live;
-    container.setAttribute("aria-hidden", String(!live));
+    const live = !!(attached && outlet?.element.isConnected);
+    presentContainer(container, { tabId, live, bridge });
     if (live && outlet) {
-      container.style.cssText = "";
+      setContainerStyle(container, "");
       if (container.parentElement !== outlet.element) {
         outlet.element.append(container);
         restoreScroll();
@@ -119,7 +130,7 @@ export function useRetainedThreadTabContainer({
     const positionBridge = () => {
       const previous = anchor.current;
       if (!bridge || !previous) {
-        container.style.cssText = "display:none";
+        setContainerStyle(container, "display:none");
         return;
       }
       const bounds = previous.element?.isConnected
@@ -138,22 +149,24 @@ export function useRetainedThreadTabContainer({
       const left = Math.max(bounds.left, bounds.right - rightInset - width);
       const top = Math.min(bounds.bottom, bounds.top + topInset);
       const height = Math.max(0, bounds.bottom - bottomInset - top);
-      container.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${width}px;height:${height}px;z-index:30;pointer-events:none`;
+      setContainerStyle(
+        container,
+        `position:fixed;left:${left}px;top:${top}px;width:${width}px;height:${height}px;z-index:30;pointer-events:none`,
+      );
     };
     positionBridge();
     if (!bridge) return;
     restoreScroll();
     window.addEventListener("resize", positionBridge);
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(positionBridge);
-    if (anchor.current?.element?.isConnected)
-      observer?.observe(anchor.current.element);
-    else observer?.observe(document.documentElement);
+    const stopObserving = observeSharedResize(
+      anchor.current?.element?.isConnected
+        ? anchor.current.element
+        : document.documentElement,
+      { read: () => undefined, write: positionBridge },
+    );
     return () => {
       window.removeEventListener("resize", positionBridge);
-      observer?.disconnect();
+      stopObserving();
     };
   });
   return {
@@ -161,6 +174,5 @@ export function useRetainedThreadTabContainer({
     parking,
     capture,
     park,
-    hasAnchor: anchor.current !== null,
   };
 }

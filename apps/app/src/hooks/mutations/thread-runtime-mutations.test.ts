@@ -141,6 +141,7 @@ beforeEach(() => {
   vi.mocked(sdk.threads.send).mockResolvedValue({
     ok: true,
     delivery: "sent",
+    messageSequence: 1,
   });
   vi.mocked(sdk.threads.spawn).mockResolvedValue(makeThreadResponse());
   vi.mocked(sdk.threads.queuedMessages.delete).mockResolvedValue({ ok: true });
@@ -503,6 +504,7 @@ it("keeps custody when a typed command receipt echoes another submission", async
   vi.mocked(sdk.threads.send).mockResolvedValueOnce({
     ok: true,
     delivery: "sent",
+    messageSequence: null,
     command: true,
     submissionIds: [crypto.randomUUID()],
   });
@@ -527,7 +529,11 @@ it("keeps custody when a typed command receipt echoes another submission", async
 it("rejects conflicting identity without changing the active send", async () => {
   const client = createTestQueryClient(),
     id = crypto.randomUUID();
-  const response = createDeferredPromise<{ ok: true; delivery: "sent" }>();
+  const response = createDeferredPromise<{
+    ok: true;
+    delivery: "sent";
+    messageSequence: null;
+  }>();
   vi.mocked(sdk.threads.send).mockReturnValueOnce(response.promise);
   const options = sendThreadMessageMutationOptions(client);
   const original = new MutationObserver(client, options).mutate({
@@ -553,7 +559,7 @@ it("rejects conflicting identity without changing the active send", async () => 
     ]);
     expect(sdk.threads.send).toHaveBeenCalledTimes(1);
   } finally {
-    response.resolve({ ok: true, delivery: "sent" });
+    response.resolve({ ok: true, delivery: "sent", messageSequence: null });
     await original;
   }
 });

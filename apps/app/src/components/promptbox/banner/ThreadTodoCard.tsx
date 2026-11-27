@@ -43,6 +43,7 @@ export function ThreadPlanQuestion({
       if (focusRequest?.interactionId === interaction.id)
         focusRequest.consumeFocus();
       seenRequest.current = focusRequest?.sequence;
+      // oxlint-disable-next-line react/set-state-in-effect
       setActiveRequest(undefined);
     } else if (focusRequest && seenRequest.current !== focusRequest.sequence) {
       seenRequest.current = focusRequest.sequence;
@@ -216,18 +217,21 @@ export function ThreadTodoCard({
     earlier,
   );
   const [expanded, setExpanded] = useState(!compact && !narrow && !quiet);
-  const previous = useRef({ narrow, quiet, waiting });
+  const [previous, setPrevious] = useState({ narrow, quiet, waiting });
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const bodyId = useId();
-  useEffect(() => {
-    const before = previous.current;
-    if ((narrow && !before.narrow) || (quiet && !before.quiet))
+  if (
+    previous.narrow !== narrow ||
+    previous.quiet !== quiet ||
+    previous.waiting !== waiting
+  ) {
+    setPrevious({ narrow, quiet, waiting });
+    if ((narrow && !previous.narrow) || (quiet && !previous.quiet))
       setExpanded(false);
-    else if (!compact && waiting && !before.waiting && !narrow)
+    else if (!compact && waiting && !previous.waiting && !narrow)
       setExpanded(true);
-    previous.current = { narrow, quiet, waiting };
-  }, [compact, narrow, quiet, waiting]);
+  }
   useEffect(() => {
     if (!focusRequest) return;
     if (
@@ -238,6 +242,7 @@ export function ThreadTodoCard({
     )
       return;
     if (!focusRequest.consumeReveal()) return;
+    // oxlint-disable-next-line react/set-state-in-effect
     if (focusRequest.interactionId || failed) setExpanded(true);
   }, [focusRequest, snapshot.items, failed]);
   useEffect(() => {

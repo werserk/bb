@@ -4,7 +4,6 @@ import {
   eq,
   exists,
   gt,
-  inArray,
   isNull,
   lt,
   lte,
@@ -12,6 +11,7 @@ import {
   notExists,
   or,
   placeholder,
+  sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import {
@@ -44,7 +44,7 @@ function prepareStalenessQueries(
             eq(earlier.threadId, started.threadId),
             eq(earlier.turnId, started.turnId),
             eq(earlier.type, "turn/started"),
-            lte(earlier.sequence, placeholder("planSequence")),
+            lte(sql`+${earlier.sequence}`, placeholder("planSequence")),
           ),
         ),
     ),
@@ -55,9 +55,9 @@ function prepareStalenessQueries(
     .where(
       and(
         eq(events.threadId, placeholder("threadId")),
-        inArray(events.type, ["turn/completed", "system/thread/interrupted"]),
+        eq(events.type, placeholder("endType")),
         gt(events.sequence, placeholder("planSequence")),
-        lte(events.sequence, placeholder("maxSeq")),
+        lte(sql`+${events.sequence}`, placeholder("maxSeq")),
         exists(
           db
             .select({ id: started.id })
@@ -84,7 +84,7 @@ function prepareStalenessQueries(
     .where(
       and(
         rootAfterPlan,
-        lt(started.sequence, placeholder("endSequence")),
+        lt(sql`+${started.sequence}`, placeholder("endSequence")),
         interrupted ? undefined : eq(started.turnId, placeholder("endTurnId")),
       ),
     )
@@ -119,7 +119,17 @@ export function listPlanStalenessEventRows(
     db,
     hasTurn ? prepareWithTurn : prepareWithoutTurn,
   );
-  const ended = queries.end.get(params);
+  const completed = queries.end.get({ ...params, endType: "turn/completed" });
+  const interrupted = queries.end.get({
+    ...params,
+    endType: "system/thread/interrupted",
+  });
+  const ended =
+    completed && interrupted
+      ? completed.sequence < interrupted.sequence
+        ? completed
+        : interrupted
+      : (completed ?? interrupted);
   if (!ended) return [];
   const startQuery =
     ended.type === "system/thread/interrupted"
