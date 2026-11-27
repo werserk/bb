@@ -25,7 +25,9 @@ standard Anthropic API version when absent, preserving an explicit caller versio
 
 bb pool status --json inspects routing; bb plugin build builds the package;
 bb plugin reload account-pool-prewarm reloads it. Tests run with no inherited BB
-routing; test-isolation.mjs enforces this boundary. Logs/secrets/data.db live in
+routing; test-isolation.mjs enforces this boundary. No test reaches the network:
+test-network-guard.ts (a vitest setup file) fails any test that opens fetch or a
+socket to a non-loopback host. Logs/secrets/data.db live in
 the bb data directory under
 plugins/account-pool-prewarm. Tokens never enter code or test artifacts.
 

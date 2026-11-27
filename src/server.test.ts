@@ -20,7 +20,7 @@ import {
   makeHostResponse,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountSchema,
   accountSecretSchema,
@@ -87,19 +87,27 @@ const loginSeeds = new WeakMap<
   Pick<TestPluginOptions, "seedClaude" | "seedCodex">
 >();
 
+// Every provider upstream a test does not set goes to `strayUpstream`, a local
+// fake. A test that injects `fetch` answers every request itself, so it keeps
+// the shipped provider hosts and can assert them.
 function testPlugin(options: TestPluginOptions = {}) {
   const { seedClaude, seedCodex, ...pluginOptions } = options;
-  const plugin = createAccountPoolPlugin(pluginOptions);
+  const plugin = createAccountPoolPlugin({
+    ...pluginOptions,
+    upstreams:
+      pluginOptions.fetch === undefined
+        ? { ...upstreamsAt(strayUpstream.url), ...pluginOptions.upstreams }
+        : pluginOptions.upstreams,
+  });
   return async (bb: BbPluginApi): Promise<void> => {
     loginSeeds.set(bb, { seedClaude, seedCodex });
     await plugin(bb);
   };
 }
 
-// Test-only: the Anthropic and ChatGPT upstreams at one fake server. OpenAI API
-// keys keep the fixed api.openai.com upstream, as the old stored config did.
+// Test-only: every provider upstream at one fake server.
 function upstreamsAt(url: string) {
-  return { anthropic: url, chatgptCodex: url };
+  return { anthropic: url, chatgptCodex: url, openai: url };
 }
 
 async function addOAuthAccount(
@@ -318,6 +326,14 @@ async function startUpstream(handler: UpstreamHandler): Promise<Upstream> {
     },
   };
 }
+
+// The upstream for providers a test did not point anywhere: it answers 503, so
+// a test that reaches it fails on its own assertions instead of the network.
+const strayUpstream = await startUpstream((_request, response) => {
+  response.statusCode = 503;
+  response.end("No test configured this upstream.");
+});
+afterAll(() => strayUpstream.close());
 
 async function readRequestBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -1390,7 +1406,6 @@ describe("Account Pool plugin", () => {
       sdk: sdkStubs(),
     });
     await testPlugin({
-      upstreams: { chatgptCodex: "https://example.com" },
       fetch: upstreamFetch,
       codexUsageUrl: CODEX_USAGE_STUB_URL,
       seedCodex: async () => ({
@@ -1549,7 +1564,7 @@ describe("Account Pool plugin", () => {
       dataDir,
       sdk: sdkStubs(),
     });
-    await testPlugin({ upstreams: { anthropic: upstream.url } })(host.bb);
+    await testPlugin({ upstreams: upstreamsAt(upstream.url) })(host.bb);
     await grantRoles(host);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
@@ -8878,7 +8893,7 @@ describe("OpenAI Platform API keys", () => {
   it("adds a Codex key through RPC and forwards Responses and compact without subscription identity", async () => {
     const seen: Array<{ url: string; headers: Headers; body: string }> = [];
     const fixture = await createFixture({
-      upstreamUrl: "https://chatgpt.com/backend-api/codex",
+      upstreamUrl: null,
       provider: "codex",
       apiKey: "sk-openai-test-only",
       options: {
@@ -8944,7 +8959,7 @@ describe("OpenAI Platform API keys", () => {
   it("persists insufficient_quota and fails over once instead of retrying a spent API key", async () => {
     const attempts: string[] = [];
     const fixture = await createFixture({
-      upstreamUrl: "https://chatgpt.com/backend-api/codex",
+      upstreamUrl: null,
       provider: "codex",
       apiKey: "sk-spent",
       priority: 1,
@@ -8995,7 +9010,7 @@ describe("OpenAI Platform API keys", () => {
 it("switches from a spent ChatGPT subscription to an OpenAI key without leaking identity", async () => {
   const attempts: Array<{ url: string; auth: string | null; account: string | null }> = [];
   const fixture = await createFixture({
-    upstreamUrl: "https://chatgpt.com/backend-api/codex",
+    upstreamUrl: null,
     provider: "codex",
     source: "oauth",
     priority: 1,

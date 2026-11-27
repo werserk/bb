@@ -7,5 +7,6 @@ export default defineConfig({
     name: "bb-plugin-account-pool",
     include: ["**/*.test.{ts,tsx}"],
     exclude: ["dist/**", "node_modules/**"],
+    setupFiles: ["./test-network-guard.ts"],
   },
 });
