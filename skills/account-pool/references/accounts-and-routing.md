@@ -318,7 +318,8 @@ working. RPC: `pass.list` (null input), `pass.revoke` (`{threadId}`).
 [--since <30m|24h|7d|ISO>] [--limit <1-1000>] [--json]` prints newest first,
 tab-separated: time, reason, provider, thread, machine, account, detail. RPC
 `audit.list` takes the same filters (`threadId`, `hostId`, `accountId`,
-`reason`, `since` in ms, `limit`). Reasons: `select` (once per account change
+`reason`, `since` in ms, `limit`) and returns `{entries, skipped}`; JSON
+output has the same shape, and text output reports skipped rows on stderr. Reasons: `select` (once per account change
 of a session, not per request), `failover`, `limit` (`quota`, `rate-limit`,
 `auth`, `upstream`), `pass-issued`, `pass-revoked` (`archived`, `deleted`,
 `restored`, `manual`, `role`, `host-removed`, `reconcile`), `role-change`

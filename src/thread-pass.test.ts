@@ -67,7 +67,7 @@ async function setup() {
   const reasons = () =>
     audit
       .list()
-      .reverse()
+      .entries.reverse()
       .map((entry) => `${entry.reason}:${entry.threadId}:${entry.detail ?? "-"}`);
   return { db, secrets, state, audit, broken, passes: make(), make, live, reasons };
 }

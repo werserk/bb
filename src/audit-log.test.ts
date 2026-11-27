@@ -28,13 +28,14 @@ async function setup(maxRows?: number) {
     await fs.rm(dataDir, { recursive: true, force: true });
   });
   const clock = { time: 10 * AUDIT_RETENTION_MS };
-  const log = new AuditLog(
-    db,
-    () => clock.time,
-    AUDIT_RETENTION_MS,
-    maxRows,
-  );
-  return { db, log, clock };
+  const raw = new AuditLog(db, () => clock.time, AUDIT_RETENTION_MS, maxRows);
+  // Most tests read entries only; the skipped count has its own test.
+  const log = {
+    append: raw.append.bind(raw),
+    prune: raw.prune.bind(raw),
+    list: (query?: Parameters<AuditLog["list"]>[0]) => raw.list(query).entries,
+  };
+  return { db, raw, log, clock };
 }
 
 it("appends validated rows and lists them newest first with filters", async () => {
@@ -121,7 +122,7 @@ it("keeps rows under both bounds", async () => {
 // After a rollback from a later build, its rows (new reasons and details) are
 // shown as they are; this build only refuses to write them.
 it("reads rows with reasons and details this build does not know", async () => {
-  const { db, log, clock } = await setup();
+  const { db, raw, log, clock } = await setup();
   db.prepare(
     "INSERT INTO pool_audit(ts, reason, provider, thread_id, host_id, account_id, detail) VALUES (?, 'switch', 'gemini', 'thread-1', 'host-a', 'account-1', 'policy:cheapest')",
   ).run(clock.time);
@@ -140,13 +141,54 @@ it("reads rows with reasons and details this build does not know", async () => {
     },
   ]);
   expect(log.list({ reason: "switch" })).toHaveLength(1);
-  const { audit } = createAuditCommands(log, () => clock.time);
+  const { audit } = createAuditCommands(raw, () => clock.time);
   const run = (options: Record<string, unknown>) =>
     audit.run({ options, positionals: {} } as never, {} as never) as Promise<{
       stdout: string;
     }>;
   expect((await run({})).stdout).toContain("\tswitch\tgemini\t");
   expect(JSON.parse((await run({ json: true, reason: "switch" })).stdout).entries).toHaveLength(1);
+});
+
+// The later build's own words for a rollback (L12): a new reason, and a known
+// reason with a new detail. Rows that break the id or time invariants, or hold
+// control characters, are skipped and counted, never fatal.
+it("returns later builds' reasons and details as they are and skips broken rows", async () => {
+  const { db, raw, clock } = await setup();
+  const insert = db.prepare(
+    "INSERT INTO pool_audit(id, ts, reason, provider, thread_id, host_id, account_id, detail) VALUES (?, ?, ?, 'claude', 'thread-1', 'host-a', 'account-1', ?)",
+  );
+  insert.run(1, clock.time, "switch", "policy");
+  insert.run(2, clock.time, "limit", "named-stop");
+  insert.run(3, "yesterday", "select", null);
+  insert.run(4, clock.time, "select", "line\nbreak");
+  insert.run(5, clock.time, "x".repeat(300), null);
+  expect(raw.list()).toEqual({
+    entries: [
+      expect.objectContaining({ id: 2, reason: "limit", detail: "named-stop" }),
+      expect.objectContaining({ id: 1, reason: "switch", detail: "policy" }),
+    ],
+    skipped: 3,
+  });
+  expect(raw.list({ reason: "switch" }).entries).toHaveLength(1);
+  const { audit } = createAuditCommands(raw, () => clock.time);
+  const run = (options: Record<string, unknown>) =>
+    audit.run({ options, positionals: {} } as never, {} as never) as Promise<{
+      stdout: string;
+      stderr?: string;
+    }>;
+  const text = await run({});
+  expect(text.stdout).toContain("\tlimit\tclaude\tthread-1\thost-a\taccount-1\tnamed-stop\n");
+  expect(text.stdout).toContain("\tswitch\tclaude\tthread-1\thost-a\taccount-1\tpolicy\n");
+  expect(text.stdout.split("\n")).toHaveLength(3);
+  expect(text.stderr).toBe("3 audit row(s) could not be read and were skipped.\n");
+  expect(JSON.parse((await run({ json: true })).stdout)).toEqual({
+    entries: [
+      expect.objectContaining({ reason: "limit", detail: "named-stop" }),
+      expect.objectContaining({ reason: "switch", detail: "policy" }),
+    ],
+    skipped: 3,
+  });
 });
 
 it("reads relative and absolute --since values", () => {
@@ -161,8 +203,8 @@ it("reads relative and absolute --since values", () => {
 });
 
 it("prints the audit as tab-separated rows or JSON and rejects bad filters", async () => {
-  const { log, clock } = await setup();
-  const { audit } = createAuditCommands(log, () => clock.time);
+  const { raw, log, clock } = await setup();
+  const { audit } = createAuditCommands(raw, () => clock.time);
   const run = (options: Record<string, unknown>) =>
     audit.run({ options, positionals: {} } as never, {} as never) as Promise<{
       stdout: string;
@@ -178,6 +220,7 @@ it("prints the audit as tab-separated rows or JSON and rejects bad filters", asy
   );
   expect(JSON.parse((await run({ json: true, thread: "thread-1" })).stdout)).toEqual({
     entries: [expect.objectContaining({ reason: "pass-issued" })],
+    skipped: 0,
   });
   await expect(run({ reason: "Not A Reason" })).rejects.toThrow(
     "Invalid audit filter",

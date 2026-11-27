@@ -52,22 +52,33 @@ export type AuditInput = Partial<
   Omit<z.infer<typeof auditRecordSchema>, "reason">
 > & { reason: AuditReason };
 
-// What it reads back: any row, so that rows written by a later build (new
-// reasons and details) are shown as they are after a rollback.
+// What it reads back: any well-formed row, so that rows written by a later
+// build (new reasons and details) are shown as they are after a rollback. A
+// row that breaks the id and time invariants, or holds an overlong or control
+// character value, is skipped and counted instead of failing the whole list.
 const REASON_NAME = /^[a-z][a-z-]{0,63}$/u;
+// eslint-disable-next-line no-control-regex
+const readText = z.string().min(1).max(256).regex(/^[^\u0000-\u001f\u007f]+$/u);
 export const auditEntrySchema = z
   .object({
     id: z.number().int().positive(),
     ts: z.number().int().nonnegative(),
-    reason: z.string().min(1),
-    provider: z.string().nullable(),
-    threadId: z.string().nullable(),
-    hostId: z.string().nullable(),
-    accountId: z.string().nullable(),
-    detail: z.string().nullable(),
+    reason: readText,
+    provider: readText.nullable(),
+    threadId: readText.nullable(),
+    hostId: readText.nullable(),
+    accountId: readText.nullable(),
+    detail: readText.nullable(),
   })
   .strict();
 export type AuditEntry = z.infer<typeof auditEntrySchema>;
+export const auditListSchema = z
+  .object({
+    entries: z.array(auditEntrySchema),
+    skipped: z.number().int().nonnegative(),
+  })
+  .strict();
+export type AuditList = z.infer<typeof auditListSchema>;
 
 export const auditQuerySchema = z
   .object({
@@ -84,16 +95,28 @@ export type AuditQuery = z.infer<typeof auditQuerySchema>;
 export const AUDIT_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 export const AUDIT_MAX_ROWS = 200_000;
 
-const rowSchema = z.object({
-  id: z.number(),
-  ts: z.number(),
-  reason: z.string(),
-  provider: z.string().nullable(),
-  thread_id: z.string().nullable(),
-  host_id: z.string().nullable(),
-  account_id: z.string().nullable(),
-  detail: z.string().nullable(),
-});
+const rowSchema = z
+  .object({
+    id: z.unknown(),
+    ts: z.unknown(),
+    reason: z.unknown(),
+    provider: z.unknown(),
+    thread_id: z.unknown(),
+    host_id: z.unknown(),
+    account_id: z.unknown(),
+    detail: z.unknown(),
+  })
+  .transform((row) => ({
+    id: row.id,
+    ts: row.ts,
+    reason: row.reason,
+    provider: row.provider,
+    threadId: row.thread_id,
+    hostId: row.host_id,
+    accountId: row.account_id,
+    detail: row.detail,
+  }))
+  .pipe(auditEntrySchema);
 
 export class AuditLog {
   private readonly insert: Database.Statement;
@@ -142,7 +165,7 @@ export class AuditLog {
     })();
   }
 
-  list(query: AuditQuery = {}): AuditEntry[] {
+  list(query: AuditQuery = {}): AuditList {
     const filter = auditQuerySchema.parse(query);
     const where: string[] = [];
     const values: Array<string | number> = [];
@@ -156,34 +179,24 @@ export class AuditLog {
     add("account_id = ?", filter.accountId);
     add("reason = ?", filter.reason);
     add("ts >= ?", filter.since);
-    const rows = z
-      .array(rowSchema)
-      .parse(
-        this.db
-          .prepare(
-            `SELECT id, ts, reason, provider, thread_id, host_id, account_id, detail FROM pool_audit${where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`} ORDER BY id DESC LIMIT ?`,
-          )
-          .all(...values, filter.limit ?? 100),
-      );
-    return rows.map((row) =>
-      auditEntrySchema.parse({
-        id: row.id,
-        ts: row.ts,
-        reason: row.reason,
-        provider: row.provider,
-        threadId: row.thread_id,
-        hostId: row.host_id,
-        accountId: row.account_id,
-        detail: row.detail,
-      }),
-    );
+    const rows = this.db
+      .prepare(
+        `SELECT id, ts, reason, provider, thread_id, host_id, account_id, detail FROM pool_audit${where.length === 0 ? "" : ` WHERE ${where.join(" AND ")}`} ORDER BY id DESC LIMIT ?`,
+      )
+      .all(...values, filter.limit ?? 100);
+    const entries: AuditEntry[] = [];
+    for (const row of rows) {
+      const parsed = rowSchema.safeParse(row);
+      if (parsed.success) entries.push(parsed.data);
+    }
+    return { entries, skipped: rows.length - entries.length };
   }
 }
 
 export const auditRpcContract = defineRpcContract({
   "audit.list": {
     input: auditQuerySchema,
-    output: z.array(auditEntrySchema),
+    output: auditListSchema,
   },
 });
 
@@ -232,7 +245,7 @@ export function createAuditCommands(log: AuditLog, now: () => number) {
       run: async (input) => {
         try {
           const options = input.options;
-          const entries = log.list({
+          const { entries, skipped } = log.list({
             ...(options.thread === undefined ? {} : { threadId: options.thread }),
             ...(options.host === undefined ? {} : { hostId: options.host }),
             ...(options.account === undefined
@@ -250,8 +263,13 @@ export function createAuditCommands(log: AuditLog, now: () => number) {
           });
           return {
             exitCode: 0,
+            ...(skipped === 0 || options.json
+              ? {}
+              : {
+                  stderr: `${skipped} audit row(s) could not be read and were skipped.\n`,
+                }),
             stdout: options.json
-              ? `${JSON.stringify({ entries })}\n`
+              ? `${JSON.stringify({ entries, skipped })}\n`
               : entries.length === 0
                 ? "No audit entries.\n"
                 : `${entries

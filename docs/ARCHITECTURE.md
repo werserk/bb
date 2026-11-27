@@ -207,7 +207,8 @@ tokens or passes. Reasons: `select`, `failover`, `limit` (with `quota`,
 `reconcile`) and `role-change` (`<from>-><to>`). The reason is checked in code,
 so a new reason needs no table rebuild; reads return unknown reasons and
 details as they are, so `bb pool audit` keeps working after a rollback from a
-build that writes more.
+build that writes more; a row that breaks the id and time invariants or holds
+an overlong or control-character value is skipped and counted (`skipped`).
 
 `select` is written once per account change of a session, not per request: the
 key is [provider, thread (or machine for hub-token requests), session], held in
