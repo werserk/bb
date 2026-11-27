@@ -13,6 +13,8 @@ import type {
   ExperimentalComposerRegistration,
   PluginEnvironmentProviderInputsRegistration,
   PluginMachineProviderInputsRegistration,
+  ExperimentalRunOnProviderRegistration,
+  ExperimentalComposerRunRowItemRegistration,
   ExperimentalThreadDisplayPolicyResolver,
   PluginPendingInteractionRegistration,
   PluginFileOpenerRegistration,
@@ -94,6 +96,8 @@ export interface PluginRegistrationSet {
   timelineRenderers?: readonly PluginTimelineRendererRegistration[];
   environmentProviderInputs?: readonly PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs?: readonly PluginMachineProviderInputsRegistration[];
+  runOnProviders?: readonly ExperimentalRunOnProviderRegistration[];
+  composerRunRowItems?: readonly ExperimentalComposerRunRowItemRegistration[];
   threadDisplayPolicies?: readonly ExperimentalThreadDisplayPolicyResolver[];
 }
 
@@ -200,6 +204,10 @@ export interface PluginEnvironmentProviderInputsSlot
   extends PluginEnvironmentProviderInputsRegistration, PluginSlotBase {}
 export interface PluginMachineProviderInputsSlot
   extends PluginMachineProviderInputsRegistration, PluginSlotBase {}
+export interface PluginRunOnProviderSlot
+  extends ExperimentalRunOnProviderRegistration, PluginSlotBase {}
+export interface PluginComposerRunRowItemSlot
+  extends ExperimentalComposerRunRowItemRegistration, PluginSlotBase {}
 
 export interface PluginSlotSnapshot {
   homepageSections: readonly PluginHomepageSectionSlot[];
@@ -241,6 +249,8 @@ export interface PluginSlotSnapshot {
   timelineRenderers: readonly PluginTimelineRendererSlot[];
   environmentProviderInputs: readonly PluginEnvironmentProviderInputsSlot[];
   machineProviderInputs: readonly PluginMachineProviderInputsSlot[];
+  runOnProviders: readonly PluginRunOnProviderSlot[];
+  composerRunRowItems: readonly PluginComposerRunRowItemSlot[];
   threadDisplayPolicies: readonly PluginThreadDisplayPolicySlot[];
 }
 
@@ -284,6 +294,8 @@ export const EMPTY_PLUGIN_SLOT_SNAPSHOT: PluginSlotSnapshot = {
   timelineRenderers: [],
   environmentProviderInputs: [],
   machineProviderInputs: [],
+  runOnProviders: [],
+  composerRunRowItems: [],
   threadDisplayPolicies: [],
 };
 
@@ -335,6 +347,8 @@ const SLOT_KINDS: readonly SlotKind[] = [
   "timelineRenderers",
   "environmentProviderInputs",
   "machineProviderInputs",
+  "runOnProviders",
+  "composerRunRowItems",
   "threadDisplayPolicies",
 ];
 
@@ -433,6 +447,8 @@ function flattenRegistrations(
     timelineRenderers: stamp(set.timelineRenderers),
     environmentProviderInputs: stamp(set.environmentProviderInputs),
     machineProviderInputs: stamp(set.machineProviderInputs),
+    runOnProviders: stamp(set.runOnProviders),
+    composerRunRowItems: stamp(set.composerRunRowItems),
     threadDisplayPolicies: stamp(
       (set.threadDisplayPolicies ?? []).map((resolve) => ({ resolve })),
     ),

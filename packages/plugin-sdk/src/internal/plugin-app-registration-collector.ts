@@ -1,6 +1,10 @@
 import type { ComponentType } from "react";
 import { z } from "zod";
 import { createModalHandle } from "./modal-handle.js";
+import {
+  collectComposerRunRowItem,
+  collectRunOnProvider,
+} from "../fork/run-on-collector.js";
 import type {
   ExperimentalTabRegistration,
   ComposerCustomization,
@@ -21,6 +25,8 @@ import type {
   ExperimentalComposerRegistration,
   PluginEnvironmentProviderInputsRegistration,
   PluginMachineProviderInputsRegistration,
+  ExperimentalRunOnProviderRegistration,
+  ExperimentalComposerRunRowItemRegistration,
   PluginFileOpenerRegistration,
   PluginHomepageSectionRegistration,
   PluginCommandRegistration,
@@ -353,6 +359,8 @@ export interface CollectedPluginAppRegistrations {
   timelineRenderers: PluginTimelineRendererRegistration[];
   environmentProviderInputs: PluginEnvironmentProviderInputsRegistration[];
   machineProviderInputs: PluginMachineProviderInputsRegistration[];
+  runOnProviders: ExperimentalRunOnProviderRegistration[];
+  composerRunRowItems: ExperimentalComposerRunRowItemRegistration[];
   contentScripts: PluginContentScriptRegistration[];
   threadDisplayPolicies: ExperimentalThreadDisplayPolicyResolver[];
 }
@@ -502,6 +510,8 @@ export function collectPluginAppRegistrations(
     timelineRenderers: [],
     environmentProviderInputs: [],
     machineProviderInputs: [],
+    runOnProviders: [],
+    composerRunRowItems: [],
     contentScripts: [],
     threadDisplayPolicies: [],
   };
@@ -548,6 +558,8 @@ export function collectPluginAppRegistrations(
     timelineRenderer: new Set<string>(),
     environmentProviderInputs: new Set<string>(),
     machineProviderInputs: new Set<string>(),
+    runOnProvider: new Set<string>(),
+    composerRunRowItem: new Set<string>(),
     contentScript: new Set<string>(),
   };
 
@@ -1364,6 +1376,22 @@ export function collectPluginAppRegistrations(
           machineProviderId,
           component: requireComponent(kind, registration.component),
         });
+      },
+      experimental_runOnProvider(registration) {
+        const run = collectRunOnProvider(
+          registration,
+          seenIds.runOnProvider,
+          onWarning,
+        );
+        if (run !== null) collected.runOnProviders.push(run);
+      },
+      experimental_composerRunRowItem(registration) {
+        const item = collectComposerRunRowItem(
+          registration,
+          seenIds.composerRunRowItem,
+          onWarning,
+        );
+        if (item !== null) collected.composerRunRowItems.push(item);
       },
     },
     experimental_sidebarFooter: new SidebarFooterCollector(

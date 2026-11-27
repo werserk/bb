@@ -21,6 +21,7 @@ interface UseComposerTypeaheadArgs {
   threadProviderCommands?: readonly ProviderCommand[] | null;
   builtinCommands?: readonly ProviderCommandSuggestion[];
   resolveMentionLink: PromptMentionLinkResolver;
+  mentionHostId?: string | null;
 }
 
 interface UseComposerTypeaheadResult {
@@ -39,6 +40,7 @@ export function useComposerTypeahead({
   threadProviderCommands,
   builtinCommands,
   resolveMentionLink,
+  mentionHostId,
 }: UseComposerTypeaheadArgs): UseComposerTypeaheadResult {
   const mentionTriggers = usePromptMentionTriggers();
   const providerPromptActions = useMemo(
@@ -55,8 +57,10 @@ export function useComposerTypeahead({
         source: {
           projectId: mentionSourceProjectId,
           currentThreadId,
-          environmentId,
           threadStorageThreadId: currentThreadId,
+          ...(mentionHostId === undefined
+            ? { environmentId }
+            : { environmentId: null, hostId: mentionHostId }),
         },
         resolveLink: resolveMentionLink,
       },
@@ -78,6 +82,7 @@ export function useComposerTypeahead({
       commandScope,
       currentThreadId,
       environmentId,
+      mentionHostId,
       mentionSourceProjectId,
       mentionTriggers,
       projectId,

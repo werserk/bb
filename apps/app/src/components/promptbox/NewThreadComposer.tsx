@@ -146,6 +146,10 @@ import {
 import { useEnvironment } from "@/hooks/queries/environment-queries";
 import { resolveRootComposeThreadEnvironment } from "@/views/root-compose-thread-environment";
 import {
+  providerInputsScopeKey,
+  useRunOnComposer,
+} from "@/fork/run-on/useRunOnComposer";
+import {
   MACHINE_SERVER_ACCESS_TITLE,
   machineServerAccessBlockedReason,
 } from "@/components/machines/machine-server-access";
@@ -1447,7 +1451,11 @@ export function NewThreadComposer({
     useState<{ scopeKey: string; value: JsonValue | null } | null>(null);
   const [environmentProviderInputsBlocked, setProviderInputsBlocked] =
     useState<{ scopeKey: string; reason: string } | null>(null);
-  const environmentProviderInputsScopeKey = `${projectId}\0${effectiveEnvironmentValue}\0${providerHostId ?? ""}`;
+  const environmentProviderInputsScopeKey = providerInputsScopeKey(
+    projectId,
+    effectiveEnvironmentValue,
+    providerHostId,
+  );
   const handleProviderInputsChange = useCallback(
     (next: PluginEnvironmentProviderInputsChange) => {
       if (next.status === "blocked") {
@@ -1580,6 +1588,28 @@ export function NewThreadComposer({
           : submissionProviderInputs === null
             ? `Configure ${inputEnvironmentProvider.displayName}`
             : null;
+  const seedRunOnInputs = useCallback(
+    (value: string, hostId: string, inputs: JsonValue) => {
+      setProviderInputsBlocked(null);
+      setProviderInputsOverride({
+        scopeKey: providerInputsScopeKey(projectId, value, hostId),
+        value: inputs,
+      });
+    },
+    [projectId],
+  );
+  const runOn = useRunOnComposer({
+    projectId,
+    projectless: isProjectless,
+    agentProviderId: selectedProviderId,
+    selectionValue: effectiveEnvironmentValue,
+    providerHostId,
+    providerInputs: submissionProviderInputs,
+    primaryHostId,
+    changeEnvironment,
+    seedProviderInputs: seedRunOnInputs,
+  });
+  const submitWithRunOn = runOn.submit;
   const environmentProviderInputsSlot = useMemo(() => {
     if (environmentProviderInputsRegistration === undefined) return null;
     const InputsComponent = environmentProviderInputsRegistration.component;
@@ -1774,10 +1804,17 @@ export function NewThreadComposer({
     () => ({
       projectId: mentionSourceProjectId,
       environmentId: reuseEnvironmentId,
-      hostId: projectHostId,
+      hostId:
+        runOn.mentionHostId === undefined ? projectHostId : runOn.mentionHostId,
       threadStorageThreadId: panelThreadId ?? undefined,
     }),
-    [mentionSourceProjectId, panelThreadId, projectHostId, reuseEnvironmentId],
+    [
+      mentionSourceProjectId,
+      panelThreadId,
+      projectHostId,
+      reuseEnvironmentId,
+      runOn.mentionHostId,
+    ],
   );
   const defaultMentionLinkResolver = useCallback<PromptMentionLinkResolver>(
     (resource) => {
@@ -1866,7 +1903,9 @@ export function NewThreadComposer({
       null);
   const submissionBlocker = resolveNewThreadBlocker({
     environmentProviderInputsBlocker:
-      machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
+      runOn.blocker ??
+      machineProviderInputs.blockedReason ??
+      environmentProviderInputsBlocker,
     environmentSetupRequiredReason:
       environmentSetupRequiredReason ?? machineServerAccessReason,
     isCopyingAttachments,
@@ -1970,8 +2009,8 @@ export function NewThreadComposer({
 
   const handleSubmit = useCallback(
     (blockedReason: string | null, extras: ComposerSubmitExtras = {}) =>
-      submitDraft(blockedReason, extras),
-    [submitDraft],
+      submitWithRunOn(extras, (merged) => submitDraft(blockedReason, merged)),
+    [submitWithRunOn, submitDraft],
   );
 
   const handleProviderChange = useDraftPreservingOptionChange(
@@ -2175,6 +2214,8 @@ export function NewThreadComposer({
               providersByHostId: environmentProvidersByHostId,
               selectedProviderHostId: providerHostId,
               inputsControlProviderIds,
+              runOn: runOn.picker,
+              runRowItems: runOn.rowItems,
               onSelectProvider: handleSelectProvider,
               onSelectHost: handleSelectHost,
               onSelectReuse: handleSelectReuse,
@@ -2371,6 +2412,8 @@ export function NewThreadComposer({
       machineProviderInputs.control,
       inputsControlProviderIds,
       providerHostId,
+      runOn.picker,
+      runOn.rowItems,
       textEffects,
       serviceTierOptions,
       pickerSessionOptionSections,
