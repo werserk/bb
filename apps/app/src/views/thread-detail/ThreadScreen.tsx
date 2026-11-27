@@ -686,9 +686,7 @@ export function ThreadScreen({
               }
               scrollOverlay={
                 <>
-                  <div className="pointer-events-none flex min-h-0 max-h-full max-w-full shrink-0 flex-col items-end gap-3 [&>[data-thread-context-card]]:min-h-0 [&>[data-thread-context-card]]:shrink">
-                    <ThreadContextCard />
-                  </div>
+                  <ThreadContextCard />
                   <div className="pointer-events-auto my-auto">
                     <ThreadTableOfContents
                       contextBoundarySeq={timeline.contextBoundarySeq}

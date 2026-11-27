@@ -19,6 +19,10 @@ import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import {
+  type CoreThreadContextCardRow,
+  ThreadContextCardProvider,
+} from "@/components/plugin/PluginThreadContextCard";
 import type { ThreadDetailSentMessageEdit } from "./ThreadDetailPromptArea";
 import { ThreadScreen, type ThreadScreenPresentation } from "./ThreadScreen";
 
@@ -125,6 +129,7 @@ function renderScreen(
   presentation: ThreadScreenPresentation,
   timeline: UseThreadTimelineControllerResult = TIMELINE,
   overrides: Partial<Parameters<typeof ThreadScreen>[0]> = {},
+  wrap: (screen: ReactNode) => ReactNode = (screen) => screen,
 ) {
   mocks.timeline = timeline;
   const { wrapper: QueryWrapper } = createQueryClientTestHarness();
@@ -133,7 +138,9 @@ function renderScreen(
       <QueryWrapper>{children}</QueryWrapper>
     </MemoryRouter>
   );
-  return render(screenElement(presentation, overrides), { wrapper: Wrapper });
+  return render(wrap(screenElement(presentation, overrides)), {
+    wrapper: Wrapper,
+  });
 }
 
 function screenElement(
@@ -232,6 +239,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   getPromptDraftAccessor({
     kind: "thread",
     projectId: THREAD.projectId,
@@ -365,4 +373,37 @@ it("hides the retained plan in an archived thread", () => {
     thread: { ...THREAD, archivedAt: 1 },
   });
   expect(container.querySelector("[data-thread-plan]")).toBeNull();
+});
+
+const CONTEXT_CARD_ROWS: CoreThreadContextCardRow[] = [
+  {
+    id: "parent",
+    group: "core",
+    order: 0,
+    component: () => <button type="button">Parent</button>,
+  },
+];
+
+it("mounts the context card directly in the page's scroll overlay", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1600);
+  const { container } = renderScreen(
+    { kind: "page" },
+    TIMELINE,
+    {},
+    (screen) => (
+      <ThreadContextCardProvider
+        enabled
+        coreRows={CONTEXT_CARD_ROWS}
+        coreSections={[]}
+        threadId={THREAD.id}
+        projectId={THREAD.projectId}
+        environment={null}
+      >
+        {screen}
+      </ThreadContextCardProvider>
+    ),
+  );
+  const card = container.querySelector("[data-thread-context-card]");
+  expect(card).toBeTruthy();
+  expect(card?.parentElement?.hasAttribute("data-scroll-overlay")).toBe(true);
 });
