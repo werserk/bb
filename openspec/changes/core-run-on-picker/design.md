@@ -38,6 +38,9 @@ The first draft had the client call a plugin `prepare` before creating the threa
 | New thread, worker choice | `{projectId, hostId: machine-b}` | `{projectId, hostId: workspace host, environmentId: null}` |
 | Open worker thread | `{environmentId: scratch on machine-b}` | `{projectId, hostId: workspace host, environmentId: null}` |
 | Commands and skills | agent host / environment | unchanged (machine-b) |
+| Workspace `hostId: null` (host unknown to bb) | as above | `{projectId: undefined, hostId: null, environmentId: null}`: file and thread-storage mentions off; thread and project mentions stay |
+
+With `hostId: null` the server would otherwise resolve the project source on its default host, which is the wrong machine, so core turns file mentions off rather than fall back (`fork/run-on/mentions.ts`).
 
 The inserted path needs no mapping. A workspace suggestion inserts its path as listed, relative to the project source root (`pathMentionSuggestions.ts:17-23`; fixture paths like `packages/db/README.md`, `usePathSuggestions.test.ts:56`). No server code rewrites a path mention before the provider (searched `apps/server/src` and `packages/agent-runtime`: none found; inferred from the search). The worker's tools take "Path relative to the workspace root" and resolve it with `confine(root, input)` = `path.resolve(root, input)` inside the root (account-workers `tools.ts:142`, `confine.ts`). `validate` makes `root` equal to that same project source on the workspace host. A mention is therefore relative to the project root, and the root is the binding's root. The plugin's thread instructions must tell the agent to read mentioned paths with the workspace tools, not with the provider's native file tools, which would resolve them against the scratch directory (tasks 4.6). The fallback "mentions off with a reason" is not needed: the mapping is the identity.
 
@@ -238,9 +241,29 @@ None of `core/composer-context-sheet` (already ported as f83901b733), `core/cont
 | Area | Files |
 |---|---|
 | SDK | `packages/plugin-sdk/src/fork/run-on-contract.ts` |
-| App | `apps/app/src/fork/run-on/{registrations.ts, RunOnGroups.tsx, RunOnChip.tsx, RunOnThreadPopover.tsx, ComposerRunRowItems.tsx, useRunOnSelection.ts, run-on-preference.ts, submission.ts}` plus tests and stories |
+| SDK (built) | `packages/plugin-sdk/src/fork/run-on-collector.ts` (validation and the `slots` helper the stock collector spreads) |
+| App (built) | `apps/app/src/fork/run-on/{registrations.ts, model.ts, probes.tsx, RunOnGroups.tsx, RunOnThreadPopover.tsx, ComposerRunRowItems.tsx, useRunOnComposer.tsx, useRunOnOpenThread.tsx, run-on-preference.ts, submission.ts, mentions.ts}` plus tests and stories; `RunOnChip` and `useRunOnSelection` from the plan live in `RunOnGroups.tsx` and `useRunOnComposer.tsx` |
+| Docs and server test | `plugins/bb-guide/skills/bb-plugin-authoring/references/fork-run-on-slots.md`, `apps/server/test/threads/fork-run-on-send-later.test.ts` |
 
-**Hot files, 1–10 lines each (about 70 lines total):** `app-contract.ts`, `app.ts`, `internal/plugin-app-registration-collector.ts`, `testing/app.tsx`, `lib/plugin-slots.ts`, `lib/plugin-sdk-app-impl.tsx`, `test/fixtures/plugins.ts`, `plugins/plugin-api-docs/src/surfaces.ts`, `pickers/EnvironmentPicker.tsx` (render groups, skip registered providers in machine sections), `promptbox/NewThreadComposer.tsx` (`useRunOnSelection`, submission, branch, blocker, mention source; may exceed 10 lines), `promptbox/NewThreadPromptBox.tsx`, `promptbox/ThreadEnvironmentSummary.tsx`, `views/thread-detail/ThreadDetailPromptArea.tsx` (row items, mention source), `docs/api_to_audit.md` (one block). The line count is an estimate; R1 recounts it on the synced base (tasks 1.8). The authoring-docs test changes only if `surfaces.ts` does not satisfy it alone. That is 15 hot files and about 10 new ones (R-m9; the first draft's "about 20 files" undercounted the wiring).
+**Hot files (built, `git diff --numstat 6456171fe0` on the R2 head): 13 files, 170 added and 15 removed lines (code 150/15, docs 20).**
+
+| File | +/− | What |
+|---|---|---|
+| `apps/app/src/components/promptbox/NewThreadComposer.tsx` | 40/5 | `useRunOnComposer`, scope key, blocker, submit, mention override, picker props |
+| `apps/app/src/components/pickers/EnvironmentPicker.tsx` | 28/6 | groups, heading, footer, trigger chip, skip registered providers |
+| `apps/app/src/views/thread-detail/ThreadDetailPromptArea.tsx` | 24/1 | `useRunOnOpenThread`, chip, row items, mention host |
+| `docs/api_to_audit.md` | 18/0 | one block |
+| `apps/app/src/lib/plugin-slots.ts` | 16/0 | two slot kinds |
+| `packages/plugin-sdk/src/app-contract.ts` | 13/0 | two slot members, type re-export |
+| `apps/app/src/components/promptbox/ThreadEnvironmentSummary.tsx` | 9/2 | `environmentOverride`, `rowItems` |
+| `apps/app/src/components/thread/composer/useComposerTypeahead.ts` | 8/0 | mention host override |
+| `apps/app/src/components/promptbox/NewThreadPromptBox.tsx` | 4/0 | `runOn`, `runRowItems` |
+| `packages/plugin-sdk/src/internal/plugin-app-registration-collector.ts` | 4/1 | spreads the fork collector |
+| `packages/plugin-sdk/src/testing/app.tsx` | 2/0 | captured registrations |
+| `plugins/bb-guide/skills/bb-plugin-authoring/references/frontend-core-slots.md` | 2/0 | pointer to `fork-run-on-slots.md` |
+| `plugins/plugin-api-docs/src/surfaces.ts` | 2/0 | two types |
+
+The plan estimated about 70 lines in 15 files. `app.ts`, `lib/plugin-sdk-app-impl.tsx` and `test/fixtures/plugins.ts` turned out not to need changes; `useComposerTypeahead.ts` and the authoring-docs pointer were added. The overrun comes from formatter line breaks and the `apps/app` comment ban (no inline fork markers); the ledger carries the markers.
 
 **Tests:** parity with the stock provider selection (byte-equal request for one draft: text, image, file, mention, model, reasoning, permission, tier, session options, `sendAt`); owner check and second-registration refusal; open-thread chip only for a matching provider; remembered choice fallback; inputs edited in the stock control; availability matrix; submission owner rule, 16 KB refusal, clearing on project and provider change and only after a successful create; mention suggestions from the workspace host with a relative inserted path; compiled-path test for the probes; picker and chip stories in dark and light at 1440 and 390. No server code changes; one new server contract test pins the Send later inline pass (tasks 1.6), and the pool tests its own hook (tasks 5.6).
 
@@ -260,4 +283,4 @@ The maintainer adds the row when R1/R2 land; this is the draft text.
 
 | Patch | Change | Paths in `werserk/bb` | Migrations / protocol | Upstream status | Retire when | State |
 |---|---|---|---|---|---|---|
-| Run on picker | `core-run-on-picker` | new: `packages/plugin-sdk/src/fork/run-on-contract.ts`, `apps/app/src/fork/run-on/*`; hooks in `packages/plugin-sdk/src/{app-contract.ts,app.ts,testing/app.tsx,internal/plugin-app-registration-collector.ts}`, `apps/app/src/lib/{plugin-slots.ts,plugin-sdk-app-impl.tsx}`, `apps/app/src/test/fixtures/plugins.ts`, `plugins/plugin-api-docs/src/surfaces.ts`, `apps/app/src/components/pickers/EnvironmentPicker.tsx`, `apps/app/src/components/promptbox/{NewThreadComposer.tsx,NewThreadPromptBox.tsx,ThreadEnvironmentSummary.tsx}`, `apps/app/src/views/thread-detail/ThreadDetailPromptArea.tsx`, `docs/api_to_audit.md` | none (app and fork SDK types only; no server change; daemon protocol and native deps unchanged) | not proposed (downstream only; new `experimental_` SDK members over stock environment providers) | upstream ships provider presentation (grouping, `agent → workspace`) and composer row items. Plugin data (account-workers bindings) has its own rollback note in the plugin | on `core/run-on-sdk` / `core/run-on-ui` after the `desktop-v0.50.1` sync; not on `fork/main` |
+| Run on picker | `core-run-on-picker` | new: `packages/plugin-sdk/src/fork/run-on-contract.ts`, `apps/app/src/fork/run-on/*`; `packages/plugin-sdk/src/fork/run-on-collector.ts`, `plugins/bb-guide/skills/bb-plugin-authoring/references/fork-run-on-slots.md`, `apps/server/test/threads/fork-run-on-send-later.test.ts`; hooks in `packages/plugin-sdk/src/{app-contract.ts,testing/app.tsx,internal/plugin-app-registration-collector.ts}`, `apps/app/src/lib/plugin-slots.ts`, `plugins/plugin-api-docs/src/surfaces.ts`, `apps/app/src/components/pickers/EnvironmentPicker.tsx`, `apps/app/src/components/promptbox/{NewThreadComposer.tsx,NewThreadPromptBox.tsx,ThreadEnvironmentSummary.tsx}`, `apps/app/src/components/thread/composer/useComposerTypeahead.ts`, `apps/app/src/views/thread-detail/ThreadDetailPromptArea.tsx`, `plugins/bb-guide/skills/bb-plugin-authoring/references/frontend-core-slots.md` (pointer), `docs/api_to_audit.md` | none (app and fork SDK types only; no server change; daemon protocol and native deps unchanged) | not proposed (downstream only; new `experimental_` SDK members over stock environment providers) | upstream ships provider presentation (grouping, `agent → workspace`) and composer row items. Plugin data (account-workers bindings) has its own rollback note in the plugin | on `core/run-on-sdk` / `core/run-on-ui` after the `desktop-v0.50.1` sync; not on `fork/main` |

@@ -31,7 +31,7 @@ Stock core already has the mechanism for "a plugin decides where a thread's file
 
 ## Impact
 
-- **Core:** about 13 new fork files and 15 hot files with 1–10-line hooks, about 70 hot lines (estimate and list in [design.md § Footprint](design.md#footprint-and-order)). No migration, no daemon protocol change, no dependency, no server change.
+- **Core:** new fork files under `fork/` directories and 13 hot files, 170 added and 15 removed hot lines as built (planned: about 70; list in [design.md § Footprint](design.md#footprint-and-order)). No migration, no daemon protocol change, no dependency, no server change.
 - **Release class:** UI-only by the fork's machine check (README §6 in bb-plugin-lab `docs/bb-fork/README.md`: same migration digest, daemon protocol and native dependency set). The change touches the app and fork SDK types only. Plugin-side data (account-workers bindings) is outside this class and has its own rollback note ([design.md § Release class](design.md#release-class)).
 - **Plugins:** `account-workers` gains an environment provider, its first app UI and RPCs; the account-pool plugin gains a row chip, a draft account adapter and an idempotent dispatch hook. Separate task lists in [tasks.md](tasks.md).
 - **Dependencies (not part of this change):**
