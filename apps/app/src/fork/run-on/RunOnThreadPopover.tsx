@@ -111,13 +111,14 @@ export function RunOnThreadPopover({ view }: { view: RunOnThreadView }) {
           type="button"
           variant="ghost"
           size="sm"
+          data-promptbox-shrinkable-control=""
           aria-label={`${RUN_ON_TITLE}: ${chip.agentName} on ${chip.workspaceName ?? "unknown workspace"}`}
           className={cn(
             OPTION_BASE_CLASS_NAME,
             OPTION_INTERACTIVE_CLASS_NAME,
             OPTION_MUTED_CLASS_NAME,
             LIST_HOVER_TRANSITION,
-            "h-6 min-w-min shrink px-1 text-xs max-md:pointer-coarse:h-11",
+            "h-6 min-w-0 shrink px-1 text-xs max-md:pointer-coarse:h-11",
           )}
         >
           <RunOnTriggerLabel chip={chip} />

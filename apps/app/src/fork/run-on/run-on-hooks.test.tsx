@@ -418,6 +418,16 @@ describe("useRunOnOpenThread", () => {
     expect(
       view.getByRole("button", { name: "Run on: machine-b on machine-a" }),
     ).toBeTruthy();
+    const trigger = view.getByRole("button");
+    expect(trigger.hasAttribute("data-promptbox-shrinkable-control")).toBe(
+      true,
+    );
+    expect(
+      trigger.querySelector("[data-promptbox-compact-label]")?.textContent,
+    ).toBe("machine-b");
+    expect(
+      trigger.querySelector("[data-promptbox-full-label]")?.textContent,
+    ).toContain("machine-a");
   });
 
   it("keeps today's row for a stock thread", () => {

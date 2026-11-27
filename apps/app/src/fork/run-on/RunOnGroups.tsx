@@ -60,9 +60,17 @@ export function RunOnTriggerLabel({ chip }: { chip: RunOnChipView }) {
         name="Server"
         className={COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS}
       />
-      <span className="min-w-[3ch] truncate">{text.agent}</span>
-      <AgentArrow />
-      <span className="min-w-[3ch] truncate">{text.workspace}</span>
+      <span
+        data-promptbox-full-label=""
+        className="flex min-w-0 items-center gap-1.5"
+      >
+        <span className="min-w-[3ch] truncate">{text.agent}</span>
+        <AgentArrow />
+        <span className="min-w-[3ch] truncate">{text.workspace}</span>
+      </span>
+      <span className="min-w-0 truncate" data-promptbox-compact-label="">
+        {text.agent}
+      </span>
     </span>
   );
 }
@@ -114,27 +122,29 @@ function RunOnRow({
         LIST_HOVER_TRANSITION,
       )}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2">
-        <MachineStatusDot
-          connected={row.agentConnected}
-          className={COARSE_POINTER_DOT_SIZE_CLASS}
-        />
-        <Icon
-          name="Server"
-          className={cn(
-            "text-muted-foreground",
-            COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
-          )}
-        />
-        <span className="min-w-0 truncate">{row.agentName}</span>
-        <AgentArrow />
-        <span className="min-w-0 truncate">{row.workspaceName}</span>
-      </span>
-      {status !== null ? (
-        <span className="ml-auto shrink-0 truncate pl-2 text-2xs text-muted-foreground">
-          {status}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-2">
+          <MachineStatusDot
+            connected={row.agentConnected}
+            className={COARSE_POINTER_DOT_SIZE_CLASS}
+          />
+          <Icon
+            name="Server"
+            className={cn(
+              "text-muted-foreground",
+              COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
+            )}
+          />
+          <span className="min-w-0 truncate">{row.agentName}</span>
+          <AgentArrow />
+          <span className="min-w-0 truncate">{row.workspaceName}</span>
         </span>
-      ) : null}
+        {status !== null ? (
+          <span className="truncate pl-4 text-2xs text-muted-foreground">
+            {status}
+          </span>
+        ) : null}
+      </span>
       <Icon
         name="Check"
         className={cn(
