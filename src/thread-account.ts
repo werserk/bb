@@ -31,8 +31,9 @@ import {
 // output fields and new enum values.
 
 export const THREAD_ACCOUNT_V1 = "thread-account.v1";
-// A Claude session continues on another account. Whether a Codex session does
-// is measured in block P4; until then a Codex switch may restart it.
+// A Claude session continues on another account, measured live in block P4
+// (docs/LIVE_CHECKS.md). A Codex switch is not measured yet, so it may restart
+// the session.
 const SWITCH_CONTINUITY: Record<PoolProvider, "continues" | "may-restart"> = {
   claude: "continues",
   codex: "may-restart",
