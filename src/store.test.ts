@@ -314,12 +314,14 @@ describe("migration continuity", () => {
     expect(
       QUOTA_MIGRATIONS.slice(0, RECORDED_MIGRATION_HASHES.length).map(sha256),
     ).toEqual(RECORDED_MIGRATION_HASHES);
-    // Machine roles (block P1), then thread passes and the audit log (block
-    // P2), appended after the native-cell build.
+    // Machine roles (block P1), thread passes and the audit log (block P2),
+    // then thread account policies (block P3), appended after the native-cell
+    // build.
     expect(QUOTA_MIGRATIONS.slice(RECORDED_MIGRATION_HASHES.length).map(sha256)).toEqual([
       "ad290dc1b51d2f7206a14ecaf43e22d3c8339ffd7bf62367dca9b063e97bd0d0",
       "6bf20e76908f2c80b71690c529933435069ca242c6455a32c1ca5d477dfb5f11",
       "d2b4876399146d476a90dde71e84a7d23cbaccc9fe2af260f04c37114f44f2c5",
+      "12d00a526984d2998962ff46a8f555afcd50bdd7c99b0c5184b3d20a2be7d1aa",
     ]);
   });
 
