@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import path from "node:path";
 import type { InstructionFile } from "./contract.js";
 
-export type ReleaseReason = "unbind" | "archive" | "delete" | "spawn-failed" | "abandoned";
+export type ReleaseReason = "unbind" | "archive" | "delete" | "spawn-failed" | "abandoned" | "account-refused";
 
 export interface Binding {
   id: string;
@@ -199,8 +199,12 @@ export class BindingStore {
       .run(reason, this.now(), id);
   }
 
-  markReady(id: string): void {
-    this.set(id, "ready = 1");
+  markReadyIfLive(id: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE bindings SET ready = 1, updated_at = ? WHERE id = ? AND released_at IS NULL")
+        .run(this.now(), id).changes > 0
+    );
   }
 
   tombstone(id: string, due: number, reason: ReleaseReason): Binding | null {
