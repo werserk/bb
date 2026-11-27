@@ -126,9 +126,9 @@ function useComposerHarness(projectId: string, initial?: Selection) {
   const changeEnvironment = vi.fn((value: string, hostId: string | null) =>
     setSelection((current) => ({ ...current, value, hostId })),
   );
-  const seedProviderInputs = vi.fn(
-    (_value: string, _hostId: string, inputs: JsonValue) =>
-      setSelection((current) => ({ ...current, inputs })),
+  const setProviderInputsOverride = vi.fn(
+    (next: { scopeKey: string; value: JsonValue | null } | null) =>
+      setSelection((current) => ({ ...current, inputs: next?.value ?? null })),
   );
   const runOn = useRunOnComposer({
     projectId,
@@ -139,9 +139,10 @@ function useComposerHarness(projectId: string, initial?: Selection) {
     providerInputs: selection.inputs,
     primaryHostId: "h-a",
     changeEnvironment,
-    seedProviderInputs,
+    setProviderInputsOverride,
+    setProviderInputsBlocked: vi.fn(),
   });
-  return { runOn, selection, changeEnvironment };
+  return { runOn, selection, changeEnvironment, setProviderInputsOverride };
 }
 
 interface Selection {
@@ -239,6 +240,10 @@ describe("useRunOnComposer", () => {
       value: encodeProviderValue(WORKER),
       hostId: "h-b",
       inputs: CHOICE_INPUTS,
+    });
+    expect(result.current.setProviderInputsOverride).toHaveBeenLastCalledWith({
+      scopeKey: `${projectId}\0${encodeProviderValue(WORKER)}\0h-b`,
+      value: CHOICE_INPUTS,
     });
     const { runOn } = result.current;
     expect(runOn.picker?.selectedValue).toBe(`runon:${WORKER}:b-a`);

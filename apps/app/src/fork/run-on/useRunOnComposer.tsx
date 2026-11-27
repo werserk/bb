@@ -38,11 +38,10 @@ export interface RunOnComposerArgs {
   primaryHostId: string | null;
   changeEnvironment: (value: string, hostId: string | null) => void;
 
-  seedProviderInputs: (
-    value: string,
-    hostId: string,
-    inputs: JsonValue,
+  setProviderInputsOverride: (
+    next: { scopeKey: string; value: JsonValue | null } | null,
   ) => void;
+  setProviderInputsBlocked: (next: null) => void;
 }
 
 export interface RunOnComposer {
@@ -106,7 +105,8 @@ export function useRunOnComposer({
   providerInputs,
   primaryHostId,
   changeEnvironment,
-  seedProviderInputs,
+  setProviderInputsOverride,
+  setProviderInputsBlocked,
 }: RunOnComposerArgs): RunOnComposer {
   const acceptedOrLoading = useAcceptedRunOnProviders();
   const accepted = useMemo(
@@ -144,10 +144,24 @@ export function useRunOnComposer({
     (row: RunOnRowView) => {
       const value = encodeProviderValue(row.providerId);
       changeEnvironment(value, row.choice.agentHostId);
-      seedProviderInputs(value, row.choice.agentHostId, row.choice.inputs);
+      setProviderInputsBlocked(null);
+      setProviderInputsOverride({
+        scopeKey: providerInputsScopeKey(
+          projectId,
+          value,
+          row.choice.agentHostId,
+        ),
+        value: row.choice.inputs,
+      });
       setPreference({ providerId: row.providerId, choiceId: row.choice.id });
     },
-    [changeEnvironment, seedProviderInputs, setPreference],
+    [
+      changeEnvironment,
+      projectId,
+      setPreference,
+      setProviderInputsBlocked,
+      setProviderInputsOverride,
+    ],
   );
   const fallBackToLocal = useCallback(() => {
     changeEnvironment(

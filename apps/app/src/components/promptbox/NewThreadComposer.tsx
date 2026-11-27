@@ -1589,16 +1589,6 @@ export function NewThreadComposer({
           : submissionProviderInputs === null
             ? `Configure ${inputEnvironmentProvider.displayName}`
             : null;
-  const seedRunOnInputs = useCallback(
-    (value: string, hostId: string, inputs: JsonValue) => {
-      setProviderInputsBlocked(null);
-      setProviderInputsOverride({
-        scopeKey: providerInputsScopeKey(projectId, value, hostId),
-        value: inputs,
-      });
-    },
-    [projectId],
-  );
   const runOn = useRunOnComposer({
     projectId,
     projectless: isProjectless,
@@ -1608,7 +1598,8 @@ export function NewThreadComposer({
     providerInputs: submissionProviderInputs,
     primaryHostId,
     changeEnvironment,
-    seedProviderInputs: seedRunOnInputs,
+    setProviderInputsOverride,
+    setProviderInputsBlocked,
   });
   const submitWithRunOn = runOn.submit;
   const environmentProviderInputsSlot = useMemo(() => {
