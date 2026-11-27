@@ -1,5 +1,6 @@
 // Synthetic thread-account.v1 answers for tests and the local harness. Labels
 // are made up ("Work A/B/C"); no real account appears here.
+import type { AccountSummary } from "../../src/contracts.js";
 import type {
   LimitEvent,
   ThreadAccountEntry,
@@ -82,4 +83,55 @@ export function aAtLimit(resetAt: number | null = T0 + 3600_000): ThreadAccountL
       item.accountId === "acc_a" ? { ...item, usable: false, reason: "at-limit", resetAt } : item,
     ),
   };
+}
+
+/** An `account.list` entry: Claude, enabled, ready, low usage. */
+export function summary(patch: Partial<AccountSummary> & { id: string; label: string }): AccountSummary {
+  return {
+    provider: "claude",
+    kind: "oauth",
+    email: null,
+    accountUuid: null,
+    subscriptionType: "max",
+    rateLimitTier: null,
+    enabled: true,
+    priority: 100,
+    createdAt: T0 - 86_400_000,
+    lastUsedAt: null,
+    lastUsedHostId: null,
+    lastUsedHostName: null,
+    accessBlocked: null,
+    usageRestriction: null,
+    extraUsage: null,
+    fiveHourUtilization: 0.2,
+    fiveHourResetAt: T0 + 3600_000,
+    fiveHourStatus: null,
+    sevenDayUtilization: null,
+    sevenDayResetAt: null,
+    sevenDayStatus: null,
+    representativeClaim: null,
+    familyWeekly: { fable: null, sonnet: null, opus: null, haiku: null, other: null },
+    limitWindows: [],
+    observedAt: T0 - 60_000,
+    heldUntil: null,
+    error: null,
+    inFlight: 0,
+    status: "ready",
+    ...patch,
+  };
+}
+
+export const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+export const ID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+export const ID_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+export const ID_X = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+/** Claude A; B past the switch threshold (status exhausted) but under the real limit; C at it; Codex X. */
+export function summaries(): AccountSummary[] {
+  return [
+    summary({ id: ID_B, label: "Work B", priority: 200, fiveHourUtilization: 0.99, status: "exhausted" }),
+    summary({ id: ID_A, label: "Work A", priority: 100 }),
+    summary({ id: ID_C, label: "Work C", priority: 300, fiveHourUtilization: 1, status: "exhausted" }),
+    summary({ id: ID_X, label: "Codex X", provider: "codex", priority: 50 }),
+  ];
 }

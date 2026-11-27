@@ -63,6 +63,39 @@ export interface AccountPoolConfigController {
 
 export const providerSchema = z.enum(["claude", "codex"]);
 export type PoolProvider = z.infer<typeof providerSchema>;
+
+/** The pool provider of a bb provider id; null when the pool does not route it. */
+export function pooledProvider(providerId: string): PoolProvider | null {
+  return providerId === "claude-code"
+    ? "claude"
+    : providerId === "codex"
+      ? "codex"
+      : null;
+}
+export const ON_LIMIT_RULES = ["fallback-auto", "stop"] as const;
+export type OnLimit = (typeof ON_LIMIT_RULES)[number];
+
+/**
+ * A new thread's account choice, carried as this plugin's submission from the
+ * composer to the first dispatch (src/dispatch-account.ts). Here so the app
+ * can parse the draft data core hands back without importing server code.
+ */
+export const dispatchAccountSchema = z
+  .object({
+    policy: z.discriminatedUnion("mode", [
+      z.object({ mode: z.literal("auto") }).strict(),
+      z
+        .object({
+          mode: z.literal("named"),
+          accountId: z.string().min(1).max(128),
+          onLimit: z.enum(ON_LIMIT_RULES).optional(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type DispatchAccount = z.infer<typeof dispatchAccountSchema>;
+
 export const accountKindSchema = z.enum(["oauth", "api-key"]);
 export const modelFamilySchema = z.enum([
   "fable",

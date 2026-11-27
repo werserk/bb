@@ -267,6 +267,33 @@ back to auto). Rows stay for a later roll forward. A roll forward keeps the
 pass epoch, so threads created while P2 ran count as new: each gets a pass at
 its next turn, which rebuilds its session once.
 
+New thread account: `src/dispatch-account.ts` registers a `message.dispatch`
+hook that stores the composer's account choice (a plugin submission) through
+`set` on a pending thread's inline start attempt, or rejects the send with the
+reason ([contract](THREAD_ACCOUNT_V1.md#new-thread-account)). It answers at
+once and never waits, so it is not the retired native-cell hold; on a reattempt
+an equal stored policy makes it a no-op.
+
+The choice comes from the account chip in the composer's run row, after Run on
+(`ui/thread-account/RunRowItem.tsx`). Its slot,
+`app.slots.experimental_composerRunRowItem`, exists only on the fork core
+(openspec `core-run-on-picker`) and not in the plugin's SDK, so
+`run-row-slot.ts` declares the shapes locally and registers only when the slot
+is a function; a stock core shows nothing new. On an open thread the chip opens
+the U1 menu on the thread's own store. On a new thread `draft.ts` holds the
+choice locally, lists `account.list` for the thread's provider (`claude-code`
+to Claude, `codex` to Codex, hidden otherwise) with the same named-account rule
+`set` applies on the first dispatch, and hands the policy to core with
+`setSubmission` (null for Auto). On mount it shows what core's draft holds for
+the pool (the `submission` prop), so a pick survives a remount; the data carries
+only the account id, so the name comes from the account list, and a pin the
+list no longer has shows "Removed account" in warning tone. Data the hook
+would not parse is cleared. Core drops the data on a project or provider
+change, so the chip then starts on Auto. `namedAccountState`, `pooledProvider`,
+`dispatchAccountSchema` and `ON_LIMIT_RULES` live in `quota.ts` and
+`contracts.ts` for this: the app cannot import `thread-policy.ts`,
+`thread-account.ts` or `dispatch-account.ts`, which load node-only modules.
+
 ## Audit log
 
 `src/audit-log.ts`, `pool_audit(id, ts, reason, provider, thread_id, host_id,

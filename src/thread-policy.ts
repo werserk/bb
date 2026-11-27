@@ -1,30 +1,18 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
-import type {
-  Account,
-  AccountQuota,
-  ModelFamily,
-  PoolProvider,
-} from "./contracts.js";
+import { ON_LIMIT_RULES, type OnLimit, type PoolProvider } from "./contracts.js";
 import {
   RECONCILE_BATCH,
   lookUpThreads,
   type ThreadPassOptions,
 } from "./thread-pass.js";
-import {
-  hasExtraUsage,
-  isQuotaExhausted,
-  isSharedQuotaExhausted,
-  isUsageRestricted,
-} from "./quota.js";
 
 // Thread account policy (block P3). A thread runs `auto` (the pool picks) or
 // is pinned to one named account with a rule for when that account hits its
 // limit. No row means `auto` at revision 0. Every change bumps the revision,
 // so concurrent writers compare-and-set.
 
-export const ON_LIMIT_RULES = ["fallback-auto", "stop"] as const;
-export type OnLimit = (typeof ON_LIMIT_RULES)[number];
+export { ON_LIMIT_RULES, type OnLimit } from "./contracts.js";
 
 export type ThreadPolicy =
   | { mode: "auto"; revision: number; updatedAt: number | null }
@@ -46,36 +34,13 @@ export type PolicyContent =
       onLimit: OnLimit;
     };
 
-// A named account is at its limit only at the real limit, not at the pool's
-// switch threshold (coordinator decision D1): the owner chose that account.
-export const NAMED_LIMIT_THRESHOLD = 1;
-
-export type NamedAccountState = "ok" | "deleted" | "unavailable" | "limit";
-
-// Why a named account cannot serve now. `unavailable` is temporary or the
-// owner's own switch (disabled, signed out, blocked, restricted) and never
-// changes the stored policy; `limit` and `deleted` may (D2).
-export function namedAccountState(
-  account: Account | null,
-  quota: AccountQuota | null,
-  family: ModelFamily | null,
-  now: number,
-): NamedAccountState {
-  if (account === null || quota === null) return "deleted";
-  if (
-    !account.enabled ||
-    quota.error !== null ||
-    (account.provider === "claude" && quota.accessBlocked !== null) ||
-    isUsageRestricted(quota, now)
-  )
-    return "unavailable";
-  if (hasExtraUsage(quota)) return "ok";
-  const exhausted =
-    family === null
-      ? isSharedQuotaExhausted(quota, NAMED_LIMIT_THRESHOLD, now)
-      : isQuotaExhausted(quota, family, NAMED_LIMIT_THRESHOLD, now);
-  return exhausted ? "limit" : "ok";
-}
+// The named-account rules live with the quota rules, which the app also
+// imports (it cannot load this module's node-only imports).
+export {
+  NAMED_LIMIT_THRESHOLD,
+  namedAccountState,
+  type NamedAccountState,
+} from "./quota.js";
 
 export function policyDetail(policy: PolicyContent): string {
   return policy.mode === "auto" ? "auto" : `named-${policy.onLimit}`;

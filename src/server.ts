@@ -11,6 +11,7 @@ import {
   ACCOUNT_POOL_THREAD_ACCOUNT_CHANGED,
 } from "./realtime.js";
 import { ThreadPolicyStore } from "./thread-policy.js";
+import { createDispatchAccountHook } from "./dispatch-account.js";
 import {
   ThreadAccounts,
   createThreadAccountHandlers,
@@ -613,6 +614,15 @@ export function createAccountPoolPlugin(
         experimental_description:
           "Account Pooler thread-account.v1: a thread's account policy (auto or a named account), the account serving it, its usable accounts and its account events.",
       },
+    );
+    bb.experimental_hooks.on(
+      "message.dispatch",
+      createDispatchAccountHook({
+        pluginId: bb.pluginId,
+        policy: (threadId) => policies.get(threadId),
+        permitted,
+        set: (input, caller) => threadAccounts.set(input, caller),
+      }),
     );
     registerUsageSource(bb, hub);
     bb.rpc.register(

@@ -154,7 +154,12 @@ the discoverable RPC contract `thread-account.v1` (get, set, accounts, events)
 change and show it; the next model request uses it and nothing restarts.
 `bb pool thread show <thread-id>` and the Threads block of `bb pool status`
 show which account serves each thread. See
-[docs/THREAD_ACCOUNT_V1.md](docs/THREAD_ACCOUNT_V1.md).
+[docs/THREAD_ACCOUNT_V1.md](docs/THREAD_ACCOUNT_V1.md). A new thread's composer can choose the account before the first send; the pool
+applies it on that send or refuses the send with the reason.
+On a bb core with the composer run-row slot (the fork's run-on picker), an
+account chip after Run on shows and changes the account of an open thread, and
+chooses the account of a new thread before its first send. A stock core has no
+such slot and shows nothing new.
 
 `bb pool audit` (and RPC `audit.list`) shows an append-only log of account
 selection, failover, limits, passes, role changes and thread account policy: ids and fixed words only,

@@ -6,11 +6,12 @@ import {
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import type { AuditEntry, AuditLog } from "./audit-log.js";
-import type {
-  Account,
-  AccountQuota,
-  PoolProvider,
-  ThreadStatusSummary,
+import {
+  pooledProvider,
+  type Account,
+  type AccountQuota,
+  type PoolProvider,
+  type ThreadStatusSummary,
 } from "./contracts.js";
 import { blockingResetAt, modelFamily } from "./quota.js";
 import {
@@ -249,14 +250,6 @@ export interface ThreadAccountDeps {
   route: (threadId: string) => Promise<ThreadRoute>;
   clearContext: (threadId: string) => Promise<void>;
   onChanged: (threadId: string) => void;
-}
-
-export function pooledProvider(providerId: string): PoolProvider | null {
-  return providerId === "claude-code"
-    ? "claude"
-    : providerId === "codex"
-      ? "codex"
-      : null;
 }
 
 function refusal(

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import {
   createFakePluginHost,
   makeHostResponse,
+  makeMessageDispatchHookContext,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9444,8 +9445,13 @@ describe("machine roles, default deny", () => {
         ).run();
       },
     });
-    const { hooks } = fixture.host.harness.inspection.registrations;
-    expect(hooks["message.dispatch"]).toBeNull();
+    const dispatch =
+      fixture.host.harness.inspection.registrations.hooks["message.dispatch"];
+    expect(
+      await dispatch?.(
+        makeMessageDispatchHookContext({ host: { id: "host-one" } }),
+      ),
+    ).toEqual({ action: "proceed" });
     expect(await resolveToken(fixture.host, "host-one", "thread-one")).not.toBe(
       "",
     );
