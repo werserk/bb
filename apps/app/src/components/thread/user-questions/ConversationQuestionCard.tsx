@@ -130,27 +130,9 @@ function QuestionMaterial({
           <MarkdownPreview
             content={preview.data ?? ""}
             allowHtml={false}
-            urlTransform={(href, key) => {
-              try {
-                const resolved = new URL(
-                  href,
-                  new URL(url, window.location.origin),
-                );
-                if (key === "href")
-                  return resolved.origin !== window.location.origin &&
-                    ["https:", "http:"].includes(resolved.protocol)
-                    ? resolved.href
-                    : "";
-                return resolved.origin === window.location.origin &&
-                  resolved.pathname.startsWith(
-                    `/api/v1/threads/${encodeURIComponent(threadId)}/questions/${encodeURIComponent(questionId)}/files/`,
-                  )
-                  ? resolved.href
-                  : "";
-              } catch {
-                return "";
-              }
-            }}
+            urlTransform={(href, key) =>
+              questionMarkdownUrl(href, key, url, threadId, questionId)
+            }
           />
         ) : html ? (
           <QuestionHtmlPreview
@@ -557,4 +539,29 @@ export function ConversationQuestionCard({
       ) : null}
     </section>
   );
+}
+
+function questionMarkdownUrl(
+  href: string,
+  key: string,
+  base: string,
+  threadId: string,
+  questionId: string,
+): string {
+  try {
+    const resolved = new URL(href, new URL(base, window.location.origin));
+    if (key === "href")
+      return resolved.origin !== window.location.origin &&
+        ["https:", "http:"].includes(resolved.protocol)
+        ? resolved.href
+        : "";
+    return resolved.origin === window.location.origin &&
+      resolved.pathname.startsWith(
+        `/api/v1/threads/${encodeURIComponent(threadId)}/questions/${encodeURIComponent(questionId)}/files/`,
+      )
+      ? resolved.href
+      : "";
+  } catch {
+    return "";
+  }
 }

@@ -34,42 +34,12 @@ export function QuestionNavigator({
   const windowSize = useRef({ threadId, pages: 1 });
   const query = useQuery({
     queryKey: [...conversationQuestionsQueryKey(threadId), "open"],
-    queryFn: async ({ signal }) => {
-      try {
-        return {
-          ...(await readOpenQuestionWindow({
-            open: sdk.threads.questions.open,
-            threadId,
-            pages:
-              windowSize.current.threadId === threadId
-                ? windowSize.current.pages
-                : 1,
-            signal,
-          })),
-          legacy: false,
-        };
-      } catch (error) {
-        if (
-          !(error instanceof BbHttpError) ||
-          !(
-            error.status === 404 ||
-            (error.status === 400 && error.code === "invalid_request")
-          )
-        )
-          throw error;
-        const questions = await sdk.threads.questions.list({
-          threadId,
-          signal,
-        });
-        return {
-          questions,
-          total: null,
-          nextCursor: null,
-          incomplete: false,
-          legacy: true,
-        };
-      }
-    },
+    queryFn: ({ signal }) =>
+      readQuestionWindow(
+        threadId,
+        windowSize.current.threadId === threadId ? windowSize.current.pages : 1,
+        signal,
+      ),
     retry: false,
     gcTime: 0,
     refetchInterval: 5_000,
@@ -277,4 +247,42 @@ export function QuestionNavigator({
       </div>
     </ComposerContextItem>
   );
+}
+
+async function readQuestionWindow(
+  threadId: string,
+  pages: number,
+  signal: AbortSignal,
+) {
+  try {
+    return {
+      ...(await readOpenQuestionWindow({
+        open: sdk.threads.questions.open,
+        threadId,
+        pages,
+        signal,
+      })),
+      legacy: false,
+    };
+  } catch (error) {
+    if (
+      !(error instanceof BbHttpError) ||
+      !(
+        error.status === 404 ||
+        (error.status === 400 && error.code === "invalid_request")
+      )
+    )
+      throw error;
+    const questions = await sdk.threads.questions.list({
+      threadId,
+      signal,
+    });
+    return {
+      questions,
+      total: null,
+      nextCursor: null,
+      incomplete: false,
+      legacy: true,
+    };
+  }
 }

@@ -528,10 +528,8 @@ export function QuestionForm({
       await onSubmit(buildQuestionAnswers(questions, formState));
       setSettledAction("submit");
       clearDraft();
-    } catch {
-    } finally {
-      submitting.current = false;
-    }
+    } catch {}
+    submitting.current = false;
   };
 
   const handleAdvance = (): void => {

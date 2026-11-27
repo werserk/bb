@@ -24,6 +24,32 @@ export function showUnavailable(path: string): void {
   });
 }
 
+type ViewableLocalFile = Extract<
+  ReturnType<typeof resolveEmbeddedLocalFileTarget>,
+  { kind: "workspace" | "thread-storage" }
+>;
+
+function openLocalFileViewer(
+  resolved: ViewableLocalFile,
+  title: string | null | undefined,
+): void {
+  try {
+    openCoreModal("core/local-file-viewer", {
+      title: (
+        resolved.relativePath.split(/[\\/]/).at(-1) ?? resolved.relativePath
+      ).slice(0, 200),
+      ...(title ? { context: title.slice(0, 200) } : {}),
+      params: {
+        ...resolved,
+        lineRange:
+          resolved.lineRange === null ? null : { ...resolved.lineRange },
+      },
+    });
+  } catch {
+    showUnavailable(resolved.path);
+  }
+}
+
 interface UseEmbeddedLocalFileLinkHandlerArgs {
   enabled: boolean;
   artifactsOnly?: boolean;
@@ -93,21 +119,7 @@ export function useEmbeddedLocalFileLinkHandler({
       )
         return true;
       if (artifactsOnly) return false;
-      try {
-        openCoreModal("core/local-file-viewer", {
-          title: (
-            resolved.relativePath.split(/[\\/]/).at(-1) ?? resolved.relativePath
-          ).slice(0, 200),
-          ...(title ? { context: title.slice(0, 200) } : {}),
-          params: {
-            ...resolved,
-            lineRange:
-              resolved.lineRange === null ? null : { ...resolved.lineRange },
-          },
-        });
-      } catch {
-        showUnavailable(resolved.path);
-      }
+      openLocalFileViewer(resolved, title);
       return true;
     },
     [

@@ -64,28 +64,30 @@ export function useThreadPlanFocus(facts: {
         return true;
       }
       if (!isThreadPlanVisible(root.current)) return false;
-      if (!interactionId && questionId)
-        interactionId = view.attentionInteractionIds[0];
-      if (interactionId) {
+      const target =
+        !interactionId && questionId
+          ? view.attentionInteractionIds[0]
+          : interactionId;
+      if (target) {
         const pending = interactions?.some(
           (item) =>
-            item.id === interactionId &&
+            item.id === target &&
             item.threadId === props.threadId &&
             item.status === "pending" &&
             item.payload.kind === "user_question",
         );
         const displayed =
-          view.unboundInteractionIds.includes(interactionId) ||
+          view.unboundInteractionIds.includes(target) ||
           [view.current, ...view.previousPlans].some((snapshot) =>
             snapshot?.items.some((step) =>
-              step.interactionIds.includes(interactionId),
+              step.interactionIds.includes(target),
             ),
           );
         if (!pending || !displayed) return false;
       } else if (!view.current) return false;
       setRequest({
         threadId: props.threadId,
-        value: createThreadPlanFocusRequest(interactionId),
+        value: createThreadPlanFocusRequest(target),
       });
       return true;
     },

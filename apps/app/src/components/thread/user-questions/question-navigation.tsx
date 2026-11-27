@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { hydrateConversationQuestion } from "@/hooks/cache-owners/conversation-question-cache-owner";
 import { useLocation } from "react-router-dom";
 import { sdk } from "@/lib/sdk";
@@ -143,98 +143,22 @@ export function QuestionNavigationProvider({
       setRequest(null);
       setPending(true);
       setSuppressedRouteKey(routeKey);
-      let requested = false;
-      const elementId =
-        kind === "question"
-          ? questionCardId(threadId, questionId)
-          : questionResponseId(threadId, questionId);
-      try {
-        if (kind === "question") {
-          const question = await sdk.threads.questions.get({
-            threadId,
-            questionId,
-            signal: controller.signal,
-          });
-          controller.signal.throwIfAborted();
-          hydrateConversationQuestion({
-            queryClient,
-            threadId,
-            questionId,
-            question,
-          });
-          const target = root.current?.querySelector<HTMLElement>(
-            `[id="${elementId}"]`,
-          );
-          if (target) {
-            target.scrollIntoView({ block: "center" });
-            target.focus({ preventScroll: true });
-            flashSearchTarget(target);
-          } else {
-            if (readOnly)
-              throw new Error(
-                "This question is outside the loaded read-only history.",
-              );
-            setFallbackQuestionId(questionId);
-          }
-          return true;
-        }
-        const queued =
-          kind === "answer" ? queuedAnswers.current.get(questionId) : undefined;
-        if (queued) {
-          const element = await queued(controller.signal);
-          controller.signal.throwIfAborted();
-          if (element) {
-            element.scrollIntoView({ block: "nearest" });
-            element.focus({ preventScroll: true });
-            flashSearchTarget(element);
-            return true;
-          }
-        }
-        const key = `${threadId}:${questionId}:${kind}`;
-        const seq =
-          cache.current.get(key) ??
-          (await resolveQuestionEventSequence({
-            list: sdk.threads.events.list,
-            threadId,
-            questionId,
-            kind,
-            signal: controller.signal,
-          }));
-        controller.signal.throwIfAborted();
-        if (seq === null) {
-          const target = root.current?.querySelector<HTMLElement>(
-            `[id="${elementId}"]`,
-          );
-          if (!target)
-            throw new Error(
-              "This message is unavailable in the current history.",
-            );
-          target.scrollIntoView({ block: "center" });
-          target.focus({ preventScroll: true });
-          flashSearchTarget(target);
-        } else {
-          cache.current.set(key, seq);
-          requested = true;
-          setRequest({
-            threadId,
-            seq,
-            elementId,
-            routeKey,
-            locationKey: `${routeKey}:question:${crypto.randomUUID()}`,
-          });
-        }
-        return true;
-      } catch (reason) {
-        if (!controller.signal.aborted)
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Unable to open question.",
-          );
-        return controller.signal.aborted;
-      } finally {
-        if (!controller.signal.aborted && !requested) setPending(false);
-      }
+      return runQuestionNavigation({
+        questionId,
+        kind,
+        threadId,
+        routeKey,
+        readOnly,
+        queryClient,
+        controller,
+        scope: () => root.current,
+        queuedAnswers: queuedAnswers.current,
+        cache: cache.current,
+        setFallbackQuestionId,
+        setRequest,
+        setError,
+        setPending,
+      });
     },
     [threadId, routeKey, readOnly, queryClient],
   );
@@ -288,4 +212,121 @@ export function QuestionNavigationProvider({
       </div>
     </Context.Provider>
   );
+}
+
+async function runQuestionNavigation({
+  questionId,
+  kind,
+  threadId,
+  routeKey,
+  readOnly,
+  queryClient,
+  controller,
+  scope,
+  queuedAnswers,
+  cache,
+  setFallbackQuestionId,
+  setRequest,
+  setError,
+  setPending,
+}: {
+  questionId: string;
+  kind: QuestionNavigationKind;
+  threadId: string;
+  routeKey: string;
+  readOnly: boolean;
+  queryClient: QueryClient;
+  controller: AbortController;
+  scope: () => HTMLElement | null;
+  queuedAnswers: ReadonlyMap<string, QueuedAnswerReveal>;
+  cache: Map<string, number>;
+  setFallbackQuestionId: (questionId: string) => void;
+  setRequest: (request: QuestionNavigationRequest) => void;
+  setError: (error: string) => void;
+  setPending: (pending: boolean) => void;
+}): Promise<boolean> {
+  let requested = false;
+  const elementId =
+    kind === "question"
+      ? questionCardId(threadId, questionId)
+      : questionResponseId(threadId, questionId);
+  try {
+    if (kind === "question") {
+      const question = await sdk.threads.questions.get({
+        threadId,
+        questionId,
+        signal: controller.signal,
+      });
+      controller.signal.throwIfAborted();
+      hydrateConversationQuestion({
+        queryClient,
+        threadId,
+        questionId,
+        question,
+      });
+      const target = scope()?.querySelector<HTMLElement>(`[id="${elementId}"]`);
+      if (target) {
+        target.scrollIntoView({ block: "center" });
+        target.focus({ preventScroll: true });
+        flashSearchTarget(target);
+      } else {
+        if (readOnly)
+          throw new Error(
+            "This question is outside the loaded read-only history.",
+          );
+        setFallbackQuestionId(questionId);
+      }
+      return true;
+    }
+    const queued =
+      kind === "answer" ? queuedAnswers.get(questionId) : undefined;
+    if (queued) {
+      const element = await queued(controller.signal);
+      controller.signal.throwIfAborted();
+      if (element) {
+        element.scrollIntoView({ block: "nearest" });
+        element.focus({ preventScroll: true });
+        flashSearchTarget(element);
+        return true;
+      }
+    }
+    const key = `${threadId}:${questionId}:${kind}`;
+    const seq =
+      cache.get(key) ??
+      (await resolveQuestionEventSequence({
+        list: sdk.threads.events.list,
+        threadId,
+        questionId,
+        kind,
+        signal: controller.signal,
+      }));
+    controller.signal.throwIfAborted();
+    if (seq === null) {
+      const target = scope()?.querySelector<HTMLElement>(`[id="${elementId}"]`);
+      if (!target)
+        throw new Error("This message is unavailable in the current history.");
+      target.scrollIntoView({ block: "center" });
+      target.focus({ preventScroll: true });
+      flashSearchTarget(target);
+    } else {
+      cache.set(key, seq);
+      requested = true;
+      setRequest({
+        threadId,
+        seq,
+        elementId,
+        routeKey,
+        locationKey: `${routeKey}:question:${crypto.randomUUID()}`,
+      });
+    }
+    return true;
+  } catch (reason) {
+    if (!controller.signal.aborted)
+      setError(
+        reason instanceof Error ? reason.message : "Unable to open question.",
+      );
+    return controller.signal.aborted;
+  } finally {
+    if (!controller.signal.aborted && !requested) setPending(false);
+  }
 }

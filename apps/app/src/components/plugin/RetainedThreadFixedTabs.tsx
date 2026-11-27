@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentType,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -98,6 +99,11 @@ function createRegistry(scope: string) {
   };
 }
 type Registry = ReturnType<typeof createRegistry>;
+type ContinuitySlot = PluginThreadFixedTabSlot & {
+  experimental_useContinuityKey: NonNullable<
+    PluginThreadFixedTabSlot["experimental_useContinuityKey"]
+  >;
+};
 const RetainedTabsContext = createContext<Registry | null>(null);
 
 export function RetainedThreadFixedTabs({
@@ -119,7 +125,10 @@ export function RetainedThreadFixedTabs({
     .filter(
       (slot): slot is PluginThreadFixedTabSlot => slot.availability === "fixed",
     )
-    .filter((slot) => slot.experimental_useContinuityKey !== undefined);
+    .filter(
+      (slot): slot is ContinuitySlot =>
+        slot.experimental_useContinuityKey !== undefined,
+    );
   return (
     <RetainedTabsContext.Provider value={registry}>
       {children}
@@ -132,7 +141,7 @@ export function RetainedThreadFixedTabs({
             <OrdinaryRegistration slot={slot} registry={registry} />
           }
         >
-          <Registration
+          <SlotRegistration
             slot={slot}
             registry={registry}
             projectId={projectId}
@@ -206,46 +215,65 @@ function OrdinaryRegistration({
   return null;
 }
 
-function Registration({
-  slot,
-  registry,
-  projectId,
-  threadId,
-  scope,
-}: {
-  slot: PluginThreadFixedTabSlot;
+interface RegistrationProps {
+  slot: ContinuitySlot;
   registry: Registry;
   projectId: string;
   threadId: string;
   scope: string;
-}) {
-  const state = useSyncExternalStore(
-    registry.subscribeState,
-    registry.getState,
-    registry.getState,
-  );
-  const useContinuityKey = slot.experimental_useContinuityKey!;
-  const key = useContinuityKey({
+}
+
+const registrations = new WeakMap<
+  ContinuitySlot,
+  { Registration: ComponentType<RegistrationProps> }
+>();
+
+function registrationFor(slot: ContinuitySlot) {
+  const existing = registrations.get(slot);
+  if (existing !== undefined) return existing;
+  const useContinuityKey = slot.experimental_useContinuityKey;
+  function Registration({
+    slot,
+    registry,
     projectId,
     threadId,
-    environment:
-      state?.threadId === threadId ? (state.environment ?? null) : null,
-  });
-  if (
-    key !== null &&
-    (typeof key !== "string" || key.length === 0 || key.length > 256)
-  )
-    throw new Error("Invalid fixed-tab continuity key");
-  return (
-    <Instance
-      key={JSON.stringify([projectId, key ?? [threadId]])}
-      slot={slot}
-      registry={registry}
-      threadId={threadId}
-      identity={key}
-      scope={scope}
-    />
-  );
+    scope,
+  }: RegistrationProps) {
+    const state = useSyncExternalStore(
+      registry.subscribeState,
+      registry.getState,
+      registry.getState,
+    );
+    const key = useContinuityKey({
+      projectId,
+      threadId,
+      environment:
+        state?.threadId === threadId ? (state.environment ?? null) : null,
+    });
+    if (
+      key !== null &&
+      (typeof key !== "string" || key.length === 0 || key.length > 256)
+    )
+      throw new Error("Invalid fixed-tab continuity key");
+    return (
+      <Instance
+        key={JSON.stringify([projectId, key ?? [threadId]])}
+        slot={slot}
+        registry={registry}
+        threadId={threadId}
+        identity={key}
+        scope={scope}
+      />
+    );
+  }
+  const host = { Registration };
+  registrations.set(slot, host);
+  return host;
+}
+
+function SlotRegistration(props: RegistrationProps) {
+  const host = registrationFor(props.slot);
+  return <host.Registration {...props} />;
 }
 
 function Instance({

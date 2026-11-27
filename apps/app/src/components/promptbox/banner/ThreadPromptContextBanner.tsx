@@ -855,11 +855,7 @@ function WritableContextBanner({
     useState<InternalDoNotUseThreadContextChangeTally | null>(null);
   const reportChangeTally = useCallback(
     (next: InternalDoNotUseThreadContextChangeTally | null) =>
-      setTally((current) =>
-        current?.added === next?.added && current?.removed === next?.removed
-          ? current
-          : next,
-      ),
+      setTally((current) => (sameChangeTally(current, next) ? current : next)),
     [],
   );
   const mount = (
@@ -1027,4 +1023,11 @@ export function ThreadPromptContextBanner({
       />
     </CoreThreadContextContext.Provider>
   );
+}
+
+function sameChangeTally(
+  a: InternalDoNotUseThreadContextChangeTally | null,
+  b: InternalDoNotUseThreadContextChangeTally | null,
+): boolean {
+  return a?.added === b?.added && a?.removed === b?.removed;
 }

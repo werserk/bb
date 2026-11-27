@@ -57,37 +57,14 @@ export function QuestionResponseEvent({
   const acceptedNotice = acceptedResolution
     ? (({ deliveryId: _deliveryId, ...notice }) => notice)(acceptedResolution)
     : null;
-  let matches = false;
-  try {
-    matches =
-      !source.isError &&
-      question?.id === response.questionId &&
-      question.threadId === threadId &&
-      question.revision === response.revision &&
-      (response.resolution
-        ? acceptedResolution !== null
-        : question.status === "answered") &&
-      JSON.stringify(
-        conversationQuestionPublicationSchema.parse(question.publication),
-      ) === JSON.stringify(response.publication) &&
-      JSON.stringify(
-        questionMaterialManifestSchema.parse(question.materialManifest),
-      ) === JSON.stringify(response.materialManifest) &&
-      (response.resolution
-        ? JSON.stringify(
-            questionResolutionAttributionSchema
-              .omit({ deliveryId: true })
-              .parse(acceptedNotice),
-          ) === JSON.stringify(response.resolution)
-        : JSON.stringify(
-            normalizeConversationQuestionAnswers(
-              question.publication.questions,
-              question.response ?? {},
-            ),
-          ) === JSON.stringify(response.answers));
-  } catch {
-    matches = false;
-  }
+  const matches = responseMatchesSource(
+    source.isError,
+    question,
+    response,
+    threadId,
+    acceptedResolution,
+    acceptedNotice,
+  );
   const withdrawn = response.resolution?.action === "withdraw";
   const delivery =
     response.resolution?.action === "withdraw"
@@ -192,4 +169,47 @@ export function QuestionResponseEvent({
       ) : null}
     </section>
   );
+}
+
+type ResponseSource = Awaited<ReturnType<typeof sdk.threads.questions.get>>;
+
+function responseMatchesSource(
+  isError: boolean,
+  question: ResponseSource | undefined,
+  response: QuestionResponseSnapshot,
+  threadId: string,
+  acceptedResolution: unknown,
+  acceptedNotice: unknown,
+): boolean {
+  try {
+    return (
+      !isError &&
+      question?.id === response.questionId &&
+      question.threadId === threadId &&
+      question.revision === response.revision &&
+      (response.resolution
+        ? acceptedResolution !== null
+        : question.status === "answered") &&
+      JSON.stringify(
+        conversationQuestionPublicationSchema.parse(question.publication),
+      ) === JSON.stringify(response.publication) &&
+      JSON.stringify(
+        questionMaterialManifestSchema.parse(question.materialManifest),
+      ) === JSON.stringify(response.materialManifest) &&
+      (response.resolution
+        ? JSON.stringify(
+            questionResolutionAttributionSchema
+              .omit({ deliveryId: true })
+              .parse(acceptedNotice),
+          ) === JSON.stringify(response.resolution)
+        : JSON.stringify(
+            normalizeConversationQuestionAnswers(
+              question.publication.questions,
+              question.response ?? {},
+            ),
+          ) === JSON.stringify(response.answers))
+    );
+  } catch {
+    return false;
+  }
 }
