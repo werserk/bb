@@ -21,6 +21,7 @@ export interface Binding {
   releaseDue: number | null;
   cleanedAt: number | null;
   releaseError: string | null;
+  sendAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +43,7 @@ interface Row {
   release_due: number | null;
   cleaned_at: number | null;
   release_error: string | null;
+  send_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -64,6 +66,7 @@ function toBinding(row: Row): Binding {
     releaseDue: row.release_due,
     cleanedAt: row.cleaned_at,
     releaseError: row.release_error,
+    sendAt: row.send_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -76,6 +79,7 @@ const ADDED_COLUMNS: readonly (readonly [string, string])[] = [
   ["release_due", "INTEGER"],
   ["cleaned_at", "INTEGER"],
   ["release_error", "TEXT"],
+  ["send_at", "INTEGER"],
 ];
 
 export function canonicalPath(value: string): string {
@@ -119,19 +123,20 @@ export class BindingStore {
 
   create(
     binding: Pick<Binding, "id" | "workerHostId" | "scratchPath" | "workspaceHostId" | "workspaceHostName" | "root" | "instructions" | "profile">
-      & Partial<Pick<Binding, "ready">>,
+      & Partial<Pick<Binding, "ready" | "sendAt">>,
   ): Binding {
     const at = this.now();
     this.db
       .prepare(
         `INSERT INTO bindings (id, thread_id, worker_host_id, scratch_path, workspace_host_id,
-          workspace_host_name, root, instructions, profile, broken_reason, ready, created_at, updated_at)
+          workspace_host_name, root, instructions, profile, broken_reason, ready, send_at, created_at, updated_at)
          VALUES (@id, NULL, @workerHostId, @scratchPath, @workspaceHostId,
-          @workspaceHostName, @root, @instructions, @profile, NULL, @ready, @at, @at)`,
+          @workspaceHostName, @root, @instructions, @profile, NULL, @ready, @sendAt, @at, @at)`,
       )
       .run({
         ...binding,
         ready: binding.ready === false ? 0 : 1,
+        sendAt: binding.sendAt ?? null,
         scratchPath: canonicalPath(binding.scratchPath),
         instructions: JSON.stringify(binding.instructions),
         at,
@@ -216,6 +221,7 @@ export class BindingStore {
       )
       .run(at, due, reason, at, id);
     if (reason === "delete") this.set(id, "release_reason = 'delete'");
+    if (reason !== "archive") this.set(id, "send_at = NULL");
     return this.byId(id);
   }
 
@@ -237,7 +243,7 @@ export class BindingStore {
   markCleaned(id: string): void {
     const at = this.now();
     this.db
-      .prepare("UPDATE bindings SET cleaned_at = ?, release_error = NULL, updated_at = ? WHERE id = ? AND released_at IS NOT NULL")
+      .prepare("UPDATE bindings SET cleaned_at = ?, release_error = NULL, send_at = NULL, updated_at = ? WHERE id = ? AND released_at IS NOT NULL")
       .run(at, at, id);
   }
 

@@ -7,6 +7,11 @@ export const WAIT_RECHECK_MS = 2_000;
 
 export const RELEASED_MESSAGE = "account-workers: this thread's workspace binding was released; spawn a new thread.";
 
+export function waitDecision(reason: string, until: number): MessageDispatchHookDecision {
+  // Core before SDK 0.6.174 reads only the @deprecated name `sendAt` and strips `recheckAt`; later cores read `sendAt` as `recheckAt`. Once core keeps the sender's time under a plugin wait (get-bb/bb#7872), the --send-at hold below is redundant but harmless.
+  return { action: "wait", reason, sendAt: until } as unknown as MessageDispatchHookDecision;
+}
+
 export interface DispatchVerdict {
   decision: MessageDispatchHookDecision;
   abandoned?: Binding;
@@ -21,7 +26,7 @@ export function decideDispatch(
   const { thread } = context;
   const ours = thread.originPluginId === pluginId;
   const wait = (reason: string): DispatchVerdict => ({
-    decision: { action: "wait", reason: `account-workers: ${reason}`, recheckAt: now + WAIT_RECHECK_MS },
+    decision: waitDecision(`account-workers: ${reason}`, now + WAIT_RECHECK_MS),
   });
   const reject = (message: string): DispatchVerdict => ({ decision: { action: "reject", message } });
   if (record === null) {
@@ -40,6 +45,9 @@ export function decideDispatch(
     }
     return wait("preparing the workspace binding");
   }
+  if (record.sendAt !== null && record.sendAt > now && thread.status === "pending") {
+    return { decision: waitDecision(`account-workers: holding this thread's messages until its --send-at time ${new Date(record.sendAt).toISOString()}`, record.sendAt) };
+  }
   return { decision: { action: "proceed" } };
 }
 
@@ -55,7 +63,7 @@ export function safeDecide(
   } catch (error) {
     onError(error);
     if (context.thread?.originPluginId === pluginId) {
-      return { decision: { action: "wait", reason: "account-workers: binding check failed; retrying", recheckAt: now + WAIT_RECHECK_MS } };
+      return { decision: waitDecision("account-workers: binding check failed; retrying", now + WAIT_RECHECK_MS) };
     }
     return { decision: { action: "proceed" } };
   }

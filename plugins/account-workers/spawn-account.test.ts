@@ -143,10 +143,10 @@ async function load(pool: Pool | null, releaseScratch?: unknown) {
             : (pool?.get ?? (() => getState(null)))(args);
     return args.outputSchema.parse(await value);
   });
-  const dispatch = () =>
+  const dispatch = (status: "pending" | "idle" | "active" = "pending") =>
     host.harness.inspection.registrations.hooks["message.dispatch"]!(
       makeMessageDispatchHookContext({
-        thread: { id: THREAD, originPluginId: "account-workers", createdAt: Date.now() },
+        thread: { id: THREAD, originPluginId: "account-workers", createdAt: Date.now(), status },
         requestedExecution: { providerId: "claude-code", model: null, reasoningLevel: null, serviceTier: null, permissionMode: null },
       }),
     );
@@ -176,6 +176,37 @@ async function expectAborted(t: Awaited<ReturnType<typeof load>>, result: { exit
   await t.host.harness.behavior.emitThreadEvent("thread.unarchived", { thread: makeThreadResponse({ id: THREAD }) });
   expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
 }
+
+describe("spawn --send-at", () => {
+  it("the plugin holds the ready thread until the requested time, whatever core does with the row", async () => {
+    const t = await load(null);
+    const sent: unknown[] = [];
+    t.host.harness.sdk.stub("threads.spawn", async (args: { sendAt?: number }) => {
+      sent.push(args.sendAt);
+      return makeThreadResponse({ id: THREAD });
+    });
+    const at = Date.now() + 86_400_000;
+    expect((await t.spawn(["--send-at", String(at)])).exitCode).toBe(0);
+    expect(sent).toEqual([at]);
+    expect(await t.dispatch()).toMatchObject({ action: "wait", sendAt: at });
+    expect(await t.dispatch("active")).toEqual({ action: "proceed" });
+    Date.now = () => at;
+    expect(await t.dispatch()).toEqual({ action: "proceed" });
+  });
+
+  it("a past --send-at proceeds once ready", async () => {
+    const t = await load(null);
+    expect((await t.spawn(["--send-at", String(Date.now() - 1)])).exitCode).toBe(0);
+    expect(await t.dispatch()).toEqual({ action: "proceed" });
+  });
+
+  it("an aborted spawn rejects instead of waiting for its time", async () => {
+    const t = await load({ set: () => ({ ok: false, reason: "at-limit", message: "limit" }) });
+    const result = await t.spawn(["--send-at", String(Date.now() + 86_400_000), "--account", "Work A"]);
+    expect(result.exitCode).toBe(1);
+    expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
+  });
+});
 
 describe("spawn --account", () => {
   it("without --account calls no pool and keeps today's spawn", async () => {

@@ -71,7 +71,12 @@ A `message.dispatch` hook (`dispatch.ts`) decides every turn before it reaches a
 | Binding released (tombstone) | refuse: "spawn a new thread" |
 | Provider not in the profile's `providerIds` | refuse (G8) |
 | Binding not ready | wait; after 60 s refuse, stop the thread and release the binding |
+| Ready binding, thread still `pending`, `spawn --send-at` time still ahead | wait until that time |
 | Ready binding | proceed |
+
+Every wait names its re-ask time under the old key `sendAt`, which both cores read. A core on SDK 0.6.132 reads only that key and strips the newer `recheckAt`; from SDK 0.6.174 on, core reads `sendAt` as the old name of `recheckAt`.
+
+**`--send-at` is the plugin's guarantee, not core's.** On a core without get-bb/bb#7872 (SDK 0.6.132 and forks of it), a plugin wait replaces the sender's `sendAt` on the queued row, and the drain after the wait rebuilds the payload without it. So a scheduled first message went out as soon as the hold let it through: live on 2026-11-27, `--send-at +1d` dispatched right after the spawn readied the binding. `spawn` now stores the requested time on the binding when it creates it, never from the queue row, and the hook keeps the thread's messages waiting until then while the thread has not started (`thread.status` is `pending` until its first message is admitted; archive and unarchive do not change it), with that time as the re-ask time. Once the thread has started, for example through Send now, the schedule has no meaning left and later messages proceed. Readiness and the schedule are two separate gates. A missing or past-due time means proceed. A release clears the time at once. An archive keeps it through the undo window, so an unarchive restores the hold, and the final release clears it. Once core keeps the sender's time under a plugin wait, this wait is redundant but harmless. **Send now** skips it like any hook. The time given to `spawn` wins over a later reschedule to an earlier time; only Send now sends earlier.
 
 So the first session never starts before `spawn` has claimed the binding, and a released or provider-switched thread cannot start a dispatched turn. Four paths skip the hook by BB design: the user's **Send now** on a queued message, the re-send of an **edited message**, **compaction** (both work on the existing conversation), and a **disabled plugin**, which runs no hook. On those paths `configure` still gives a released or provider-switched thread no workspace tools.
 
@@ -141,7 +146,7 @@ interface ProviderProfile {
 - **Per-call verify.** For a profile with `verify`, every workspace tool call first goes to `verifyProfile` on the worker, then to the workspace. A refusal marks the binding broken (`broken_reason`): later calls refuse with no host call and `configure` drops the tools, until `rebind` clears it. A failed call to the worker refuses that call only, so a short disconnect does not disable a healthy binding. Profiles without `verify` cost nothing per call.
 - **Provider check.** `configure` gives the tools only while the thread's provider is one of its profile's `providerIds`; otherwise it serves a short notice instead.
 - **Release.** `releaseScratch` runs `release` on the worker before it removes the scratch entry; a throw keeps the entry and is recorded as `release_error` ([release](#release)).
-- **Storage.** The binding has `profile` (rows from block 1 read as `claude`), nullable `broken_reason`, and from block 4 `ready`, `released_at`, `release_reason`, `release_due`, `cleaned_at` and `release_error`, all added in place to an existing database. Older rows read as ready and live.
+- **Storage.** The binding has `profile` (rows from block 1 read as `claude`), nullable `broken_reason`, and from block 4 `ready`, `released_at`, `release_reason`, `release_due`, `cleaned_at` and `release_error`, and from the `--send-at` fix `send_at`, all added in place to an existing database. Older rows read as ready and live.
 
 ### OpenCode
 
@@ -211,7 +216,7 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
 | `plugins/account-workers`: tools, routing, binding, instructions, Claude scratch profile | Built, block 1 |
 | Provider profile seam, OpenCode profile | Built, block 2 |
 | Codex profile | Built, block 3 |
-| Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4 |
+| Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4; the `--send-at` hold after A2 |
 | Account selection | Built: `spawn --account` and the account in `list` through the pool's `thread-account.v1`, block A2 ([accounts](#accounts)); the policy, passes and switching are the pool's |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
@@ -240,5 +245,5 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
   - The canary has no login, so it cannot see tools that Codex offers only with a Codex-backend login (`image_generation`, apps and connectors). Their features are off in the overlay; if one came back on, its tool would appear only on the real thread, where the hook still blocks it.
   - The canary's catalog is the worker's cache. A thread whose login does not match the cache's identity uses the bundled catalog or fetches a fresh one, which may differ.
   - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
-- **G11. Account window.** `spawn --account` relies on the dispatch hold, so the paths that skip hooks also skip the account: the user's **Send now** on the queued first message before the policy is stored sends that turn through `auto`. The spawn then still succeeds, with a warning when `get` already shows another serving account. The warning can miss a first turn of several requests whose later requests already ran on the named account; the pool's `events` would catch that and are not read yet. Closing it needs a core change (a plugin create without a first message, then `set`, then the send). A refused spawn deletes its queued messages for the same reason: after release, Send now would skip the hook in a cleaned scratch.
+- **G11. Account window.** In the one live check (2026-11-27) the hold did its job: the policy was stored 39 ms before the first turn was requested. `get`'s `serving.since` is the time of the first model request, not of `set`, so it cannot date the policy. `spawn --account` relies on the dispatch hold, so the paths that skip hooks also skip the account: the user's **Send now** on the queued first message before the policy is stored sends that turn through `auto`. The spawn then still succeeds, with a warning when `get` already shows another serving account. The warning can miss a first turn of several requests whose later requests already ran on the named account; the pool's `events` would catch that and are not read yet. Closing it needs a core change (a plugin create without a first message, then `set`, then the send). A refused spawn deletes its queued messages for the same reason: after release, Send now would skip the hook in a cleaned scratch.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).

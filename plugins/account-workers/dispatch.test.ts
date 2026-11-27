@@ -51,7 +51,7 @@ describe("dispatch hold", () => {
 
   it("waits ask core to re-ask shortly, and the released message says what to do", () => {
     expect(decideDispatch(ME, ctx(ME), null, T0)).toEqual({
-      decision: { action: "wait", reason: "account-workers: waiting for the workspace binding", recheckAt: T0 + WAIT_RECHECK_MS },
+      decision: { action: "wait", reason: "account-workers: waiting for the workspace binding", sendAt: T0 + WAIT_RECHECK_MS },
     });
     expect(decideDispatch(ME, ctx(ME), binding({ releasedAt: T0 }), T0).decision).toEqual({ action: "reject", message: RELEASED_MESSAGE });
   });
