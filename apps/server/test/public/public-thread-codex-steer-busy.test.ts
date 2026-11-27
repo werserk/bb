@@ -10,8 +10,11 @@ import {
   getLatestThreadSequence,
   environments,
   projectAttachmentThreads,
+  getActiveStoredTurnId,
   getThread,
+  isThreadAwaitingTurnStartPastDeadline,
   listQueuedThreadMessages,
+  readThreadRunState,
   listStoredThreadPromptHistoryRows,
   setThreadExecutionOverride,
 } from "@bb/db";
@@ -815,6 +818,65 @@ it.each([false, true])(
     });
   },
 );
+
+it("keeps an unknown competing turn active, queues the input once and leaves it to the turn-start deadline", async () => {
+  await withTestHarness(async (harness) => {
+    const { thread, environment, host, commands } = fixture(
+      harness,
+      () => refusal(),
+      () => ({
+        ok: false,
+        errorCode: "competing_turn",
+        errorMessage: "Refusing to start a competing turn",
+      }),
+    );
+    await send(harness, thread.id);
+    await expect
+      .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+      .toBe(1);
+    complete(harness, thread.id, environment.id);
+    await runQueuedMessageDispatch(harness.deps, {
+      kind: "thread-ready",
+      threadId: thread.id,
+    });
+    await expect.poll(() => commands.length).toBe(2);
+    await expect
+      .poll(() => listQueuedThreadMessages(harness.db, thread.id).length)
+      .toBe(1);
+    // The daemon holds a turn the server has not heard of yet: the thread
+    // stays active with nothing tracked, so that turn's events or the
+    // turn-start deadline settle it, and the queued input drains afterwards.
+    expect(getThread(harness.db, thread.id)?.status).toBe("active");
+    expect(readThreadRunState(harness.db, thread.id).requests).toEqual([]);
+    expect(getActiveStoredTurnId(harness.db, thread.id)).toBeNull();
+    const queued = listQueuedThreadMessages(harness.db, thread.id);
+    const rejected = listEvents(harness.db, { threadId: thread.id })
+      .filter((e) => e.type === "client/turn/rejected")
+      .map((e) => JSON.parse(e.data))
+      .filter((e) => e.requestId === commands[1]!.requestId);
+    expect(rejected).toEqual([
+      expect.objectContaining({
+        reason: "competing_turn",
+        deferredToQueuedMessageId: queued[0]!.id,
+      }),
+    ]);
+    replay(harness, commands[1]!, host.id, false, "competing_turn");
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+    expect(
+      isThreadAwaitingTurnStartPastDeadline(harness.db, {
+        deadline: Date.now() + 1,
+        threadId: thread.id,
+      }),
+    ).toBe(true);
+    runThreadLifecycleTransaction(harness.deps, thread.id, {
+      type: "turn-start.overdue",
+      deadlineMinutes: 5,
+      now: Date.now(),
+    });
+    expect(getThread(harness.db, thread.id)?.status).not.toBe("active");
+    expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+  });
+});
 
 it.each(["input", "groups", "execution", "provenance"])(
   "does not restore a competing deferred request with changed %s",

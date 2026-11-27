@@ -245,15 +245,18 @@ function statusChangeSkipsAttention(
   next: ThreadLifecycleTransition["next"],
 ): boolean {
   if (next.status === state.status) return false;
-  if (latestServiceTurn(db, threadId) !== undefined) return true;
   const completion =
     input.type === "turn.completed"
       ? { status: input.status, turnId: input.turnId }
       : state.heldCompletion !== null && next.heldCompletion === null
         ? state.heldCompletion
         : null;
-  if (completion === null) return false;
+  const serviceTurnLatest = latestServiceTurn(db, threadId) !== undefined;
+  // Fork: after a service turn, non-completion moves stay silent, but an
+  // error (provider failure, daemon loss) still raises attention.
+  if (completion === null) return serviceTurnLatest && next.status !== "error";
   return (
+    serviceTurnLatest ||
     isServiceTurn(db, threadId, completion.turnId) ||
     (completion.status === "completed" &&
       shouldSilenceBackgroundTurnAttention(db, {

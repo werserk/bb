@@ -13,7 +13,7 @@ import {
   seedThread,
   seedTurnStarted,
 } from "../helpers/seed.js";
-import { withTestHarness } from "../helpers/test-app.js";
+import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 import { runThreadLifecycle } from "../../src/services/threads/lifecycle/finish.js";
 import { getThread, insertThreadPluginMetadata } from "@bb/db";
 
@@ -149,6 +149,93 @@ it("keeps service input hidden while exposing a live turn timer", async () => {
     expect((await sdk.threads.get({ threadId: thread.id })).status).toBe(
       "error",
     );
+  });
+});
+
+function seedHiddenServiceTurn(h: TestAppHarness) {
+  const { host } = seedHostSession(h.deps),
+    { project } = seedProjectWithSource(h.deps, { hostId: host.id });
+  const environment = seedEnvironment(h.deps, {
+    hostId: host.id,
+    projectId: project.id,
+  });
+  const thread = seedThread(h.deps, {
+    environmentId: environment.id,
+    projectId: project.id,
+    providerId: "codex",
+    status: "active",
+  });
+  seedEvent(h.deps, {
+    threadId: thread.id,
+    environmentId: environment.id,
+    sequence: 1,
+    type: "client/turn/requested",
+    scope: threadScope(),
+    data: {
+      direction: "outbound",
+      requestId: encodeClientTurnRequestIdNumber({ value: 1 }),
+      serviceTurn: {
+        version: 1,
+        visibility: "hidden",
+        reason: "helper-result",
+        origin: { pluginId: "wprojects", senderThreadId: null },
+      },
+      input: [{ type: "text", text: "self reminder", mentions: [] }],
+      target: { kind: "new-turn" },
+      execution: {
+        model: "gpt-5",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        source: "client/turn/requested",
+      },
+      initiator: "system",
+      senderThreadId: null,
+      request: { method: "turn/start", params: {} },
+      source: "tell",
+    },
+  });
+  seedTurnStarted(h.deps, {
+    threadId: thread.id,
+    environmentId: environment.id,
+    providerThreadId: "provider",
+    sequence: 2,
+    turnId: "service",
+  });
+  return thread;
+}
+
+describe("attention after a hidden service turn", () => {
+  it("raises attention when the provider fails the thread into error", async () => {
+    await withTestHarness(async (h) => {
+      const thread = seedHiddenServiceTurn(h);
+      const before = getThread(h.db, thread.id)!.latestAttentionAt;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runThreadLifecycle(h.deps, thread.id, {
+        type: "provider.failed",
+        unstartedRequestId: null,
+      });
+      const after = getThread(h.db, thread.id)!;
+      expect(after.status).toBe("error");
+      expect(after.latestAttentionAt).toBeGreaterThan(before);
+    });
+  });
+
+  it("stays silent when the hidden service turn completes idle", async () => {
+    await withTestHarness(async (h) => {
+      const thread = seedHiddenServiceTurn(h);
+      const before = getThread(h.db, thread.id)!.latestAttentionAt;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runThreadLifecycle(h.deps, thread.id, {
+        type: "turn.completed",
+        turnId: "service",
+        status: "completed",
+      });
+      expect(getThread(h.db, thread.id)).toMatchObject({
+        status: "idle",
+        latestAttentionAt: before,
+      });
+    });
   });
 });
 
