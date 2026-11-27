@@ -38,6 +38,8 @@ it("selects only each composer control's own annotation when clicked", () => {
     for (const id of [
       "composer-replacement",
       "composer-banners",
+      "composer-inline-panels",
+      "composer-suggestions",
       "composer-state",
       "mention-provider",
       "composer-rich-text",

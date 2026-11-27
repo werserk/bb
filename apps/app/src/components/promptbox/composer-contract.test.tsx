@@ -691,6 +691,10 @@ it("expands collapsed composer for pending and error suggestion feedback", async
   const composer = await listedComposer();
   const controller = composer.experimental_suggestions;
   await waitFor(() => expect(controller.getSnapshot().eligible).toBe(true));
+  await act(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
   fireEvent.click(screen.getByLabelText("Collapse prompt box"));
   await waitFor(() =>
     expect(box.querySelector("[data-promptbox-collapsed]")).not.toBeNull(),

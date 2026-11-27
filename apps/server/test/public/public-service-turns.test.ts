@@ -218,6 +218,18 @@ describe("attention after a hidden service turn", () => {
       const after = getThread(h.db, thread.id)!;
       expect(after.status).toBe("error");
       expect(after.latestAttentionAt).toBeGreaterThan(before);
+      const sdk = createNodeBbSdk({
+        baseUrl: "http://localhost",
+        fetch: async (input, init) => h.app.request(new Request(input, init)),
+      });
+      const listed = (await sdk.threads.list()).find(
+        (entry) => entry.id === thread.id,
+      );
+      expect(listed).toMatchObject({
+        status: "error",
+        runtime: { displayStatus: "error" },
+        serviceTurn: { visibility: "hidden" },
+      });
     });
   });
 

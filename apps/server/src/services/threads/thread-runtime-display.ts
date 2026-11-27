@@ -580,10 +580,7 @@ export function toThreadListEntryResponses(
       now: args.now,
       thread,
     });
-    if (serviceTurn) {
-      entry.serviceTurn = serviceTurn;
-      if (thread.status === "error") entry.runtime.displayStatus = "idle";
-    }
+    if (serviceTurn) entry.serviceTurn = serviceTurn;
     return thread.environmentHostId === null &&
       (thread.status === "pending" || thread.status === "starting")
       ? {

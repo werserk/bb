@@ -5027,7 +5027,7 @@ removing the prefix.
 
 `bb.experimental_threads.experimental_serviceTurnCapabilities()` returns the server-owned `{serviceTurns:{version:1}}` capability (also `GET /api/v1/capabilities/service-turns`). `experimental_sendService` accepts typed reason, input, target and optional managed sender. It authenticates the calling plugin with its revocable caller credential, restricts both threads to its managed namespace and the same project, and always starts or queues a separate turn. Public unauthenticated descriptor injection is refused. Missing capability must retain pending work; method presence is not a capability.
 
-The descriptor persists in nullable `queued_thread_messages.service_turn` and optional requested/interrupt event JSON. Human timeline defaults filter full service turns, preserving successful typed owner posts and native interactions standalone. Raw SDK/events/queue/output and CLI JSON journals retain truth. CLI `--include-service` exposes retained detail. Service failures and interruptions do not raise native attention; explicit posts/questions retain their independent attention.
+The descriptor persists in nullable `queued_thread_messages.service_turn` and optional requested/interrupt event JSON. Human timeline defaults filter full service turns, preserving successful typed owner posts and native interactions standalone. Raw SDK/events/queue/output and CLI JSON journals retain truth. CLI `--include-service` exposes retained detail. A service turn's own failure or interruption does not raise native attention; a move to error that is not a turn completion (provider failure, daemon loss) does, and thread lists show that error status. Explicit posts/questions retain their independent attention.
 
 Release class: data-protocol, additive migration. No daemon wire change; both daemon/server version pairs work. An old server ignores the new column after upgrade; rollback keeps the column and degrades presentation to F7 collapsed background rows.
 
@@ -5198,7 +5198,6 @@ Core callers: native title/commit helpers use the same dispatcher admission/canc
 
 `experimental_ComposerSuggestionController.experimental_begin` and `experimental_finish` expose request-ID and snapshot-scoped pending/error state through `experimental_ComposerSuggestionState.request`. Core Composer renders the shared state in its placeholder and accessible error disclosure; Prompt Suggestion supplies its RPC lifecycle. Terminal updates and cleanup cannot clear newer requests; progress changes retain draft/context snapshot identity. No progress text is draft content or submittable. Stabilization requires request-race, cancellation, typing, disposal, none/error/timeout and mobile disclosure coverage.
 
-
 ## Owner base instructions and companion continuity
 
 `BbPluginApi.experimental_userInstructions.read()` returns the configured data-directory owner instructions with exact content and a content hash, or an explicit missing/empty/unreadable reason. It accepts no path and includes no workspace files, provider scaffolding, skills or tools. Core thread instruction assembly and this read share `readOwnerInstructions`; core retains its historical trimming and missing-file behavior. Prompt Suggestion uses this for full BIBLE composition in both the short owner-message role and the independent task-memory role, and fingerprints changes before dispatch, memory commit and delivery. Both roles call the same native generation API and selected model; suggestion RPC output contains no task state, while inspect retains the existing source-linked memory schema. Stabilization requires exact-byte/read-failure/hash-change and both-consumer regression coverage, then a project-wide rename and removal of this entry. Content is owner-private and must not be logged as diagnostics.
@@ -5212,7 +5211,6 @@ Core callers: native title/commit helpers use the same dispatcher admission/canc
 - `ComposerCustomization.experimental_inlinePanels` registers scoped components inside the composer border above the draft. `ExperimentalComposerContributions.experimental_InlinePanels` is the host renderer used by the bundled Composer on expanded and compact layouts. The host applies the same plugin ownership, crash boundaries, scope filtering, generation identity and customization suppression as toolbar actions. Prompt Suggestion is the first caller; no independent floating overlay is created.
 - `experimental_ComposerSuggestionController.experimental_suspend()` clears pending/displayed ghost suggestions and returns an idempotent release function. Nested holders keep the controller ineligible until all release; disposal never becomes eligible on release. The current context snapshot remains available to a manual preview. Core's existing begin/show/accept and keyboard/Send paths all consult that same controller eligibility.
 - Stabilization requires desktop/compact inline rendering checks, scope/disposal coverage, multiple mounted composer isolation, nested suspension coverage and adoption by another consumer. Draft application continues through the existing shared `PluginComposerApi.replace` updater with an immutable-snapshot guard; this adds no submission or draft-write path.
-
 
 ## Composer context preview
 
@@ -5236,6 +5234,7 @@ question preservation, unknown-host coverage and SDK/CLI contract parity.
 ## Composer editor actions
 
 `ComposerCustomization.actions[].experimental_placement: "editor"` places a plugin action at the start of the draft line instead of the action row; `ExperimentalComposerContributions.experimental_EditorActions` is the host renderer the bundled Composer mounts there on expanded layouts, and the editor text indents only while that slot holds a button. The host applies the same plugin ownership, crash boundary, scope filtering and suppression as toolbar actions. Prompt Suggestion's ✦ is the first caller: a click asks for a new proposal and Tab accepts it. Audit focus order, touch sizes and multiple editor actions before stabilization.
+
 ## Pre-completion policy (partial companion)
 
 `PluginExperimentalThreads.experimental_preCompletionCapabilities` and

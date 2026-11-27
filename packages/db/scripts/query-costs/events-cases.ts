@@ -87,6 +87,7 @@ import {
   listStoredEventRowsInSequenceRange,
   listStoredItemLifecycleRowsByItems,
   listStoredRootConversationOutlineEventRows,
+  listStoredServiceTurnContextRows,
   listStoredTaskTurnRequestEvents,
   listStoredTimelineThreadWindowEventRows,
   listStoredTimelineTurnEventRows,
@@ -195,6 +196,18 @@ function turnDetailsWindow(fixture: HistoryFixture) {
     sequenceStart: turn.requestSequence,
     threadId: fixture.threadId,
   };
+}
+
+function hideEveryTenthTurnRequest(
+  db: DbConnection,
+  fixture: HistoryFixture,
+): void {
+  db.$client
+    .prepare(
+      `UPDATE events SET data = json_set(data, '$.serviceTurn', json('{"visibility":"hidden","kind":"query-costs"}'))
+       WHERE thread_id = ? AND type = 'client/turn/requested' AND (sequence % 10) = 0`,
+    )
+    .run(fixture.threadId);
 }
 
 function startPendingTurn(db: DbConnection, fixture: HistoryFixture): void {
@@ -1299,6 +1312,19 @@ export const EVENTS_COST_CASES: readonly QueryCostCase[] = [
       listThreadIdsWithLatestHostDaemonRestartInterruption(db, {
         threadIds: allThreadIds(fixture),
       }),
+  },
+  {
+    name: `${EVENTS}#listStoredServiceTurnContextRows`,
+    variant: "no service turns",
+    run: (db, fixture) =>
+      listStoredServiceTurnContextRows(db, fixture.threadId),
+  },
+  {
+    name: `${EVENTS}#listStoredServiceTurnContextRows`,
+    variant: "some hidden service turns",
+    prepare: hideEveryTenthTurnRequest,
+    run: (db, fixture) =>
+      listStoredServiceTurnContextRows(db, fixture.threadId),
   },
   {
     name: `${EVENTS}#getLastStoredTurnRequestEvent`,

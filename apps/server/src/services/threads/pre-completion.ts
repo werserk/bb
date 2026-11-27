@@ -69,7 +69,7 @@ export function clearPreCompletionPolicies(pluginId: string): void {
     if (policy.pluginId === pluginId) policies.delete(threadId);
 }
 
-type PreCompletionDeps = Pick<AppDeps, "db" | "hub">;
+type PreCompletionDeps = Pick<AppDeps, "db" | "hub" | "providerRegistry">;
 type PreCompletionArgs = {
   threadId: string;
   providerThreadId: string;
@@ -160,14 +160,14 @@ const codexAsyncQuestionDataSchema = z.object({
 });
 function isNativeUserQuestion(
   interaction: PendingInteraction,
-  providerId: string,
+  providerPluginId: string | null,
 ): boolean {
   if (interaction.payload.kind === "user_question") return true;
   const origin = interaction.origin;
   return (
-    providerId === "codex" &&
     origin?.kind === "plugin" &&
     origin.pluginId === "provider-codex" &&
+    origin.pluginId === providerPluginId &&
     origin.rendererId === "async-question" &&
     interaction.payload.kind === "plugin" &&
     codexAsyncQuestionDataSchema.safeParse(interaction.payload.data).success
@@ -194,9 +194,9 @@ async function evaluatePreCompletion(
     })
   )
     return reply({ action: "allow", gap: "missing_identity" });
-  if (thread.providerId !== "claude-code" && thread.providerId !== "codex")
-    return reply({ action: "allow", gap: "unsupported_provider" });
   const turnId = args.turnId;
+  const providerPluginId =
+    deps.providerRegistry.get(thread.providerId)?.pluginId ?? null;
   const ended = () =>
     args.signal.aborted ||
     !getThread(deps.db, thread.id) ||
@@ -220,7 +220,7 @@ async function evaluatePreCompletion(
       statuses: ["pending", "resolving"],
     })
       .map(toPendingInteraction)
-      .filter((i) => isNativeUserQuestion(i, thread.providerId))
+      .filter((i) => isNativeUserQuestion(i, providerPluginId))
       .map((i) => i.id);
   let pendingUserQuestionIds: string[];
   try {

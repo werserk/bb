@@ -231,10 +231,12 @@ function applyTransactionEffect(
 }
 
 /**
- * Fork: hidden service turns and silent background turns never raise the
- * owner's attention marker. A thread whose latest turn request is a service
- * turn stays quiet on every status change; a completing turn (directly or as a
- * released held completion) stays quiet when it was a service turn, or when it
+ * Fork: hidden service turns and silent background turns do not raise the
+ * owner's attention marker. While the latest turn request is a service turn,
+ * status moves stay quiet, except a move to error that is not a turn
+ * completion (a provider failure or daemon loss), which raises attention. A
+ * completing turn (directly or as a released held completion) stays quiet when
+ * the latest request or the completing turn is a service turn, or when it
  * completed and the thread's background policy silences it.
  */
 function statusChangeSkipsAttention(
@@ -252,8 +254,6 @@ function statusChangeSkipsAttention(
         ? state.heldCompletion
         : null;
   const serviceTurnLatest = latestServiceTurn(db, threadId) !== undefined;
-  // Fork: after a service turn, non-completion moves stay silent, but an
-  // error (provider failure, daemon loss) still raises attention.
   if (completion === null) return serviceTurnLatest && next.status !== "error";
   return (
     serviceTurnLatest ||
