@@ -49,6 +49,14 @@ import { orderForProject, readProjectId } from "./project-priority.js";
 import { PROVIDER_UPSTREAMS, type ProviderUpstreams } from "./upstreams.js";
 import type { AuditInput } from "./audit-log.js";
 import { looksLikePass, type PassPrincipal } from "./thread-pass.js";
+import {
+  NAMED_LIMIT_THRESHOLD,
+  namedAccountState,
+  type NamedAccountState,
+  type OnLimit,
+  type Serving,
+  type ThreadPolicy,
+} from "./thread-policy.js";
 
 // Who sent a request: a machine (hub token) or, on a worker machine, one
 // thread (thread pass) or the model catalog (catalog pass).
@@ -57,6 +65,26 @@ export type HubPrincipal = { kind: "host"; hostId: string } | PassPrincipal;
 export interface HubPasses {
   verify(presented: string): Promise<PassPrincipal | null>;
 }
+
+// Thread account policies (block P3, thread-policy.ts), as the hub uses them.
+export interface HubThreadPolicies {
+  get(threadId: string): ThreadPolicy;
+  // Compare-and-set to `auto` after a real limit; false when another writer won.
+  fallBack(threadId: string, revision: number): boolean;
+  servingFor(threadId: string): Serving | null;
+  noteServing(threadId: string, accountId: string, at: number): void;
+}
+
+interface NamedRoute {
+  accountId: string;
+  onLimit: OnLimit;
+  revision: number;
+  updatedAt: number | null;
+}
+
+const MAX_NAMED_LIMIT_KEYS = 10_000;
+// How often one request re-reads a policy that changed under it.
+const MAX_POLICY_READS = 3;
 
 // Requests that reach a model. The audit logs only these: catalog listings and
 // token counts never pick an account for a conversation.
@@ -107,7 +135,9 @@ interface HubOptions {
   maxAffinityBindings: number;
   hubTokens: HubTokenStore;
   passes: HubPasses | null;
+  policies: HubThreadPolicies | null;
   audit: (entry: AuditInput) => void;
+  onThreadAccountChanged: (threadId: string) => void;
   getSettings: () => AccountPoolConfig;
   adapters: ReadonlyMap<PoolProvider, ProviderAdapter>;
   fetch: typeof fetch;
@@ -187,6 +217,9 @@ export class AccountPoolHub {
   private activeAccounts = new Map<PoolProvider, ActiveAccount>();
   // Last account logged as `select` per [provider, principal, session].
   private readonly auditedSelections = new Map<string, string>();
+  // Last `named-limit` row per thread that does not change the policy (stop,
+  // unavailable): repeats are not logged until a success or a policy change.
+  private readonly namedLimitNotes = new Map<string, string>();
   private readonly usageRefreshes = new Map<string, Promise<void>>();
   private readonly lastUsageRefreshAt = new Map<string, number>();
   private readonly drainWaiters = new Set<() => void>();
@@ -696,19 +729,19 @@ export class AccountPoolHub {
     const threadId = principal.kind === "thread" ? principal.threadId : null;
     const audited = AUDITED_ROUTES.has(routePath);
     const audit = (
-      reason: "select" | "failover" | "limit",
-      accountId: string,
-      detail: FailoverCause | null = null,
+      reason: "select" | "failover" | "limit" | "named-limit" | "policy",
+      accountId: string | null,
+      detail: string | null = null,
     ) => {
-      if (audited)
-        this.options.audit({
-          reason,
-          provider: adapter.provider,
-          threadId,
-          hostId,
-          accountId,
-          detail,
-        });
+      if (!audited) return;
+      this.options.audit({
+        reason,
+        provider: adapter.provider,
+        threadId,
+        hostId,
+        accountId,
+        detail,
+      });
     };
     let cause: FailoverCause = "upstream";
     const signal = AbortSignal.any([request.signal, this.stopped.signal]);
@@ -736,37 +769,167 @@ export class AccountPoolHub {
       affinityKey === null || parsed.parentAffinityId === null
         ? null
         : JSON.stringify([adapter.provider, hostId, parsed.parentAffinityId]);
+    // A thread pinned to a named account of this provider (block P3) uses only
+    // that account until it cannot serve; then its on-limit rule applies.
+    const policies = this.options.policies;
+    let policyReads = 0;
+    const readNamed = (): NamedRoute | null => {
+      if (threadId === null || policies === null) return null;
+      policyReads += 1;
+      let policy: ThreadPolicy;
+      try {
+        policy = policies.get(threadId);
+      } catch {
+        return null;
+      }
+      return policy.mode === "named" && policy.provider === adapter.provider
+        ? {
+            accountId: policy.accountId,
+            onLimit: policy.onLimit,
+            revision: policy.revision,
+            updatedAt: policy.updatedAt,
+          }
+        : null;
+    };
+    let named = readNamed();
+    let namedRefreshed = false;
+    const namedStates = new Map<string, NamedAccountState>();
+    const setAside = (accountId: string) => {
+      if (candidateIds.has(accountId)) attempted.add(accountId);
+    };
     try {
-      while (attempted.size < candidateIds.size) {
+      while (attempted.size < candidateIds.size || named !== null) {
         signal.throwIfAborted();
-        const selected = await this.select(
-          adapter.provider,
-          candidateIds,
-          attempted,
-          family,
-          affinityKey,
-          parentAffinityKey,
-          previousAccountId,
-          routing,
-          signal,
-          projectOrder,
-        );
-        if (
-          !usageRefreshed &&
-          (selected === null ||
-            isQuotaExhausted(
-              selected.quota,
+        let selected: SelectedAccount | null;
+        if (named !== null) {
+          const accountId = named.accountId;
+          if (attempted.has(accountId) && !namedStates.has(accountId)) {
+            // A quota rejection is the real limit. Any other failure is
+            // transient unless it left the account unusable (D2).
+            if (cause === "quota") namedStates.set(accountId, "limit");
+            else {
+              const after = await this.namedAccount(accountId, family, false);
+              if (after.state === "ok") break;
+              namedStates.set(accountId, after.state);
+            }
+          }
+          const looked = await abortable(
+            this.namedAccount(
+              accountId,
               family,
-              this.options.getSettings().switchThreshold,
-              this.options.now(),
-            ))
-        ) {
-          usageRefreshed = true;
-          await abortable(
-            this.refreshExhaustedUsage(candidateIds, attempted, family),
+              !namedRefreshed && !attempted.has(accountId),
+            ),
             signal,
           );
-          continue;
+          namedRefreshed = true;
+          const state = namedStates.get(accountId) ?? looked.state;
+          if (
+            state === "ok" &&
+            looked.account !== null &&
+            looked.quota !== null &&
+            looked.account.provider === adapter.provider
+          ) {
+            selected = this.selectNamed(looked.account, looked.quota, affinityKey);
+          } else {
+            const notServing = state === "ok" ? "deleted" : state;
+            namedStates.set(accountId, notServing);
+            setAside(accountId);
+            if (!audited || threadId === null || policies === null) {
+              // Token counts and other side routes never change a policy.
+              named = null;
+              continue;
+            }
+            if (named.onLimit === "stop") {
+              if (
+                this.firstNamedLimit(
+                  threadId,
+                  `${named.revision}:${notServing}-stop`,
+                )
+              ) {
+                audit("named-limit", accountId, `${notServing}-stop`);
+                this.options.onThreadAccountChanged(threadId);
+              }
+              const resetAt =
+                notServing === "limit" && looked.quota !== null
+                  ? blockingResetAt(
+                      looked.quota,
+                      family,
+                      NAMED_LIMIT_THRESHOLD,
+                      this.options.now(),
+                    )
+                  : null;
+              return adapter.errorResponse(
+                429,
+                namedStopMessage(notServing, looked.account?.label ?? null),
+                resetAt === null
+                  ? {}
+                  : {
+                      "retry-after": String(
+                        Math.max(
+                          1,
+                          Math.ceil((resetAt - this.options.now()) / 1_000),
+                        ),
+                      ),
+                    },
+              );
+            }
+            if (notServing === "unavailable") {
+              // Served by auto for this request; the policy stays (D2).
+              if (
+                this.firstNamedLimit(
+                  threadId,
+                  `${named.revision}:unavailable-fallback-auto`,
+                )
+              ) {
+                audit("named-limit", accountId, "unavailable-fallback-auto");
+                this.options.onThreadAccountChanged(threadId);
+              }
+              named = null;
+              continue;
+            }
+            if (policies.fallBack(threadId, named.revision)) {
+              audit("named-limit", accountId, `${notServing}-fallback-auto`);
+              audit("policy", null, "auto@limit");
+              this.namedLimitNotes.delete(threadId);
+              this.options.onThreadAccountChanged(threadId);
+              named = null;
+            } else {
+              // Another writer changed the policy first: follow what it wrote.
+              named = policyReads < MAX_POLICY_READS ? readNamed() : null;
+              if (named !== null) namedStates.delete(named.accountId);
+            }
+            continue;
+          }
+        } else {
+          selected = await this.select(
+            adapter.provider,
+            candidateIds,
+            attempted,
+            family,
+            affinityKey,
+            parentAffinityKey,
+            previousAccountId,
+            routing,
+            signal,
+            projectOrder,
+          );
+          if (
+            !usageRefreshed &&
+            (selected === null ||
+              isQuotaExhausted(
+                selected.quota,
+                family,
+                this.options.getSettings().switchThreshold,
+                this.options.now(),
+              ))
+          ) {
+            usageRefreshed = true;
+            await abortable(
+              this.refreshExhaustedUsage(candidateIds, attempted, family),
+              signal,
+            );
+            continue;
+          }
         }
         if (selected === null) break;
         let pacing: PacingFlight | null = null;
@@ -1052,12 +1215,18 @@ export class AccountPoolHub {
           if (response.ok) {
             this.observeAccess(selected.account, response.status, "", secret);
             selected.accept();
+            // The named account served again: its next limit is news. A
+            // request served by auto for an unavailable named account keeps
+            // the note, so the stretch stays one row.
+            if (threadId !== null && named !== null)
+              this.namedLimitNotes.delete(threadId);
             this.auditSelect(
               audited,
               adapter.provider,
               principal,
               parsed.affinityId,
               selected.account.id,
+              named,
             );
           }
           return this.clientResponse(upstream);
@@ -1092,8 +1261,31 @@ export class AccountPoolHub {
     principal: HubPrincipal,
     affinityId: string | null,
     accountId: string,
+    named: NamedRoute | null,
   ): void {
     if (!audited) return;
+    const threadId = principal.kind === "thread" ? principal.threadId : null;
+    // `switch`: the first request that moves a thread to the account a later
+    // `set` named. Moves by the pool itself stay `select` / `failover`.
+    let reason: "select" | "switch" = "select";
+    const policies = this.options.policies;
+    if (threadId !== null && policies !== null) {
+      const previous = policies.servingFor(threadId);
+      if (
+        named !== null &&
+        named.accountId === accountId &&
+        named.updatedAt !== null &&
+        previous !== null &&
+        previous.accountId !== accountId &&
+        named.updatedAt >= previous.at
+      )
+        reason = "switch";
+      policies.noteServing(threadId, accountId, this.options.now());
+      // Only a real change of the serving account (any policy) is a signal;
+      // the next request of the same session on the same account is not.
+      if (previous?.accountId !== accountId)
+        this.options.onThreadAccountChanged(threadId);
+    }
     const key = JSON.stringify([
       provider,
       principal.kind === "thread"
@@ -1114,12 +1306,74 @@ export class AccountPoolHub {
       this.auditedSelections.delete(oldest.value);
     }
     this.options.audit({
-      reason: "select",
+      reason,
       provider,
-      threadId: principal.kind === "thread" ? principal.threadId : null,
+      threadId,
       hostId: principal.hostId,
       accountId,
     });
+  }
+
+  // Dedupes `named-limit` rows that change no policy: one per thread, policy
+  // revision and detail until the named account serves again.
+  private firstNamedLimit(threadId: string, key: string): boolean {
+    if (this.namedLimitNotes.get(threadId) === key) return false;
+    this.namedLimitNotes.delete(threadId);
+    this.namedLimitNotes.set(threadId, key);
+    while (this.namedLimitNotes.size > MAX_NAMED_LIMIT_KEYS) {
+      const oldest = this.namedLimitNotes.keys().next();
+      if (oldest.done) break;
+      this.namedLimitNotes.delete(oldest.value);
+    }
+    return true;
+  }
+
+  private async namedAccount(
+    accountId: string,
+    family: ModelFamily,
+    refresh: boolean,
+  ): Promise<{
+    state: NamedAccountState;
+    account: Account | null;
+    quota: AccountQuota | null;
+  }> {
+    const account = await this.options.accounts.get(accountId);
+    let quota = account === null ? null : this.options.quotas.get(accountId);
+    let state = namedAccountState(account, quota, family, this.options.now());
+    if (state === "limit" && refresh && account !== null && account.kind === "oauth") {
+      await this.refreshAccountUsage(account, EXHAUSTED_USAGE_REFRESH_INTERVAL_MS);
+      quota = this.options.quotas.get(accountId);
+      state = namedAccountState(account, quota, family, this.options.now());
+    }
+    return { state, account, quota };
+  }
+
+  // The named account as a pinned session: holds over 20 s return 429 instead
+  // of failing over, the session is bound to it on success, and the pool's
+  // active account does not move.
+  private selectNamed(
+    account: Account,
+    quota: AccountQuota,
+    affinityKey: string | null,
+  ): SelectedAccount {
+    return {
+      account,
+      quota,
+      keepAffinity: true,
+      accept: () => {
+        if (affinityKey === null) return;
+        const accepted = { accountId: account.id, lastUsedAt: this.options.now() };
+        this.options.affinity.putBinding(affinityKey, accepted);
+        this.affinityBindings.delete(affinityKey);
+        this.affinityBindings.set(affinityKey, accepted);
+        while (this.affinityBindings.size > this.options.maxAffinityBindings) {
+          const oldest = this.affinityBindings.keys().next();
+          if (oldest.done) break;
+          this.affinityBindings.delete(oldest.value);
+          this.options.affinity.removeBinding(oldest.value);
+        }
+      },
+    };
   }
 
   private async discardUpstream(
@@ -1669,6 +1923,7 @@ export class AccountPoolHub {
   async retryAvailability(
     provider: PoolProvider,
     family: ModelFamily,
+    threadId: string | null = null,
   ): Promise<RetryAvailability> {
     const parent = this.options.getParentRoute();
     if (parent !== null) {
@@ -1691,18 +1946,33 @@ export class AccountPoolHub {
     const accounts = (await this.options.accounts.list()).filter(
       (account) => account.provider === provider,
     );
+    // A thread pinned with `stop` waits for its own account only (block P3).
+    const policy =
+      threadId === null || this.options.policies === null
+        ? null
+        : this.options.policies.get(threadId);
+    if (
+      policy?.mode === "named" &&
+      policy.provider === provider &&
+      policy.onLimit === "stop"
+    )
+      return this.accountAvailability(
+        accounts.filter((account) => account.id === policy.accountId),
+        family,
+        NAMED_LIMIT_THRESHOLD,
+      );
     return this.accountAvailability(accounts, family);
   }
 
   private accountAvailability(
     accounts: readonly Account[],
     family: ModelFamily,
+    threshold = this.options.getSettings().switchThreshold,
   ): RetryAvailability {
     const enabled = accounts.filter((account) => account.enabled);
     if (enabled.length === 0)
       return { kind: "unavailable", reason: "no-enabled-account" };
     const now = this.options.now();
-    const threshold = this.options.getSettings().switchThreshold;
     const resets: number[] = [];
     let unknown = false;
     for (const account of enabled) {
@@ -1831,7 +2101,9 @@ export function createHub(options: {
   affinity: PoolAffinityStore;
   hubTokens: HubTokenStore;
   passes?: HubPasses | null;
+  policies?: HubThreadPolicies | null;
   audit?: (entry: AuditInput) => void;
+  onThreadAccountChanged?: (threadId: string) => void;
   getSettings: () => AccountPoolConfig;
   fetch?: typeof fetch;
   now?: () => number;
@@ -1881,7 +2153,9 @@ export function createHub(options: {
     maxAffinityBindings: options.maxAffinityBindings ?? MAX_AFFINITY_BINDINGS,
     hubTokens: options.hubTokens,
     passes: options.passes ?? null,
+    policies: options.policies ?? null,
     audit: options.audit ?? (() => {}),
+    onThreadAccountChanged: options.onThreadAccountChanged ?? (() => {}),
     getSettings: options.getSettings,
     adapters,
     fetch: options.fetch ?? fetch,
@@ -1895,6 +2169,20 @@ export function createHub(options: {
     onUpstreamError: options.onUpstreamError ?? (() => {}),
     onOAuthRefresh: options.onOAuthRefresh ?? (() => {}),
   });
+}
+
+function namedStopMessage(
+  state: "limit" | "deleted" | "unavailable",
+  label: string | null,
+): string {
+  const account = label === null ? "an account" : `account ${label}`;
+  const what =
+    state === "limit"
+      ? "which hit its limit"
+      : state === "deleted"
+        ? "which was removed from the pool"
+        : "which is unavailable now (disabled, signed out or blocked)";
+  return `This thread is set to ${account}, ${what}; its on-limit rule is stop. Switch the account or set auto with \`bb pool thread set <thread-id> auto\`.`;
 }
 
 function readBearer(value: string | null): string | null {

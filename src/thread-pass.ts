@@ -16,11 +16,10 @@ import type { AuditLog } from "./audit-log.js";
 // useless without the key. Revoking a pass deletes its row; a new row gets a
 // new nonce, so a revoked pass can never come back.
 //
-// This module knows nothing about machine roles. `mayHold(hostId)` decides
-// which hosts are issued passes (block P2: role `worker`); `mayPresent(hostId)`
-// decides whose passes are accepted (any role). They differ on purpose: a
-// later build that issues passes on every role can roll back to this one
-// without failing a turn in flight.
+// This module knows nothing about machine roles. `mayHoldThreadPass(hostId)`
+// and `mayHoldCatalogPass(hostId)` decide which hosts are issued passes (block
+// P3: thread passes on every role, catalog passes on workers only);
+// `mayPresent(hostId)` decides whose passes are accepted (any role).
 
 export const THREAD_PASS_PREFIX = "pt1";
 export const CATALOG_PASS_PREFIX = "pc1";
@@ -150,7 +149,7 @@ export class PassKey {
   private broken(reason: string): void {
     this.state = { kind: "broken" };
     this.onBroken(
-      `Account Pooler pass key ${reason}; worker machines get no pass until it is fixed and the plugin restarts. The file is left as it is.`,
+      `Account Pooler pass key ${reason}; until it is fixed and the plugin restarts, worker machines get no pass and threads on server and trusted machines use the machine token. The file is left as it is.`,
     );
   }
 }
@@ -175,10 +174,16 @@ export interface ThreadPassOptions {
   key: PassKey;
   now: () => number;
   audit: AuditLog;
-  mayHold: (hostId: string) => boolean;
+  mayHoldThreadPass: (hostId: string) => boolean;
+  mayHoldCatalogPass: (hostId: string) => boolean;
   mayPresent: (hostId: string) => boolean;
   // null when the thread does not exist; other failures throw.
   getThread: (threadId: string) => Promise<PassThread | null>;
+  // Up to 200 threads at once; unknown and deleted ids are left out. Other
+  // failures throw.
+  listThreads: (
+    threadIds: readonly string[],
+  ) => Promise<Map<string, Pick<PassThread, "archivedAt" | "deletedAt">>>;
   // false when the machine was removed from bb; other failures throw.
   hostExists: (hostId: string) => Promise<boolean>;
 }
@@ -193,8 +198,23 @@ export const passSummarySchema = z
   .strict();
 export type PassSummary = z.infer<typeof passSummarySchema>;
 
+// Why a send got no thread pass. `closed`: the thread is archived or deleted,
+// so it gets nothing. `failed`: the key or the store is broken, or bb could not
+// be asked; a server or trusted machine falls back to its machine token.
+export type IssueResult =
+  | { kind: "pass"; pass: string }
+  | { kind: "not-holder" }
+  | { kind: "closed" }
+  | { kind: "failed" };
+
+export const RECONCILE_BATCH = 200;
+
 export class ThreadPasses {
   private readonly select: Database.Statement<[string]>;
+  // Bumped by every host revoke. An issue that started before a revoke of its
+  // host writes nothing: every role may hold passes (P3), so the holder
+  // re-check alone cannot see that the role changed meanwhile.
+  private readonly hostRevokes = new Map<string, number>();
 
   constructor(private readonly options: ThreadPassOptions) {
     this.select = options.db.prepare(
@@ -252,11 +272,25 @@ export class ThreadPasses {
 
   // The thread's pass, issuing one when needed; null means "give no pass".
   async issue(threadId: string, hostId: string): Promise<string | null> {
+    const result = await this.issueResult(threadId, hostId);
+    return result.kind === "pass" ? result.pass : null;
+  }
+
+  async issueResult(threadId: string, hostId: string): Promise<IssueResult> {
+    try {
+      return await this.issueOrThrow(threadId, hostId);
+    } catch {
+      return { kind: "failed" };
+    }
+  }
+
+  private async issueOrThrow(threadId: string, hostId: string): Promise<IssueResult> {
     idSchema.parse(threadId);
     idSchema.parse(hostId);
-    if (!this.options.mayHold(hostId)) return null;
+    if (!this.options.mayHoldThreadPass(hostId)) return { kind: "not-holder" };
+    const revokes = this.hostRevokes.get(hostId) ?? 0;
     const key = await this.options.key.get(true);
-    if (key === null) return null;
+    if (key === null) return { kind: "failed" };
     let row = this.row(threadId);
     if (row !== null && row.host_id === hostId && row.archived_at !== null) {
       // Sent to while marked archived: an unarchive may have been missed.
@@ -264,10 +298,10 @@ export class ThreadPasses {
       try {
         thread = await this.options.getThread(threadId);
       } catch {
-        return null;
+        return { kind: "failed" };
       }
       if (thread === null || thread.deletedAt !== null || thread.archivedAt !== null)
-        return null;
+        return { kind: "closed" };
       row = this.row(threadId);
       if (row !== null && row.archived_at !== null) {
         if (this.inGrace(row)) {
@@ -285,19 +319,26 @@ export class ThreadPasses {
       }
     }
     // Synchronous from here on: no role change or lifecycle event interleaves.
-    if (!this.options.mayHold(hostId)) return null;
+    if (
+      !this.options.mayHoldThreadPass(hostId) ||
+      (this.hostRevokes.get(hostId) ?? 0) !== revokes
+    )
+      return { kind: "not-holder" };
     if (row === null || row.host_id !== hostId) {
       row = this.write(threadId, hostId, null);
       this.audit("pass-issued", row, null);
     }
-    return `${THREAD_PASS_PREFIX}.${threadId}.${this.threadMac(key, row)}`;
+    return {
+      kind: "pass",
+      pass: `${THREAD_PASS_PREFIX}.${threadId}.${this.threadMac(key, row)}`,
+    };
   }
 
   async catalogPass(hostId: string): Promise<string | null> {
     idSchema.parse(hostId);
-    if (!this.options.mayHold(hostId)) return null;
+    if (!this.options.mayHoldCatalogPass(hostId)) return null;
     const key = await this.options.key.get(true);
-    if (key === null || !this.options.mayHold(hostId)) return null;
+    if (key === null || !this.options.mayHoldCatalogPass(hostId)) return null;
     return `${CATALOG_PASS_PREFIX}.${hostId}.${this.catalogMac(key, hostId)}`;
   }
 
@@ -348,7 +389,7 @@ export class ThreadPasses {
     } catch {
       return; // the reconcile catches it
     }
-    if (hostId === null || !this.options.mayHold(hostId)) return;
+    if (hostId === null || !this.options.mayHoldThreadPass(hostId)) return;
     const raced = this.row(threadId);
     if (raced !== null) {
       this.options.db
@@ -384,6 +425,7 @@ export class ThreadPasses {
   }
 
   revokeHost(hostId: string, detail: "role" | "host-removed" | "reconcile"): number {
+    this.hostRevokes.set(hostId, (this.hostRevokes.get(hostId) ?? 0) + 1);
     const rows = this.rowsForHost(hostId);
     this.options.db.prepare("DELETE FROM pool_thread_pass WHERE host_id = ?").run(hostId);
     for (const row of rows) this.audit("pass-revoked", row, detail);
@@ -426,9 +468,12 @@ export class ThreadPasses {
   }
 
   // Catches lifecycle events missed while the plugin was down. Runs at start
-  // and every 15 minutes. An SDK failure keeps the row for the next round.
+  // and every 15 minutes. Threads are looked up 200 at a time; a thread the
+  // list leaves out is confirmed with one get, so a short list never revokes.
+  // An SDK failure keeps the row for the next round.
   async reconcile(): Promise<void> {
     const hosts = new Map<string, boolean>();
+    const live: PassRow[] = [];
     for (const row of this.allRows()) {
       if (!this.options.mayPresent(row.host_id)) {
         this.revokeHost(row.host_id, "reconcile");
@@ -449,21 +494,28 @@ export class ThreadPasses {
         this.revokeHost(row.host_id, "host-removed");
         continue;
       }
-      let thread: PassThread | null;
-      try {
-        thread = await this.options.getThread(row.thread_id);
-      } catch {
-        continue;
+      live.push(row);
+    }
+    for (let start = 0; start < live.length; start += RECONCILE_BATCH) {
+      const batch = live.slice(start, start + RECONCILE_BATCH);
+      const found = await lookUpThreads(
+        batch.map((row) => row.thread_id),
+        this.options,
+      );
+      if (found === null) continue;
+      for (const row of batch) {
+        const thread = found.get(row.thread_id);
+        if (thread === undefined) continue; // the lookup failed: keep
+        const current = this.row(row.thread_id);
+        if (current === null || current.nonce !== row.nonce) continue;
+        if (
+          thread === null ||
+          thread.deletedAt !== null ||
+          (thread.archivedAt !== null &&
+            this.options.now() >= thread.archivedAt + ARCHIVE_UNDO_GRACE_MS)
+        )
+          this.revokeThread(row.thread_id, "reconcile");
       }
-      const current = this.row(row.thread_id);
-      if (current === null || current.nonce !== row.nonce) continue;
-      if (
-        thread === null ||
-        thread.deletedAt !== null ||
-        (thread.archivedAt !== null &&
-          this.options.now() >= thread.archivedAt + ARCHIVE_UNDO_GRACE_MS)
-      )
-        this.revokeThread(row.thread_id, "reconcile");
     }
   }
 
@@ -479,6 +531,41 @@ export class ThreadPasses {
       detail,
     });
   }
+}
+
+// Looks threads up in one list call, then confirms each id the list left out
+// with a get. The result maps an id to its thread, to null when bb says it does
+// not exist, and leaves out ids whose get failed. null when the list failed.
+export async function lookUpThreads(
+  threadIds: readonly string[],
+  sdk: Pick<ThreadPassOptions, "getThread" | "listThreads">,
+): Promise<Map<
+  string,
+  Pick<PassThread, "archivedAt" | "deletedAt"> | null
+> | null> {
+  let listed: Map<string, Pick<PassThread, "archivedAt" | "deletedAt">>;
+  try {
+    listed = await sdk.listThreads(threadIds);
+  } catch {
+    return null;
+  }
+  const result = new Map<
+    string,
+    Pick<PassThread, "archivedAt" | "deletedAt"> | null
+  >();
+  for (const threadId of threadIds) {
+    const thread = listed.get(threadId);
+    if (thread !== undefined) {
+      result.set(threadId, thread);
+      continue;
+    }
+    try {
+      result.set(threadId, await sdk.getThread(threadId));
+    } catch {
+      // keep: unknown this round
+    }
+  }
+  return result;
 }
 
 function equalMac(presented: string, expected: string): boolean {
@@ -512,7 +599,7 @@ export function createPassCommands(passes: ThreadPasses) {
   return {
     "pass list": cliCommand({
       summary:
-        "List the per-thread passes of worker machines (never the pass itself)",
+        "List the per-thread passes (never the pass itself)",
       options: { json },
       run: async (input) => {
         const list = passes.list();

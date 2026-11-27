@@ -6,13 +6,23 @@ import {
   hostIdSchema,
   migrateHostRoles,
 } from "./host-roles.js";
-import { ACCOUNT_POOL_HOST_ROLES_CHANGED } from "./realtime.js";
+import {
+  ACCOUNT_POOL_HOST_ROLES_CHANGED,
+  ACCOUNT_POOL_THREAD_ACCOUNT_CHANGED,
+} from "./realtime.js";
+import { ThreadPolicyStore } from "./thread-policy.js";
+import {
+  ThreadAccounts,
+  createThreadAccountHandlers,
+  threadAccountContract,
+} from "./thread-account.js";
 import { AuditLog, createAuditHandlers } from "./audit-log.js";
 import {
   PassKey,
   ThreadPasses,
   createPassHandlers,
   isNotFound,
+  type PassThread,
 } from "./thread-pass.js";
 import {
   retryAvailabilityContract,
@@ -105,6 +115,8 @@ const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
 // How often worker passes are checked against bb (archive, delete, removed
 // machines) and the audit log is pruned; also runs once at start.
 const RECONCILE_INTERVAL_MS = 15 * 60 * 1_000;
+// Thread creation times seen by the env hook (they never change).
+const MAX_CREATED_AT_ENTRIES = 10_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool-prewarm/http";
 
@@ -225,33 +237,72 @@ export function createAccountPoolPlugin(
     const hubTokens = new HubTokenStore(secretDir, now, holdsHubToken);
     await hubTokens.initialize();
     await hubTokens.prune(enrolledIds);
+    // null when the thread does not exist; other failures throw.
+    const fetchThread = async (threadId: string): Promise<unknown> => {
+      try {
+        return await bb.sdk.threads.get({ threadId, include: "host" });
+      } catch (error) {
+        if (isNotFound(error)) return null;
+        throw error;
+      }
+    };
     const passThreadSchema = z.object({
       host: z.object({ id: hostIdSchema }).nullable(),
       archivedAt: z.number().nullable(),
       deletedAt: z.number().nullable(),
     });
+    const threadSchema = passThreadSchema.extend({
+      providerId: z.string(),
+      status: z.string(),
+      createdAt: z.number(),
+    });
+    const getPassThread = async (threadId: string): Promise<PassThread | null> => {
+      const raw = await fetchThread(threadId);
+      if (raw === null) return null;
+      const thread = passThreadSchema.parse(raw);
+      return {
+        hostId: thread.host?.id ?? null,
+        archivedAt: thread.archivedAt,
+        deletedAt: thread.deletedAt,
+      };
+    };
+    const getThread = async (threadId: string) => {
+      const raw = await fetchThread(threadId);
+      return raw === null ? null : threadSchema.parse(raw);
+    };
+    const listThreads = async (threadIds: readonly string[]) =>
+      new Map(
+        z
+          .array(
+            z.object({
+              id: z.string(),
+              archivedAt: z.number().nullable(),
+              deletedAt: z.number().nullable(),
+            }),
+          )
+          .parse(
+            await bb.sdk.threads.list({
+              threadIds: [...threadIds],
+              includeHidden: true,
+            }),
+          )
+          .map((thread) => [
+            thread.id,
+            { archivedAt: thread.archivedAt, deletedAt: thread.deletedAt },
+          ]),
+      );
+    // Every role may hold thread passes (block P3); only workers hold the
+    // catalog pass, because server and trusted machines keep a machine token.
     const passes = new ThreadPasses({
       db,
       key: new PassKey(secretDir, (message) => bb.log.error(message)),
       now,
       audit,
-      mayHold: isWorker,
+      mayHoldThreadPass: permitted,
+      mayHoldCatalogPass: isWorker,
       mayPresent: permitted,
-      getThread: async (threadId) => {
-        try {
-          const thread = passThreadSchema.parse(
-            await bb.sdk.threads.get({ threadId, include: "host" }),
-          );
-          return {
-            hostId: thread.host?.id ?? null,
-            archivedAt: thread.archivedAt,
-            deletedAt: thread.deletedAt,
-          };
-        } catch (error) {
-          if (isNotFound(error)) return null;
-          throw error;
-        }
-      },
+      getThread: getPassThread,
+      listThreads,
       hostExists: async (hostId) => {
         try {
           await bb.sdk.hosts.get({ hostId });
@@ -262,7 +313,51 @@ export function createAccountPoolPlugin(
         }
       },
     });
+    const policies = new ThreadPolicyStore(db, now, (threadId) =>
+      audit.latestServing(threadId),
+    );
+    const threadAccountChanged = (threadId: string) =>
+      bb.realtime.publish(ACCOUNT_POOL_THREAD_ACCOUNT_CHANGED, { threadId });
+    // Threads that existed when this build first started keep the machine
+    // token on server and trusted machines (byte-identical env, no session
+    // rebuild) until a policy row gives them their own pass.
+    const createdAt = new Map<string, number>();
+    const threadCreatedAt = async (threadId: string): Promise<number | null> => {
+      const cached = createdAt.get(threadId);
+      if (cached !== undefined) return cached;
+      let created: number;
+      try {
+        const parsed = z
+          .object({ createdAt: z.number() })
+          .safeParse(await fetchThread(threadId));
+        if (!parsed.success) return null;
+        created = parsed.data.createdAt;
+      } catch {
+        return null;
+      }
+      createdAt.set(threadId, created);
+      while (createdAt.size > MAX_CREATED_AT_ENTRIES) {
+        const oldest = createdAt.keys().next();
+        if (oldest.done) break;
+        createdAt.delete(oldest.value);
+      }
+      return created;
+    };
+    // An unknown creation time keeps the P2 behaviour (machine token).
+    const usesThreadPass = async (threadId: string): Promise<boolean> => {
+      if (policies.has(threadId)) return true;
+      const created = await threadCreatedAt(threadId);
+      return created !== null && created >= policies.passEpoch;
+    };
     const routing = new RoutingStore(bb.storage.kv, now);
+    // The credential the thread's last routed turn got (thread-account.v1
+    // `route`); deleted when a turn gets no central routing.
+    const routeKey = (threadId: string) => `thread-route:${threadId}`;
+    const routeSchema = z.enum(["pass", "machine-token"]);
+    const forgetRoute = async (threadId: string) => {
+      await bb.storage.kv.delete(`retry-route:${threadId}`);
+      await bb.storage.kv.delete(routeKey(threadId));
+    };
     const projectPriority = new ProjectPriority(bb.storage.kv, () =>
       accounts.list(),
     );
@@ -282,6 +377,15 @@ export function createAccountPoolPlugin(
       affinity: new PoolAffinityStore(db),
       hubTokens,
       passes,
+      policies: {
+        get: (threadId) => policies.get(threadId),
+        fallBack: (threadId, revision) =>
+          policies.write(threadId, { mode: "auto" }, revision) !== null,
+        servingFor: (threadId) => policies.servingFor(threadId),
+        noteServing: (threadId, accountId, at) =>
+          policies.noteServing(threadId, accountId, at),
+      },
+      onThreadAccountChanged: threadAccountChanged,
       audit: (entry) => {
         try {
           audit.append(entry);
@@ -434,6 +538,7 @@ export function createAccountPoolPlugin(
       const result = await hub.retryAvailability(
         provider.data,
         modelFamily(request.data.execution.model),
+        input.threadId,
       );
       return permitted(hostId) ? result : denied();
     };
@@ -444,6 +549,69 @@ export function createAccountPoolPlugin(
         experimental_discoverable: true,
         experimental_description:
           "Account Pooler retry availability for routed failed turns.",
+      },
+    );
+    const lastModelSchema = z.object({
+      execution: z.object({ model: z.string() }),
+    });
+    const grandfathered = async (threadId: string): Promise<boolean> => {
+      const thread = await getThread(threadId).catch(() => null);
+      return (
+        thread?.host != null &&
+        holdsHubToken(thread.host.id) &&
+        !(await usesThreadPass(threadId))
+      );
+    };
+    const queuedModelSchema = z.array(z.object({ model: z.string().min(1) }));
+    const threadAccounts = new ThreadAccounts({
+      policies,
+      audit,
+      listAccounts: () => accounts.list(),
+      quota: (accountId) => quotas.get(accountId),
+      now,
+      getThread,
+      // A thread without a turn yet takes the model of its first queued
+      // message, so `set` checks the family it is about to run (A2).
+      threadModel: async (threadId) => {
+        try {
+          const events = await bb.sdk.threads.events.list({
+            threadId,
+            types: ["client/turn/requested"],
+            order: "desc",
+            limit: "1",
+          });
+          const parsed = lastModelSchema.safeParse(events[0]?.data);
+          if (parsed.success) return parsed.data.execution.model;
+          const queued = queuedModelSchema.safeParse(
+            await bb.sdk.threads.queuedMessages.list({ threadId }),
+          );
+          return queued.success ? (queued.data[0]?.model ?? null) : null;
+        } catch {
+          return null;
+        }
+      },
+      grandfathered,
+      route: async (threadId) => {
+        const stored = routeSchema.safeParse(
+          await bb.storage.kv.get(routeKey(threadId)),
+        );
+        if (stored.success) return stored.data;
+        // Routed before this build recorded routes: a grandfathered thread
+        // runs on the machine token.
+        return (await grandfathered(threadId)) ? "machine-token" : "none";
+      },
+      clearContext: async (threadId) => {
+        await bb.sdk.threads.clearContext({ threadId });
+      },
+      onChanged: threadAccountChanged,
+    });
+    bb.rpc.register(
+      threadAccountContract,
+      createThreadAccountHandlers(threadAccounts),
+      {
+        experimental_discoverable: true,
+        experimental_description:
+          "Account Pooler thread-account.v1: a thread's account policy (auto or a named account), the account serving it, its usable accounts and its account events.",
       },
     );
     registerUsageSource(bb, hub);
@@ -470,6 +638,7 @@ export function createAccountPoolPlugin(
       hostRoles,
       passes,
       audit,
+      threadAccounts,
       now,
     );
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
@@ -478,6 +647,18 @@ export function createAccountPoolPlugin(
         return (await availability.get())[provider];
       }
       return operations.hasUsableEnabledAccount(provider);
+    };
+    // R2: a server or trusted thread whose pass cannot be issued keeps the
+    // machine token; log once when that starts and once when it ends.
+    let passFallback = false;
+    const notePassFallback = (failing: boolean) => {
+      if (failing === passFallback) return;
+      passFallback = failing;
+      if (failing)
+        bb.log.warn(
+          "Account Pooler could not issue a thread pass on a server or trusted machine; its threads use the machine token until passes work again.",
+        );
+      else bb.log.info("Account Pooler thread passes work again.");
     };
     const markerEntries = (token: string): PoolEnvEntry[] => [
       {
@@ -523,8 +704,7 @@ export function createAccountPoolPlugin(
         const unpermitted = async (
           reason = "This machine has no Account Pooler role, so it gets no central Claude and Codex routing.",
         ): Promise<PoolEnvEntry[]> => {
-          if (threadId !== null)
-            await bb.storage.kv.delete(`retry-route:${threadId}`);
+          if (threadId !== null) await forgetRoute(threadId);
           return [
             ...[
               "ANTHROPIC_BASE_URL",
@@ -542,6 +722,7 @@ export function createAccountPoolPlugin(
         const worker = isWorker(context.hostId);
         if (!bypassed && (await canServe(provider))) {
           let token: string;
+          let hostToken: string | null = null;
           if (worker) {
             // A thread gets its own pass; a send without a thread (the model
             // catalog) gets a pass that only lists models.
@@ -556,29 +737,43 @@ export function createAccountPoolPlugin(
             token = pass;
           } else {
             try {
-              token = await hubTokens.forHost(context.hostId);
+              hostToken = await hubTokens.forHost(context.hostId);
             } catch (error) {
               if (error instanceof HostNotPermittedError) return unpermitted();
               throw error;
             }
+            token = hostToken;
+            if (threadId !== null && (await usesThreadPass(threadId))) {
+              const issued = await passes.issueResult(threadId, context.hostId);
+              if (issued.kind === "closed")
+                return unpermitted(
+                  "This thread is archived or deleted, so it gets no central routing.",
+                );
+              notePassFallback(issued.kind !== "pass");
+              if (issued.kind === "pass") token = issued.pass;
+            }
           }
           if (threadId !== null) {
             await bb.storage.kv.set(`retry-route:${threadId}`, provider);
+            await bb.storage.kv.set(
+              routeKey(threadId),
+              worker || token !== hostToken ? "pass" : "machine-token",
+            );
             if (provider === "claude") {
               await routing.recordRouted(threadId, context.hostId);
             }
           }
           const entries = [
             ...(await serving(token, context.projectId)),
-            ...(worker ? workerMarkerEntries() : markerEntries(token)),
+            ...(worker || hostToken === null
+              ? workerMarkerEntries()
+              : markerEntries(hostToken)),
           ];
           return !permitted(context.hostId) || isWorker(context.hostId) !== worker
             ? unpermitted()
             : entries;
         }
-        if (threadId !== null) {
-          await bb.storage.kv.delete(`retry-route:${threadId}`);
-        }
+        if (threadId !== null) await forgetRoute(threadId);
         return !permitted(context.hostId)
           ? unpermitted()
           : parentPool === null
@@ -794,7 +989,9 @@ export function createAccountPoolPlugin(
       await passes.archived(
         thread.id,
         thread.archivedAt ?? now(),
-        hostRoles.hasAny("worker"),
+        hostRoles.hasAny("worker") ||
+          thread.createdAt >= policies.passEpoch ||
+          policies.has(thread.id),
       );
     });
     bb.events.on("thread.unarchived", ({ thread }) => {
@@ -802,6 +999,7 @@ export function createAccountPoolPlugin(
     });
     bb.events.on("thread.deleted", ({ thread }) => {
       passes.revokeThread(thread.id, "deleted");
+      if (policies.delete(thread.id)) threadAccountChanged(thread.id);
     });
     bb.events.on("experimental_host.deleted", ({ host }) => {
       passes.revokeHost(host.id, "host-removed");
@@ -811,6 +1009,10 @@ export function createAccountPoolPlugin(
         while (!signal.aborted) {
           try {
             await passes.reconcile();
+            await policies.reconcile(
+              { getThread: getPassThread, listThreads },
+              threadAccountChanged,
+            );
             audit.prune();
           } catch (error) {
             bb.log.warn(

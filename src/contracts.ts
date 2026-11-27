@@ -275,8 +275,29 @@ export type PoolStatus = z.infer<typeof statusSchema>;
 
 export const routedThreadStatusListSchema = z.array(routedThreadStatusSchema);
 
+// Threads per serving account over the last 24 h (block P3).
+export const threadStatusSummarySchema = z
+  .object({
+    namedPolicies: z.number().int().nonnegative(),
+    servingByAccount: z.array(
+      z
+        .object({
+          accountId: z.string().min(1),
+          accountLabel: z.string().nullable(),
+          threads: z.number().int().nonnegative(),
+        })
+        .strict(),
+    ),
+    machineTokenSelections: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ThreadStatusSummary = z.infer<typeof threadStatusSummarySchema>;
+
 export const statusReportSchema = statusSchema
-  .extend({ routedThreadsWithoutLocalLogin: routedThreadStatusListSchema })
+  .extend({
+    routedThreadsWithoutLocalLogin: routedThreadStatusListSchema,
+    threads: threadStatusSummarySchema.optional(),
+  })
   .strict();
 
 export type PoolStatusReport = z.infer<typeof statusReportSchema>;

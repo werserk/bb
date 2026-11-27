@@ -5,6 +5,10 @@ import {
 import { createAuditCommands, type AuditLog } from "./audit-log.js";
 import { createPassCommands, type ThreadPasses } from "./thread-pass.js";
 import {
+  createThreadAccountCommands,
+  type ThreadAccounts,
+} from "./thread-account.js";
+import {
   PluginCliError,
   cliCommand,
   defineCli,
@@ -185,6 +189,19 @@ function formatStatus(status: PoolStatusReport): string {
           (thread) =>
             `${thread.threadId}\t${thread.hostName ?? thread.hostId}\t${thread.localClaudeStatus}`,
         )),
+    ...(status.threads === undefined
+      ? []
+      : [
+          "",
+          "Threads (last 24 h):",
+          `Named policies: ${status.threads.namedPolicies}`,
+          ...status.threads.servingByAccount.map(
+            (row) =>
+              `${row.accountLabel ?? row.accountId}\t${row.threads} thread${row.threads === 1 ? "" : "s"}`,
+          ),
+          `Machine-token selections: ${status.threads.machineTokenSelections}`,
+          "Per thread: bb pool thread show <thread-id>",
+        ]),
     "",
     formatAccounts(status.accounts),
   ].join("\n");
@@ -261,6 +278,7 @@ export function registerPoolCli(
   hostRoles: HostRoles,
   passes: ThreadPasses,
   audit: AuditLog,
+  threads: ThreadAccounts | null = null,
   now: () => number = Date.now,
 ): void {
   bb.cli.register(
@@ -274,6 +292,7 @@ export function registerPoolCli(
         ...createHostRoleCommands(hostRoles),
         ...createPassCommands(passes),
         ...createAuditCommands(audit, now),
+        ...(threads === null ? {} : createThreadAccountCommands(threads)),
         ping: cliCommand({
           summary:
             "Send one tiny Haiku request through exactly one local Claude account",
@@ -686,14 +705,16 @@ export function registerPoolCli(
           options: { json: JSON_OPTION },
           run: (input) =>
             attempt(async () => {
-              const [poolStatus, routedThreadsWithoutLocalLogin] =
+              const [poolStatus, routedThreadsWithoutLocalLogin, threadSummary] =
                 await Promise.all([
                   operations.status(),
                   operations.routedThreadsWithoutLocalLogin(),
+                  threads?.summary() ?? null,
                 ]);
               const status: PoolStatusReport = {
                 ...poolStatus,
                 routedThreadsWithoutLocalLogin,
+                ...(threadSummary === null ? {} : { threads: threadSummary }),
               };
               return {
                 exitCode: 0,

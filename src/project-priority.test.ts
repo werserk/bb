@@ -94,7 +94,11 @@ async function startPool(): Promise<Pool> {
   const clock = { now: Date.now() };
   await createAccountPoolPlugin({
     usageUrl: "data:application/json,{}",
-    upstreams: { anthropic: `http://127.0.0.1:${address.port}` },
+    upstreams: {
+      anthropic: `http://127.0.0.1:${address.port}`,
+      chatgptCodex: `http://127.0.0.1:${address.port}`,
+      openai: `http://127.0.0.1:${address.port}`,
+    },
     now: () => clock.now,
   })(host.bb);
   await host.harness.behavior.callRpc("hostRole.set", {

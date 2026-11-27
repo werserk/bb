@@ -227,3 +227,32 @@ it("prints the audit as tab-separated rows or JSON and rejects bad filters", asy
   );
   await expect(run({ limit: "0" })).rejects.toThrow("Invalid audit filter");
 });
+
+it("finds a thread's latest row of one reason with one indexed lookup (block P3)", async () => {
+  const { raw, db, clock } = await setup();
+  expect(raw.latestEvent("thread-1", "named-limit")).toBeNull();
+  const limit = (threadId: string, detail: string) => {
+    clock.time += 1;
+    raw.append({ reason: "named-limit", provider: "claude", threadId, hostId: "host-a", accountId: "account-1", detail });
+  };
+  limit("thread-1", "unavailable-fallback-auto");
+  limit("thread-1", "limit-fallback-auto");
+  limit("thread-2", "limit-stop");
+  clock.time += 1;
+  raw.append({ reason: "select", provider: "claude", threadId: "thread-1", hostId: "host-a", accountId: "account-2" });
+  expect(raw.latestEvent("thread-1", "named-limit")).toMatchObject({
+    threadId: "thread-1",
+    detail: "limit-fallback-auto",
+  });
+  // The same timestamp as "limit-fallback-auto": the later row wins.
+  clock.time -= 3;
+  limit("thread-1", "deleted-stop");
+  expect(raw.latestEvent("thread-1", "named-limit")?.detail).toBe("deleted-stop");
+  const plan = db
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT id FROM pool_audit WHERE thread_id = ? AND reason = ? ORDER BY ts DESC, id DESC LIMIT 1",
+    )
+    .all("thread-1", "named-limit")
+    .map((row) => String((row as { detail: unknown }).detail));
+  expect(plan.join("\n")).toContain("USING INDEX pool_audit_thread");
+});

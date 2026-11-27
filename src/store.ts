@@ -877,4 +877,23 @@ export const QUOTA_MIGRATIONS = [
   );
   CREATE INDEX pool_audit_ts ON pool_audit(ts);
   CREATE INDEX pool_audit_thread ON pool_audit(thread_id, ts)`,
+  // Thread account policy (block P3, thread-policy.ts). No row means `auto`.
+  // `pool_pass_epoch` holds the time this build first started: threads created
+  // before it keep the machine token on server and trusted machines until they
+  // get a policy, so the install rebuilds no running session.
+  `CREATE TABLE pool_thread_policy (
+    thread_id TEXT PRIMARY KEY NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('auto', 'named')),
+    provider TEXT CHECK (provider IN ('claude', 'codex')),
+    account_id TEXT,
+    on_limit TEXT CHECK (on_limit IN ('fallback-auto', 'stop')),
+    revision INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((mode = 'auto' AND provider IS NULL AND account_id IS NULL AND on_limit IS NULL)
+        OR (mode = 'named' AND provider IS NOT NULL AND account_id IS NOT NULL AND on_limit IS NOT NULL))
+  );
+  CREATE TABLE pool_pass_epoch (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    started_at INTEGER NOT NULL
+  )`,
 ];

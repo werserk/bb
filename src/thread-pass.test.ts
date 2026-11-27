@@ -39,6 +39,8 @@ async function setup() {
     ]),
     threads: new Map<string, PassThread | Error>(),
     hosts: new Map<string, boolean | Error>(),
+    listCalls: 0,
+    listFails: false,
   };
   const audit = new AuditLog(db, () => state.time);
   const broken = vi.fn();
@@ -48,13 +50,28 @@ async function setup() {
       key: new PassKey(secrets, broken),
       now: () => state.time,
       audit,
-      mayHold: (hostId) => state.roles.get(hostId) === "worker",
+      // P2's rule; the any-role rule of P3 is tested in server.test.ts.
+      mayHoldThreadPass: (hostId) => state.roles.get(hostId) === "worker",
+      mayHoldCatalogPass: (hostId) => state.roles.get(hostId) === "worker",
       mayPresent: (hostId) => state.roles.get(hostId) !== undefined,
       getThread: async (threadId) => {
         const thread = state.threads.get(threadId);
         if (thread instanceof Error) throw thread;
         // server.ts maps a 404 to null.
         return thread ?? null;
+      },
+      listThreads: async (threadIds) => {
+        state.listCalls += 1;
+        if (state.listFails) throw new Error("list failed");
+        const found = new Map<string, Pick<PassThread, "archivedAt" | "deletedAt">>();
+        for (const threadId of threadIds) {
+          const thread = state.threads.get(threadId);
+          // Like bb: a thread the list cannot read is left out.
+          if (thread instanceof Error) continue;
+          if (thread !== undefined && thread.deletedAt === null)
+            found.set(threadId, thread);
+        }
+        return found;
       },
       hostExists: async (hostId) => {
         const exists = state.hosts.get(hostId) ?? true;
@@ -312,6 +329,25 @@ it("reconciles rows of deleted, archived, missing and role-less threads and keep
   state.threads.delete("live");
   await passes.reconcile();
   expect(passes.list().map((pass) => pass.threadId)).toEqual(["flaky", "live"]);
+});
+
+it("looks threads up in batches of 200 and keeps every row when the list call fails", async () => {
+  const { passes, state, live } = await setup();
+  const ids = Array.from({ length: 201 }, (_, index) => `thread-${index}`);
+  for (const id of ids) {
+    live(id);
+    await passes.issue(id, "host-w");
+  }
+  state.threads.delete("thread-0");
+  state.listFails = true;
+  await passes.reconcile();
+  expect(passes.list()).toHaveLength(201);
+  expect(state.listCalls).toBe(2);
+  state.listFails = false;
+  await passes.reconcile();
+  expect(state.listCalls).toBe(4);
+  expect(passes.list().map((pass) => pass.threadId)).not.toContain("thread-0");
+  expect(passes.list()).toHaveLength(200);
 });
 
 it("creates the key only at the first issue, never overwrites it, and keeps passes across a restart", async () => {

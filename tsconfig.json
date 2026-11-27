@@ -27,6 +27,7 @@
     "src/**/*.ts",
     "app.tsx",
     "app.test.tsx",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "test-network-guard.ts"
   ]
 }

@@ -7,8 +7,8 @@ import {
 import type Database from "better-sqlite3";
 import { z } from "zod";
 
-// Append-only audit of routing and access decisions (block P2). It holds ids,
-// reasons and a fixed-vocabulary detail only: never prompt content, model
+// Append-only audit of routing and access decisions (blocks P2, P3). It holds
+// ids, reasons and a fixed-vocabulary detail only: never prompt content, model
 // names, headers, tokens or passes.
 export const AUDIT_REASONS = [
   "select",
@@ -17,17 +17,26 @@ export const AUDIT_REASONS = [
   "pass-issued",
   "pass-revoked",
   "role-change",
+  // Thread account policy (block P3, thread-policy.ts).
+  "switch",
+  "policy",
+  "named-limit",
 ] as const;
 export const auditReasonSchema = z.enum(AUDIT_REASONS);
 export type AuditReason = z.infer<typeof auditReasonSchema>;
 
 // Every detail value the code writes. Role changes write "<from>-><to>".
+// Policy changes write "<policy>@<caller>[+new-session]" and named-account
+// events "<cause>-<rule>" (block P3).
 const ROLE_NAME = "(server|worker|trusted|none)";
+const POLICY_DETAIL =
+  "(auto|named-fallback-auto|named-stop)@(client|cli|limit|revert|plugin-[a-z0-9-]{1,48})(\\+new-session)?";
+const NAMED_LIMIT_DETAIL = "(limit|deleted|unavailable)-(fallback-auto|stop)";
 export const auditDetailSchema = z
   .string()
   .regex(
     new RegExp(
-      `^(archived|deleted|restored|manual|role|host-removed|reconcile|quota|rate-limit|auth|upstream|${ROLE_NAME}->${ROLE_NAME})$`,
+      `^(archived|deleted|restored|manual|role|host-removed|reconcile|quota|rate-limit|auth|upstream|${ROLE_NAME}->${ROLE_NAME}|${POLICY_DETAIL}|${NAMED_LIMIT_DETAIL})$`,
       "u",
     ),
   );
@@ -51,6 +60,11 @@ const auditRecordSchema = z
 export type AuditInput = Partial<
   Omit<z.infer<typeof auditRecordSchema>, "reason">
 > & { reason: AuditReason };
+
+// Rows that say an account served a thread. A `failover` row is written
+// before its attempt, so it is not proof; a served failover also writes
+// `select`.
+const SERVING_REASONS = "('select', 'switch')";
 
 // What it reads back: any well-formed row, so that rows written by a later
 // build (new reasons and details) are shown as they are after a rollback. A
@@ -163,6 +177,99 @@ export class AuditLog {
         )
         .run(this.maxRows);
     })();
+  }
+
+  // The account that last served a thread: its latest select or switch row
+  // (block P3). Rows past the retention are gone, so an old thread
+  // reads as not routed until its next request.
+  latestServing(threadId: string): { accountId: string; at: number } | null {
+    const row = z
+      .object({ account_id: z.string().min(1), ts: z.number().int() })
+      .optional()
+      .safeParse(
+        this.db
+          .prepare(
+            `SELECT account_id, ts FROM pool_audit WHERE thread_id = ? AND reason IN ${SERVING_REASONS} AND account_id IS NOT NULL ORDER BY ts DESC, id DESC LIMIT 1`,
+          )
+          .get(threadId),
+      );
+    return row.success && row.data !== undefined
+      ? { accountId: row.data.account_id, at: row.data.ts }
+      : null;
+  }
+
+  // The latest serving row of every thread routed since `since` (block P3).
+  recentServing(
+    since: number,
+  ): Array<{ threadId: string; accountId: string; at: number }> {
+    return z
+      .array(
+        z.object({
+          thread_id: z.string().min(1),
+          account_id: z.string().min(1),
+          ts: z.number().int(),
+        }),
+      )
+      .catch([])
+      .parse(
+        this.db
+          .prepare(
+            `SELECT thread_id, account_id, MAX(ts) AS ts FROM pool_audit WHERE ts >= ? AND thread_id IS NOT NULL AND account_id IS NOT NULL AND reason IN ${SERVING_REASONS} GROUP BY thread_id ORDER BY ts DESC`,
+          )
+          .all(since),
+      )
+      .map((row) => ({
+        threadId: row.thread_id,
+        accountId: row.account_id,
+        at: row.ts,
+      }));
+  }
+
+  // Model sessions selected on a machine token, not a thread pass, since
+  // `since`: one `select` row per session account change (block P3).
+  machineTokenSelections(since: number): number {
+    return z
+      .object({ count: z.number().int() })
+      .parse(
+        this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM pool_audit WHERE ts >= ? AND reason = 'select' AND thread_id IS NULL",
+          )
+          .get(since),
+      ).count;
+  }
+
+  // A thread's latest row of one reason: one indexed lookup (block P3). null
+  // when there is none or it does not parse.
+  latestEvent(threadId: string, reason: string): AuditEntry | null {
+    const parsed = rowSchema.safeParse(
+      this.db
+        .prepare(
+          "SELECT id, ts, reason, provider, thread_id, host_id, account_id, detail FROM pool_audit WHERE thread_id = ? AND reason = ? ORDER BY ts DESC, id DESC LIMIT 1",
+        )
+        .get(threadId, reason),
+    );
+    return parsed.success ? parsed.data : null;
+  }
+
+  // A thread's account events, oldest first after `afterId` (block P3).
+  threadEvents(
+    threadId: string,
+    reasons: readonly string[],
+    afterId: number,
+    limit: number,
+  ): AuditEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, ts, reason, provider, thread_id, host_id, account_id, detail FROM pool_audit WHERE thread_id = ? AND id > ? AND reason IN (${reasons.map(() => "?").join(", ")}) ORDER BY id ASC LIMIT ?`,
+      )
+      .all(threadId, afterId, ...reasons, limit);
+    const entries: AuditEntry[] = [];
+    for (const row of rows) {
+      const parsed = rowSchema.safeParse(row);
+      if (parsed.success) entries.push(parsed.data);
+    }
+    return entries;
   }
 
   list(query: AuditQuery = {}): AuditList {
