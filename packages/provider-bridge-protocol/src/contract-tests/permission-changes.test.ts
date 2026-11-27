@@ -97,6 +97,7 @@ function createControlledClaudeQuery() {
       emit({ value: undefined, done: true });
     },
     getContextUsage: vi.fn().mockResolvedValue(null),
+    initializationResult: vi.fn().mockResolvedValue({}),
     interrupt: vi.fn().mockResolvedValue(undefined),
     setModel: vi.fn().mockResolvedValue(undefined),
     setPermissionMode: vi.fn().mockResolvedValue(undefined),

@@ -52,6 +52,8 @@ describe("product-map surfaces", () => {
     const ordered = [
       "composer-replacement",
       "composer-banners",
+      "composer-inline-panels",
+      "composer-suggestions",
       "composer-state",
       "mention-provider",
       "composer-rich-text",

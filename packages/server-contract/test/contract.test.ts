@@ -54,11 +54,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "Submission membership and admission receipts are additive; legacy requests, persisted events and rollback servers omit them.",
     fields: [
       "sendMessageRequestSchema.clientSubmissionId",
-      "sendQueuedMessageResponseSchema.command",
       "sendQueuedMessageResponseSchema.queuedMessage.clientSubmissionIds",
-      "sendQueuedMessageResponseSchema.requested",
-      "sendQueuedMessageResponseSchema.sourceQueuedMessageIds",
-      "sendQueuedMessageResponseSchema.submissionIds",
       "threadTimelineResponseSchema.rows.clientSubmissionIds",
       "threadTimelineResponseSchema.rows.sourceQueuedMessageIds",
       "threadTimelineResponseSchema.rows.submissionRequestId",
@@ -2284,7 +2280,21 @@ describe("environment provider contracts", () => {
 it("keeps legacy admission decoders and excludes submission identity from edit requests", () => {
   const id = crypto.randomUUID();
   expect(
-    contract.sendMessageResponseSchema.parse({ ok: true, delivery: "sent" }),
+    contract.sendMessageResponseSchema.parse({
+      ok: true,
+      delivery: "sent",
+      messageSequence: null,
+    }),
+  ).toEqual({ ok: true, delivery: "sent", messageSequence: null });
+  expect(
+    contract.sendMessageResponseSchema.safeParse({ ok: true, delivery: "sent" })
+      .success,
+  ).toBe(false);
+  expect(
+    contract.sendQueuedMessageResponseSchema.parse({
+      ok: true,
+      delivery: "sent",
+    }),
   ).toEqual({ ok: true, delivery: "sent" });
   expect(
     contract.sendMessageRequestSchema.parse({

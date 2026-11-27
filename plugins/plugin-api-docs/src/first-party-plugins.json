@@ -115,6 +115,11 @@
     "icon": "ChartColumn"
   },
   {
+    "id": "prompt-suggestion",
+    "name": "Prompt Suggestion",
+    "icon": "MessageSquare"
+  },
+  {
     "id": "provider-retry",
     "name": "Provider retry",
     "icon": "ArrowReloadHorizontal"
