@@ -742,12 +742,6 @@ export class AccountPoolHub {
         accountId,
         detail,
       });
-      if (reason === "failover" && threadId !== null && accountId !== null)
-        this.options.policies?.noteServing(
-          threadId,
-          accountId,
-          this.options.now(),
-        );
     };
     let cause: FailoverCause = "upstream";
     const signal = AbortSignal.any([request.signal, this.stopped.signal]);
@@ -1270,6 +1264,28 @@ export class AccountPoolHub {
     named: NamedRoute | null,
   ): void {
     if (!audited) return;
+    const threadId = principal.kind === "thread" ? principal.threadId : null;
+    // `switch`: the first request that moves a thread to the account a later
+    // `set` named. Moves by the pool itself stay `select` / `failover`.
+    let reason: "select" | "switch" = "select";
+    const policies = this.options.policies;
+    if (threadId !== null && policies !== null) {
+      const previous = policies.servingFor(threadId);
+      if (
+        named !== null &&
+        named.accountId === accountId &&
+        named.updatedAt !== null &&
+        previous !== null &&
+        previous.accountId !== accountId &&
+        named.updatedAt >= previous.at
+      )
+        reason = "switch";
+      policies.noteServing(threadId, accountId, this.options.now());
+      // Only a real change of the serving account (any policy) is a signal;
+      // the next request of the same session on the same account is not.
+      if (previous?.accountId !== accountId)
+        this.options.onThreadAccountChanged(threadId);
+    }
     const key = JSON.stringify([
       provider,
       principal.kind === "thread"
@@ -1289,24 +1305,6 @@ export class AccountPoolHub {
       if (oldest.done) break;
       this.auditedSelections.delete(oldest.value);
     }
-    const threadId = principal.kind === "thread" ? principal.threadId : null;
-    // `switch`: the first request that moves a thread to the account a later
-    // `set` named. Moves by the pool itself stay `select` / `failover`.
-    let reason: "select" | "switch" = "select";
-    const policies = this.options.policies;
-    if (threadId !== null && policies !== null) {
-      const previous = policies.servingFor(threadId);
-      if (
-        named !== null &&
-        named.accountId === accountId &&
-        named.updatedAt !== null &&
-        previous !== null &&
-        previous.accountId !== accountId &&
-        named.updatedAt >= previous.at
-      )
-        reason = "switch";
-      policies.noteServing(threadId, accountId, this.options.now());
-    }
     this.options.audit({
       reason,
       provider,
@@ -1314,8 +1312,6 @@ export class AccountPoolHub {
       hostId: principal.hostId,
       accountId,
     });
-    if (reason === "switch" && threadId !== null)
-      this.options.onThreadAccountChanged(threadId);
   }
 
   // Dedupes `named-limit` rows that change no policy: one per thread, policy

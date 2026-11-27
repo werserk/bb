@@ -67,6 +67,11 @@ const limitEventSchema = z
   })
   .strict();
 
+// How the thread's requests reach the hub: its own pass, the machine token
+// (grandfathered threads among them), or none yet.
+export const THREAD_ROUTES = ["pass", "machine-token", "none"] as const;
+export type ThreadRoute = (typeof THREAD_ROUTES)[number];
+
 export const threadAccountStateSchema = z
   .object({
     threadId: idSchema,
@@ -75,6 +80,7 @@ export const threadAccountStateSchema = z
     revision: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative().nullable(),
     grandfathered: z.boolean(),
+    route: z.enum(THREAD_ROUTES),
     serving: z
       .object({
         accountId: z.string().min(1),
@@ -233,11 +239,13 @@ export interface ThreadAccountDeps {
     archivedAt: number | null;
     deletedAt: number | null;
   } | null>;
-  // The model of the thread's last turn, null when unknown.
-  lastModel: (threadId: string) => Promise<string | null>;
+  // The model of the thread's last turn or, before its first turn, of its
+  // first queued message; null when unknown.
+  threadModel: (threadId: string) => Promise<string | null>;
   // Whether the thread still runs on the machine token (server and trusted
   // machines, created before this build first started, no policy row yet).
   grandfathered: (threadId: string) => Promise<boolean>;
+  route: (threadId: string) => Promise<ThreadRoute>;
   clearContext: (threadId: string) => Promise<void>;
   onChanged: (threadId: string) => void;
 }
@@ -335,7 +343,7 @@ export class ThreadAccounts {
   ): Promise<ThreadAccountState> {
     const policy = this.deps.policies.get(threadId);
     const serving = this.deps.policies.servingFor(threadId);
-    const lastLimit = this.deps.audit.threadEvents(threadId, ["named-limit"], 0, 1_000).at(-1);
+    const lastLimit = this.deps.audit.latestEvent(threadId, "named-limit");
     return {
       threadId,
       provider,
@@ -351,6 +359,7 @@ export class ThreadAccounts {
       revision: policy.revision,
       updatedAt: policy.updatedAt,
       grandfathered: await this.deps.grandfathered(threadId),
+      route: await this.deps.route(threadId),
       serving:
         serving === null
           ? null
@@ -361,7 +370,7 @@ export class ThreadAccounts {
               since: serving.at,
             },
       lastLimit:
-        lastLimit === undefined ? null : limitEvent(lastLimit, labels.of),
+        lastLimit === null ? null : limitEvent(lastLimit, labels.of),
       switchContinuity:
         continuity ?? (provider === null ? "may-restart" : SWITCH_CONTINUITY[provider]),
       note: provider === "codex" ? CODEX_NOTE : null,
@@ -402,7 +411,7 @@ export class ThreadAccounts {
           "other-provider",
           `Account ${account.label} is a ${account.provider} account; this thread runs ${provider}.`,
         );
-      const model = await this.deps.lastModel(threadId);
+      const model = await this.deps.threadModel(threadId);
       const family = model === null ? null : modelFamily(model);
       const quota = this.deps.quota(account.id);
       const usable = namedAccountState(account, quota, family, this.deps.now());
@@ -543,7 +552,7 @@ export class ThreadAccounts {
     idSchema.parse(threadId);
     const thread = await this.deps.getThread(threadId);
     const provider = thread === null ? null : pooledProvider(thread.providerId);
-    const model = provider === null ? null : await this.deps.lastModel(threadId);
+    const model = provider === null ? null : await this.deps.threadModel(threadId);
     const family = model === null ? null : modelFamily(model);
     const now = this.deps.now();
     const accounts = (await this.deps.listAccounts()).sort(
@@ -712,6 +721,12 @@ function threadArg(value: unknown): string {
   return parsed.data;
 }
 
+const ROUTE_TEXT: Record<ThreadRoute, string> = {
+  pass: "own pass",
+  "machine-token": "machine token (no policy applies)",
+  none: "no routed turn yet",
+};
+
 function formatState(state: ThreadAccountState): string {
   const policy =
     state.policy.mode === "auto"
@@ -728,6 +743,7 @@ function formatState(state: ThreadAccountState): string {
     `Provider: ${state.provider ?? "not pooled"}`,
     `Policy: ${policy} (revision ${state.revision})`,
     `Serving: ${serving}`,
+    `Route: ${ROUTE_TEXT[state.route]}`,
     ...(state.lastLimit === null
       ? []
       : [

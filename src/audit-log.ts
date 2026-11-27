@@ -61,6 +61,11 @@ export type AuditInput = Partial<
   Omit<z.infer<typeof auditRecordSchema>, "reason">
 > & { reason: AuditReason };
 
+// Rows that say an account served a thread. A `failover` row is written
+// before its attempt, so it is not proof; a served failover also writes
+// `select`.
+const SERVING_REASONS = "('select', 'switch')";
+
 // What it reads back: any well-formed row, so that rows written by a later
 // build (new reasons and details) are shown as they are after a rollback. A
 // row that breaks the id and time invariants, or holds an overlong or control
@@ -174,8 +179,8 @@ export class AuditLog {
     })();
   }
 
-  // The account that last served a thread: its latest select, failover or
-  // switch row (block P3). Rows past the retention are gone, so an old thread
+  // The account that last served a thread: its latest select or switch row
+  // (block P3). Rows past the retention are gone, so an old thread
   // reads as not routed until its next request.
   latestServing(threadId: string): { accountId: string; at: number } | null {
     const row = z
@@ -184,7 +189,7 @@ export class AuditLog {
       .safeParse(
         this.db
           .prepare(
-            "SELECT account_id, ts FROM pool_audit WHERE thread_id = ? AND reason IN ('select', 'failover', 'switch') AND account_id IS NOT NULL ORDER BY ts DESC, id DESC LIMIT 1",
+            `SELECT account_id, ts FROM pool_audit WHERE thread_id = ? AND reason IN ${SERVING_REASONS} AND account_id IS NOT NULL ORDER BY ts DESC, id DESC LIMIT 1`,
           )
           .get(threadId),
       );
@@ -209,7 +214,7 @@ export class AuditLog {
       .parse(
         this.db
           .prepare(
-            "SELECT thread_id, account_id, MAX(ts) AS ts FROM pool_audit WHERE ts >= ? AND thread_id IS NOT NULL AND account_id IS NOT NULL AND reason IN ('select', 'failover', 'switch') GROUP BY thread_id ORDER BY ts DESC",
+            `SELECT thread_id, account_id, MAX(ts) AS ts FROM pool_audit WHERE ts >= ? AND thread_id IS NOT NULL AND account_id IS NOT NULL AND reason IN ${SERVING_REASONS} GROUP BY thread_id ORDER BY ts DESC`,
           )
           .all(since),
       )
@@ -232,6 +237,19 @@ export class AuditLog {
           )
           .get(since),
       ).count;
+  }
+
+  // A thread's latest row of one reason: one indexed lookup (block P3). null
+  // when there is none or it does not parse.
+  latestEvent(threadId: string, reason: string): AuditEntry | null {
+    const parsed = rowSchema.safeParse(
+      this.db
+        .prepare(
+          "SELECT id, ts, reason, provider, thread_id, host_id, account_id, detail FROM pool_audit WHERE thread_id = ? AND reason = ? ORDER BY ts DESC, id DESC LIMIT 1",
+        )
+        .get(threadId, reason),
+    );
+    return parsed.success ? parsed.data : null;
   }
 
   // A thread's account events, oldest first after `afterId` (block P3).

@@ -249,7 +249,13 @@ re-reads the policy (at most three reads). `named-limit` rows that change
 nothing are deduplicated per thread, revision and detail until the named
 account serves again. The first request served by a newly named account writes
 `switch` instead of `select`; the previous serving account comes from an LRU
-filled from the audit log, so this survives a restart. Policies of deleted
+filled from the audit log's latest `select` or `switch` row, so this survives a
+restart. A `failover` row is written before its attempt, so it does not count
+as serving. Every real change of the serving account, under any policy,
+publishes `thread-account-changed`; the same account again publishes nothing.
+The env hook stores the credential each routed turn got under the plugin KV
+key `thread-route:<threadId>` (`pass` or `machine-token`, deleted when a turn
+gets no central routing); `get` reports it as `route`. Policies of deleted
 threads are dropped on `thread.deleted` and by the reconcile; archived threads
 keep theirs.
 

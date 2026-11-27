@@ -350,6 +350,14 @@ export function createAccountPoolPlugin(
       return created !== null && created >= policies.passEpoch;
     };
     const routing = new RoutingStore(bb.storage.kv, now);
+    // The credential the thread's last routed turn got (thread-account.v1
+    // `route`); deleted when a turn gets no central routing.
+    const routeKey = (threadId: string) => `thread-route:${threadId}`;
+    const routeSchema = z.enum(["pass", "machine-token"]);
+    const forgetRoute = async (threadId: string) => {
+      await bb.storage.kv.delete(`retry-route:${threadId}`);
+      await bb.storage.kv.delete(routeKey(threadId));
+    };
     const projectPriority = new ProjectPriority(bb.storage.kv, () =>
       accounts.list(),
     );
@@ -546,6 +554,15 @@ export function createAccountPoolPlugin(
     const lastModelSchema = z.object({
       execution: z.object({ model: z.string() }),
     });
+    const grandfathered = async (threadId: string): Promise<boolean> => {
+      const thread = await getThread(threadId).catch(() => null);
+      return (
+        thread?.host != null &&
+        holdsHubToken(thread.host.id) &&
+        !(await usesThreadPass(threadId))
+      );
+    };
+    const queuedModelSchema = z.array(z.object({ model: z.string().min(1) }));
     const threadAccounts = new ThreadAccounts({
       policies,
       audit,
@@ -553,7 +570,9 @@ export function createAccountPoolPlugin(
       quota: (accountId) => quotas.get(accountId),
       now,
       getThread,
-      lastModel: async (threadId) => {
+      // A thread without a turn yet takes the model of its first queued
+      // message, so `set` checks the family it is about to run (A2).
+      threadModel: async (threadId) => {
         try {
           const events = await bb.sdk.threads.events.list({
             threadId,
@@ -562,18 +581,24 @@ export function createAccountPoolPlugin(
             limit: "1",
           });
           const parsed = lastModelSchema.safeParse(events[0]?.data);
-          return parsed.success ? parsed.data.execution.model : null;
+          if (parsed.success) return parsed.data.execution.model;
+          const queued = queuedModelSchema.safeParse(
+            await bb.sdk.threads.queuedMessages.list({ threadId }),
+          );
+          return queued.success ? (queued.data[0]?.model ?? null) : null;
         } catch {
           return null;
         }
       },
-      grandfathered: async (threadId) => {
-        const thread = await getThread(threadId).catch(() => null);
-        return (
-          thread?.host != null &&
-          holdsHubToken(thread.host.id) &&
-          !(await usesThreadPass(threadId))
+      grandfathered,
+      route: async (threadId) => {
+        const stored = routeSchema.safeParse(
+          await bb.storage.kv.get(routeKey(threadId)),
         );
+        if (stored.success) return stored.data;
+        // Routed before this build recorded routes: a grandfathered thread
+        // runs on the machine token.
+        return (await grandfathered(threadId)) ? "machine-token" : "none";
       },
       clearContext: async (threadId) => {
         await bb.sdk.threads.clearContext({ threadId });
@@ -679,8 +704,7 @@ export function createAccountPoolPlugin(
         const unpermitted = async (
           reason = "This machine has no Account Pooler role, so it gets no central Claude and Codex routing.",
         ): Promise<PoolEnvEntry[]> => {
-          if (threadId !== null)
-            await bb.storage.kv.delete(`retry-route:${threadId}`);
+          if (threadId !== null) await forgetRoute(threadId);
           return [
             ...[
               "ANTHROPIC_BASE_URL",
@@ -731,6 +755,10 @@ export function createAccountPoolPlugin(
           }
           if (threadId !== null) {
             await bb.storage.kv.set(`retry-route:${threadId}`, provider);
+            await bb.storage.kv.set(
+              routeKey(threadId),
+              worker || token !== hostToken ? "pass" : "machine-token",
+            );
             if (provider === "claude") {
               await routing.recordRouted(threadId, context.hostId);
             }
@@ -745,9 +773,7 @@ export function createAccountPoolPlugin(
             ? unpermitted()
             : entries;
         }
-        if (threadId !== null) {
-          await bb.storage.kv.delete(`retry-route:${threadId}`);
-        }
+        if (threadId !== null) await forgetRoute(threadId);
         return !permitted(context.hostId)
           ? unpermitted()
           : parentPool === null

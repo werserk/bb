@@ -5,11 +5,16 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import {
   createFakePluginHost,
+  makeQueueEntry,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { accountSchema, statusReportSchema } from "./contracts.js";
+import {
+  accountSchema,
+  EMPTY_FAMILY_WEEKLY,
+  statusReportSchema,
+} from "./contracts.js";
 import { PARENT_TOKEN_ENV, PARENT_URL_ENV } from "./parent-pool.js";
 import { QUOTA_MIGRATIONS, QuotaStore } from "./store.js";
 import { createAccountPoolPlugin } from "./server.js";
@@ -87,7 +92,11 @@ async function fixture(
     return value;
   };
   const clearContext = vi.fn(async (_input: unknown) => ({ ok: true as const }));
-  const model = { current: "claude-haiku-4-5-20251001" };
+  // The model of the last turn (null: no turn yet) and the queued messages.
+  const model: { current: string | null; queued: string[] } = {
+    current: "claude-haiku-4-5-20251001",
+    queued: [],
+  };
   const notFound = Object.assign(new Error("not found"), { status: 404 });
   const host = createFakePluginHost({
     pluginId: "account-pool-prewarm",
@@ -113,14 +122,20 @@ async function fixture(
           }),
         clearContext,
         events: {
-          list: async () => [
-            {
-              data: {
-                requestId: "creq_aaaaaaaaaa",
-                execution: { model: model.current },
-              },
-            },
-          ],
+          list: async () =>
+            model.current === null
+              ? []
+              : [
+                  {
+                    data: {
+                      requestId: "creq_aaaaaaaaaa",
+                      execution: { model: model.current },
+                    },
+                  },
+                ],
+        },
+        queuedMessages: {
+          list: async () => model.queued.map((queued) => makeQueueEntry({ model: queued })),
         },
       },
       system: { providerStates: async () => ({ providers: [] }) },
@@ -230,9 +245,36 @@ async function fixture(
       fiveHourResetAt: START + 3_600_000,
       observedAt: clock.time,
     });
+  const setFamilyWeekly = (
+    accountId: string,
+    family: keyof typeof EMPTY_FAMILY_WEEKLY,
+    utilization: number,
+  ) =>
+    quotas.put({
+      ...quotas.get(accountId),
+      familyWeekly: {
+        ...EMPTY_FAMILY_WEEKLY,
+        [family]: {
+          utilization,
+          resetAt: START + 7 * 86_400_000,
+          status: null,
+          observedAt: clock.time,
+          source: "usage",
+        },
+      },
+      observedAt: clock.time,
+    });
+  const changedSignals = (threadId: string) =>
+    host.harness.inspection.realtimeSignals.filter(
+      (signal) =>
+        signal.channel === "thread-account-changed" &&
+        JSON.stringify(signal.payload) === JSON.stringify({ threadId }),
+    ).length;
   return {
     host,
     clock,
+    setFamilyWeekly,
+    changedSignals,
     seen,
     replies,
     thread,
@@ -323,6 +365,10 @@ describe("passes on every role and grandfathering (R1, R3)", () => {
         String(entry.message).includes("could not issue a thread pass"),
       ),
     ).toHaveLength(1);
+    expect(await f.rpc("get", { threadId: "thread-new" })).toMatchObject({
+      grandfathered: false,
+      route: "machine-token",
+    });
   });
 
   it("gives an archived new thread nothing", async () => {
@@ -705,5 +751,103 @@ describe("policy store", () => {
     // P2 runs migrations 0..11; P3 only appends index 12.
     expect(QUOTA_MIGRATIONS).toHaveLength(13);
     expect(QUOTA_MIGRATIONS[12]).toContain("CREATE TABLE pool_thread_policy");
+  });
+});
+
+describe("new-thread family, serving signal and route (A2, U1, U2)", () => {
+  it("checks a new thread's model family from its first queued message (A2)", async () => {
+    const f = await fixture();
+    f.thread("thread-new");
+    f.model.current = null;
+    f.model.queued = ["claude-opus-4-1", "claude-haiku-4-5-20251001"];
+    f.setFamilyWeekly(f.beta, "opus", 1);
+    const named = { threadId: "thread-new", policy: { mode: "named", accountId: f.beta } };
+    const usable = async () =>
+      ((await f.rpc("accounts", { threadId: "thread-new" })).accounts as Array<
+        Record<string, unknown>
+      >).map((account) => [account.accountLabel, account.usable, account.reason]);
+    expect(await f.rpc("set", named)).toMatchObject({ ok: false, reason: "at-limit" });
+    expect(await usable()).toEqual([
+      ["alpha", true, null],
+      ["beta", false, "at-limit"],
+    ]);
+    // Once a turn ran, its model decides, not the queue.
+    f.model.current = "claude-haiku-4-5-20251001";
+    expect(await usable()).toEqual([
+      ["alpha", true, null],
+      ["beta", true, null],
+    ]);
+    // No turn and an empty queue: only the shared quota counts.
+    f.model.current = null;
+    f.model.queued = [];
+    expect(await f.rpc("set", named)).toMatchObject({ ok: true, revision: 1 });
+  });
+
+  it("signals a change of the serving account under auto too, once per real change (U1)", async () => {
+    const f = await fixture();
+    f.thread("thread-a");
+    const a = await f.token("thread-a");
+    expect(f.changedSignals("thread-a")).toBe(0);
+    await f.send(a);
+    expect(f.seen.at(-1)).toBe("sk-alpha");
+    expect(f.changedSignals("thread-a")).toBe(1);
+    await f.send(a);
+    await f.send(a);
+    expect(f.changedSignals("thread-a")).toBe(1);
+    await f.callRpc("account.disable", { id: f.alpha });
+    await f.send(a);
+    await f.send(a);
+    expect(f.seen.slice(-2)).toEqual(["sk-beta", "sk-beta"]);
+    expect(f.changedSignals("thread-a")).toBe(2);
+    expect(await f.rpc("get", { threadId: "thread-a" })).toMatchObject({
+      serving: { accountId: f.beta },
+    });
+  });
+
+  it("signals a failover inside one request as one change (U1)", async () => {
+    const f = await fixture();
+    f.thread("thread-b");
+    const b = await f.token("thread-b");
+    f.replies.set("sk-alpha", {
+      status: 429,
+      headers: {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-5h-status": "rejected",
+        "anthropic-ratelimit-unified-5h-utilization": "1",
+        "anthropic-ratelimit-unified-5h-reset": String(Math.floor(START / 1_000) + 3_600),
+      },
+    });
+    expect((await f.send(b)).status).toBe(200);
+    expect(f.seen.slice(-2)).toEqual(["sk-alpha", "sk-beta"]);
+    expect(f.changedSignals("thread-b")).toBe(1);
+    expect(await f.rpc("get", { threadId: "thread-b" })).toMatchObject({
+      serving: { accountId: f.beta },
+    });
+  });
+
+  it("reports how a thread's requests reach the hub (U2)", async () => {
+    const f = await fixture();
+    f.thread("thread-new");
+    f.thread("thread-old", { createdAt: START - 1 });
+    f.thread("thread-w", { host: { id: "host-two" } });
+    const route = async (threadId: string) =>
+      (await f.rpc("get", { threadId })).route;
+    expect(await route("thread-new")).toBe("none");
+    // Grandfathered threads run on the machine token, recorded or not.
+    expect(await route("thread-old")).toBe("machine-token");
+    await f.env("thread-new");
+    await f.env("thread-old");
+    expect(await route("thread-new")).toBe("pass");
+    expect(await route("thread-old")).toBe("machine-token");
+    expect((await f.runCli(["thread", "show", "thread-old"])).stdout).toContain(
+      "Route: machine token (no policy applies)",
+    );
+    await f.callRpc("hostRole.set", { hostId: "host-two", role: "worker" });
+    await f.env("thread-w", "claude-code", "host-two");
+    expect(await route("thread-w")).toBe("pass");
+    // A turn without central routing reaches no hub.
+    await f.callRpc("hostRole.set", { hostId: "host-two", role: "none" });
+    await f.env("thread-w", "claude-code", "host-two");
+    expect(await route("thread-w")).toBe("none");
   });
 });

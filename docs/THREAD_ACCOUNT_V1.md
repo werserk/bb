@@ -13,6 +13,17 @@ fields and enums may gain values; a caller ignores fields it does not know and
 treats an unknown enum value as "not one of mine". A removed field, a renamed
 value or a changed meaning is `thread-account.v2`, registered next to `v1`.
 
+## Pooled providers
+
+The pool routes a thread by its bb provider id. Use this table, not the
+plugin's internal code:
+
+| bb `providerId` | pool `provider` |
+|---|---|
+| `claude-code` | `claude` |
+| `codex` | `codex` |
+| any other | none: `provider` is null and a named `set` is refused with `not-pooled` |
+
 ## Policy
 
 | Policy | Meaning |
@@ -61,6 +72,7 @@ Input `{ threadId }`. Output:
   "revision": 1,
   "updatedAt": 1900000000000,
   "grandfathered": false,
+  "route": "pass",
   "serving": { "accountId": "acct-b", "accountLabel": "Work B", "provider": "claude", "since": 1900000001000 },
   "lastLimit": null,
   "switchContinuity": "continues",
@@ -68,8 +80,19 @@ Input `{ threadId }`. Output:
 }
 ```
 
-`provider` is null for a thread the pool does not route. `serving` is the last
-account that served a model request of the thread (null before the first one).
+`provider` is null for a thread the pool does not route (see Pooled
+providers). `route` is how the thread's requests reach the pool, as given to
+its last routed turn:
+
+| `route` | meaning |
+|---|---|
+| `pass` | the thread's own pass; its policy applies |
+| `machine-token` | the machine token: a grandfathered thread, or a pass could not be issued; no policy applies |
+| `none` | no routed turn yet, or the last turn got no central routing |
+
+A grandfathered thread that has not run since this build reads
+`machine-token`. `serving` is the last account that served a model request of
+the thread (null before the first one).
 `lastLimit` is the latest `named-limit` event: `cause` `limit` | `deleted` |
 `unavailable`, `action` `fell-back` | `served-auto` | `stopped`.
 `switchContinuity` is `continues` (Claude), `may-restart` (Codex, unknown) or
@@ -93,6 +116,10 @@ Input:
 output is the `get` state plus `ok: true`, `changed`, `sessionRebuild`
 (`none` | `next-turn` | `new-session`) and `message`. Setting `auto` on a
 thread without a stored policy changes nothing.
+
+The `unavailable` and `at-limit` checks use the model family of the thread's
+last turn; a thread without a turn uses the model of its first queued message,
+and with neither only the shared quota counts. `accounts` does the same.
 
 Refusals are `{ ok: false, reason, message, resetAt? }`, checked in this order:
 
@@ -158,4 +185,6 @@ sessions selected on a machine token).
 ## Realtime
 
 `thread-account-changed` with `{ threadId }` after a `set`, a fallback, a stop,
-a switch or a deleted thread's policy.
+a deleted thread's policy, and whenever another account starts serving the
+thread, under any policy (a switch, a failover, an auto move). Requests that
+stay on the same account send nothing.
