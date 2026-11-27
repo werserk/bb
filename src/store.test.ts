@@ -314,6 +314,10 @@ describe("migration continuity", () => {
     expect(
       QUOTA_MIGRATIONS.slice(0, RECORDED_MIGRATION_HASHES.length).map(sha256),
     ).toEqual(RECORDED_MIGRATION_HASHES);
+    // Machine roles (block P1), appended after the native-cell build.
+    expect(QUOTA_MIGRATIONS.slice(RECORDED_MIGRATION_HASHES.length).map(sha256)).toEqual([
+      "ad290dc1b51d2f7206a14ecaf43e22d3c8339ffd7bf62367dca9b063e97bd0d0",
+    ]);
   });
 
   it("reopens a store recorded by the native-cell build and keeps its rows", async () => {

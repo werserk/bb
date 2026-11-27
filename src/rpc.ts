@@ -1,4 +1,4 @@
-import { hostExclusionRpcContract } from "./host-exclusion.js";
+import { hostRoleRpcContract } from "./host-roles.js";
 import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
@@ -33,7 +33,7 @@ import { projectPriorityRpcContract } from "./project-priority.js";
 
 export const accountPoolRpcContract = defineRpcContract({
   ...projectPriorityRpcContract,
-  ...hostExclusionRpcContract,
+  ...hostRoleRpcContract,
   "account.ping": {
     input: accountPingInputSchema,
     output: accountPingResultSchema,
@@ -128,11 +128,11 @@ export function createRpcHandlers(
   codexLogin: CodexDeviceLogin,
   config: AccountPoolConfigController,
   projectPriorityHandlers: PluginRpcHandlers<typeof projectPriorityRpcContract>,
-  hostExclusionHandlers: PluginRpcHandlers<typeof hostExclusionRpcContract>,
+  hostRoleHandlers: PluginRpcHandlers<typeof hostRoleRpcContract>,
 ): PluginRpcHandlers<typeof accountPoolRpcContract> {
   return {
     ...projectPriorityHandlers,
-    ...hostExclusionHandlers,
+    ...hostRoleHandlers,
     "account.ping": ({ id, diagnostic }) => operations.ping(id, diagnostic),
     "account.add": (input) => operations.add(input),
     "account.list": () => operations.list(),

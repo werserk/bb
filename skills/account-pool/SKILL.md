@@ -8,10 +8,10 @@ description: "Configure or diagnose Account Pooler accounts, authentication, quo
 Use `bb pool` for this plugin's accounts and routes. Inspect current state with
 `bb pool status --json` and `bb pool account list --json` before changing routing.
 Use `bb pool --help` for available commands.
-For explicit machine-wide exclusions from central Claude and Codex pooling,
-inspect `bb pool machine list --json`; see the machine routing section in the
-routing reference before `machine exclude <host-id>` or `machine include <host-id>`.
-An exclusion is policy, not native-account readiness.
+Only a machine with a role gets central Claude and Codex pooling. Inspect
+`bb pool machine list --json`; see the machine roles section in the routing
+reference before `machine role <host-id> <server|worker|trusted|none>`.
+A role is policy, not native-account readiness.
 
 For account login, secret handling, quota refresh, routing settings,
 ordering, or failover, read

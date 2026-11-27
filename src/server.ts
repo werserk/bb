@@ -1,11 +1,12 @@
 import { handleResponses } from "./responses-nonstream.js";
 import {
-  HostExclusions,
-  HostExcludedError,
-  createHostExclusionHandlers,
+  HostRoles,
+  HostNotPermittedError,
+  createHostRoleHandlers,
   hostIdSchema,
-} from "./host-exclusion.js";
-import { ACCOUNT_POOL_HOST_EXCLUSIONS_CHANGED } from "./realtime.js";
+  migrateHostRoles,
+} from "./host-roles.js";
+import { ACCOUNT_POOL_HOST_ROLES_CHANGED } from "./realtime.js";
 import {
   retryAvailabilityContract,
   retryAvailabilityMethod,
@@ -169,18 +170,25 @@ export function createAccountPoolPlugin(
     await accounts.initialize();
     const now = options.now ?? Date.now;
     const db = bb.storage.database();
-    bb.storage.migrate(db, QUOTA_MIGRATIONS);
-    const hostExclusions = new HostExclusions(
+    // Order matters: list hosts, then migrate + seed roles in one transaction,
+    // then prune tokens. Pruning before the seed would revoke every machine.
+    const enrolledHosts = await bb.sdk.hosts.list();
+    const enrolledIds = enrolledHosts.map((host) => host.id);
+    migrateHostRoles(
+      db,
+      () => bb.storage.migrate(db, QUOTA_MIGRATIONS),
+      enrolledIds,
+    );
+    const hostRoles: HostRoles = new HostRoles(
       db,
       () => bb.sdk.hosts.list(),
-      () => bb.realtime.publish(ACCOUNT_POOL_HOST_EXCLUSIONS_CHANGED, {}),
+      (hostId) => hubTokens.revoke(hostId),
+      () => bb.realtime.publish(ACCOUNT_POOL_HOST_ROLES_CHANGED, {}),
     );
-    const hubTokens = new HubTokenStore(secretDir, now, (id) =>
-      hostExclusions.isExcluded(id),
-    );
+    const permitted = (hostId: string) => hostRoles.hasRole(hostId);
+    const hubTokens = new HubTokenStore(secretDir, now, permitted);
     await hubTokens.initialize();
-    const enrolledHosts = await bb.sdk.hosts.list();
-    await hubTokens.prune(enrolledHosts.map((host) => host.id));
+    await hubTokens.prune(enrolledIds);
     const routing = new RoutingStore(bb.storage.kv, now);
     const projectPriority = new ProjectPriority(bb.storage.kv, () =>
       accounts.list(),
@@ -261,7 +269,11 @@ export function createAccountPoolPlugin(
       hub,
       hubTokens,
       routing,
-      () => bb.sdk.hosts.list(),
+      async () => {
+        const hosts = await bb.sdk.hosts.list();
+        hostRoles.project(hosts.map((host) => host.id));
+        return hosts;
+      },
       async (hostId) =>
         (await bb.sdk.system.providerStates({ hostId })).providers,
       now,
@@ -321,7 +333,7 @@ export function createAccountPoolPlugin(
         await bb.storage.kv.delete(`retry-route:${input.threadId}`);
         return { kind: "not-routed" };
       };
-      if (hostExclusions.isExcluded(hostId)) return denied();
+      if (!permitted(hostId)) return denied();
       const events = await bb.sdk.threads.events.list({
         threadId: input.threadId,
         types: ["client/turn/requested"],
@@ -331,12 +343,12 @@ export function createAccountPoolPlugin(
       const request = failedRequestSchema.safeParse(events[0]?.data);
       if (!request.success || request.data.requestId !== input.requestId)
         return { kind: "unavailable", reason: "source-unavailable" };
-      if (hostExclusions.isExcluded(hostId)) return denied();
+      if (!permitted(hostId)) return denied();
       const result = await hub.retryAvailability(
         provider.data,
         modelFamily(request.data.execution.model),
       );
-      return hostExclusions.isExcluded(hostId) ? denied() : result;
+      return permitted(hostId) ? result : denied();
     };
     bb.rpc.register(
       retryAvailabilityContract,
@@ -356,7 +368,7 @@ export function createAccountPoolPlugin(
         codexLogin,
         config,
         createProjectPriorityHandlers(projectPriority),
-        createHostExclusionHandlers(hostExclusions),
+        createHostRoleHandlers(hostRoles),
       ),
     );
     registerPoolCli(
@@ -366,7 +378,7 @@ export function createAccountPoolPlugin(
       codexLogin,
       config,
       projectPriority,
-      hostExclusions,
+      hostRoles,
     );
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
       if (!(await operations.isRoutingEnabled(provider))) return false;
@@ -408,11 +420,11 @@ export function createAccountPoolPlugin(
         hostId: string;
       }) => {
         const { threadId } = context;
-        const excluded = async (): Promise<PoolEnvEntry[]> => {
+        const unpermitted = async (): Promise<PoolEnvEntry[]> => {
           if (threadId !== null)
             await bb.storage.kv.delete(`retry-route:${threadId}`);
           const reason =
-            "This machine is excluded from central Claude and Codex Account Pooler routing.";
+            "This machine has no Account Pooler role, so it gets no central Claude and Codex routing.";
           return [
             ...[
               "ANTHROPIC_BASE_URL",
@@ -424,7 +436,7 @@ export function createAccountPoolPlugin(
             ].map((name) => ({ name, value: "", reason })),
           ];
         };
-        if (hostExclusions.isExcluded(context.hostId)) return excluded();
+        if (!permitted(context.hostId)) return unpermitted();
         const bypassed =
           threadId !== null && (await routing.isBypassed(threadId));
         if (!bypassed && (await canServe(provider))) {
@@ -432,7 +444,7 @@ export function createAccountPoolPlugin(
           try {
             token = await hubTokens.forHost(context.hostId);
           } catch (error) {
-            if (error instanceof HostExcludedError) return excluded();
+            if (error instanceof HostNotPermittedError) return unpermitted();
             throw error;
           }
           if (threadId !== null) {
@@ -445,15 +457,15 @@ export function createAccountPoolPlugin(
             ...(await serving(token, context.projectId)),
             ...markerEntries(token),
           ];
-          return hostExclusions.isExcluded(context.hostId)
-            ? excluded()
+          return !permitted(context.hostId)
+            ? unpermitted()
             : entries;
         }
         if (threadId !== null) {
           await bb.storage.kv.delete(`retry-route:${threadId}`);
         }
-        return hostExclusions.isExcluded(context.hostId)
-          ? excluded()
+        return !permitted(context.hostId)
+          ? unpermitted()
           : parentPool === null
             ? []
             : neutralized(provider);
@@ -487,9 +499,9 @@ export function createAccountPoolPlugin(
             },
           ];
     const proxiedHealth = async (provider: PoolProvider, hostId: string) =>
-      !hostExclusions.isExcluded(hostId) &&
+      permitted(hostId) &&
       (await canServe(provider)) &&
-      !hostExclusions.isExcluded(hostId)
+      permitted(hostId)
         ? {
             label: "Proxied",
             statusMessage:

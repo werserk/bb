@@ -97,6 +97,10 @@ async function startPool(): Promise<Pool> {
     upstreams: { anthropic: `http://127.0.0.1:${address.port}` },
     now: () => clock.now,
   })(host.bb);
+  await host.harness.behavior.callRpc("hostRole.set", {
+    hostId: "host-one",
+    role: "trusted",
+  });
   const ids = {} as Pool["ids"];
   for (const [name, priority] of [
     ["a", 1],

@@ -250,26 +250,29 @@ they do not automatically become last-resort accounts.
 
 See PLUGIN_OVERVIEW.md → OpenAI Platform API keys for routing and error recovery.
 
-## Machine routing exclusion
+## Machine roles
 
-Use `bb pool machine list [--json]` to inspect enrolled machines and retained
-exclusions. `bb pool machine exclude <host-id> [--json]` excludes that exact ID
-from central Claude and Codex pooling together; `bb pool machine include
-<host-id> [--json]` explicitly removes the exclusion, including for a machine
-no longer enrolled. Unknown IDs cannot be newly excluded. Names are display only.
+Default deny: only a machine with a role gets central Claude and Codex pooling.
+The roles are `server`, `worker` and `trusted`; they currently behave the same.
+Use `bb pool machine list [--json]` to see enrolled machines and removed machines
+that kept a role. `bb pool machine role <host-id> <server|worker|trusted|none>
+[--json]` sets the exact ID's role; `none` removes it, including for a machine
+no longer enrolled. Unknown IDs cannot get a role. Names are display only.
 
-Settings → Advanced → Machine routing and RPC `hostExclusion.list` (null input),
-`hostExclusion.set` (`{hostId, excluded}`) use the same persisted service.
-The exclusion clears Pooler endpoint/auth and parent markers from subsequent
-environment contributions, including catalog calls with no thread. It never contributes ANTHROPIC_CUSTOM_HEADERS on the excluded path, preserving
-opaque target-host headers byte-for-byte. Preexisting arbitrary project-header
-cleanup belongs to the separately configured VM launcher. Other credentials
-remain under their own authority. The machine must use its own provider login.
+Settings → Advanced → Machine routing and RPC `hostRole.list` (null input),
+`hostRole.set` (`{hostId, role}`) use the same persisted service.
+Without a role, environment contributions carry no Pooler endpoint, auth or
+parent markers, including catalog calls with no thread, and no
+ANTHROPIC_CUSTOM_HEADERS, preserving opaque target-host headers byte-for-byte.
+Preexisting arbitrary project-header cleanup belongs to the separately
+configured VM launcher. The machine must use its own provider login.
 
-Current and grace machine tokens fail newly performed authentication while
-excluded, and mint/rotation fail. Already authenticated requests may finish;
-already running processes retain their environment. Native health and native
-retry policies remain authoritative. Include restores existing central routing
-policy, not proof of native login or capacity. No registry/scheduler is created.
-Exclusions survive reload and unenrollment. Older plugin versions ignore them;
-a rollback needs independent launcher/network confinement to preserve isolation.
+No hub token is minted for a machine without a role. Setting `none` deletes its
+token file, so current and grace tokens fail newly performed authentication;
+already authenticated requests may finish and running processes keep their
+environment. A change between roles keeps the token. A role is not proof of
+native login or capacity; no registry/scheduler is created.
+A removed machine keeps its role until it is set to `none`: set `none` before
+removing a machine. Roles survive reload. The exclusion table is kept as the
+rollback input of the previous version and rewritten from roles; after a
+rollback that version routes exactly the machines that had a role.

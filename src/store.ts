@@ -1,4 +1,4 @@
-import { HostExcludedError } from "./host-exclusion.js";
+import { HostNotPermittedError } from "./host-roles.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -255,8 +255,9 @@ export class HubTokenStore {
 
   constructor(
     private readonly secretsDir: string,
-    private readonly now: () => number = Date.now,
-    private readonly isExcluded: (hostId: string) => boolean = () => false,
+    private readonly now: () => number,
+    // Required on purpose: a store without a predicate must not mint for anyone.
+    private readonly hasRole: (hostId: string) => boolean,
   ) {}
 
   async initialize(): Promise<void> {
@@ -282,12 +283,15 @@ export class HubTokenStore {
   async forHost(hostId: string): Promise<string> {
     await this.initialize();
     return this.serialized(hostId, async () => {
-      if (this.isExcluded(hostId)) throw new HostExcludedError(hostId);
+      if (!this.hasRole(hostId)) throw new HostNotPermittedError(hostId);
       const existing = this.read(hostId);
       if (existing !== null) return existing.value;
       const created = this.create(hostId);
       await this.write(hostId, created);
-      if (this.isExcluded(hostId)) throw new HostExcludedError(hostId);
+      if (!this.hasRole(hostId)) {
+        await this.drop(hostId);
+        throw new HostNotPermittedError(hostId);
+      }
       return created.value;
     });
   }
@@ -295,7 +299,7 @@ export class HubTokenStore {
   async rotate(hostId: string): Promise<HubTokenSummary> {
     await this.initialize();
     return this.serialized(hostId, async () => {
-      if (this.isExcluded(hostId)) throw new HostExcludedError(hostId);
+      if (!this.hasRole(hostId)) throw new HostNotPermittedError(hostId);
       const current = this.read(hostId);
       const now = this.now();
       const next = this.create(hostId);
@@ -306,7 +310,10 @@ export class HubTokenStore {
         ];
       }
       await this.write(hostId, next);
-      if (this.isExcluded(hostId)) throw new HostExcludedError(hostId);
+      if (!this.hasRole(hostId)) {
+        await this.drop(hostId);
+        throw new HostNotPermittedError(hostId);
+      }
       return this.summary(next);
     });
   }
@@ -322,7 +329,7 @@ export class HubTokenStore {
     }
     if (matchedHostId === null) return null;
     return this.serialized(matchedHostId, async () => {
-      if (this.isExcluded(matchedHostId)) return null;
+      if (!this.hasRole(matchedHostId)) return null;
       const matched = this.read(matchedHostId);
       if (
         matched === null ||
@@ -344,7 +351,7 @@ export class HubTokenStore {
       } else {
         this.tokens.set(matched.hostId, next);
       }
-      return this.isExcluded(matched.hostId) ? null : matched.hostId;
+      return this.hasRole(matched.hostId) ? matched.hostId : null;
     });
   }
 
@@ -355,21 +362,26 @@ export class HubTokenStore {
       .sort((left, right) => left.hostId.localeCompare(right.hostId));
   }
 
-  async prune(hostIds: readonly string[]): Promise<void> {
+  // Keeps a token only for an enrolled host that has a role.
+  async prune(enrolledHostIds: readonly string[]): Promise<void> {
     await this.initialize();
-    const enrolled = new Set(hostIds);
+    const enrolled = new Set(enrolledHostIds);
     const stale = [...this.tokens.keys()].filter(
-      (hostId) => !enrolled.has(hostId),
+      (hostId) => !enrolled.has(hostId) || !this.hasRole(hostId),
     );
-    await Promise.all(
-      stale.map((hostId) =>
-        this.serialized(hostId, async () => {
-          await fs.rm(this.tokenPath(hostId), { force: true });
-          this.tokens.delete(hostId);
-          this.persistedLastUsedAt.delete(hostId);
-        }),
-      ),
-    );
+    await Promise.all(stale.map((hostId) => this.revoke(hostId)));
+  }
+
+  async revoke(hostId: string): Promise<void> {
+    await this.initialize();
+    await this.serialized(hostId, () => this.drop(hostId));
+  }
+
+  // Caller holds the host lock.
+  private async drop(hostId: string): Promise<void> {
+    await fs.rm(this.tokenPath(hostId), { force: true });
+    this.tokens.delete(hostId);
+    this.persistedLastUsedAt.delete(hostId);
   }
 
   private create(hostId: string): StoredHubToken {
@@ -836,4 +848,10 @@ export const QUOTA_MIGRATIONS = [
     host_id TEXT PRIMARY KEY NOT NULL
   )`,
   NATIVE_POOL_MIGRATION,
+  // Machine roles (block P1). pool_host_exclusion above stays: it is the input of
+  // the previous build and is kept in sync by projectExclusions (host-roles.ts).
+  `CREATE TABLE pool_host_role (
+    host_id TEXT PRIMARY KEY NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('server', 'worker', 'trusted'))
+  )`,
 ];
