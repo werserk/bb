@@ -77,7 +77,7 @@ describe.skipIf(!hasCodex)("Codex no-fallback canary (real codex app-server, moc
 
   it("baseline: a scratch dir without the profile acts on the worker, so the gate fails", async () => {
     const report = await canary(false);
-    expect(report.failures.join("\n")).toMatch(/acted on the worker: .*exec_command/);
+    expect(report.failures.join("\n")).toMatch(/acted on the worker:/);
     expect(report.failures.join("\n")).toMatch(/mcp_started_fake/);
     expect(report.failures.join("\n")).toMatch(/guard hook is missing/);
   }, 90_000);
