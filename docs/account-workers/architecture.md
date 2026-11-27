@@ -41,14 +41,16 @@ agent on worker host ──tool call──▶ BB server: registerTool execute(pa
 
 A binding maps a thread to `(worker host, scratch path)` and `(workspace host, root, instructions)`. It lives in the plugin's own SQLite database, not in thread metadata (which the thread's agent can write).
 
-`bb account-workers spawn --workspace-machine <m> --path <dir> --machine <worker> --prompt …`:
+`bb account-workers spawn --workspace-machine <m> --path <dir> --machine <worker> --prompt … [--account <id|label>] [--on-limit fallback-auto|stop]`:
 
 1. picks the provider profile for `--provider` (default `claude-code`, passed to BB explicitly); a provider with no profile is refused before any host call;
+   with a named `--account`, it also finds the Account Pooler's `thread-account.v1` and resolves the account before anything is created (see [accounts](#accounts));
 2. resolves the workspace root on its host (`resolveRoot`: realpath, `AGENTS.md`/`CLAUDE.md`);
 3. creates the scratch directory on the worker through the profile (`prepareScratch`, see [provider profiles](#provider-profiles)); a refusal leaves no binding;
 4. stores an unclaimed, not-ready binding (`thread_id` NULL, `ready` 0) for that scratch path, with the profile id;
 5. spawns the thread on the worker with the scratch directory as an unmanaged workspace and the chosen provider and model; if that fails, the binding is released (below);
-6. stamps the thread id on the binding, marks it ready and asks core to re-ask the dispatch hook.
+6. stamps the thread id on the binding; with `--account`, stores the thread's account policy while the dispatch hook still holds the first turn;
+7. marks the binding ready unless it was released meanwhile (the ready deadline passed, or the thread was archived or deleted; then the spawn is undone and fails), and asks core to re-ask the dispatch hook.
 
 `bb.agents.configure` can run before step 6 returns. It then claims the binding whose `(worker host, scratch path)` matches the thread's environment, but only while `thread_id` is NULL, so a fork or side chat that shares the directory never gets one. Bindings are looked up by thread id only.
 
@@ -185,24 +187,18 @@ Codex gets the workspace tools as `dynamicTools`, as it gets every BB plugin too
 
 ## Accounts
 
-Several accounts per worker, one chosen per thread. **Direction chosen** (owner, 2026-11-27): the pool is the central key keeper. Each account signs in once, in BB; a worker holds agent CLIs and scratch directories but no credentials, and a workspace host gets neither.
+Several accounts per provider, one chosen per thread. **Direction chosen** (owner, 2026-11-27): the pool is the central key keeper. Each account signs in once, in BB; a worker holds agent CLIs and scratch directories but no credentials, and a workspace host gets neither.
 
-What the pool gives a thread today, checked in `plugins/account-pool` and the live `account-pool-prewarm` variant:
+The Account Pooler owns the account policy of every thread and publishes it as the versioned RPC contract `thread-account.v1` (`get`, `set`, `accounts`, `events`; its `docs/THREAD_ACCOUNT_V1.md`). account-workers is one caller of it (`thread-account.ts`):
 
-| Question | Answer |
-|---|---|
-| Which account | Chosen per HTTP request in the pool's hub on the BB server. The pin key is `(provider, host, provider session id)` and moves on exhaustion or failover. Project order (variant only) is an order, not a pin. |
-| Pin a thread, show its account | Not possible: no CLI, RPC, header or env, and `status.routedThreads` has no account field. |
-| Where keys live | One file per account in the BB server's data directory (0600 in a 0700 dir). A thread gets the hub URL and a per-machine hub token through `contributeEnv`. |
-| Per-thread opt-out | `bypass.set {threadId, bypassed}` RPC: private, not published or versioned. |
-| Providers | `claude-code`, `codex`; no OpenCode. |
-| Native cells (variant only) | `bb pool native …` (`docs/NATIVE_POOL.md` there): one labelled Claude account per enrolled, centrally excluded host under its own Unix user, with thread→cell bindings. Out of repo, one whole host per account. |
-
-Next step (new blocks, not built):
-
-- **Pool:** a per-thread pass issued through `contributeEnv` in place of the per-machine hub token; the hub maps pass → thread → account policy (`auto`, or one named account with a per-thread limit action: ask, fall back to auto, or stop) and revokes the pass on archive and delete; a versioned contract to get and set a thread's policy and read its current account; machine roles so a workspace host gets no pass.
-- **account-workers:** `spawn --account` through that contract, and the account shown in `list`.
-- **Switching mid-thread:** the next model request goes to the new account without a new provider session, as the pool's failover does today. That this holds for each CLI is inferred, not checked.
+- **Discovery** by method name only: exactly one running plugin must publish `thread-account.v1.set`, `.get` and `.accounts`. No pool plugin id or internal RPC is used. Without `--account` nothing is discovered or called, so account-workers works without a pool.
+- **Providers**: `--account` works for the pooled providers of the contract's "Pooled providers" table (`claude-code` → `claude`, `codex` → `codex`); others are refused before any call. `set`'s own `not-pooled` refusal is handled the same way.
+- **Resolution before spawn**: `accounts` lists every pool account whatever the thread, so it is called with the calling thread's id (or a fixed probe id) before any host call. Candidates are the accounts of the spawn's provider; an exact id wins, then a unique exact label. A typo or an ambiguous label creates nothing. Unlike `bb pool thread set`, a label shared with an account of the other provider is not ambiguous.
+- **Order**: the thread is spawned with its first message; the [dispatch hold](#dispatch-hold) keeps that turn waiting while the binding is not ready. account-workers then calls `set {named, accountId, onLimit}` (default `fallback-auto`), checks that the answer stores exactly that, reads `get` once, and only then readies the binding. The first model request therefore already goes through the named policy. The window runs from inside `threads.spawn` to the ready mark: two pool calls of at most 10 s each, typically well under a second.
+- **Undo**: any refusal, transport error, unexpected answer or a released binding undoes the spawn: the binding is released with reason `account-refused` (the hook rejects its turns; unarchive cannot restore it, since only archive tombstones are restored), the thread's queued messages are deleted, the thread is archived, the scratch is cleaned, and the CLI exits 1 with a code (`account_refused`, `account_pool_error`, `account_not_applied`, `spawn_abandoned`). Nothing falls back to `auto` silently. The undo does not use the CLI's abort signal, so a cancelled spawn still cleans up.
+- **`list`** shows each live bound thread's serving account and policy from `get` (empty when there is no pool or the call fails).
+- **Audit**: the pool records the setter as `plugin-account-workers`, not the agent or user that ran the CLI.
+- **Switching mid-thread** is the pool's: `bb pool thread set <thread> <account>`; the next model request goes to the new account.
 
 Dropped: per-worker account homes and a pool bypass for them (each home needed its own sign-in on each worker). Homes may return for a worker with no hub.
 
@@ -216,7 +212,7 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
 | Provider profile seam, OpenCode profile | Built, block 2 |
 | Codex profile | Built, block 3 |
 | Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4 |
-| Account selection | Planned: pool as key keeper with per-thread passes ([accounts](#accounts)); block 4 built the binding lifecycle it needs |
+| Account selection | Built: `spawn --account` and the account in `list` through the pool's `thread-account.v1`, block A2 ([accounts](#accounts)); the policy, passes and switching are the pool's |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
 ## Open points
@@ -244,4 +240,5 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
   - The canary has no login, so it cannot see tools that Codex offers only with a Codex-backend login (`image_generation`, apps and connectors). Their features are off in the overlay; if one came back on, its tool would appear only on the real thread, where the hook still blocks it.
   - The canary's catalog is the worker's cache. A thread whose login does not match the cache's identity uses the bundled catalog or fetches a fresh one, which may differ.
   - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
+- **G11. Account window.** `spawn --account` relies on the dispatch hold, so the paths that skip hooks also skip the account: the user's **Send now** on the queued first message before the policy is stored sends that turn through `auto`. The spawn then still succeeds, with a warning when `get` already shows another serving account. Closing it needs a core change (a plugin create without a first message, then `set`, then the send). A refused spawn deletes its queued messages for the same reason: after release, Send now would skip the hook in a cleaned scratch.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).

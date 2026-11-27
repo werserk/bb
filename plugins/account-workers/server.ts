@@ -7,11 +7,29 @@ import {
   type PluginAgentConfiguration,
   type PluginAgentConfigurationContext,
 } from "@get-bb/plugin-sdk";
-import { BindingStore, canonicalPath, type Binding } from "./bindings.js";
+import { BindingStore, canonicalPath, isReleased, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
 import { safeDecide } from "./dispatch.js";
 import { ARCHIVE_UNDO_MS, isLive, Releaser, type ReleaseOutcome, type ThreadState } from "./release.js";
 import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
+import {
+  applyAccount,
+  describeThreadAccount,
+  discoverPool,
+  findReader,
+  LIST_TIMEOUT_MS,
+  ON_LIMIT,
+  POOL_TIMEOUT_MS,
+  POOLED_PROVIDERS,
+  PROBE_THREAD_ID,
+  readThreadAccount,
+  resolveAccount,
+  within,
+  type AppliedAccount,
+  type ChosenAccount,
+  type OnLimit,
+  type ThreadAccountView,
+} from "./thread-account.js";
 import type { ProviderProfile } from "./profiles/types.js";
 import {
   execCallTimeout,
@@ -238,8 +256,48 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     return names.filter((name) => set.has(name));
   }
 
-  const describe = (b: Binding) =>
-    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${state(b)}`;
+  const describe = (b: Binding, account?: ThreadAccountView | null) =>
+    `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${state(b)}${account ? `  ${describeThreadAccount(account)}` : ""}`;
+
+  async function abortSpawn(bindingId: string, threadId: string, cause: unknown): Promise<PluginCliError> {
+    const problems: string[] = [];
+    const record = store.byId(bindingId);
+    if (record !== null) releaser.retire(record, Date.now(), "account-refused");
+    try {
+      const rows = await bb.sdk.threads.queuedMessages.list({ threadId, signal: AbortSignal.timeout(POOL_TIMEOUT_MS) });
+      for (const row of rows) await bb.sdk.threads.queuedMessages.delete({ threadId, queuedMessageId: row.id });
+    } catch (error) {
+      problems.push(`removing its queued messages failed: ${String(error)}`);
+    }
+    await bb.experimental_hooks.recheck("message.dispatch").catch(() => undefined);
+    try {
+      await bb.sdk.threads.archive({ threadId, signal: AbortSignal.timeout(POOL_TIMEOUT_MS) });
+    } catch (error) {
+      problems.push(`archiving it failed: ${String(error)}`);
+    }
+    if (record !== null) {
+      const outcome = await releaser.release(record);
+      if (outcome.kind === "failed") problems.push(`the worker cleanup failed: ${outcome.error}; run unbind to retry`);
+    }
+    const original = cause instanceof PluginCliError ? cause : null;
+    const text = cause instanceof Error ? cause.message : String(cause);
+    const tail = problems.length === 0 ? `Thread ${threadId} was archived; nothing was sent.` : `Thread ${threadId}: nothing was sent, but ${problems.join("; ")}.`;
+    return new PluginCliError(`${text}\n${tail}`, { code: original?.code ?? "account_pool_error" });
+  }
+
+  async function threadAccounts(bindings: Binding[]): Promise<Map<string, ThreadAccountView | null>> {
+    const views = new Map<string, ThreadAccountView | null>();
+    const live = bindings.filter((b) => b.threadId !== null && !isReleased(b));
+    if (live.length === 0) return views;
+    const pluginId = await findReader(bb.sdk);
+    if (pluginId === null) return views;
+    await Promise.all(
+      live.map(async (b) => {
+        views.set(b.threadId!, await readThreadAccount(bb.sdk, pluginId, b.threadId!, within(LIST_TIMEOUT_MS)).catch(() => null));
+      }),
+    );
+    return views;
+  }
 
   bb.cli.register(
     defineCli({
@@ -258,6 +316,8 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             model: { type: "string", description: "Model id" },
             title: { type: "string", description: "Thread title" },
             "send-at": { type: "integer", min: 0, max: Number.MAX_SAFE_INTEGER, description: "Schedule the first message at this epoch ms instead of now" },
+            account: { type: "string", description: "Pool account (id or label) for this thread, set through the Account Pooler's thread-account.v1 before its first message; auto or absent: the pool picks" },
+            "on-limit": { type: "string", description: `With a named --account: ${ON_LIMIT.join(" or ")} (default ${ON_LIMIT[0]}) when that account hits its limit` },
             json: { type: "boolean", description: "Print JSON" },
           },
           async run(input, ctx) {
@@ -272,12 +332,34 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
                 { code: "unsupported_provider" },
               );
             }
+            const accountArg = o.account as string | undefined;
+            const onLimitArg = o["on-limit"] as string | undefined;
+            const named = accountArg !== undefined && accountArg !== "auto";
+            if (onLimitArg !== undefined && !named) {
+              throw new PluginCliError("--on-limit needs a named --account", { code: "on_limit_without_account" });
+            }
+            if (onLimitArg !== undefined && !(ON_LIMIT as readonly string[]).includes(onLimitArg)) {
+              throw new PluginCliError(`--on-limit must be ${ON_LIMIT.join(" or ")}`, { code: "bad_on_limit" });
+            }
+            const onLimit = (onLimitArg ?? ON_LIMIT[0]) as OnLimit;
+            if (named && POOLED_PROVIDERS[providerId] === undefined) {
+              throw new PluginCliError(
+                `--account: the Account Pooler does not route provider ${providerId}; pooled: ${Object.keys(POOLED_PROVIDERS).join(", ")}`,
+                { code: "account_not_pooled" },
+              );
+            }
             const refused = await refusedMachineEnv(profile, projectId);
             if (refused.length > 0) {
               throw new PluginCliError(
                 `BB machine variables ${refused.join(", ")} are set for project ${projectId}; they override or disable the scratch ${profile.id} config, so the worker's native tools would stay on. Remove them first.`,
                 { code: "overriding_env" },
               );
+            }
+            let pool: { pluginId: string; account: ChosenAccount } | null = null;
+            if (named) {
+              const pluginId = await discoverPool(bb.sdk, ctx.signal);
+              const account = await resolveAccount(bb.sdk, pluginId, POOLED_PROVIDERS[providerId]!, accountArg, ctx.threadId ?? PROBE_THREAD_ID, ctx.signal);
+              pool = { pluginId, account };
             }
             const model = (o.model as string | undefined) || null;
             const worker = await resolveMachine(o.machine as string, ctx.signal);
@@ -328,13 +410,34 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             if (binding?.threadId !== threadId) {
               throw new PluginCliError(`Binding ${bindingId} was claimed by ${binding?.threadId}, not ${threadId}`);
             }
-            store.markReady(bindingId);
+            let applied: AppliedAccount | null = null;
+            if (pool !== null) {
+              try {
+                applied = await applyAccount(bb.sdk, pool.pluginId, threadId, pool.account, onLimit, ctx.signal);
+              } catch (error) {
+                throw await abortSpawn(bindingId, threadId, error);
+              }
+            }
+            if (!store.markReadyIfLive(bindingId)) {
+              throw await abortSpawn(
+                bindingId,
+                threadId,
+                new PluginCliError(
+                  `Binding ${bindingId} was released before spawn readied it (the ready deadline passed, or the thread was archived or deleted)`,
+                  { code: "spawn_abandoned" },
+                ),
+              );
+            }
             void bb.experimental_hooks.recheck("message.dispatch").catch(() => undefined);
+            const account = applied === null ? null : { accountId: applied.accountId, accountLabel: applied.accountLabel, onLimit: applied.onLimit, revision: applied.revision };
+            const warning = applied?.warning ?? null;
             return {
               exitCode: 0,
               stdout: o.json
-                ? JSON.stringify({ threadId, bindingId, profile: profile.id, workerHostId: worker.id, scratchPath: scratch.path, workspaceHostId: workspace.hostId, root: workspace.root })
-                : `Thread ${threadId} on ${worker.name}, workspace ${workspace.hostName}:${workspace.root}\nscratch ${scratch.path}`,
+                ? JSON.stringify({ threadId, bindingId, profile: profile.id, workerHostId: worker.id, scratchPath: scratch.path, workspaceHostId: workspace.hostId, root: workspace.root, account, ...(warning === null ? {} : { warning }) })
+                : `Thread ${threadId} on ${worker.name}, workspace ${workspace.hostName}:${workspace.root}\nscratch ${scratch.path}` +
+                  (account === null ? "" : `\naccount ${account.accountLabel} (${account.accountId}), on limit ${account.onLimit}`) +
+                  (warning === null ? "" : `\nwarning: ${warning}`),
             };
           },
         }),
@@ -386,10 +489,20 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           async run(input) {
             await releaser.sweep();
             const all = store.list().filter((b) => input.options.all || b.cleanedAt === null);
+            const accounts = await threadAccounts(all);
+            const accountOf = (b: Binding) => (b.threadId === null ? null : (accounts.get(b.threadId) ?? null));
             if (input.options.json) {
-              return { exitCode: 0, stdout: JSON.stringify(all.map(({ instructions, ...rest }) => ({ ...rest, instructionFiles: instructions.map((f) => f.file) }))) };
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify(
+                  all.map((b) => {
+                    const { instructions, ...rest } = b;
+                    return { ...rest, instructionFiles: instructions.map((f) => f.file), account: accountOf(b) };
+                  }),
+                ),
+              };
             }
-            return { exitCode: 0, stdout: all.length === 0 ? "No bindings" : all.map(describe).join("\n") };
+            return { exitCode: 0, stdout: all.length === 0 ? "No bindings" : all.map((b) => describe(b, accountOf(b))).join("\n") };
           },
         }),
         exec: cliCommand({
