@@ -1468,7 +1468,9 @@ describe("thread runtime cache owner", () => {
         queryClient,
         request,
       });
-      expect(transaction.kind).toBe("queued-message");
+      expect(
+        transaction.kind === "accepted-turn" && transaction.prediction,
+      ).toBeNull();
       queryClient.setQueryData(
         threadTimelineQueryKey("thread-1"),
         makeTimelineResponse(refreshed),
@@ -1482,13 +1484,13 @@ describe("thread runtime cache owner", () => {
         transaction,
       });
 
+      const visible = composePendingSends(queryClient, "thread-1");
       expect(
-        queryClient
-          .getQueryData<ThreadTimelineResponse>(
-            threadTimelineQueryKey("thread-1"),
-          )
-          ?.rows.map((row) => (row.kind === "conversation" ? row.text : null)),
+        visible.rows.map((row) =>
+          row.kind === "conversation" ? row.text : null,
+        ),
       ).toEqual(expectedTexts);
+      expect(visible.queue).toEqual([]);
     },
   );
 

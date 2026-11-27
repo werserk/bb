@@ -22,11 +22,14 @@ interface PaneThreadKeepAliveProps {
   timelineEnabled: boolean;
 }
 
-function useHiddenThreadCacheRevision(
+function useHiddenThreadCache(
   queryClient: QueryClient,
   hiddenThreadIds: readonly string[],
-): void {
-  const [, setRevision] = useState(0);
+): { readonly client: QueryClient } {
+  const [cache, setCache] = useState({ client: queryClient });
+  if (cache.client !== queryClient) {
+    setCache({ client: queryClient });
+  }
   const hiddenKey = hiddenThreadIds.join("\n");
   useEffect(() => {
     if (hiddenKey === "") {
@@ -40,10 +43,11 @@ function useHiddenThreadCacheRevision(
         typeof queryKey[1] === "string" &&
         hidden.has(queryKey[1])
       ) {
-        setRevision((revision) => revision + 1);
+        setCache({ client: queryClient });
       }
     });
   }, [queryClient, hiddenKey]);
+  return cache;
 }
 
 const RetainedThreadView = memo(function RetainedThreadView({
@@ -84,21 +88,21 @@ export function PaneThreadKeepAlive({
   const [state, setState] = useState(() =>
     initialPaneRetention({ projectId, threadId }),
   );
+  const cache = useHiddenThreadCache(
+    queryClient,
+    state.slots
+      .filter((slot) => slot.threadId !== threadId)
+      .map((slot) => slot.threadId),
+  );
   const next = reconcilePaneRetention(
     state,
     { projectId, threadId },
     (candidateId, options) =>
-      retains && canRetainCachedThread(queryClient, candidateId, options),
+      retains && canRetainCachedThread(cache.client, candidateId, options),
   );
   if (next !== state) {
     setState(next);
   }
-  useHiddenThreadCacheRevision(
-    queryClient,
-    next.slots
-      .filter((slot) => slot.threadId !== threadId)
-      .map((slot) => slot.threadId),
-  );
   return (
     <>
       {next.slots.map((slot) => {
