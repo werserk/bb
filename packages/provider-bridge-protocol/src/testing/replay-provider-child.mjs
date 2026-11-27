@@ -145,6 +145,7 @@ const DIALECTS = {
     isInitialize(classified) {
       return classified.kind === "request" && classified.key === "control_request:initialize";
     },
+    answersInitializeAtOnce: true,
     withResponseId(message, id) {
       return { ...message, response: { ...message.response, request_id: id } };
     },
@@ -247,7 +248,29 @@ function buildSegments(entries, dialect) {
     }
     current.push({ ...entry, message, classified });
   }
-  return segments;
+  return dialect.answersInitializeAtOnce
+    ? segments.map((segment) => answerInitializeBeforeLaterWrites(segment, dialect))
+    : segments;
+}
+
+function answerInitializeBeforeLaterWrites(segment, dialect) {
+  const requestIndex = segment.findIndex(
+    (step) => step.dir === "bridge→provider" && step.message !== null && dialect.isInitialize(step.classified),
+  );
+  if (requestIndex === -1) return segment;
+  const requestId = String(segment[requestIndex].classified.id);
+  const responseIndex = segment.findIndex(
+    (step, index) =>
+      index > requestIndex &&
+      step.dir === "provider→bridge" &&
+      step.classified.kind === "response" &&
+      String(step.classified.id) === requestId,
+  );
+  if (responseIndex <= requestIndex + 1) return segment;
+  const reordered = [...segment];
+  const [response] = reordered.splice(responseIndex, 1);
+  reordered.splice(requestIndex + 1, 0, response);
+  return reordered;
 }
 
 function claimSegmentIndex(stateDir) {
