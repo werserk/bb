@@ -63,8 +63,8 @@ interface ThreadEnvironmentSummaryProps {
   environmentMachineProvider?: MachineProviderPresentation | null;
   environmentCheckout?: WorkspaceCheckoutDisplay;
   onCreateNewThreadInEnvironment?: () => void;
-  environmentOverride?: ReactNode; 
-  rowItems?: ReactNode; 
+  environmentOverride?: ReactNode;
+  rowItems?: ReactNode;
 }
 
 export const ThreadEnvironmentSummary = memo(function ThreadEnvironmentSummary({
