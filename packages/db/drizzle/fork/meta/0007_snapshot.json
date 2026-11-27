@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ecb33b90-ca3e-4be8-8165-5031bb56866d",
-  "prevId": "fbe5ec34-75a0-4a4a-ab6b-3fa440eafc7d",
+  "id": "5c5ec6c6-f5de-4556-a593-c2b0f9b45622",
+  "prevId": "ecb33b90-ca3e-4be8-8165-5031bb56866d",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -3926,6 +3926,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "recheck_at": {
+          "name": "recheck_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "waiting_on": {
           "name": "waiting_on",
           "type": "text",
@@ -4097,6 +4104,16 @@
             "id"
           ],
           "isUnique": false
+        },
+        "queued_thread_messages_recheck_idx": {
+          "name": "queued_thread_messages_recheck_idx",
+          "columns": [
+            "state",
+            "recheck_at",
+            "id"
+          ],
+          "isUnique": false,
+          "where": "\"queued_thread_messages\".\"recheck_at\" IS NOT NULL"
         },
         "queued_thread_messages_retry_idx": {
           "name": "queued_thread_messages_retry_idx",

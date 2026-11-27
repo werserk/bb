@@ -1025,6 +1025,7 @@ export const queuedThreadMessages = sqliteTable(
       .default(false),
     state: text("state", { enum: queuedMessageStateValues }).notNull(),
     sendAt: integer("send_at"),
+    recheckAt: integer("recheck_at"),
     waitingOn: text("waiting_on"),
     waitHolder: text("wait_holder").$type<QueuedMessageWaitHolder>(),
     failureReason: text("failure_reason"),
@@ -1069,6 +1070,9 @@ export const queuedThreadMessages = sqliteTable(
       table.sendAt,
       table.id,
     ),
+    index("queued_thread_messages_recheck_idx")
+      .on(table.state, table.recheckAt, table.id)
+      .where(sql`${table.recheckAt} IS NOT NULL`),
     index("queued_thread_messages_retry_idx").on(
       table.state,
       table.nextAttemptAt,

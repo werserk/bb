@@ -107,6 +107,7 @@ it.each([
         claimed: claims,
         waitingOn,
         sendAt,
+        recheckAt: null,
         message: {
           input: textInput("service"),
           execution: {
@@ -182,6 +183,7 @@ it("publishes a newly created wait even when other queued rows have the same rea
       claimed: null,
       waitingOn: { kind: "thread-busy" },
       sendAt: null,
+      recheckAt: null,
       message: {
         input: textInput("new ordinary"),
         execution: {
@@ -242,7 +244,6 @@ it.each(["plugin", "host-offline"] as const)(
           kind === "plugin"
             ? { kind, pluginId: "queue-gate", reason: "held" }
             : { kind, hostName: "Test Host" },
-        sendAt: null,
       });
       await runQueuedMessageDispatch(
         h.deps,
