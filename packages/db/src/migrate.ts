@@ -1471,13 +1471,27 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
       stageExistingThreadStorageDeletedAtColumn(db, migrationsFolder);
     // werserk fork: a backported column upstream is about to add.
     stageForkRecheckAtForUpstream(db, migrationsFolder);
+    let migrationError: unknown;
     try {
       drizzleMigrate(db, { migrationsFolder });
+    } catch (error) {
+      migrationError = error;
+      throw error;
     } finally {
       if (stagedConnectMachineId) restoreStagedConnectMachineIdColumn(db);
       if (stagedThreadStorageDeletedAt)
         restoreStagedThreadStorageDeletedAtColumn(db);
-      restoreStagedForkRecheckAt(db);
+      // werserk fork: a failed restore must not hide why the migration
+      // failed. The stage stays, and the next start restores it.
+      try {
+        restoreStagedForkRecheckAt(db);
+      } catch (restoreError) {
+        if (migrationError === undefined) throw restoreError;
+        throw new Error(
+          `Database migration failed (${String(migrationError)}), and restoring the staged recheck_at column also failed: ${String(restoreError)}`,
+          { cause: migrationError },
+        );
+      }
     }
     applyReorderedCleanupMigrations(db, migrationsFolder);
     seedKeepAwakePluginConfiguration(db);

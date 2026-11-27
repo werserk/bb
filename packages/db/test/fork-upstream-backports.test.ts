@@ -417,4 +417,40 @@ describe("fork 0007 backport of upstream 0162", () => {
       db.$client.close();
     }
   });
+
+  it("keeps upstream's migration error when the restore after it fails too", () => {
+    const db = createConnection(":memory:");
+    try {
+      migrate(db);
+      // A stage the restore cannot read, and an upstream migration that fails.
+      db.$client.exec(
+        "CREATE TABLE __bb_fork_stage_queued_message_recheck_at (id text PRIMARY KEY NOT NULL)",
+      );
+      const broken = copyDrizzle();
+      writeFileSync(
+        join(broken, "9999_broken.sql"),
+        "SELECT * FROM no_such_upstream_table;",
+      );
+      const journal = readJournal(broken);
+      journal.entries.push({
+        idx: journal.entries.length,
+        version: "6",
+        when: 9_999_999_999_999,
+        tag: "9999_broken",
+        breakpoints: true,
+      });
+      writeJournal(broken, journal);
+
+      let thrown: unknown;
+      try {
+        migrate(db, { migrationsFolder: broken });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(String(thrown)).toMatch(/restoring the staged recheck_at/);
+      expect(String((thrown as Error).cause)).toMatch(/no_such_upstream_table/);
+    } finally {
+      db.$client.close();
+    }
+  });
 });

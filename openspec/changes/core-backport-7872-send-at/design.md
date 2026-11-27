@@ -35,6 +35,8 @@ Between `0162` and the restore, later upstream migrations in the same run see th
 
 The stage step and the fork `0007` entry stay as long as any database may still upgrade from a pre-sync build.
 
+Accepted risk: if the synced build stops between stage and restore, the owner then rolls back to a build from before this backport (it has no restore step), that build runs, and the synced build starts again, the restore writes the staged `send_at` and `state` over what the older runtime changed in between; this takes three unlikely steps in a row, so it is accepted rather than guarded.
+
 ## Release class and rollback
 
 Class `data-protocol` (the fork release runbook): a new column and index, a data move on existing rows, and an additive plugin contract field. It needs `--owner-approved`, and the runbook takes a database snapshot before the first start.
@@ -46,6 +48,14 @@ Pointer rollback to the previous build works without a snapshot restore:
 - Rolling forward again: `0007` is already in the ledger and does not re-run. Rows the old runtime wrote with a plugin time in `send_at` are read as a sender time. Such a message waits until that time (normally seconds) and is never sent early.
 
 Restore the snapshot only if this migration itself damaged the database. It drops every queued message and thread change made after the upgrade.
+
+## Patch ledger entry
+
+The row for the fork patch ledger, added when this branch lands on `fork/main`:
+
+| Patch | Change | Files | Data and contract | Upstream | Retire when | Status |
+|---|---|---|---|---|---|---|
+| Scheduled send under dispatch wait | `core-backport-7872-send-at` | `apps/server/src/services/threads/{dispatch-attempt,dispatch-hooks,queue-drain-failure,queue-waits,queued-messages,thread-turn-starting}.ts`, `packages/db/src/{schema,data/queued-thread-messages,fork-migrations,fork-upstream-backports,migrate}.ts`, `packages/plugin-sdk/src/backend-contract.ts`, tests, `FORK.md` | fork db `0007_queued_message_recheck_at` (= upstream `0162`, staged and recorded at sync); plugin contract `wait.recheckAt` (legacy `sendAt` mapped); SDK version unchanged 0.6.132 | upstream get-bb/bb 89f1e507d6 (#7872), SDK 0.6.174 | a sync that brings upstream `0162`; keep the fork `0007` file and the stage step while pre-sync databases can upgrade | branch `core/backport-7872-send-at`; not on `fork/main`, not released |
 
 ## Plugin SDK version
 

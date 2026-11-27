@@ -14,12 +14,14 @@ interface UpstreamBackport {
   upstreamTag: string;
 }
 
+// get-bb/bb #7872: the plugin re-ask time gets its own column.
+const recheckAtBackport: UpstreamBackport = {
+  forkTag: "0007_queued_message_recheck_at",
+  upstreamTag: "0162_queued_message_recheck_at",
+};
+
 export const forkBackportsOfUpstream: readonly UpstreamBackport[] = [
-  // get-bb/bb #7872: the plugin re-ask time gets its own column.
-  {
-    forkTag: "0007_queued_message_recheck_at",
-    upstreamTag: "0162_queued_message_recheck_at",
-  },
+  recheckAtBackport,
 ];
 
 function journalWhen(folder: string, tag: string): number | undefined {
@@ -83,7 +85,6 @@ export function forkMigrationsCoveredUpstream(
 }
 
 const RECHECK_STAGE = "__bb_fork_stage_queued_message_recheck_at";
-const RECHECK_UPSTREAM_TAG = "0162_queued_message_recheck_at";
 
 /**
  * Run before upstream's migrator. A database that ran fork 0007 already has
@@ -102,7 +103,10 @@ export function stageForkRecheckAtForUpstream(
   migrationsFolder: string,
 ): void {
   if (tableExists(db, RECHECK_STAGE)) return;
-  const upstreamWhen = journalWhen(migrationsFolder, RECHECK_UPSTREAM_TAG);
+  const upstreamWhen = journalWhen(
+    migrationsFolder,
+    recheckAtBackport.upstreamTag,
+  );
   if (upstreamWhen === undefined || upstreamApplied(db, upstreamWhen)) return;
   if (!tableExists(db, "queued_thread_messages")) return;
   if (!columnExists(db, "queued_thread_messages", "recheck_at")) return;

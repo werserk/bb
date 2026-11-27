@@ -567,7 +567,7 @@ async function runDispatchAttempt(
       retriesGoFirst &&
       hasLiveQueuedRetry(deps.db, thread.id)
     ) {
-      continued.outcome = waitOn({ kind: "thread-busy" }, null);
+      continued.outcome = waitOn({ kind: "thread-busy" });
       return;
     }
 
@@ -577,7 +577,7 @@ async function runDispatchAttempt(
       args.queuePayload.kind !== "retry" &&
       hasOrdinaryQueuedThreadMessages(deps.db, thread.id)
     ) {
-      continued.outcome = waitOn({ kind: "thread-busy" });
+      continued.outcome = waitOn({ kind: "thread-busy" }, null);
       return;
     }
 

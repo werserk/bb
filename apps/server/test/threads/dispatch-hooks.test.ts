@@ -1532,6 +1532,48 @@ describe("a scheduled send held by a plugin wait", () => {
     });
   });
 
+  // werserk fork: Send now is the sender overriding both the hold and the time.
+  it("sends a scheduled row a plugin holds at once on Send now", async () => {
+    await withTestHarness(async (harness) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const scheduledAt = Date.now() + SCHEDULED_IN_MS;
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "limiter",
+            handler: () => ({ action: "wait", reason: "1 of 1 running" }),
+          },
+        ],
+      });
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-scheduled-send-now",
+        status: "idle",
+      });
+      const turnsBefore = turnRequests(harness, thread.id).length;
+      await acceptThreadSendRequest(harness.deps, {
+        payload: {
+          input: textInput("send it now"),
+          mode: "auto",
+          sendAt: scheduledAt,
+        },
+        thread,
+      });
+      const held = onlyQueuedRow(harness, thread.id);
+      expect(held.waitingOn).toMatchObject({ kind: "plugin" });
+      expect(held.sendAt).toBe(scheduledAt);
+
+      await sendQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        queuedMessageId: held.id,
+        mode: "auto",
+        claimPolicy: { kind: "explicit-send" },
+      });
+
+      expect(turnRequests(harness, thread.id)).toHaveLength(turnsBefore + 1);
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+    });
+  });
+
   it("keeps the scheduled time across a re-attempt the plugin still holds", async () => {
     await withTestHarness(async (harness) => {
       vi.useFakeTimers({ toFake: ["Date"] });
