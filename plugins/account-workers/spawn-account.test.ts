@@ -177,6 +177,36 @@ async function expectAborted(t: Awaited<ReturnType<typeof load>>, result: { exit
   expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
 }
 
+describe("spawn --send-at", () => {
+  it("the plugin holds the ready thread until the requested time, whatever core does with the row", async () => {
+    const t = await load(null);
+    const sent: unknown[] = [];
+    t.host.harness.sdk.stub("threads.spawn", async (args: { sendAt?: number }) => {
+      sent.push(args.sendAt);
+      return makeThreadResponse({ id: THREAD });
+    });
+    const at = Date.now() + 86_400_000;
+    expect((await t.spawn(["--send-at", String(at)])).exitCode).toBe(0);
+    expect(sent).toEqual([at]);
+    expect(await t.dispatch()).toMatchObject({ action: "wait", sendAt: at });
+    Date.now = () => at;
+    expect(await t.dispatch()).toEqual({ action: "proceed" });
+  });
+
+  it("a past --send-at proceeds once ready", async () => {
+    const t = await load(null);
+    expect((await t.spawn(["--send-at", String(Date.now() - 1)])).exitCode).toBe(0);
+    expect(await t.dispatch()).toEqual({ action: "proceed" });
+  });
+
+  it("an aborted spawn rejects instead of waiting for its time", async () => {
+    const t = await load({ set: () => ({ ok: false, reason: "at-limit", message: "limit" }) });
+    const result = await t.spawn(["--send-at", String(Date.now() + 86_400_000), "--account", "Work A"]);
+    expect(result.exitCode).toBe(1);
+    expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
+  });
+});
+
 describe("spawn --account", () => {
   it("without --account calls no pool and keeps today's spawn", async () => {
     const t = await load(null);

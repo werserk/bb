@@ -340,7 +340,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             provider: { type: "string", description: `Provider id (default ${DEFAULT_PROVIDER}); one of ${PROFILES.flatMap((p) => p.providerIds).join(", ")}` },
             model: { type: "string", description: "Model id" },
             title: { type: "string", description: "Thread title" },
-            "send-at": { type: "integer", min: 0, max: Number.MAX_SAFE_INTEGER, description: "Schedule the first message at this epoch ms instead of now" },
+            "send-at": { type: "integer", min: 0, max: Number.MAX_SAFE_INTEGER, description: "Schedule the first message at this epoch ms instead of now; account-workers holds the thread's messages until then" },
             account: { type: "string", description: "Pool account (id or label) for this thread, set through the Account Pooler's thread-account.v1 before its first message; auto or absent: the pool picks" },
             "on-limit": { type: "string", description: `With a named --account: ${ON_LIMIT.join(" or ")} (default ${ON_LIMIT[0]}) when that account hits its limit` },
             json: { type: "boolean", description: "Print JSON" },
@@ -406,6 +406,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               instructions: workspace.instructions,
               profile: profile.id,
               ready: false,
+              sendAt: (o["send-at"] as number | undefined) ?? null,
             });
             let threadId: string;
             try {
