@@ -31,12 +31,15 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   definePluginApp,
+  experimental_THREAD_INFO_ROW_GROUPS,
   experimental_copyToClipboard,
   useBbNavigate,
   useRealtime,
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
+import { AccountCardRow } from "./ui/thread-account/AccountCardRow.js";
+import { LimitCard } from "./ui/thread-account/LimitCard.js";
 import {
   Collapsible,
   CollapsibleContent,
@@ -2033,5 +2036,19 @@ export default definePluginApp((app) => {
   app.slots.settingsSection({
     id: "accounts",
     component: AccountPoolSettings,
+  });
+  // U1: the thread's account in the thread context card (and its header
+  // popover in the banner layout).
+  app.slots.experimental_threadContextCardRow({
+    id: "thread-account",
+    group: experimental_THREAD_INFO_ROW_GROUPS.thread,
+    order: 50,
+    component: AccountCardRow,
+  });
+  // U2: the limit card, plain content in a card banner (R1).
+  app.composer.customize({
+    id: "thread-account",
+    scopes: ["thread"],
+    banners: [{ id: "limit", chrome: "card", component: LimitCard }],
   });
 });
