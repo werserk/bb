@@ -304,3 +304,28 @@ describe("app RPCs", () => {
     expect(await host.harness.callRpc("workspaceOptions", { threadId: "thr_new" })).toEqual({ options: [] });
   });
 });
+
+describe("provider id", () => {
+  it("passes the SDK's environment provider validation, which refuses a dotted id", async () => {
+    const host = await load(rpc());
+    expect([...host.harness.inspection.registrations.environmentProviders.keys()]).toEqual([WORKER_PROVIDER_ID]);
+    const declaration = workerProvider({
+      store: new BindingStore(new Database(":memory:")),
+      host: { call: (async () => ({ ok: true })) as never },
+      listHosts: async () => hosts(),
+      projectSources: async () => sources,
+      refusedMachineEnv: async () => [],
+      release: async () => ({ kind: "cleaned" as const }),
+      retire: () => undefined,
+      changed: () => undefined,
+      log: () => undefined,
+    });
+    const register = (id: string) => {
+      const fresh = createFakePluginHost({ pluginId: "account-workers" });
+      fresh.bb.experimental_environments.register({ ...declaration, id } as unknown as Parameters<typeof fresh.bb.experimental_environments.register>[0]);
+      return [...fresh.harness.inspection.registrations.environmentProviders.keys()];
+    };
+    expect(register(WORKER_PROVIDER_ID)).toEqual(["account-workers-worker"]);
+    expect(() => register("account-workers.worker")).toThrow(/invalid environment provider id/);
+  });
+});
