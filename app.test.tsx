@@ -127,7 +127,7 @@ function render(
       rpc: {
         "status.get": () => status(accounts),
         "config.get": () => config(),
-        "hostExclusion.list": () => [],
+        "hostRole.list": () => [],
         ...extraRpc,
       },
       openUrl: () => true,
@@ -147,7 +147,7 @@ describe("Account Pool parent banner", () => {
         rpc: {
           "status.get": () => ({ ...status(), parent }),
           "config.get": () => config(),
-          "hostExclusion.list": () => [],
+          "hostRole.list": () => [],
         },
         openUrl: () => true,
       },
@@ -894,61 +894,65 @@ it("adds an OpenAI API key from the Codex section", async () => {
   );
 });
 
-it("lists unminted and retained machines and saves exclusions authoritatively", async () => {
-  let excluded = false;
+const select = (element: HTMLElement) => element as HTMLSelectElement;
+
+it("lists machines with their roles and saves a role authoritatively", async () => {
+  let role: string | null = null;
   const slot = render([], {
-    "hostExclusion.list": () => [
-      { hostId: "new-host", hostName: "New", enrolled: true, excluded },
-      { hostId: "gone", hostName: null, enrolled: false, excluded: true },
+    "hostRole.list": () => [
+      { hostId: "new-host", hostName: "New", enrolled: true, role },
+      { hostId: "gone", hostName: null, enrolled: false, role: "trusted" },
     ],
-    "hostExclusion.set": () => {
-      excluded = true;
-      return { hostId: "new-host", hostName: "New", enrolled: true, excluded };
+    "hostRole.set": () => {
+      role = "trusted";
+      return { hostId: "new-host", hostName: "New", enrolled: true, role };
     },
   });
   fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-  const toggle = await slot.findByRole("switch", {
-    name: "Exclude New from central pooling",
-  });
-  expect(toggle.getAttribute("aria-checked")).toBe("false");
-  expect(await slot.findByText(/No longer enrolled/)).toBeTruthy();
-  fireEvent.click(toggle);
-  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  const picker = select(
+    await slot.findByRole("combobox", { name: "Role of New" }),
+  );
+  expect(picker.value).toBe("none");
+  expect(
+    await slot.findByText(/No longer enrolled, role kept/),
+  ).toBeTruthy();
+  fireEvent.change(picker, { target: { value: "trusted" } });
+  await waitFor(() => expect(picker.value).toBe("trusted"));
   expect(slot.rpcCalls).toContainEqual({
-    method: "hostExclusion.set",
-    input: { hostId: "new-host", excluded: true },
+    method: "hostRole.set",
+    input: { hostId: "new-host", role: "trusted" },
   });
 });
 
-it("keeps the authoritative machine policy on a failed save", async () => {
+it("keeps the authoritative machine role on a failed save", async () => {
   const slot = render([], {
-    "hostExclusion.list": () => [
-      { hostId: "new-host", hostName: "New", enrolled: true, excluded: false },
+    "hostRole.list": () => [
+      { hostId: "new-host", hostName: "New", enrolled: true, role: "trusted" },
     ],
-    "hostExclusion.set": () => {
-      throw new Error("Policy save failed");
+    "hostRole.set": () => {
+      throw new Error("Role save failed");
     },
   });
   fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-  const toggle = await slot.findByRole("switch", {
-    name: "Exclude New from central pooling",
-  });
-  fireEvent.click(toggle);
-  expect(await slot.findByText("Policy save failed")).toBeTruthy();
-  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  const picker = select(
+    await slot.findByRole("combobox", { name: "Role of New" }),
+  );
+  fireEvent.change(picker, { target: { value: "none" } });
+  expect(await slot.findByText("Role save failed")).toBeTruthy();
+  expect(picker.value).toBe("trusted");
 });
 
-it("disables rotation for an excluded machine", async () => {
+it("disables rotation for a machine without a role", async () => {
   const slot = render([], {
-    "hostExclusion.list": () => [
-      { hostId: "host-one", hostName: "bee", enrolled: true, excluded: true },
+    "hostRole.list": () => [
+      { hostId: "host-one", hostName: "bee", enrolled: true, role: null },
     ],
   });
   fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
   expect(
     (
       await slot.findByRole("button", {
-        name: "bee: Excluded from central pooling",
+        name: "bee: No Account Pooler role",
       })
     ).hasAttribute("disabled"),
   ).toBe(true);
@@ -961,134 +965,123 @@ it("keeps the saved authoritative row when reconciliation fails and an older lis
     hostId: "new-host",
     hostName: "New",
     enrolled: true,
-    excluded: false,
+    role: null,
   };
   const slot = render([], {
-    "hostExclusion.list": () => {
+    "hostRole.list": () => {
       reads++;
       if (reads === 1) return [initial];
       if (reads === 2) return stale.promise;
       throw new Error("Reconciliation failed");
     },
-    "hostExclusion.set": () => ({ ...initial, excluded: true }),
+    "hostRole.set": () => ({ ...initial, role: "trusted" }),
   });
   fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-  const toggle = await slot.findByRole("switch", {
-    name: "Exclude New from central pooling",
-  });
-  await slot.emitRealtime("host-exclusions-changed", {});
-  fireEvent.click(toggle);
+  const picker = select(
+    await slot.findByRole("combobox", { name: "Role of New" }),
+  );
+  await slot.emitRealtime("host-roles-changed", {});
+  fireEvent.change(picker, { target: { value: "trusted" } });
   expect(await slot.findByText("Reconciliation failed")).toBeTruthy();
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  expect(picker.value).toBe("trusted");
   await act(async () => {
     stale.resolve([initial]);
   });
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  expect(picker.value).toBe("trusted");
 });
 
 it.each([true, false])(
-  "includes a machine and removes an unenrolled retained row (enrolled=%s)",
+  "removes a role and drops an unenrolled row (enrolled=%s)",
   async (enrolled) => {
     const row = {
       hostId: "target",
       hostName: enrolled ? "Target" : null,
       enrolled,
-      excluded: true,
+      role: "trusted",
     };
     let saved = false;
     const slot = render([], {
-      "hostExclusion.list": () =>
-        saved ? (enrolled ? [{ ...row, excluded: false }] : []) : [row],
-      "hostExclusion.set": () => {
+      "hostRole.list": () =>
+        saved ? (enrolled ? [{ ...row, role: null }] : []) : [row],
+      "hostRole.set": () => {
         saved = true;
-        return { ...row, excluded: false };
+        return { ...row, role: null };
       },
     });
     fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-    const name = `Exclude ${row.hostName ?? row.hostId} from central pooling`;
-    fireEvent.click(await slot.findByRole("switch", { name }));
+    const name = `Role of ${row.hostName ?? row.hostId}`;
+    fireEvent.change(await slot.findByRole("combobox", { name }), {
+      target: { value: "none" },
+    });
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({
-        method: "hostExclusion.set",
-        input: { hostId: "target", excluded: false },
+        method: "hostRole.set",
+        input: { hostId: "target", role: "none" },
       }),
     );
     await waitFor(() =>
       enrolled
-        ? expect(
-            slot.getByRole("switch", { name }).getAttribute("aria-checked"),
-          ).toBe("false")
-        : expect(slot.queryByRole("switch", { name })).toBeNull(),
+        ? expect(select(slot.getByRole("combobox", { name })).value).toBe(
+            "none",
+          )
+        : expect(slot.queryByRole("combobox", { name })).toBeNull(),
     );
   },
 );
 
-it("disables only the saving row and refreshes external realtime policy", async () => {
+it("disables only the saving row and refreshes external realtime roles", async () => {
   const save = deferred<object>();
-  let excluded = false;
-  const row = {
-    hostId: "one",
-    hostName: "One",
-    enrolled: true,
-    excluded: false,
-  };
+  let role: string | null = null;
+  const row = { hostId: "one", hostName: "One", enrolled: true, role: null };
   const slot = render([], {
-    "hostExclusion.list": () => [
-      row,
-      { ...row, hostId: "two", hostName: "Two", excluded },
-    ],
-    "hostExclusion.set": () => save.promise,
+    "hostRole.list": () => [row, { ...row, hostId: "two", hostName: "Two", role }],
+    "hostRole.set": () => save.promise,
   });
   fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
-  const one = await slot.findByRole("switch", {
-    name: "Exclude One from central pooling",
-  });
-  const two = slot.getByRole("switch", {
-    name: "Exclude Two from central pooling",
-  });
-  fireEvent.click(one);
-  await waitFor(() => expect(one.hasAttribute("disabled")).toBe(true));
-  expect(two.hasAttribute("disabled")).toBe(false);
-  excluded = true;
-  await slot.emitRealtime("host-exclusions-changed", {});
-  await waitFor(() => expect(two.getAttribute("aria-checked")).toBe("true"));
+  const one = select(await slot.findByRole("combobox", { name: "Role of One" }));
+  const two = select(slot.getByRole("combobox", { name: "Role of Two" }));
+  fireEvent.change(one, { target: { value: "worker" } });
+  await waitFor(() => expect(one.disabled).toBe(true));
+  expect(two.disabled).toBe(false);
+  role = "server";
+  await slot.emitRealtime("host-roles-changed", {});
+  await waitFor(() => expect(two.value).toBe("server"));
   await act(async () => {
-    save.resolve({ ...row, excluded: true });
+    save.resolve({ ...row, role: "worker" });
   });
-  await waitFor(() => expect(one.hasAttribute("disabled")).toBe(false));
+  await waitFor(() => expect(one.disabled).toBe(false));
 });
 
 it.each([1440, 390])(
-  "renders machine routing controls at %spx in the local settings harness",
+  "renders machine role controls at %spx in the local settings harness",
   async (width) => {
     vi.stubGlobal("innerWidth", width);
     const slot = render([], {
-      "hostExclusion.list": () => [
+      "hostRole.list": () => [
         {
-          hostId: "native-one",
-          hostName: "Native machine",
+          hostId: "server-one",
+          hostName: "Server machine",
           enrolled: true,
-          excluded: true,
+          role: "server",
         },
-        { hostId: "retired", hostName: null, enrolled: false, excluded: true },
+        { hostId: "retired", hostName: null, enrolled: false, role: "worker" },
       ],
     });
     fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
     expect(await slot.findByText("Machine routing")).toBeTruthy();
     expect(
-      await slot.findByRole("switch", {
-        name: "Exclude Native machine from central pooling",
-      }),
-    ).toBeTruthy();
+      select(
+        await slot.findByRole("combobox", { name: "Role of Server machine" }),
+      ).value,
+    ).toBe("server");
     expect(
-      await slot.findByRole("switch", {
-        name: "Exclude retired from central pooling",
-      }),
-    ).toBeTruthy();
-    expect(await slot.findByText(/No longer enrolled/)).toBeTruthy();
+      select(await slot.findByRole("combobox", { name: "Role of retired" }))
+        .value,
+    ).toBe("worker");
+    expect(await slot.findByText(/No longer enrolled, role kept/)).toBeTruthy();
     if (process.env.EXCLUSION_UI_CAPTURE_DIR) {
       await writeFile(
-        `${process.env.EXCLUSION_UI_CAPTURE_DIR}/native-exclusion-ui-${width}.fragment.html`,
+        `${process.env.EXCLUSION_UI_CAPTURE_DIR}/machine-roles-ui-${width}.fragment.html`,
         slot.container.innerHTML,
       );
     }

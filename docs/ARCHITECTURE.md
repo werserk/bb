@@ -51,8 +51,8 @@ plugins/account-pool-prewarm. Tokens never enter code or test artifacts.
   finish and store the new token before the transport closes. A refresh still
   running after that bound is cut off.
 - **Caller identity is still open.** Plugin RPC carries no caller identity, so
-  every administrative call is trusted. Host exclusions and any future roles
-  or thread policies guard against mistakes, not against a hostile caller.
+  every administrative call is trusted. Machine roles and any future thread
+  policies guard against mistakes, not against a hostile caller.
   Closing this needs a core change and is tracked outside this repository.
 
 ## Rationale
@@ -79,28 +79,50 @@ Model-access 403 remains a request failure; 401 remains credential failure.
 Mixed accounts share the existing priority/cursor/affinity policy to avoid a
 second paid-routing mechanism. API catalogs remain native Platform payloads.
 
-## Machine-wide routing exclusion
+## Machine roles
 
-`src/host-exclusion.ts` owns explicit policy in `pool_host_exclusion(host_id)`;
-missing row preserves existing routing. This additive eighth migration shares
-QUOTA_MIGRATIONS and the existing database. RPC, CLI and settings use the same
-service; retained exclusions outlive host unenrollment until explicitly removed.
-The policy gates provider environment contributions (including null-thread
-catalog), token mint/rotation/current and grace authentication, retry decisions
-and Proxied health. Post-await checks prevent stale positive results.
+`src/host-roles.ts` owns `pool_host_role(host_id, role)`, the tenth migration in
+QUOTA_MIGRATIONS. The roles are `server`, `worker` and `trusted`; in this version
+they behave the same. The rule is default deny: a machine is pooled only while
+it has a role. A machine without one gets neutral environment contributions
+(including null-thread catalog calls) and is never minted a hub token; its
+current and grace tokens fail authentication, rotation fails, retry decisions
+and Proxied health treat it as unpooled. Every call site uses one predicate,
+`HostRoles.hasRole`, and `HubTokenStore` takes it as a required constructor
+argument, so a store without a predicate cannot exist.
 
-Excluded env contributions empty both providers' routing and parent markers,
-without contributing ANTHROPIC_CUSTOM_HEADERS. Opaque target-host headers are
-preserved byte-for-byte; any preexisting project attribution cleanup belongs
-to the separately configured VM launcher.
-Existing processes keep their environment. New authentication is denied while
-excluded; requests authenticated earlier may finish. Policy identifies the
-trusted host context/token principal, not physical network origin.
+Why: a workspace must never get a key or a pass by accident. Under the earlier
+opt-out exclusion, a newly enrolled machine was pooled until someone excluded
+it; with roles, it gets nothing until the owner gives it a role.
 
-An older plugin ignores exclusion rows and may route again. Rollback therefore
-is not preserved isolation; enrolled native machines need independent launcher
-or network confinement before rollback. This feature establishes no native
-identity, readiness, worker registry, capacity lease or scheduling guarantee.
+Start order: list enrolled hosts, then one transaction (the SDK migrator, the
+one-time seed, reconcile, projection), then the token store and its prune.
+- Upgrade from the opt-out build (the exclusion table exists, the role table
+  does not): every enrolled host without an exclusion row gets `trusted`, so
+  today's routing and its tokens are kept; excluded hosts get nothing, and a
+  token file kept for one is deleted by the prune. A fresh store seeds nothing.
+- Reconcile, every start: an exclusion row beats a role. Only the previous
+  build writes such a pair (an exclusion made after a rollback).
+- Revocation: only a change to `none` deletes the machine's token file;
+  a role-to-role change keeps the token. Prune at start and on every `status`
+  drops tokens of machines that are not enrolled or have no role.
+- A removed machine keeps its role ("No longer enrolled, role kept") because
+  the host list may be incomplete; set `none` before removing a machine.
+
+Rollback projection: `pool_host_exclusion` is no longer read for routing; it is
+the previous build's only input. `projectExclusions` rewrites it from roles
+(no row for a machine with a role, a row for every enrolled machine without one)
+on every role change, at start and on every `status`. After a rollback the
+previous build routes exactly the machines that had a role at the last
+projection; a machine enrolled after it and never seen by one is routed by the
+previous build, and any `bb pool status` before the rollback closes that gap.
+The previous migrator ignores the extra recorded migration, so the store opens.
+
+Existing processes keep their environment; requests authenticated earlier may
+finish. Roles identify the trusted host context and token principal, not the
+physical network origin. Like every administrative call, they guard against
+mistakes, not a hostile caller (see Caller identity above). Roles establish no
+native identity, readiness, worker registry, capacity lease or scheduling.
 
 ## Retired native cells
 
@@ -109,7 +131,7 @@ the `message.dispatch` hold and `pool native`) was removed on 2026-11-27 by the
 owner's decision. Why: a cell kept its own provider login next to the pooled
 account, so two processes could refresh the same OAuth grant and invalidate each
 other. The hub is now the only refresh owner for every pooled account; a machine
-that must use its own login is excluded under Machine routing instead.
+that must use its own login gets no role under Machine routing instead.
 
 Migration nine (`NATIVE_POOL_MIGRATION` in `store.ts`) stays byte-identical at
 its index. The SDK checks every applied migration by index and statement hash,

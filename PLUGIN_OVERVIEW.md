@@ -120,16 +120,18 @@ an account-wide credential error. Temporary 429 follows the existing hold policy
 
 ## Machine routing
 
-Settings → Advanced → Machine routing lists enrolled machines, including those
-without a minted token, plus retained exclusions for removed machines. Exclude
-applies to central Claude and Codex pooling together. The machine must use its
+Only a machine with an Account Pooler role gets central Claude and Codex
+pooling; a machine without one gets nothing, not even a hub token. The roles are
+`server`, `worker` and `trusted` and currently behave the same. Settings →
+Advanced → Machine routing lists enrolled machines and removed machines that
+kept a role, with a role picker per machine. A machine without a role uses its
 own provider credentials; the setting is not observed native readiness.
 
-`bb pool machine list --json`, `bb pool machine exclude <host-id> --json` and
-`bb pool machine include <host-id> --json` share `hostExclusion.list` and
-`hostExclusion.set` RPC policy. IDs are exact; names are display labels.
-New environment contributions clear Pooler routes and parent markers. Existing
-process environments are unchanged; new machine-token authentication is denied,
-including grace tokens, while already authenticated requests may finish.
-Explicit Include restores normal policy without verifying native credentials.
+`bb pool machine list --json` and `bb pool machine role <host-id>
+<server|worker|trusted|none> --json` share `hostRole.list` and `hostRole.set`
+RPC policy. IDs are exact; names are display labels. Only `none` revokes the
+machine's hub token; a change between roles keeps it. A removed machine keeps
+its role until it is set to `none`, so set `none` before removing a machine.
+Existing process environments are unchanged; after `none`, new machine-token
+authentication is denied, while already authenticated requests may finish.
 See [the architecture map](docs/ARCHITECTURE.md) for persistence and rollback limits.

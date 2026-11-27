@@ -1,5 +1,9 @@
-import type { HostExclusionSummary } from "./src/host-exclusion.js";
-import { ACCOUNT_POOL_HOST_EXCLUSIONS_CHANGED } from "./src/realtime.js";
+import {
+  HOST_ROLES,
+  type HostRole,
+  type HostRoleSummary,
+} from "./src/host-roles.js";
+import { ACCOUNT_POOL_HOST_ROLES_CHANGED } from "./src/realtime.js";
 import {
   useCallback,
   useEffect,
@@ -844,7 +848,7 @@ function ConfigFieldRow({
 function AccountPoolSettings() {
   const rpc = useRpc<typeof accountPoolRpcContract>();
   const navigate = useBbNavigate();
-  const [machines, setMachines] = useState<HostExclusionSummary[] | null>(null);
+  const [machines, setMachines] = useState<HostRoleSummary[] | null>(null);
   const [machineError, setMachineError] = useState<string | null>(null);
   const [savingMachines, setSavingMachines] = useState<ReadonlySet<string>>(
     new Set(),
@@ -853,7 +857,7 @@ function AccountPoolSettings() {
   const refreshMachines = useCallback(async () => {
     const request = ++machineRequest.current;
     try {
-      const rows = await rpc.call("hostExclusion.list", null);
+      const rows = await rpc.call("hostRole.list", null);
       if (request !== machineRequest.current) return;
       setMachines(rows);
       setMachineError(null);
@@ -867,19 +871,19 @@ function AccountPoolSettings() {
       machineRequest.current++;
     };
   }, [refreshMachines]);
-  useRealtime(ACCOUNT_POOL_HOST_EXCLUSIONS_CHANGED, () => {
+  useRealtime(ACCOUNT_POOL_HOST_ROLES_CHANGED, () => {
     void refreshMachines();
   });
-  const setMachineExcluded = async (hostId: string, excluded: boolean) => {
+  const setMachineRole = async (hostId: string, role: HostRole | "none") => {
     setSavingMachines((current) => new Set([...current, hostId]));
     try {
-      const saved = await rpc.call("hostExclusion.set", { hostId, excluded });
+      const saved = await rpc.call("hostRole.set", { hostId, role });
       machineRequest.current++;
       setMachines((current) => {
         const rows = (current ?? []).filter(
           (machine) => machine.hostId !== saved.hostId,
         );
-        if (saved.enrolled || saved.excluded) rows.push(saved);
+        if (saved.enrolled || saved.role !== null) rows.push(saved);
         return rows.sort((left, right) =>
           left.hostId.localeCompare(right.hostId),
         );
@@ -1395,9 +1399,10 @@ function AccountPoolSettings() {
               <div className="py-2.5">
                 <div className="text-sm text-foreground">Machine routing</div>
                 <p className="text-xs text-muted-foreground">
-                  Exclude a dedicated machine from central Claude and Codex
-                  pooling. It must use its own provider credentials. This does
-                  not stop requests already running.
+                  Only a machine with a role gets central Claude and Codex
+                  pooling. Without a role it gets no hub token and must use its
+                  own provider credentials. Removing a role revokes the
+                  machine&apos;s token; requests already running finish.
                 </p>
                 {machineError !== null ? (
                   <p role="alert">{machineError}</p>
@@ -1414,17 +1419,31 @@ function AccountPoolSettings() {
                         <div>{machine.hostName ?? machine.hostId}</div>
                         <div className="text-xs text-muted-foreground">
                           {machine.hostId}
-                          {machine.enrolled ? "" : " · No longer enrolled"}
+                          {machine.enrolled
+                            ? ""
+                            : " · No longer enrolled, role kept"}
                         </div>
                       </div>
-                      <Switch
-                        aria-label={`Exclude ${machine.hostName ?? machine.hostId} from central pooling`}
-                        checked={machine.excluded}
+                      <select
+                        aria-label={`Role of ${machine.hostName ?? machine.hostId}`}
+                        className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+                        value={machine.role ?? "none"}
                         disabled={savingMachines.has(machine.hostId)}
-                        onCheckedChange={(excluded) =>
-                          void setMachineExcluded(machine.hostId, excluded)
+                        onChange={(event) =>
+                          void setMachineRole(
+                            machine.hostId,
+                            event.currentTarget.value as HostRole | "none",
+                          )
                         }
-                      />
+                      >
+                        <option value="none">No role</option>
+                        {HOST_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {role[0]?.toUpperCase()}
+                            {role.slice(1)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   ))
                 )}
@@ -1445,7 +1464,7 @@ function AccountPoolSettings() {
                         machineError !== null ||
                         machines.some(
                           (machine) =>
-                            machine.hostId === host.hostId && machine.excluded,
+                            machine.hostId === host.hostId && machine.role === null,
                         )
                       }
                       size="sm"
@@ -1460,9 +1479,9 @@ function AccountPoolSettings() {
                     >
                       {machines?.some(
                         (machine) =>
-                          machine.hostId === host.hostId && machine.excluded,
+                          machine.hostId === host.hostId && machine.role === null,
                       )
-                        ? `${host.hostName ?? host.hostId}: Excluded from central pooling`
+                        ? `${host.hostName ?? host.hostId}: No Account Pooler role`
                         : `Rotate ${host.hostName ?? host.hostId}`}
                     </Button>
                   ))}

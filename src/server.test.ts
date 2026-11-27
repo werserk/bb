@@ -13,6 +13,7 @@ import fs from "node:fs/promises";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +32,11 @@ import {
   type AccountSummary,
 } from "./contracts.js";
 import { z } from "zod";
-import { PARENT_TOKEN_ENV, PARENT_URL_ENV } from "./parent-pool.js";
+import {
+  AVAILABILITY_PATH,
+  PARENT_TOKEN_ENV,
+  PARENT_URL_ENV,
+} from "./parent-pool.js";
 import {
   AccountStore,
   HubTokenStore,
@@ -223,6 +228,16 @@ function sdkStubs() {
   };
 }
 
+// A fresh store gives no machine a role; the fixture hosts get one explicitly.
+async function grantRoles(
+  host: ReturnType<typeof createFakePluginHost>,
+  hostIds: readonly string[] = ["host-one", "host-two"],
+  role: "server" | "worker" | "trusted" = "trusted",
+): Promise<void> {
+  for (const hostId of hostIds)
+    await host.harness.behavior.callRpc("hostRole.set", { hostId, role });
+}
+
 async function resolveToken(
   host: ReturnType<typeof createFakePluginHost>,
   hostId = "host-one",
@@ -341,6 +356,8 @@ async function createFixture(args: {
   apiKey?: string;
   priority?: number;
   beforePlugin?: (host: Fixture["host"]) => void;
+  // false: start with the store's own roles (none on a fresh store) and no key.
+  roles?: boolean;
 }): Promise<Fixture> {
   const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-pool-"));
   const host = createFakePluginHost({
@@ -360,6 +377,7 @@ async function createFixture(args: {
   });
   args.beforePlugin?.(host);
   await plugin(host.bb);
+  if (args.roles !== false) await grantRoles(host);
   const provider = args.provider ?? "claude";
   const priority = args.priority ?? 100;
   const accountMetadata =
@@ -394,9 +412,11 @@ async function createFixture(args: {
     await fs.rm(dataDir, { recursive: true, force: true });
   });
   const key =
-    args.provider === "codex"
-      ? (await resolveCodexToken(host)).token
-      : await resolveToken(host);
+    args.roles === false
+      ? ""
+      : args.provider === "codex"
+        ? (await resolveCodexToken(host)).token
+        : await resolveToken(host);
   return { dataDir, host, service, key, account };
 }
 
@@ -554,6 +574,7 @@ describe("Account Pool plugin", () => {
     });
     const plugin = testPlugin();
     await plugin(host.bb);
+    await grantRoles(host);
     expect(await host.bb.storage.kv.get("config")).toEqual(expected);
     expect(await host.harness.behavior.callRpc("config.get", null)).toEqual(
       expected,
@@ -598,6 +619,7 @@ describe("Account Pool plugin", () => {
       codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
     });
     await testPlugin()(host.bb);
+    await grantRoles(host);
     expect(
       host.harness.inspection.logEntries.filter((entry) =>
         entry.message.startsWith("Ignored removed config keys"),
@@ -621,6 +643,7 @@ describe("Account Pool plugin", () => {
       sdk: sdkStubs(),
     });
     await testPlugin()(host.bb);
+    await grantRoles(host);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -670,6 +693,7 @@ describe("Account Pool plugin", () => {
         sdk: sdkStubs(),
       });
       await testPlugin()(host.bb);
+      await grantRoles(host);
       cleanups.push(async () => {
         await host.harness.lifecycle.dispose();
         await fs.rm(dataDir, { recursive: true, force: true });
@@ -711,6 +735,7 @@ describe("Account Pool plugin", () => {
         sdk: sdkStubs(),
       });
       await testPlugin()(host.bb);
+      await grantRoles(host);
       cleanups.push(async () => {
         await host.harness.lifecycle.dispose();
         await fs.rm(dataDir, { recursive: true, force: true });
@@ -1086,6 +1111,7 @@ describe("Account Pool plugin", () => {
       seedCodex,
       usageUrl: "data:application/json,{}",
     })(host.bb);
+    await grantRoles(host);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       service.controller.abort();
@@ -1372,6 +1398,7 @@ describe("Account Pool plugin", () => {
         expiresAt: null,
       }),
     })(host.bb);
+    await grantRoles(host);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       service.controller.abort();
@@ -1431,7 +1458,7 @@ describe("Account Pool plugin", () => {
       "secrets",
       "accounts",
     );
-    const seededTokens = new HubTokenStore(secretDir);
+    const seededTokens = new HubTokenStore(secretDir, Date.now, () => true);
     await seededTokens.initialize();
     await seededTokens.forHost("host-gone");
     const goneTokenFile = path.join(secretDir, "hub-token-host-gone.json");
@@ -1442,11 +1469,13 @@ describe("Account Pool plugin", () => {
       sdk: sdkStubs(),
     });
     await testPlugin()(host.bb);
+    await grantRoles(host);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
     });
     await expect(fs.access(goneTokenFile)).rejects.toThrow();
+    await grantRoles(host);
     await host.harness.behavior.callRpc("account.add", {
       provider: "claude",
       source: { kind: "api-key", apiKey: "sk-account" },
@@ -1470,7 +1499,7 @@ describe("Account Pool plugin", () => {
     let now = 1_000;
     const dataDir = await mkdtemp(path.join(tmpdir(), "bb-pool-tokens-"));
     cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
-    const tokens = new HubTokenStore(dataDir, () => now);
+    const tokens = new HubTokenStore(dataDir, () => now, () => true);
     await tokens.initialize();
     const token = await tokens.forHost("host-one");
     const tokenFile = path.join(dataDir, "hub-token-host-one.json");
@@ -1517,6 +1546,7 @@ describe("Account Pool plugin", () => {
       sdk: sdkStubs(),
     });
     await testPlugin({ upstreams: { anthropic: upstream.url } })(host.bb);
+    await grantRoles(host);
     const service = host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       service.controller.abort();
@@ -2558,6 +2588,7 @@ describe("Account Pool plugin", () => {
       sdk: sdkStubs(),
     });
     await testPlugin()(host.bb);
+    await grantRoles(host);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -2701,6 +2732,7 @@ describe("Account Pool plugin", () => {
       oauthProfileUrl: `${oauth.url}/profile`,
       usageUrl: "data:application/json,{}",
     })(host.bb);
+    await grantRoles(host);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -2862,6 +2894,7 @@ describe("Account Pool plugin", () => {
       codexUsageUrl: EMPTY_USAGE_URL,
       usageUrl: "data:application/json,{}",
     })(host.bb);
+    await grantRoles(host);
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
       await fs.rm(dataDir, { recursive: true, force: true });
@@ -8476,6 +8509,7 @@ it("publishes an empty shared usage group before any accounts or settings are co
   });
   try {
     await testPlugin({ fetch })(host.bb);
+    await grantRoles(host);
     expect(
       host.harness.registrations.experimental_publishedRpcMethods.map(
         (entry) => entry.method,
@@ -8562,6 +8596,7 @@ describe("Account Pool nested proxy", () => {
               BB_ACCOUNT_POOL_PARENT_TOKEN: PARENT_TOKEN,
             },
     })(host.bb);
+    await grantRoles(host);
     host.harness.behavior.runService("hub");
     cleanups.push(async () => {
       await host.harness.lifecycle.dispose();
@@ -9043,7 +9078,7 @@ it("does not poison an OpenAI key when a model returns 403", async () => {
   await recovered.text();
 });
 
-describe("machine-wide exclusion", () => {
+describe("machine roles, default deny", () => {
   it.each([null, "proxy", "isolate"] as const)(
     "neutralizes ordinary and catalog env for both providers with parent %s",
     async (mode) => {
@@ -9072,13 +9107,14 @@ describe("machine-wide exclusion", () => {
       const { callRpc, runCli, resolveProviderEnv, resolveProviderEnvHealth } =
         fixture.host.harness.behavior;
       expect(
-        (await runCli(["machine", "exclude", "host-one", "--json"])).exitCode,
+        (await runCli(["machine", "role", "host-one", "none", "--json"]))
+          .exitCode,
       ).toBe(0);
-      expect(await callRpc("hostExclusion.list", null)).toContainEqual({
+      expect(await callRpc("hostRole.list", null)).toContainEqual({
         hostId: "host-one",
         hostName: "One",
         enrolled: true,
-        excluded: true,
+        role: null,
       });
       upstream.mockClear();
       await fixture.host.bb.storage.kv.delete("retry-route:thread-one");
@@ -9118,14 +9154,14 @@ describe("machine-wide exclusion", () => {
       expect(
         await resolveToken(fixture.host, "host-two", "thread-two"),
       ).not.toBe("");
-      await callRpc("hostExclusion.set", {
+      await callRpc("hostRole.set", {
         hostId: "host-one",
-        excluded: false,
+        role: "trusted",
       });
       expect(
         JSON.parse((await runCli(["machine", "list", "--json"])).stdout)
-          .machines[0].excluded,
-      ).toBe(false);
+          .machines[0].role,
+      ).toBe("trusted");
     },
   );
 
@@ -9154,9 +9190,9 @@ describe("machine-wide exclusion", () => {
         machine: "host-one",
       });
       const current = await resolveToken(fixture.host);
-      await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+      await fixture.host.harness.behavior.callRpc("hostRole.set", {
         hostId: "host-one",
-        excluded: true,
+        role: "none",
       });
       upstream.mockClear();
       for (const token of [previous, current]) {
@@ -9184,7 +9220,195 @@ describe("machine-wide exclusion", () => {
     },
   );
 
-  it("serves a former native-cell host like any other host and keeps its exclusion", async () => {
+  const secretsOf = (fixture: Fixture) =>
+    path.join(fixture.dataDir, "plugins", "account-pool", "secrets", "accounts");
+  const tokenFile = (fixture: Fixture, hostId: string) =>
+    path.join(secretsOf(fixture), `hub-token-${hostId}.json`);
+  const availability = (fixture: Fixture, token: string) =>
+    fixture.host.harness.behavior
+      .fetchHttp("GET", AVAILABILITY_PATH, { headers: authHeaders(token) })
+      .then((response) => response.status);
+  const ROUTING_NAMES = [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CODEX_OPENAI_BASE_URL",
+    "CODEX_POOL_AUTH_TOKEN",
+    PARENT_URL_ENV,
+    PARENT_TOKEN_ENV,
+  ];
+
+  it("gives a role-less or unknown host neutral env and mints no token, with or without a thread", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      options: { fetch: async () => Response.json({}) },
+    });
+    const { callRpc, resolveProviderEnv, resolveProviderEnvHealth } =
+      fixture.host.harness.behavior;
+    await callRpc("hostRole.set", { hostId: "host-two", role: "none" });
+    for (const hostId of ["host-two", "host-unknown"])
+      for (const provider of ["claude-code", "codex"])
+        for (const threadId of [null, "thread-two"]) {
+          const entries = await resolveProviderEnv(provider, {
+            threadId,
+            projectId: "project-one",
+            hostId,
+          });
+          expect(entries.map((e) => e.name).sort()).toEqual(
+            [...ROUTING_NAMES].sort(),
+          );
+          expect(entries.every((e) => e.value === "")).toBe(true);
+          expect(
+            await resolveProviderEnvHealth(provider, { hostId }),
+          ).toBeNull();
+        }
+    expect(
+      (await fs.readdir(secretsOf(fixture))).filter((name) =>
+        name.startsWith("hub-token-"),
+      ),
+    ).toEqual(["hub-token-host-one.json"]);
+    await expect(
+      callRpc("token.rotate", { machine: "host-two" }),
+    ).rejects.toThrow();
+  });
+
+  it.each(["server", "worker", "trusted"] as const)(
+    "routes a host with role %s through the hub",
+    async (role) => {
+      const fixture = await createFixture({
+        upstreamUrl: "https://unused.invalid",
+        options: { fetch: async () => Response.json({}) },
+      });
+      await fixture.host.harness.behavior.callRpc("hostRole.set", {
+        hostId: "host-two",
+        role,
+      });
+      for (const threadId of [null, "thread-two"]) {
+        const entries = await fixture.host.harness.behavior.resolveProviderEnv(
+          "claude-code",
+          { threadId, projectId: null, hostId: "host-two" },
+        );
+        const token = entries.find((e) => e.name === "ANTHROPIC_AUTH_TOKEN");
+        expect(typeof token?.value === "string" && token.value.length).toBe(43);
+        expect(await availability(fixture, token?.value as string)).toBe(200);
+      }
+    },
+  );
+
+  it("revokes the token when the role is removed and mints a new one on a new role", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      options: { fetch: async () => Response.json({}) },
+    });
+    const { callRpc } = fixture.host.harness.behavior;
+    const previous = fixture.key;
+    await callRpc("token.rotate", { machine: "host-one" });
+    const current = await resolveToken(fixture.host);
+    expect(await availability(fixture, previous)).toBe(200);
+    await callRpc("hostRole.set", { hostId: "host-one", role: "none" });
+    await expect(fs.access(tokenFile(fixture, "host-one"))).rejects.toThrow();
+    for (const token of [previous, current])
+      expect(await availability(fixture, token)).toBe(401);
+    await callRpc("hostRole.set", { hostId: "host-one", role: "trusted" });
+    expect(await availability(fixture, current)).toBe(401);
+    const next = await resolveToken(fixture.host);
+    expect([previous, current]).not.toContain(next);
+    expect(await availability(fixture, next)).toBe(200);
+  });
+
+  it("keeps the token on a role-to-role change", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      options: { fetch: async () => Response.json({}) },
+    });
+    const before = await fs.stat(tokenFile(fixture, "host-one"));
+    await fixture.host.harness.behavior.callRpc("hostRole.set", {
+      hostId: "host-one",
+      role: "server",
+    });
+    const after = await fs.stat(tokenFile(fixture, "host-one"));
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(await resolveToken(fixture.host)).toBe(fixture.key);
+    expect(await availability(fixture, fixture.key)).toBe(200);
+  });
+
+  it("upgrades an opt-out store without revoking included hosts and drops excluded hosts' kept tokens", async () => {
+    const kept = (hostId: string, value: string) => ({
+      hostId,
+      value,
+      mintedAt: 1,
+      lastUsedAt: null,
+      previous: [],
+    });
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      options: { fetch: async () => Response.json({}) },
+      roles: false,
+      beforePlugin(host) {
+        // The opt-out build's store: host-two excluded after it had a token.
+        const db = host.bb.storage.database();
+        host.bb.storage.migrate(db, QUOTA_MIGRATIONS.slice(0, 9));
+        db.prepare(
+          "INSERT INTO pool_host_exclusion(host_id) VALUES ('host-two'), ('host-gone')",
+        ).run();
+        const dir = path.join(
+          host.bb.server.experimental_dataDir,
+          "plugins",
+          "account-pool",
+          "secrets",
+          "accounts",
+        );
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        for (const [hostId, value] of [
+          ["host-one", "A".repeat(43)],
+          ["host-two", "B".repeat(43)],
+        ] as const)
+          writeFileSync(
+            path.join(dir, `hub-token-${hostId}.json`),
+            `${JSON.stringify(kept(hostId, value))}\n`,
+            { mode: 0o600 },
+          );
+      },
+    });
+    expect(
+      await fixture.host.harness.behavior.callRpc("hostRole.list", null),
+    ).toEqual([
+      { hostId: "host-one", hostName: "One", enrolled: true, role: "trusted" },
+      { hostId: "host-two", hostName: "Two", enrolled: true, role: null },
+    ]);
+    await expect(
+      fs.access(tokenFile(fixture, "host-one")),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(tokenFile(fixture, "host-two"))).rejects.toThrow();
+    expect(await availability(fixture, "A".repeat(43))).toBe(200);
+    expect(await availability(fixture, "B".repeat(43))).toBe(401);
+    expect(await resolveToken(fixture.host)).toBe("A".repeat(43));
+    expect(
+      fixture.host.bb.storage
+        .database()
+        .prepare("SELECT host_id FROM pool_host_exclusion ORDER BY host_id")
+        .all(),
+    ).toEqual([{ host_id: "host-gone" }, { host_id: "host-two" }]);
+  });
+
+  it("prunes a role-less host's token and projects exclusions on status", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      options: { fetch: async () => Response.json({}) },
+    });
+    await resolveToken(fixture.host, "host-two", "thread-two");
+    const db = fixture.host.bb.storage.database();
+    db.prepare("DELETE FROM pool_host_role WHERE host_id = 'host-two'").run();
+    await fixture.host.harness.behavior.callRpc("status.get", null);
+    await expect(fs.access(tokenFile(fixture, "host-two"))).rejects.toThrow();
+    await expect(
+      fs.access(tokenFile(fixture, "host-one")),
+    ).resolves.toBeUndefined();
+    expect(
+      db.prepare("SELECT host_id FROM pool_host_exclusion").all(),
+    ).toEqual([{ host_id: "host-two" }]);
+  });
+
+  it("serves a former native-cell host like any other host and denies it without a role", async () => {
     const fixture = await createFixture({
       upstreamUrl: "https://unused.invalid",
       beforePlugin(host) {
@@ -9204,9 +9428,9 @@ describe("machine-wide exclusion", () => {
     expect(await resolveToken(fixture.host, "host-one", "thread-one")).not.toBe(
       "",
     );
-    await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+    await fixture.host.harness.behavior.callRpc("hostRole.set", {
       hostId: "host-one",
-      excluded: true,
+      role: "none",
     });
     for (const provider of ["claude-code", "codex"]) {
       const entries = await fixture.host.harness.behavior.resolveProviderEnv(
@@ -9249,9 +9473,9 @@ it("rechecks policy while retry request events are resolving", async () => {
     { threadId: "thread-one", requestId: "request-one" },
   );
   await entered.promise;
-  await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+  await fixture.host.harness.behavior.callRpc("hostRole.set", {
     hostId: "host-one",
-    excluded: true,
+    role: "none",
   });
   gate.resolve();
   expect(await pending).toEqual({ kind: "not-routed" });
@@ -9311,9 +9535,9 @@ it.each(["claude-code", "codex"])(
       projectId: null,
     });
     await entered.promise;
-    await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+    await fixture.host.harness.behavior.callRpc("hostRole.set", {
       hostId: "host-one",
-      excluded: true,
+      role: "none",
     });
     release.resolve();
     expect(await health).toBeNull();
@@ -9334,13 +9558,13 @@ it("validates machine policy and exposes CLI help without minting a token", asyn
     options: { fetch: async () => Response.json({}) },
   });
   await expect(
-    fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+    fixture.host.harness.behavior.callRpc("hostRole.set", {
       hostId: "host-one",
-      excluded: true,
+      role: "none",
       provider: "claude",
     }),
   ).rejects.toThrow();
-  for (const command of ["list", "exclude", "include"]) {
+  for (const command of ["list", "role"]) {
     const help = await fixture.host.harness.behavior.runCli([
       "machine",
       command,
@@ -9349,17 +9573,41 @@ it("validates machine policy and exposes CLI help without minting a token", asyn
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("--json");
   }
-  const result = await fixture.host.harness.behavior.runCli([
-    "machine",
-    "exclude",
-    "missing",
-    "--json",
+  for (const args of [
+    ["role", "missing", "trusted"],
+    ["role", "host-one", "admin"],
+    ["role", "bad/id", "none"],
+    ["exclude", "host-one"],
+    ["include", "host-one"],
+  ]) {
+    const result = await fixture.host.harness.behavior.runCli([
+      "machine",
+      ...args,
+      "--json",
+    ]);
+    expect(result.exitCode, args.join(" ")).not.toBe(0);
+  }
+  expect(
+    (
+      await fixture.host.harness.behavior.runCli([
+        "machine",
+        "role",
+        "missing",
+        "none",
+        "--json",
+      ])
+    ).exitCode,
+  ).toBe(0);
+  expect(
+    await fixture.host.harness.behavior.callRpc("hostRole.list", null),
+  ).toEqual([
+    { hostId: "host-one", hostName: "One", enrolled: true, role: "trusted" },
+    { hostId: "host-two", hostName: "Two", enrolled: true, role: "trusted" },
   ]);
-  expect(result.exitCode).not.toBe(0);
 });
 
 it.each(["claude-code", "codex"])(
-  "merges excluded %s routes without clobbering target-only headers or credentials",
+  "merges role-less %s routes without clobbering target-only headers or credentials",
   async (provider) => {
     const fixture = await createFixture({
       upstreamUrl: "https://unused.invalid",
@@ -9371,9 +9619,9 @@ it.each(["claude-code", "codex"])(
         },
       },
     });
-    await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+    await fixture.host.harness.behavior.callRpc("hostRole.set", {
       hostId: "host-one",
-      excluded: true,
+      role: "none",
     });
     const entries = await fixture.host.harness.behavior.resolveProviderEnv(
       provider,

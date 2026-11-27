@@ -1,7 +1,7 @@
 import {
-  createHostExclusionCommands,
-  type HostExclusions,
-} from "./host-exclusion.js";
+  createHostRoleCommands,
+  type HostRoles,
+} from "./host-roles.js";
 import {
   PluginCliError,
   cliCommand,
@@ -256,7 +256,7 @@ export function registerPoolCli(
   codexLogin: CodexDeviceLogin,
   config: AccountPoolConfigController,
   projectPriority: ProjectPriority,
-  hostExclusions: HostExclusions,
+  hostRoles: HostRoles,
 ): void {
   bb.cli.register(
     defineCli({
@@ -266,7 +266,7 @@ export function registerPoolCli(
       description: DESCRIPTION,
       commands: {
         ...createProjectPriorityCommands(projectPriority),
-        ...createHostExclusionCommands(hostExclusions),
+        ...createHostRoleCommands(hostRoles),
         ping: cliCommand({
           summary:
             "Send one tiny Haiku request through exactly one local Claude account",
