@@ -520,11 +520,24 @@ export type SetQueuedMessageGroupBoundaryRequest = z.infer<
 export const sendQueuedMessageResponseSchema = z.discriminatedUnion(
   "delivery",
   [
-    z.object({ ok: z.literal(true), delivery: z.literal("sent") }),
+    z.object({
+      ok: z.literal(true),
+      delivery: z.literal("sent"),
+      submissionIds: z.array(z.uuid()).optional(),
+      sourceQueuedMessageIds: z.array(z.string()).optional(),
+      requested: z
+        .object({
+          requestId: clientTurnRequestIdSchema,
+          sequence: z.number().int(),
+        })
+        .optional(),
+    }),
     z.object({
       ok: z.literal(true),
       delivery: z.literal("queued"),
       queuedMessage: threadQueuedMessageSchema,
+      submissionIds: z.array(z.uuid()).optional(),
+      sourceQueuedMessageIds: z.array(z.string()).optional(),
     }),
   ],
 );

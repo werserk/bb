@@ -55,6 +55,9 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
     fields: [
       "sendMessageRequestSchema.clientSubmissionId",
       "sendQueuedMessageResponseSchema.queuedMessage.clientSubmissionIds",
+      "sendQueuedMessageResponseSchema.requested",
+      "sendQueuedMessageResponseSchema.sourceQueuedMessageIds",
+      "sendQueuedMessageResponseSchema.submissionIds",
       "threadTimelineResponseSchema.rows.clientSubmissionIds",
       "threadTimelineResponseSchema.rows.sourceQueuedMessageIds",
       "threadTimelineResponseSchema.rows.submissionRequestId",
@@ -2296,6 +2299,16 @@ it("keeps legacy admission decoders and excludes submission identity from edit r
       delivery: "sent",
     }),
   ).toEqual({ ok: true, delivery: "sent" });
+  const sendNowReceipt = {
+    ok: true as const,
+    delivery: "sent" as const,
+    sourceQueuedMessageIds: [`qsub_${id}`],
+    submissionIds: [id],
+    requested: { requestId: "creq_23456789ab", sequence: 7 },
+  };
+  expect(contract.sendQueuedMessageResponseSchema.parse(sendNowReceipt)).toEqual(
+    sendNowReceipt,
+  );
   expect(
     contract.sendMessageRequestSchema.parse({
       input: [{ type: "text", text: "same", mentions: [] }],
