@@ -8,11 +8,38 @@ import {
   getProjectStoredPromptAttachmentPaths,
   parsePromptDraftStorage,
   promptDraftToInput,
+  promptInputFitsDraft,
   promptInputToDraft,
   serializePromptDraftStorage,
 } from "../src/prompt/prompt-draft.js";
 
 describe("prompt draft helpers", () => {
+  it("says whether a prompt input survives a round trip through a draft", () => {
+    const text = { type: "text" as const, text: "ask", mentions: [] };
+    expect(
+      promptInputFitsDraft([
+        text,
+        { type: "localImage", path: "/tmp/a.png" },
+        { type: "localFile", path: "/tmp/a.txt" },
+      ]),
+    ).toBe(true);
+    expect(
+      promptInputFitsDraft([text, { ...text, visibility: "agent-only" }]),
+    ).toBe(false);
+    expect(
+      promptInputFitsDraft([
+        text,
+        { type: "localFile", path: "/tmp/a.txt", visibility: "agent-only" },
+      ]),
+    ).toBe(false);
+    expect(
+      promptInputFitsDraft([
+        text,
+        { type: "image", url: "https://example.com/a.png" },
+      ]),
+    ).toBe(false);
+  });
+
   it("drops invalid legacy raw text drafts", () => {
     const parsed = parsePromptDraftStorage("Investigate flaky login redirect");
     expect(parsed).toEqual({

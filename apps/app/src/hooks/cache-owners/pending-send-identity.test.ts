@@ -597,3 +597,60 @@ it("keeps stored journal entries when the navigation lock is held elsewhere, and
     client.clear();
   }
 });
+
+it.each([
+  {
+    name: "agent-only text",
+    input: [
+      { type: "text" as const, text: "visible ask", mentions: [] },
+      {
+        type: "text" as const,
+        text: "plugin context",
+        mentions: [],
+        visibility: "agent-only" as const,
+      },
+    ],
+  },
+  {
+    name: "a URL image",
+    input: [
+      { type: "text" as const, text: "visible ask", mentions: [] },
+      { type: "image" as const, url: "https://example.com/shot.png" },
+    ],
+  },
+])(
+  "keeps a send with $name visible instead of handing a lossy draft back on scope reset",
+  async ({ input }) => {
+    const client = createAppQueryClient();
+    const draft = seedPendingSendThread(client);
+    window.sessionStorage.clear();
+    try {
+      const request = {
+        id: "thread-1",
+        clientSubmissionId: crypto.randomUUID(),
+        mode: "steer" as const,
+        input,
+      };
+      await beginSendThreadMessageTransaction({ queryClient: client, request });
+      const send = dispatchPendingSend(
+        client,
+        request.id,
+        request.clientSubmissionId,
+        request,
+        [],
+        vi.fn(),
+      );
+      clearPendingSendScope(client);
+      await send.catch(() => undefined);
+      expect(draft.getCurrent().text).toBe("");
+      expect(draft.getCurrent().attachments).toEqual([]);
+      expect(
+        pendingSendOwner(client)
+          .list("thread-1")
+          .map((entry) => [entry.id, entry.request?.input]),
+      ).toEqual([[request.clientSubmissionId, input]]);
+    } finally {
+      client.clear();
+    }
+  },
+);

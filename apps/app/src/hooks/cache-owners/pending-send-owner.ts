@@ -2,6 +2,7 @@ import {
   PendingSendOverlay,
   PendingSendJournal,
   parsePromptDraftStorage,
+  promptInputFitsDraft,
   promptInputToDraft,
   serializePromptDraftStorage,
   type PendingSend,
@@ -190,6 +191,10 @@ function handBackUnacknowledged(
       )
     )
       continue;
+    if (entry.request && !promptInputFitsDraft(entry.request.input)) {
+      kept.push(entry);
+      continue;
+    }
     const projectId = getThreadEntity(client, entry.threadId)?.thread.projectId;
     const draft = entry.request
       ? promptInputToDraft(entry.request.input)
