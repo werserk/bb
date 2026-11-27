@@ -4,6 +4,7 @@ import {
   DRAFT_ACCOUNTS_ERROR_NOTE,
   DRAFT_PINNED_LABEL,
   DRAFT_REFUSED_NOTE,
+  DRAFT_REMOVED_DETAILS,
   DraftAccountStore,
   draftAccountList,
   draftView,
@@ -115,8 +116,24 @@ describe("DraftAccountStore", () => {
     const { store } = setup();
     store.start({ policy: { mode: "named", accountId: "gone" } });
     await vi.waitFor(() => expect(store.getSnapshot().accounts).not.toBeNull());
-    expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: REMOVED_ACCOUNT });
+    expect(draftView(store.getSnapshot(), T0)).toMatchObject({
+      state: "named",
+      label: REMOVED_ACCOUNT,
+      tone: "warning",
+      details: DRAFT_REMOVED_DETAILS,
+    });
     expect(store.getSnapshot().get?.policy).toMatchObject({ onLimit: "fallback-auto" });
+  });
+
+  it("a pick whose account later leaves the list turns to the removed warning", async () => {
+    const { store, load } = setup();
+    store.start(null);
+    await store.pick({ kind: "named", accountId: ID_A, accountLabel: "Work A" });
+    await vi.waitFor(() => expect(store.getSnapshot().accounts).not.toBeNull());
+    expect(draftView(store.getSnapshot(), T0)).toMatchObject({ label: "Work A", tone: "default" });
+    load.mockImplementation(async () => summaries().filter((item) => item.id !== ID_A));
+    store.retry();
+    await vi.waitFor(() => expect(draftView(store.getSnapshot(), T0)).toMatchObject({ label: REMOVED_ACCOUNT, tone: "warning" }));
   });
 
   it("clears draft data the dispatch hook would not parse and stays on Auto", () => {

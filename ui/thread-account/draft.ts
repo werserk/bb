@@ -7,6 +7,7 @@ import { blockingResetAt, NAMED_LIMIT_THRESHOLD, namedAccountState } from "../..
 import { setInputFor, type PickTarget } from "./pick.js";
 import { NOTE_MS, type ThreadAccountSnapshot } from "./store.js";
 import {
+  REMOVED_ACCOUNT,
   threadAccountView,
   type ThreadAccountGet,
   type ThreadAccountList,
@@ -25,6 +26,7 @@ export const DRAFT_REFUSED_NOTE =
 export const DRAFT_ACCOUNTS_ERROR_NOTE = "Could not read the pool's accounts.";
 /** A restored pin before the account list says its name. */
 export const DRAFT_PINNED_LABEL = "Pinned account";
+export const DRAFT_REMOVED_DETAILS = "Pinned to an account the pool no longer has. Choose another account or Auto.";
 
 export function draftGet(provider: PoolProvider, policy: ThreadAccountGet["policy"]): ThreadAccountGet {
   return {
@@ -91,8 +93,17 @@ function labelled(snapshot: ThreadAccountSnapshot): ThreadAccountGet | null {
   return { ...get, policy: { ...get.policy, accountLabel: label } };
 }
 
+/** The pin's account is not in the loaded list: the hook would refuse the send. */
+function pinRemoved(snapshot: ThreadAccountSnapshot): boolean {
+  const get = snapshot.get;
+  if (get === null || get.policy.mode !== "named" || snapshot.accounts === null) return false;
+  const { accountId } = get.policy;
+  return !snapshot.accounts.accounts.some((item) => item.accountId === accountId);
+}
+
 export function draftView(snapshot: ThreadAccountSnapshot, now: number): ThreadAccountView {
   const view = threadAccountView({ get: labelled(snapshot), accounts: snapshot.accounts, error: null, dismissedId: null, now });
+  if (pinRemoved(snapshot)) return { ...view, label: REMOVED_ACCOUNT, tone: "warning", details: DRAFT_REMOVED_DETAILS };
   return view.state === "auto-idle" ? { ...view, details: DRAFT_AUTO_DETAILS } : view;
 }
 

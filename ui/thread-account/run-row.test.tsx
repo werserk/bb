@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { JsonValue } from "@get-bb/plugin-sdk/app";
 import { dispatchAccountSchema } from "../../src/dispatch-account.js";
-import { DRAFT_REFUSED_NOTE, DRAFT_TITLE } from "./draft.js";
+import { DRAFT_REFUSED_NOTE, DRAFT_REMOVED_DETAILS, DRAFT_TITLE } from "./draft.js";
 import { CODEX_PICKER_NOTE } from "./pick.js";
 import { getState, ID_A, named, summaries, THREAD } from "./fixtures.js";
 import { RUN_ROW_ITEM_ID, RUN_ROW_ITEM_ORDER, ThreadAccountRunRowItem } from "./RunRowItem.js";
@@ -186,6 +186,16 @@ describe("new thread (5.3)", () => {
     expect(held).toEqual({ policy: { mode: "named", accountId: ID_A } });
     await openMenu(again, /^Account: Work A$/u);
     expect(again.getByRole("menuitemradio", { name: /Work A/u }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("a restored pin on an account the pool no longer has shows a warning", async () => {
+    const setSubmission = vi.fn((_data: JsonValue | null) => true);
+    const submission = { policy: { mode: "named", accountId: "gone" } };
+    const slot = renderItem({ scope: scope("claude-code"), compact: false, submission, setSubmission }, rpc);
+    const chip = await slot.findByRole("button", { name: "Account: Removed account" });
+    expect(chip.getAttribute("title")).toBe(DRAFT_REMOVED_DETAILS);
+    expect(slot.getByText("Removed account").className).toContain("text-warning-text");
+    expect(setSubmission).not.toHaveBeenCalled();
   });
 
   it("a foreign plugin's draft (null for this item) mounts on Auto and is left alone", async () => {
