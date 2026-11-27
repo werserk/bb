@@ -309,12 +309,20 @@ describe("message.dispatch: the new thread's chosen account", () => {
       policy: { mode: "named", accountId: f.beta, onLimit: "fallback-auto" },
       revision: 2,
     });
+    // Same account, another rule at its limit: not equal, so it is written.
+    await expect(
+      f.dispatch("thr_new", f.own({ policy: { mode: "named", accountId: f.beta, onLimit: "stop" } })),
+    ).resolves.toEqual(PROCEED);
+    expect(await f.policyOf("thr_new")).toMatchObject({
+      policy: { mode: "named", accountId: f.beta, onLimit: "stop" },
+      revision: 3,
+    });
     await expect(f.dispatch("thr_new", f.own({ policy: { mode: "auto" } }))).resolves.toEqual(
       PROCEED,
     );
     expect(await f.policyOf("thr_new")).toMatchObject({
       policy: { mode: "auto" },
-      revision: 3,
+      revision: 4,
     });
   });
 

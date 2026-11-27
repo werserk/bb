@@ -67,7 +67,7 @@ export function createDispatchAccountHook(deps: DispatchAccountDeps) {
       return {
         action: "reject",
         message:
-          "This thread's machine has no Account Pooler role, so a chosen account would not apply. Start it with Auto, or give the machine a role with `bb pool machine role <host-id>`.",
+          "This thread's machine has no Account Pooler role, so a chosen account would not apply. Start it with Auto, or give the machine a role with `bb pool machine role <host-id> <role>` (for example `trusted`).",
       };
     const result = await deps.set(
       { threadId, policy },
