@@ -1,4 +1,6 @@
 import { hostRoleRpcContract } from "./host-roles.js";
+import { auditRpcContract } from "./audit-log.js";
+import { passRpcContract } from "./thread-pass.js";
 import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
@@ -34,6 +36,8 @@ import { projectPriorityRpcContract } from "./project-priority.js";
 export const accountPoolRpcContract = defineRpcContract({
   ...projectPriorityRpcContract,
   ...hostRoleRpcContract,
+  ...passRpcContract,
+  ...auditRpcContract,
   "account.ping": {
     input: accountPingInputSchema,
     output: accountPingResultSchema,
@@ -129,10 +133,14 @@ export function createRpcHandlers(
   config: AccountPoolConfigController,
   projectPriorityHandlers: PluginRpcHandlers<typeof projectPriorityRpcContract>,
   hostRoleHandlers: PluginRpcHandlers<typeof hostRoleRpcContract>,
+  passHandlers: PluginRpcHandlers<typeof passRpcContract>,
+  auditHandlers: PluginRpcHandlers<typeof auditRpcContract>,
 ): PluginRpcHandlers<typeof accountPoolRpcContract> {
   return {
     ...projectPriorityHandlers,
     ...hostRoleHandlers,
+    ...passHandlers,
+    ...auditHandlers,
     "account.ping": ({ id, diagnostic }) => operations.ping(id, diagnostic),
     "account.add": (input) => operations.add(input),
     "account.list": () => operations.list(),

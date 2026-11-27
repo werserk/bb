@@ -7,6 +7,13 @@ import {
   migrateHostRoles,
 } from "./host-roles.js";
 import { ACCOUNT_POOL_HOST_ROLES_CHANGED } from "./realtime.js";
+import { AuditLog, createAuditHandlers } from "./audit-log.js";
+import {
+  PassKey,
+  ThreadPasses,
+  createPassHandlers,
+  isNotFound,
+} from "./thread-pass.js";
 import {
   retryAvailabilityContract,
   retryAvailabilityMethod,
@@ -95,6 +102,9 @@ export interface AccountPoolPluginOptions {
 }
 
 const DISPOSE_INSPECTION_TIMEOUT_MS = 2_000;
+// How often worker passes are checked against bb (archive, delete, removed
+// machines) and the audit log is pruned; also runs once at start.
+const RECONCILE_INTERVAL_MS = 15 * 60 * 1_000;
 const DISPOSE_INSPECTION_TIMEOUT = Symbol("dispose-inspection-timeout");
 const HUB_BASE_PATH = "/api/v1/plugins/account-pool-prewarm/http";
 
@@ -179,16 +189,72 @@ export function createAccountPoolPlugin(
       () => bb.storage.migrate(db, QUOTA_MIGRATIONS),
       enrolledIds,
     );
+    const audit = new AuditLog(db, now);
     const hostRoles: HostRoles = new HostRoles(
       db,
       () => bb.sdk.hosts.list(),
-      (hostId) => hubTokens.revoke(hostId),
+      async (hostId, previous, next) => {
+        audit.append({
+          reason: "role-change",
+          hostId,
+          detail: `${previous ?? "none"}->${next ?? "none"}`,
+        });
+        // A worker never holds a hub token; a machine that stops being a
+        // worker, or loses its role, loses its passes. Other changes keep the
+        // token (P1).
+        if (next === null || next === "worker") await hubTokens.revoke(hostId);
+        if (previous === "worker" || next === null)
+          passes.revokeHost(hostId, "role");
+      },
       () => bb.realtime.publish(ACCOUNT_POOL_HOST_ROLES_CHANGED, {}),
     );
     const permitted = (hostId: string) => hostRoles.hasRole(hostId);
-    const hubTokens = new HubTokenStore(secretDir, now, permitted);
+    const isWorker = (hostId: string) => hostRoles.roleOf(hostId) === "worker";
+    // Only `server` and `trusted` machines hold a hub token.
+    const holdsHubToken = (hostId: string) => {
+      const role = hostRoles.roleOf(hostId);
+      return role === "server" || role === "trusted";
+    };
+    const hubTokens = new HubTokenStore(secretDir, now, holdsHubToken);
     await hubTokens.initialize();
     await hubTokens.prune(enrolledIds);
+    const passThreadSchema = z.object({
+      host: z.object({ id: hostIdSchema }).nullable(),
+      archivedAt: z.number().nullable(),
+      deletedAt: z.number().nullable(),
+    });
+    const passes = new ThreadPasses({
+      db,
+      key: new PassKey(secretDir, (message) => bb.log.error(message)),
+      now,
+      audit,
+      mayHold: isWorker,
+      mayPresent: permitted,
+      getThread: async (threadId) => {
+        try {
+          const thread = passThreadSchema.parse(
+            await bb.sdk.threads.get({ threadId, include: "host" }),
+          );
+          return {
+            hostId: thread.host?.id ?? null,
+            archivedAt: thread.archivedAt,
+            deletedAt: thread.deletedAt,
+          };
+        } catch (error) {
+          if (isNotFound(error)) return null;
+          throw error;
+        }
+      },
+      hostExists: async (hostId) => {
+        try {
+          await bb.sdk.hosts.get({ hostId });
+          return true;
+        } catch (error) {
+          if (isNotFound(error)) return false;
+          throw error;
+        }
+      },
+    });
     const routing = new RoutingStore(bb.storage.kv, now);
     const projectPriority = new ProjectPriority(bb.storage.kv, () =>
       accounts.list(),
@@ -208,6 +274,16 @@ export function createAccountPoolPlugin(
       quotas,
       affinity: new PoolAffinityStore(db),
       hubTokens,
+      passes,
+      audit: (entry) => {
+        try {
+          audit.append(entry);
+        } catch (error) {
+          bb.log.warn(
+            `Account Pooler could not write an audit entry: ${error instanceof Error ? error.message : String(error)}.`,
+          );
+        }
+      },
       getSettings: () => currentSettings,
       fetch: upstreamFetch,
       now,
@@ -280,6 +356,10 @@ export function createAccountPoolPlugin(
       () => bb.realtime.publish(ACCOUNT_POOL_ACCOUNTS_CHANGED, {}),
       (accountId) => hub.refreshUsage(accountId, true),
       parentStatus,
+      (hostId) =>
+        isWorker(hostId)
+          ? "This machine is a worker: its threads hold per-thread passes, not a machine token. Revoke one thread's pass with `bb pool pass revoke <thread-id>`."
+          : null,
     );
     const login = new ClaudeOAuthLogin({
       fetch: upstreamFetch,
@@ -369,6 +449,8 @@ export function createAccountPoolPlugin(
         config,
         createProjectPriorityHandlers(projectPriority),
         createHostRoleHandlers(hostRoles),
+        createPassHandlers(passes),
+        createAuditHandlers(audit),
       ),
     );
     registerPoolCli(
@@ -379,6 +461,9 @@ export function createAccountPoolPlugin(
       config,
       projectPriority,
       hostRoles,
+      passes,
+      audit,
+      now,
     );
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
       if (!(await operations.isRoutingEnabled(provider))) return false;
@@ -399,6 +484,14 @@ export function createAccountPoolPlugin(
         reason: "Account Pooler hub token for this machine",
       },
     ];
+    // A worker's pass belongs to one thread, so nested bb servers get no hub.
+    const workerMarkerEntries = (): PoolEnvEntry[] =>
+      [PARENT_URL_ENV, PARENT_TOKEN_ENV].map((name) => ({
+        name,
+        value: "",
+        reason:
+          "Worker machines hold per-thread passes, which nested bb servers cannot use",
+      }));
     const neutralized = (provider: PoolProvider): PoolEnvEntry[] =>
       PROVIDER_ROUTING_ENV[provider].map((name) => ({
         name,
@@ -420,11 +513,11 @@ export function createAccountPoolPlugin(
         hostId: string;
       }) => {
         const { threadId } = context;
-        const unpermitted = async (): Promise<PoolEnvEntry[]> => {
+        const unpermitted = async (
+          reason = "This machine has no Account Pooler role, so it gets no central Claude and Codex routing.",
+        ): Promise<PoolEnvEntry[]> => {
           if (threadId !== null)
             await bb.storage.kv.delete(`retry-route:${threadId}`);
-          const reason =
-            "This machine has no Account Pooler role, so it gets no central Claude and Codex routing.";
           return [
             ...[
               "ANTHROPIC_BASE_URL",
@@ -439,13 +532,28 @@ export function createAccountPoolPlugin(
         if (!permitted(context.hostId)) return unpermitted();
         const bypassed =
           threadId !== null && (await routing.isBypassed(threadId));
+        const worker = isWorker(context.hostId);
         if (!bypassed && (await canServe(provider))) {
           let token: string;
-          try {
-            token = await hubTokens.forHost(context.hostId);
-          } catch (error) {
-            if (error instanceof HostNotPermittedError) return unpermitted();
-            throw error;
+          if (worker) {
+            // A thread gets its own pass; a send without a thread (the model
+            // catalog) gets a pass that only lists models.
+            const pass =
+              threadId === null
+                ? await passes.catalogPass(context.hostId)
+                : await passes.issue(threadId, context.hostId);
+            if (pass === null)
+              return unpermitted(
+                "Account Pooler could not issue a pass for this worker thread, so it gets no central routing.",
+              );
+            token = pass;
+          } else {
+            try {
+              token = await hubTokens.forHost(context.hostId);
+            } catch (error) {
+              if (error instanceof HostNotPermittedError) return unpermitted();
+              throw error;
+            }
           }
           if (threadId !== null) {
             await bb.storage.kv.set(`retry-route:${threadId}`, provider);
@@ -455,9 +563,9 @@ export function createAccountPoolPlugin(
           }
           const entries = [
             ...(await serving(token, context.projectId)),
-            ...markerEntries(token),
+            ...(worker ? workerMarkerEntries() : markerEntries(token)),
           ];
-          return !permitted(context.hostId)
+          return !permitted(context.hostId) || isWorker(context.hostId) !== worker
             ? unpermitted()
             : entries;
         }
@@ -631,9 +739,10 @@ export function createAccountPoolPlugin(
       "GET",
       AVAILABILITY_PATH,
       async (context) => {
-        if ((await hub.authenticate(context.req.raw)) === null) {
-          return new Response(null, { status: 401 });
-        }
+        const principal = await hub.authenticate(context.req.raw);
+        if (principal === null) return new Response(null, { status: 401 });
+        if (principal.kind === "catalog")
+          return new Response(null, { status: 403 });
         return Response.json(
           poolAvailabilitySchema.parse({
             claude: await canServe("claude"),
@@ -647,8 +756,10 @@ export function createAccountPoolPlugin(
       "GET",
       "/retry-availability",
       async (context) => {
-        if ((await hub.authenticate(context.req.raw)) === null)
-          return new Response(null, { status: 401 });
+        const principal = await hub.authenticate(context.req.raw);
+        if (principal === null) return new Response(null, { status: 401 });
+        if (principal.kind === "catalog")
+          return new Response(null, { status: 403 });
         const query = z
           .object({ provider: routedProviderSchema, family: modelFamilySchema })
           .safeParse(
@@ -666,6 +777,47 @@ export function createAccountPoolPlugin(
     });
     bb.background.service("hub", {
       start: (signal) => hub.start(signal),
+    });
+    // Thread lifecycle revokes worker passes. Events missed while the plugin
+    // was down are caught by the reconcile below.
+    bb.events.on("thread.archived", async ({ thread }) => {
+      // Without a worker there is no pass to revoke and no race to close.
+      if (hostRoles.hasAny("worker"))
+        await passes.archived(thread.id, thread.archivedAt ?? now());
+    });
+    bb.events.on("thread.unarchived", ({ thread }) => {
+      passes.unarchived(thread.id);
+    });
+    bb.events.on("thread.deleted", ({ thread }) => {
+      passes.revokeThread(thread.id, "deleted");
+    });
+    bb.events.on("experimental_host.deleted", ({ host }) => {
+      passes.revokeHost(host.id, "host-removed");
+    });
+    bb.background.service("pass-reconcile", {
+      start: async (signal) => {
+        while (!signal.aborted) {
+          try {
+            await passes.reconcile();
+            audit.prune();
+          } catch (error) {
+            bb.log.warn(
+              `Account Pooler pass reconcile failed: ${error instanceof Error ? error.message : String(error)}.`,
+            );
+          }
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) return resolve();
+            const wake = () => {
+              clearTimeout(timer);
+              signal.removeEventListener("abort", wake);
+              resolve();
+            };
+            const timer = setTimeout(wake, RECONCILE_INTERVAL_MS);
+            timer.unref();
+            signal.addEventListener("abort", wake, { once: true });
+          });
+        }
+      },
     });
   };
 }

@@ -118,16 +118,19 @@ it("keeps the store readable by the previous build and its exclusions fail close
   expect(roles(db)).toEqual(["host-a:trusted"]);
 });
 
-it("sets, lists and removes roles; only removal revokes, and the projection follows", async () => {
+// Rewritten in block P2 (it said every change but removal is silent): the
+// callback now hears every real change with both roles, and owns what it
+// revokes (server.ts: the token on none/worker, passes when leaving worker).
+it("sets, lists and removes roles, reports each real change once, and the projection follows", async () => {
   const { db, migrate } = await store();
   migrateHostRoles(db, () => migrate(QUOTA_MIGRATIONS), []);
   let hosts = [
     { id: "host-a", name: "A" },
     { id: "host-b", name: "B" },
   ];
-  const revoke = vi.fn(async () => {});
+  const roleChanged = vi.fn(async () => {});
   const changed = vi.fn();
-  const service = new HostRoles(db, async () => hosts, revoke, changed);
+  const service = new HostRoles(db, async () => hosts, roleChanged, changed);
   expect(await service.set({ hostId: "host-a", role: "trusted" })).toEqual({
     hostId: "host-a",
     hostName: "A",
@@ -136,9 +139,17 @@ it("sets, lists and removes roles; only removal revokes, and the projection foll
   });
   expect(exclusions(db)).toEqual(["host-b"]);
   await service.set({ hostId: "host-a", role: "server" });
+  await service.set({ hostId: "host-a", role: "server" });
   await service.set({ hostId: "host-a", role: "worker" });
-  expect(revoke).not.toHaveBeenCalled();
+  expect(roleChanged.mock.calls).toEqual([
+    ["host-a", null, "trusted"],
+    ["host-a", "trusted", "server"],
+    ["host-a", "server", "worker"],
+  ]);
   expect(service.roleOf("host-a")).toBe("worker");
+  expect(service.hasAny("worker")).toBe(true);
+  // A worker always has an exclusion row, so an older build never routes it.
+  expect(exclusions(db)).toEqual(["host-a", "host-b"]);
   await expect(
     service.set({ hostId: "host-missing", role: "trusted" }),
   ).rejects.toThrow("not enrolled");
@@ -156,12 +167,51 @@ it("sets, lists and removes roles; only removal revokes, and the projection foll
     { hostId: "host-b", hostName: "B", enrolled: true, role: null },
   ]);
   await service.set({ hostId: "host-a", role: "none" });
-  expect(revoke).toHaveBeenCalledExactlyOnceWith("host-a");
+  expect(roleChanged).toHaveBeenLastCalledWith("host-a", "worker", null);
+  expect(roleChanged).toHaveBeenCalledTimes(4);
   expect(service.hasRole("host-a")).toBe(false);
+  expect(service.hasAny("worker")).toBe(false);
   expect(await service.list()).toEqual([
     { hostId: "host-b", hostName: "B", enrolled: true, role: null },
   ]);
-  expect(changed).toHaveBeenCalledTimes(4);
+  expect(changed).toHaveBeenCalledTimes(5);
+});
+
+// M3: a rollback must never hand a worker a hub token. The opt-out build
+// (0c7ca42) routes every host without an exclusion row; the first roles build
+// (P1) drops the role of an excluded host at its start.
+it("keeps every worker, enrolled or not, closed under both older builds and keeps it on roll-forward", async () => {
+  const { db, migrate } = await store();
+  migrate(BASE_MIGRATIONS);
+  migrateHostRoles(db, () => migrate(QUOTA_MIGRATIONS), ["host-w", "host-s"]);
+  const hosts = [
+    { id: "host-w", name: "W" },
+    { id: "host-s", name: "S" },
+  ];
+  const service = new HostRoles(db, async () => hosts, async () => {});
+  await service.set({ hostId: "host-w", role: "worker" });
+  await service.set({ hostId: "host-s", role: "server" });
+  // The worker machine is removed from bb but keeps its role.
+  hosts.splice(0, 1);
+  service.project(hosts.map((host) => host.id));
+  expect(exclusions(db)).toEqual(["host-w"]);
+  // Opt-out build: only pool_host_exclusion decides.
+  migrate(BASE_MIGRATIONS);
+  const optOutRoutes = (hostId: string) =>
+    db
+      .prepare("SELECT host_id FROM pool_host_exclusion WHERE host_id = ?")
+      .get(hostId) === undefined;
+  expect(["host-w", "host-s"].map(optOutRoutes)).toEqual([false, true]);
+  // Roll forward to this build: the worker keeps its role.
+  migrateHostRoles(db, () => migrate(QUOTA_MIGRATIONS), ["host-s"]);
+  expect(roles(db)).toEqual(["host-s:server", "host-w:worker"]);
+  // Roll back to the P1 build: its start runs this statement (ea1ef07,
+  // host-roles.ts), so the worker loses its role and P1 mints it no token.
+  expect(() => migrate(QUOTA_MIGRATIONS.slice(0, 10))).not.toThrow();
+  db.prepare(
+    "DELETE FROM pool_host_role WHERE host_id IN (SELECT host_id FROM pool_host_exclusion)",
+  ).run();
+  expect(roles(db)).toEqual(["host-s:server"]);
 });
 
 it("denies mint, rotation, current and grace credentials without a role", async () => {

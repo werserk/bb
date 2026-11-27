@@ -11,6 +11,8 @@ server.ts registers CLI/RPC/HTTP and constructs hub.ts. Hub owns authenticated
 machine access, account selection, quotas, affinity, refresh, streaming and
 parent delegation. Provider adapters own upstream credentials and wire format;
 upstreams.ts fixes the provider hosts they send to.
+host-roles.ts decides which machines are pooled and how, thread-pass.ts issues
+and checks worker passes, audit-log.ts keeps the append-only audit.
 GET /models selects Claude and maps to upstream /v1/models. GET /v1/models
 selects Codex. Parent forwarding retains the public alias; only the final adapter
 maps it. Queries and upstream errors are preserved. The adapter supplies the
@@ -82,14 +84,21 @@ second paid-routing mechanism. API catalogs remain native Platform payloads.
 ## Machine roles
 
 `src/host-roles.ts` owns `pool_host_role(host_id, role)`, the tenth migration in
-QUOTA_MIGRATIONS. The roles are `server`, `worker` and `trusted`; in this version
-they behave the same. The rule is default deny: a machine is pooled only while
-it has a role. A machine without one gets neutral environment contributions
-(including null-thread catalog calls) and is never minted a hub token; its
-current and grace tokens fail authentication, rotation fails, retry decisions
-and Proxied health treat it as unpooled. Every call site uses one predicate,
-`HostRoles.hasRole`, and `HubTokenStore` takes it as a required constructor
-argument, so a store without a predicate cannot exist.
+QUOTA_MIGRATIONS. The rule is default deny: a machine is pooled only while it
+has a role. A machine without one gets neutral environment contributions
+(including null-thread catalog calls), is never minted a hub token or a pass,
+its current and grace credentials fail authentication, rotation fails, and retry
+decisions and Proxied health treat it as unpooled.
+
+| Role | Credential in its threads' env | Nested bb servers |
+|---|---|---|
+| `server`, `trusted` | the machine's hub token | get the hub (parent markers) |
+| `worker` | a pass per thread; a catalog pass without a thread | get nothing (markers empty) |
+| none | nothing (neutral env) | get nothing |
+
+`server` and `trusted` behave the same in this version. `HubTokenStore` takes
+its predicate as a required constructor argument (`server ∨ trusted`), so a
+store without one cannot exist and a worker is never minted a token.
 
 Why: a workspace must never get a key or a pass by accident. Under the earlier
 opt-out exclusion, a newly enrolled machine was pooled until someone excluded
@@ -101,28 +110,113 @@ one-time seed, reconcile, projection), then the token store and its prune.
   does not): every enrolled host without an exclusion row gets `trusted`, so
   today's routing and its tokens are kept; excluded hosts get nothing, and a
   token file kept for one is deleted by the prune. A fresh store seeds nothing.
-- Reconcile, every start: an exclusion row beats a role. Only the previous
-  build writes such a pair (an exclusion made after a rollback).
-- Revocation: only a change to `none` deletes the machine's token file;
-  a role-to-role change keeps the token. Prune at start and on every `status`
-  drops tokens of machines that are not enrolled or have no role.
+- Reconcile, every start: an exclusion row beats a role, except for `worker`
+  (a worker always has an exclusion row, see Rollback). Only the previous build
+  writes such a pair (an exclusion made after a rollback).
+- An Include made under the previous build is not carried forward; give the
+  machine a role after rolling forward.
+- Role changes: to `none` or to `worker` deletes the machine's token file;
+  leaving `worker` or losing the role deletes its passes; any other change
+  keeps the token. Every real change writes a `role-change` audit row. Prune at
+  start and on every `status` drops tokens of machines that are not enrolled or
+  hold no token role.
 - A removed machine keeps its role ("No longer enrolled, role kept") because
   the host list may be incomplete; set `none` before removing a machine.
+- The pool's `server` role is the pool's own record. Moving bb's core server to
+  another machine does not move it; set the roles again after such a move.
 
 Rollback projection: `pool_host_exclusion` is no longer read for routing; it is
-the previous build's only input. `projectExclusions` rewrites it from roles
-(no row for a machine with a role, a row for every enrolled machine without one)
-on every role change, at start and on every `status`. After a rollback the
-previous build routes exactly the machines that had a role at the last
-projection; a machine enrolled after it and never seen by one is routed by the
-previous build, and any `bb pool status` before the rollback closes that gap.
-The previous migrator ignores the extra recorded migration, so the store opens.
+the previous builds' only input. `projectExclusions` rewrites it from roles on
+every role change, at start and on every `status`: a row for every enrolled
+machine without a role and for every `worker` (enrolled or not), none for
+`server` or `trusted`. After a rollback the opt-out build routes exactly the
+`server` and `trusted` machines of the last projection, and the first roles
+build (P1) drops a worker's role at its start, so no older build mints a hub
+token for a worker. A machine enrolled after the last projection is routed by
+the opt-out build; any `bb pool status` before the rollback closes that gap.
+Older migrators ignore the extra recorded migrations, so the store opens.
 
 Existing processes keep their environment; requests authenticated earlier may
 finish. Roles identify the trusted host context and token principal, not the
 physical network origin. Like every administrative call, they guard against
 mistakes, not a hostile caller (see Caller identity above). Roles establish no
 native identity, readiness, worker registry, capacity lease or scheduling.
+
+## Per-thread passes
+
+`src/thread-pass.ts`. A worker machine's threads get a pass bound to one thread
+and one machine instead of the machine's hub token, so a leaked credential
+reaches one thread and dies with it. A pass is
+`pt1.<threadId>.<mac>`, where mac = base64url(HMAC-SHA256(key,
+"pt1\0" threadId "\0" hostId "\0" nonce)). A send without a thread (the model
+catalog) gets `pc1.<hostId>.<mac>`, which only lists models: right after
+authentication, before the parent-proxy branch, every other route answers 403,
+and `/availability` and `/retry-availability` refuse it.
+
+Why a key: passes are re-derived from the key on every send and never stored.
+`pool_thread_pass(thread_id, host_id, nonce, issued_at, archived_at)` holds only
+a random nonce per thread, useless without the key, so the database and its
+backups hold no credential. Verification is one row lookup and an HMAC compare;
+a malformed pass (wrong part count, id characters or MAC length) is a 401.
+- Key file: `secrets/accounts/pass-key.json` (0600, `{"version":1,"key":…}`),
+  created at the first worker issue and only if it does not exist (exclusive
+  create, then a hard link: an existing file always wins); never overwritten.
+  Any other read or parse failure is logged once and leaves passes off until a
+  restart (workers get neutral env, every pass is refused); hub tokens are
+  unaffected.
+- Rotation: with no worker turn running, delete the file and reload the plugin;
+  every pass dies and the next send issues new ones.
+- Why a row and a nonce: revoking deletes the row; a new row gets a new nonce,
+  so a revoked pass never comes back.
+
+| Event | Effect |
+|---|---|
+| `thread.archived` | works until archived + 30 s (core's archive undo grace; a turn may still run) |
+| `thread.unarchived` within 30 s | the same pass works again |
+| `thread.unarchived` later | the row goes; the next send issues a new pass |
+| `thread.deleted` (soft delete, no undelete) | revoked at once |
+| `experimental_host.deleted` | every pass of the machine is revoked |
+| role leaves `worker`, or `none` | every pass of the machine is revoked |
+| `bb pool pass revoke <thread>` | revoked; the next send issues a new pass |
+| thread moves to another machine | the next send issues a new pass; the old one dies |
+
+An archive that lands before the thread's first issue still writes an archived
+row, so a racing issue cannot leave a live pass behind; a send to a thread whose
+row is archived asks bb whether an unarchive was missed. Events missed while
+the plugin was down are caught by a reconcile at start and every 15 minutes
+(`pass-reconcile` service): it deletes rows of role-less machines, rows past
+the grace, rows of machines `hosts.get` answers 404 for, and rows of deleted or
+404 threads. An SDK error keeps the row for the next round, so the window for a
+missed event is at most 15 minutes. There is no per-request thread lookup.
+
+Role-agnostic seam: the module knows no roles. `mayHold` decides who is issued
+passes (P2: `worker`), `mayPresent` whose passes are accepted (any role). A
+later build that issues passes on every role (so per-thread policy sees threads
+of `server` and `trusted` machines) only widens `mayHold`, and can roll back to
+this build without failing a turn in flight. A pass presented to a build older
+than this one is a 401.
+
+## Audit log
+
+`src/audit-log.ts`, `pool_audit(id, ts, reason, provider, thread_id, host_id,
+account_id, detail)`, the twelfth migration. Append-only; ids, a reason and a
+fixed-vocabulary detail only, never prompt content, model names, headers,
+tokens or passes. Reasons: `select`, `failover`, `limit` (with `quota`,
+`rate-limit`, `auth`, `upstream`), `pass-issued`, `pass-revoked` (with
+`archived`, `deleted`, `restored`, `manual`, `role`, `host-removed`,
+`reconcile`) and `role-change` (`<from>-><to>`). The reason is checked in code,
+so a new reason needs no table rebuild; reads return unknown reasons and
+details as they are, so `bb pool audit` keeps working after a rollback from a
+build that writes more.
+
+`select` is written once per account change of a session, not per request: the
+key is [provider, thread (or machine for hub-token requests), session], held in
+memory (10 000 keys, least recently used first out), and only for model
+requests (not `/models`, not `count_tokens`). Requests forwarded to a parent
+pool are logged by the parent, which selects the account. Retention: 90 days
+and 200 000 rows, pruned at start and every 15 minutes. Read-only access:
+`bb pool audit` (filters `--thread`, `--host`, `--account`, `--reason`,
+`--since`, `--limit`, `--json`) and RPC `audit.list`.
 
 ## Retired native cells
 

@@ -49,6 +49,9 @@ export class PoolOperations {
     private readonly parentStatus: () => Promise<
       PoolStatus["parent"]
     > = async () => null,
+    // Why a machine cannot hold a hub token at all (a worker), or null.
+    private readonly tokenDeniedReason: (hostId: string) => string | null = () =>
+      null,
   ) {}
 
   ping(id: string, diagnostic = false) {
@@ -235,6 +238,8 @@ export class PoolOperations {
     const host = matches[0];
     if (host === undefined)
       throw new Error(`Machine ${machine} does not exist.`);
+    const denied = this.tokenDeniedReason(host.id);
+    if (denied !== null) throw new Error(denied);
     const token = await this.hubTokens.rotate(host.id);
     return { ...token, hostName: host.name };
   }

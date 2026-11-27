@@ -854,4 +854,27 @@ export const QUOTA_MIGRATIONS = [
     host_id TEXT PRIMARY KEY NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('server', 'worker', 'trusted'))
   )`,
+  // Per-thread passes (block P2, thread-pass.ts): a nonce per thread, never
+  // the pass itself.
+  `CREATE TABLE pool_thread_pass (
+    thread_id TEXT PRIMARY KEY NOT NULL,
+    host_id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    issued_at INTEGER NOT NULL,
+    archived_at INTEGER
+  )`,
+  // Audit log (block P2, audit-log.ts). `reason` is checked in code, so new
+  // reasons need no table rebuild.
+  `CREATE TABLE pool_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    provider TEXT,
+    thread_id TEXT,
+    host_id TEXT,
+    account_id TEXT,
+    detail TEXT
+  );
+  CREATE INDEX pool_audit_ts ON pool_audit(ts);
+  CREATE INDEX pool_audit_thread ON pool_audit(thread_id, ts)`,
 ];
