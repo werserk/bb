@@ -12,6 +12,7 @@ import { resolveBundledMarketplaceDirectory } from "../../../src/services/plugin
 const UNPREFIXED_BUNDLED_PLUGIN_IDS = [
   "account-pool",
   "agent-annotations",
+  "ai-gateway",
   "ask-user-question",
   "automations",
   "bb-account",
@@ -35,6 +36,7 @@ const UNPREFIXED_BUNDLED_PLUGIN_IDS = [
   "pdf-preview",
   "plugin-api-docs",
   "plugin-api-tester",
+  "prompt-suggestion",
   "provider-acp",
   "provider-claude-code",
   "provider-codex",
