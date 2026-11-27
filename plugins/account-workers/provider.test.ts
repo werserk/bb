@@ -271,4 +271,15 @@ describe("app RPCs", () => {
     await expect(online.harness.callRpc("rebind", { threadId: "thr_new", workspaceHostId: WORKER })).rejects.toThrow(SAME_HOST);
     expect(await online.harness.callRpc("rebind", { threadId: "thr_new", workspaceHostId: WORKSPACE })).toMatchObject({ workspace: { root: ROOT } });
   });
+
+  it("does not show or rebind a thread bound by the CLI spawn", async () => {
+    const host = await load(rpc());
+    host.harness.sdk.stub("threads.spawn", async () => makeThreadResponse({ id: "thr_cli" }));
+    const spawned = await host.harness.behavior.runCli(
+      ["spawn", "--workspace-machine", "workspace", "--path", ROOT, "--machine", "worker", "--prompt", "hi", "--project", "p1", "--json"],
+    );
+    expect(spawned.exitCode).toBe(0);
+    expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_cli" })).toEqual({ workspace: null });
+    await expect(host.harness.callRpc("rebind", { threadId: "thr_cli", workspaceHostId: WORKSPACE })).rejects.toThrow(/bound by spawn/);
+  });
 });

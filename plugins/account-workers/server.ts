@@ -280,10 +280,13 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
     },
     async threadWorkspace({ threadId }) {
       const binding = store.byThread(threadId);
-      return { workspace: binding === null ? null : await threadWorkspace(binding) };
+      return { workspace: binding === null || binding.owner !== "provider" ? null : await threadWorkspace(binding) };
     },
     async rebind({ threadId, workspaceHostId }) {
       const current = bindingOrFail(threadId);
+      if (current.owner !== "provider") {
+        throw new PluginCliError(`Thread ${threadId} was bound by spawn; use bb account-workers rebind`, { code: "not_provider" });
+      }
       const thread = await bb.sdk.threads.get({ threadId });
       let workspace;
       try {
