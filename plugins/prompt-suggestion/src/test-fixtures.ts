@@ -61,7 +61,7 @@ export function fixture(
         get: async () =>
           makeThreadResponse({
             id: "thread",
-            providerId: options.providerId ?? "codex",
+            providerId: options.providerId ?? "test-provider",
             status: options.threadStatus ?? "idle",
             queuedMessageCount: options.queued ?? 0,
           }),
@@ -139,7 +139,7 @@ export function fixture(
                     id: "interaction",
                     threadId: "thread",
                     turnId: "turn",
-                    providerId: "codex",
+                    providerId: "test-provider",
                     providerThreadId: "p",
                     providerRequestId: "r",
                     status: "pending" as const,

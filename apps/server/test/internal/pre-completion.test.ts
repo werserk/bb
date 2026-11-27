@@ -399,5 +399,17 @@ describe.each(["claude-code", "codex"])(
         });
         expect(result(await f.call())).toMatchObject({ action: "allow" });
       }, "codex"));
+    it("admits any provider whose bridge calls the check", async () =>
+      fixture(async (f) => {
+        f.pluginQuestion();
+        setPreCompletionPolicy("test", f.threadId, (ctx) => {
+          expect(ctx).toMatchObject({ providerId: "third-party-provider" });
+          return { action: "continue", instruction: "Ask natively" };
+        });
+        expect(result(await f.call())).toMatchObject({
+          action: "continue",
+          instruction: "Ask natively",
+        });
+      }, "third-party-provider"));
   },
 );
