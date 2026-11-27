@@ -49,6 +49,7 @@ import { ListLoadingPlaceholder } from "@bb/shared-ui/list-loading-placeholder";
 import { MachineIcon } from "@/components/machines/MachineLabel";
 import { searchMachineHosts } from "./machine-picker-search";
 import { useResetPickerScroll } from "@bb/shared-ui/hooks/use-reset-picker-scroll";
+import * as RunOn from "@/fork/run-on/RunOnGroups";
 
 interface SelectedEnvironment {
   modeLabel: string;
@@ -95,6 +96,7 @@ export interface EnvironmentPickerUIProps {
   ) => void;
   onSelectHost?: (hostId: string) => void;
   onSelectReuse?: () => void;
+  runOn?: RunOn.RunOnPickerModel;
 }
 
 export const PROVIDER_INPUTS_CONTROL_MISSING_REASON =
@@ -217,6 +219,7 @@ export function EnvironmentPickerUI({
   onSelectProvider,
   onSelectHost,
   onSelectReuse,
+  runOn,
 }: EnvironmentPickerUIProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(
     defaultOpen ?? false,
@@ -251,9 +254,10 @@ export function EnvironmentPickerUI({
       providers.filter(
         (provider) =>
           !provider.machineProviderId &&
+          !runOn?.registeredProviderIds.has(provider.id) &&
           provider.requires.projectless === projectless,
       ),
-    [projectless, providers],
+    [projectless, providers, runOn],
   );
   const isMachineMenu = hasMultipleMachines;
   const hostConnected = availableHost?.status === "connected";
@@ -304,7 +308,7 @@ export function EnvironmentPickerUI({
           hasSelectedHostlessProvider: selectedHostlessProvider !== undefined,
         })
       : undefined;
-  const selectedCommandValue = contextualHost
+  const stockSelectedCommandValue = contextualHost
     ? `machine:${contextualHost.id}`
     : selectedHostlessProvider
       ? `provider:any:${selectedHostlessProvider.id}`
@@ -313,6 +317,9 @@ export function EnvironmentPickerUI({
         : selectedProvider !== undefined && selectedProviderHostId !== null
           ? `provider:${selectedProviderHostId}:${selectedProvider.id}`
           : "";
+  const selectedCommandValue =
+    runOn?.selectedValue ?? stockSelectedCommandValue;
+  const menuTitle = runOn ? RunOn.RUN_ON_TITLE : "Environment";
   const selected = useMemo((): SelectedEnvironment => {
     if (
       selectedProvider !== undefined &&
@@ -402,7 +409,7 @@ export function EnvironmentPickerUI({
           type="button"
           variant="ghost"
           size="sm"
-          aria-label="Environment"
+          aria-label={menuTitle}
           aria-busy={isLoading}
           disabled={disabled}
           data-promptbox-shrinkable-control=""
@@ -415,7 +422,13 @@ export function EnvironmentPickerUI({
             className,
           )}
         >
-          <span className={OPTION_TRIGGER_CONTENT_CLASS_NAME}>
+          {runOn?.chip ? <RunOn.RunOnTriggerLabel chip={runOn.chip} /> : null}
+          <span
+            className={cn(
+              OPTION_TRIGGER_CONTENT_CLASS_NAME,
+              runOn?.chip && "hidden",
+            )}
+          >
             {selectedProvider === undefined ? (
               <Icon
                 name={isLoading ? "Spinner" : selected.icon}
@@ -468,8 +481,8 @@ export function EnvironmentPickerUI({
       <PopoverContent
         mobileClassName={PICKER_MOBILE_CLASS_NAME}
         align="start"
-        aria-label="Environment"
-        mobileTitle="Environment"
+        aria-label={menuTitle}
+        mobileTitle={menuTitle}
         autoFocusRef={
           isLoading ? undefined : showSearch ? searchInputRef : commandRef
         }
@@ -503,6 +516,7 @@ export function EnvironmentPickerUI({
                 showSearch && "flex flex-col overflow-hidden",
               )}
             >
+              {runOn ? <RunOn.RunOnLocalHeading /> : null}
               {isMachineMenu && availableMachines ? (
                 showSearch ? (
                   <MachineContextualEnvironmentOptions
@@ -590,11 +604,19 @@ export function EnvironmentPickerUI({
                   />
                 </>
               )}
+              {runOn ? (
+                <RunOn.RunOnGroups
+                  model={runOn}
+                  now={hostClock.now}
+                  onClose={() => handleOpenChange(false)}
+                />
+              ) : null}
               <ReuseEnvironmentOption
                 selected={parsed?.type === "reuse"}
                 onSelect={onSelectReuse ? selectReuse : undefined}
               />
             </CommandList>
+            {runOn ? <RunOn.RunOnFooter model={runOn} /> : null}
           </Command>
         )}
       </PopoverContent>
