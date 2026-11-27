@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { PendingSendPresentationContext } from "./pending-send-presentation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@bb/shared-ui/button";
+import { createClientSubmissionId } from "@bb/domain";
 import { useSendThreadMessage } from "@/hooks/mutations/thread-runtime-mutations";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import {
@@ -126,7 +127,7 @@ function PendingSendEntryControls({
           onClick={() => {
             const request = entry.request;
             if (!request) return;
-            const id = crypto.randomUUID();
+            const id = createClientSubmissionId();
             const retry = {
               ...request,
               id: threadId,

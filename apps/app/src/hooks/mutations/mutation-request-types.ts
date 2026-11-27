@@ -1,3 +1,4 @@
+import { createClientSubmissionId } from "@bb/domain";
 import type {
   EditMessageRequest,
   SendMessageRequest,
@@ -20,7 +21,7 @@ export function prepareSendRequest(request: SendThreadMessageMutationRequest) {
   if (!prepared) {
     prepared = {
       ...request,
-      clientSubmissionId: request.clientSubmissionId ?? crypto.randomUUID(),
+      clientSubmissionId: request.clientSubmissionId ?? createClientSubmissionId(),
     };
     preparedSends.set(request, prepared);
   }

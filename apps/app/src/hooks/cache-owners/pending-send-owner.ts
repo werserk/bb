@@ -26,6 +26,7 @@ import {
   type ThreadTimelineResponse,
 } from "@bb/server-contract";
 import type { ThreadQueuedMessage } from "@bb/domain";
+import { createClientSubmissionId } from "@bb/domain";
 import {
   syncThreadTimelineSubscriptionTag,
   COMPACT_THREAD_TIMELINE_SEGMENT_LIMIT,
@@ -642,7 +643,7 @@ export function pendingSendDraftId(
       if (parsed.success) binding = parsed.data;
     }
   } catch {}
-  return binding?.draft === draftHash(draft) ? binding.id : crypto.randomUUID();
+  return binding?.draft === draftHash(draft) ? binding.id : createClientSubmissionId();
 }
 export function newPendingSend(
   entry: Omit<PendingSend, "sequence" | "state">,

@@ -805,3 +805,90 @@ it("prefilters requested events by the raw submission id with the same admission
     expect(answer(admitted)).toMatchObject({ scannedRows: 0 });
   });
 });
+
+it("finds a dated submission beyond the 1000-row window and bounds the scan by its date", async () => {
+  const { sql } = await import("drizzle-orm");
+  const { createClientSubmissionId } = await import("@bb/domain");
+  const { listStoredEventRowsContaining } = await import("@bb/db");
+  const { createClientTurnRequestId } =
+    await import("../../src/services/threads/thread-events.js");
+  const { SUBMISSION_CLOCK_SKEW_MS } =
+    await import("../../src/services/threads/submission-admission.js");
+  await withTestHarness(async (h) => {
+    const { host } = seedHostSession(h.deps, { id: "dated-host" });
+    const { project } = seedProjectWithSource(h.deps, {
+      hostId: host.id,
+      path: "/fixture",
+    });
+    const thread = seedThread(h.deps, {
+      projectId: project.id,
+      status: "idle",
+    });
+    const minute = 60_000;
+    const base = Date.now() - 10 * 24 * 60 * minute;
+    const dated = createClientSubmissionId(base + 500 * minute);
+    const undated = crypto.randomUUID();
+    const start = getLatestThreadSequence(h.db, { threadId: thread.id }) + 1;
+    h.db.transaction((tx) => {
+      for (let i = 0; i < 3000; i++) {
+        const clientSubmissions =
+          i === 500
+            ? [{ id: dated, inputGroupIndex: 0 }]
+            : i === 501
+              ? [{ id: undated, inputGroupIndex: 0 }]
+              : undefined;
+        const data = JSON.stringify({
+          requestId: createClientTurnRequestId(),
+          ...(clientSubmissions ? { clientSubmissions } : {}),
+          direction: "outbound",
+          source: "tell",
+          initiator: "user",
+          senderThreadId: null,
+          input: [{ type: "text", text: `row ${i}`, mentions: [] }],
+          target: { kind: "new-turn" },
+          request: { method: "turn/start", params: {} },
+          execution: {
+            model: "test",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            source: "client/turn/requested",
+          },
+        });
+        tx.run(
+          sql`INSERT INTO events(id,thread_id,scope_kind,sequence,type,data,created_at) VALUES (${`${thread.id}-dated-${i}`},${thread.id},'thread',${start + i * 3},'client/turn/requested',${data},${base + i * minute})`,
+        );
+      }
+    });
+    const answer = (id: string) => {
+      try {
+        return assertSubmissionNotAdmitted(h.db, thread.id, id);
+      } catch (error) {
+        return (error as { body?: { code?: string } }).body?.code;
+      }
+    };
+    expect(answer(dated)).toBe("submission_already_admitted");
+    expect(findRequestedSubmission(h.db, thread.id, dated).requested).toEqual(
+      expect.objectContaining({ sequence: start + 500 * 3 }),
+    );
+    expect(answer(undated)).toMatchObject({ scannedRows: 0 });
+    const scanned = (sinceCreatedAt?: number) =>
+      listStoredEventRowsContaining(h.db, {
+        threadId: thread.id,
+        type: "client/turn/requested",
+        window: 1000,
+        needles: ["outbound"],
+        ...(sinceCreatedAt === undefined ? {} : { sinceCreatedAt }),
+      }).length;
+    const skew = SUBMISSION_CLOCK_SKEW_MS / minute;
+    expect(scanned()).toBe(1000);
+    expect(scanned(base + 500 * minute - SUBMISSION_CLOCK_SKEW_MS)).toBe(
+      3000 - (500 - skew),
+    );
+    expect(scanned(base + 1999 * minute)).toBe(1001);
+    expect(scanned(base + 2000 * minute)).toBe(1000);
+    expect(scanned(Date.now())).toBe(1000);
+    expect(scanned(base - minute)).toBe(3000);
+    expect(scanned(base + 1234 * minute + 1)).toBe(3000 - 1235);
+  });
+});
