@@ -60,7 +60,7 @@ export function workspaceInstructions(binding: Binding): string {
     "## Workspace on another machine (account-workers)",
     `This thread runs on a worker machine. Its workspace is on the machine \`${binding.workspaceHostName}\`, root \`${binding.root}\`.`,
     "Local file and shell tools are disabled in this thread: they would act on the worker, not the workspace.",
-    "Use the workspace_* tools for all file and command work. Paths are relative to the workspace root; absolute paths inside the root also work. workspace_exec runs `bash -c` in the root on the workspace machine.",
+    "Use the workspace_* tools for all file and command work. Paths are relative to the workspace root; absolute paths inside the root also work. A file path the user mentions is relative to the workspace root; read it with workspace_read. workspace_exec runs `bash -c` in the root on the workspace machine.",
     "A failed write, edit or exec whose outcome is unknown must be checked (re-read, git status) before retrying.",
   ];
   for (const file of binding.instructions) {

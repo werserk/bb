@@ -136,6 +136,7 @@ describe("worker environment provider", () => {
     );
     expect(config.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(config.instructions).toContain("MARKER");
+    expect(config.instructions).toContain("A file path the user mentions is relative to the workspace root");
   });
 
   it("a second create for the same thread reuses the binding without touching the worker", async () => {
