@@ -7,7 +7,6 @@ import {
   toThreadStatusThread,
 } from "./plugin-sidebar-threads";
 
-
 type EntryOverrides = Parameters<typeof makeThreadListEntry>[0];
 
 function indicatorFor(overrides: EntryOverrides) {
