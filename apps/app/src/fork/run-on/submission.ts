@@ -51,6 +51,14 @@ function sameJson(source: unknown, copy: JsonValue): boolean {
   );
 }
 
+function deepFreeze(value: JsonValue): JsonValue {
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) deepFreeze(item as JsonValue);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 export function snapshotJson(
   data: unknown,
 ): { value: JsonValue; bytes: number } | null {
@@ -59,7 +67,10 @@ export function snapshotJson(
     if (text === undefined) return null;
     const value = JSON.parse(text) as JsonValue;
     if (!sameJson(data, value)) return null;
-    return { value, bytes: new TextEncoder().encode(text).length };
+    return {
+      value: deepFreeze(value),
+      bytes: new TextEncoder().encode(text).length,
+    };
   } catch {
     return null;
   }
@@ -124,7 +135,10 @@ export function createRunRowSubmissionStore() {
       const snapshot = snapshotJson(data);
       if (snapshot === null) return false;
       if (snapshot.bytes > RUN_ROW_SUBMISSION_MAX_BYTES) return false;
-      held = { scopeKey, value: { pluginId, data: snapshot.value } };
+      held = {
+        scopeKey,
+        value: Object.freeze({ pluginId, data: snapshot.value }),
+      };
       emit();
       return true;
     },

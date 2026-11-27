@@ -32,6 +32,7 @@ const stubs = vi.hoisted(() => ({
   environment: undefined as unknown,
   workspace: { status: "loading" } as unknown,
   rowItemProps: null as {
+    submission?: { pluginId: string; data: JsonValue } | null;
     setSubmissionFor?: (pluginId: string, data: JsonValue | null) => boolean;
   } | null,
 }));
@@ -211,6 +212,36 @@ describe("useRunOnComposer", () => {
       held,
       undefined,
     ]);
+  });
+
+  it("sends the stored data even after a plugin mutates its submission prop", async () => {
+    const projectId = nextProject();
+    const { result } = renderHook(() => useComposerHarness(projectId));
+    render(<>{result.current.runOn.rowItems}</>);
+    act(() => {
+      stubs.rowItemProps?.setSubmissionFor?.("account-pool", {
+        accountId: "a1",
+      });
+    });
+    render(<>{result.current.runOn.rowItems}</>);
+    const prop = stubs.rowItemProps?.submission?.data as {
+      accountId: string;
+      pad?: string;
+    };
+    expect(prop).toEqual({ accountId: "a1" });
+    expect(() => {
+      prop.pad = "x".repeat(41 * 1024);
+    }).toThrow(TypeError);
+    const send = vi
+      .fn<(extras: ComposerSubmitExtras) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    await act(async () => {
+      await result.current.runOn.submit({}, send);
+    });
+    expect(send.mock.calls[0]?.[0].pluginSubmission).toEqual({
+      pluginId: "account-pool",
+      data: { accountId: "a1" },
+    });
   });
 
   it("drops a scope's row item data when the scope changes", () => {

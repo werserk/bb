@@ -238,6 +238,24 @@ describe("single pluginSubmission", () => {
     expect(store.get()?.value.data).toEqual({ policy: { accountId: "a1" } });
   });
 
+  it("freezes the stored copy, so mutating what it hands out cannot grow it", () => {
+    const store = createRunRowSubmissionStore();
+    expect(
+      store.set("p\0codex", "account-pool", { policy: { accountId: "a1" } }),
+    ).toBe(true);
+    const held = store.get()?.value.data as {
+      policy: { accountId: string };
+      pad?: string;
+    };
+    expect(() => {
+      held.pad = "x".repeat(RUN_ROW_SUBMISSION_MAX_BYTES * 2);
+    }).toThrow(TypeError);
+    expect(() => {
+      held.policy.accountId = "a2";
+    }).toThrow(TypeError);
+    expect(store.get()?.value.data).toEqual({ policy: { accountId: "a1" } });
+  });
+
   it.each([
     ["undefined", undefined],
     ["a function", () => 1],
