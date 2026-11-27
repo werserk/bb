@@ -2,7 +2,9 @@ import type Database from "better-sqlite3";
 import path from "node:path";
 import type { InstructionFile } from "./contract.js";
 
-export type ReleaseReason = "unbind" | "archive" | "delete" | "spawn-failed" | "abandoned" | "account-refused";
+export type ReleaseReason = "unbind" | "archive" | "delete" | "spawn-failed" | "abandoned" | "account-refused" | "environment";
+
+export type BindingOwner = "cli" | "provider";
 
 export interface Binding {
   id: string;
@@ -22,6 +24,7 @@ export interface Binding {
   cleanedAt: number | null;
   releaseError: string | null;
   sendAt: number | null;
+  owner: BindingOwner;
   createdAt: number;
   updatedAt: number;
 }
@@ -44,6 +47,7 @@ interface Row {
   cleaned_at: number | null;
   release_error: string | null;
   send_at: number | null;
+  owner: BindingOwner;
   created_at: number;
   updated_at: number;
 }
@@ -67,6 +71,7 @@ function toBinding(row: Row): Binding {
     cleanedAt: row.cleaned_at,
     releaseError: row.release_error,
     sendAt: row.send_at,
+    owner: row.owner,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -80,6 +85,7 @@ const ADDED_COLUMNS: readonly (readonly [string, string])[] = [
   ["cleaned_at", "INTEGER"],
   ["release_error", "TEXT"],
   ["send_at", "INTEGER"],
+  ["owner", "TEXT NOT NULL DEFAULT 'cli'"],
 ];
 
 export function canonicalPath(value: string): string {
@@ -119,24 +125,31 @@ export class BindingStore {
     for (const [name, type] of ADDED_COLUMNS) {
       if (!columns.has(name)) db.exec(`ALTER TABLE bindings ADD COLUMN ${name} ${type}`);
     }
+    db.exec(`CREATE TABLE IF NOT EXISTS provider_starts (
+      thread_id TEXT PRIMARY KEY,
+      model TEXT,
+      recorded_at INTEGER NOT NULL
+    )`);
   }
 
   create(
     binding: Pick<Binding, "id" | "workerHostId" | "scratchPath" | "workspaceHostId" | "workspaceHostName" | "root" | "instructions" | "profile">
-      & Partial<Pick<Binding, "ready" | "sendAt">>,
+      & Partial<Pick<Binding, "ready" | "sendAt" | "threadId" | "owner">>,
   ): Binding {
     const at = this.now();
     this.db
       .prepare(
         `INSERT INTO bindings (id, thread_id, worker_host_id, scratch_path, workspace_host_id,
-          workspace_host_name, root, instructions, profile, broken_reason, ready, send_at, created_at, updated_at)
-         VALUES (@id, NULL, @workerHostId, @scratchPath, @workspaceHostId,
-          @workspaceHostName, @root, @instructions, @profile, NULL, @ready, @sendAt, @at, @at)`,
+          workspace_host_name, root, instructions, profile, broken_reason, ready, send_at, owner, created_at, updated_at)
+         VALUES (@id, @threadId, @workerHostId, @scratchPath, @workspaceHostId,
+          @workspaceHostName, @root, @instructions, @profile, NULL, @ready, @sendAt, @owner, @at, @at)`,
       )
       .run({
         ...binding,
         ready: binding.ready === false ? 0 : 1,
         sendAt: binding.sendAt ?? null,
+        threadId: binding.threadId ?? null,
+        owner: binding.owner ?? "cli",
         scratchPath: canonicalPath(binding.scratchPath),
         instructions: JSON.stringify(binding.instructions),
         at,
@@ -265,6 +278,26 @@ export class BindingStore {
 
   remove(id: string): boolean {
     return this.db.prepare("DELETE FROM bindings WHERE id = ?").run(id).changes > 0;
+  }
+
+  recordStart(threadId: string, model: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO provider_starts (thread_id, model, recorded_at) VALUES (?, ?, ?)
+         ON CONFLICT(thread_id) DO UPDATE SET model = excluded.model, recorded_at = excluded.recorded_at`,
+      )
+      .run(threadId, model, this.now());
+  }
+
+  startModel(threadId: string): { model: string | null } | null {
+    const row = this.db.prepare("SELECT model FROM provider_starts WHERE thread_id = ?").get(threadId) as
+      | { model: string | null }
+      | undefined;
+    return row ?? null;
+  }
+
+  forgetStart(threadId: string): void {
+    this.db.prepare("DELETE FROM provider_starts WHERE thread_id = ?").run(threadId);
   }
 
   list(): Binding[] {

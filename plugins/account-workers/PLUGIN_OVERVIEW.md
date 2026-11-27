@@ -8,12 +8,16 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 - The workspace's `AGENTS.md` and `CLAUDE.md` reach the agent as quoted instructions.
 - The thread runs in an empty scratch directory on the worker whose settings turn off the provider's native file, shell and other tools, so nothing acts on the worker by mistake. Supported providers: Claude Code (`claude-code`, the default), OpenCode 2 (`acp-opencode`) and Codex (`codex`; the spawn first runs a no-fallback check on the worker).
 
+## From the new-thread picker
+
+Choose **On a worker** as the environment, the worker as the machine, and the workspace (the project's folder on another machine) in the control next to it. The thread starts with the same scratch directory and workspace tools as `spawn`; archiving or deleting it releases the scratch directory through BB's environment cleanup. On a BB build with the Run on picker, the worker and workspace pair is one row of that picker, and the open thread's environment menu has **Change workspace…** to move its tools to another machine with the project's source.
+
 ## For agents and scripts
 
 - `bb account-workers spawn --workspace-machine <machine> --path <dir> --machine <worker> --prompt <text> [--provider <id>] [--model <id>] [--send-at <epoch ms>] [--account <id|label>] [--on-limit fallback-auto|stop]` starts a bound thread.
 - `--account` pins the thread to one pool account (Account Pooler `thread-account.v1`) before its first message; `--on-limit` says what happens at that account's limit (default `fallback-auto`). Any refusal stops the spawn and archives the new thread; without `--account` the pool picks.
 - `--send-at` schedules the first message. account-workers, not core, guarantees it: while the thread has not started, its messages wait until that time, also on cores that drop the sender's time under a plugin wait. The time given to `spawn` wins over a later reschedule to an earlier time; only Send now sends earlier.
-- `bb account-workers list` (with each thread's account and policy when the pool is present), `rebind`, `unbind` manage bindings.
+- `bb account-workers list` (with each thread's account and policy when the pool is present), `rebind`, `unbind` manage bindings; a thread started from the picker moves with Change workspace instead of `rebind`.
 - `bb account-workers exec --thread <id> -- <command>` runs a command through the same path as the agent's exec tool.
 
 `workspace_exec` runs commands as the daemon user on the workspace machine; it is not a sandbox. See `docs/account-workers/architecture.md` for the design and open points.

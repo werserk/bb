@@ -2,6 +2,11 @@
 
 Owner decisions, newest first. Each entry says what was decided and why.
 
+## 2026-11-27 — Environment provider for the new-thread picker
+
+- **Decision.** account-workers registers the environment provider `account-workers-worker` with a workspace inputs control, so a worker thread starts from BB's picker. It uses the v1 provider contract with `ownsPath: false`; its bindings carry `owner = provider` and are released through the provider's `remove`, not the plugin's archive and delete handlers. The dispatch hook records the start model for `create`.
+- **Why.** Provider ids allow only `[a-z0-9-]`, so `account-workers.worker` from the proposal is invalid. The running cores (0.49, 0.50.1) call v1 providers with the thread, and the thread has no model, so the hook is the only place that sees it. `ownsPath: true` would make core run the project's setup scripts in a directory that is not a checkout. Core owns the environment's lifetime, so a second release path from plugin events would race it.
+
 ## 2026-11-27 — Block 4: binding lifecycle; accounts through the pool
 
 - **Decision.** Block 4 ships the binding lifecycle: a `message.dispatch` hold that keeps a thread's turns back until its binding is ready and refuses released bindings and unguarded providers, and a two-step release (tombstone, then worker cleanup) on `unbind`, archive and delete. Account choice moves to the pool as the central key keeper: one sign-in per account in BB, a per-thread pass, a per-thread account policy and switching mid-thread. Per-worker account homes and the pool bypass are dropped; #4 is re-scoped to that design.

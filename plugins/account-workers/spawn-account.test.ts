@@ -78,7 +78,7 @@ function hostRpc(calls: string[], releaseScratch: unknown = { ok: true }) {
     calls.push(call.method);
     switch (call.method) {
       case "resolveRoot":
-        return { ok: true, root: "/work/repo", hostname: "ws", instructions: [] };
+        return { ok: true, root: "/work/repo", hostname: "ws", instructions: [], branch: null };
       case "prepareScratch":
         return { ok: true, path: SCRATCH };
       case "releaseScratch":

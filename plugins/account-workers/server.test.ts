@@ -68,7 +68,7 @@ function defaultRpc(overrides: Record<string, unknown> = {}): HostRpc {
     }
     switch (call.method) {
       case "resolveRoot":
-        return { ok: true, root: "/work/repo", hostname: "ws", instructions: [{ file: "AGENTS.md", text: "MARKER ```x```", truncated: false }] };
+        return { ok: true, root: "/work/repo", hostname: "ws", instructions: [{ file: "AGENTS.md", text: "MARKER ```x```", truncated: false }], branch: null };
       case "prepareScratch":
         return { ok: true, path: SCRATCH };
       case "releaseScratch":

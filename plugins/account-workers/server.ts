@@ -10,6 +10,8 @@ import {
 import { BindingStore, canonicalPath, isReleased, type Binding } from "./bindings.js";
 import { accountWorkersHostContract, type InstructionFile } from "./contract.js";
 import { safeDecide } from "./dispatch.js";
+import { accountWorkersAppContract, workspaceTag, type ThreadWorkspace, type WorkerChoice, type WorkspaceOption } from "./app-contract.js";
+import { noteProviderStart, resolveProjectWorkspace, WorkspaceProblem, workerProvider } from "./provider.js";
 import { ARCHIVE_UNDO_MS, isLive, Releaser, type ReleaseOutcome, type ThreadState } from "./release.js";
 import { DEFAULT_PROVIDER, PROFILES, profileById, profileForProvider } from "./profiles/index.js";
 import {
@@ -58,7 +60,7 @@ export function workspaceInstructions(binding: Binding): string {
     "## Workspace on another machine (account-workers)",
     `This thread runs on a worker machine. Its workspace is on the machine \`${binding.workspaceHostName}\`, root \`${binding.root}\`.`,
     "Local file and shell tools are disabled in this thread: they would act on the worker, not the workspace.",
-    "Use the workspace_* tools for all file and command work. Paths are relative to the workspace root; absolute paths inside the root also work. workspace_exec runs `bash -c` in the root on the workspace machine.",
+    "Use the workspace_* tools for all file and command work. Paths are relative to the workspace root; absolute paths inside the root also work. A file path the user mentions is relative to the workspace root; read it with workspace_read. workspace_exec runs `bash -c` in the root on the workspace machine.",
     "A failed write, edit or exec whose outcome is unknown must be checked (re-read, git status) before retrying.",
   ];
   for (const file of binding.instructions) {
@@ -181,6 +183,12 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
   bb.agents.configure((context) => configureThread(store, context));
 
   bb.experimental_hooks.on("message.dispatch", (context) => {
+    try {
+      const start = noteProviderStart(store, context);
+      if (start !== null) return start;
+    } catch (error) {
+      bb.log.error(`account-workers: recording a worker start failed: ${String(error)}`);
+    }
     const verdict = safeDecide(bb.pluginId, context, (id) => store.recordByThread(id), Date.now(), (error) =>
       bb.log.error(`account-workers: dispatch check failed: ${String(error)}`),
     );
@@ -200,18 +208,123 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
 
   bb.events.on("thread.archived", ({ thread }) => {
     const binding = store.byThread(thread.id);
-    if (binding !== null) releaser.retire(binding, (thread.archivedAt ?? Date.now()) + ARCHIVE_UNDO_MS, "archive");
+    if (binding !== null && binding.owner === "cli") releaser.retire(binding, (thread.archivedAt ?? Date.now()) + ARCHIVE_UNDO_MS, "archive");
   });
   bb.events.on("thread.unarchived", ({ thread }) => {
     const record = store.recordByThread(thread.id);
-    if (record !== null) releaser.restore(record);
+    if (record !== null && record.owner === "cli") releaser.restore(record);
   });
   bb.events.on("thread.deleted", ({ thread }) => {
     const record = store.recordByThread(thread.id);
-    if (record !== null && record.cleanedAt === null) releaser.retire(record, Date.now() + ARCHIVE_UNDO_MS, "delete");
+    if (record !== null && record.owner === "cli" && record.cleanedAt === null) releaser.retire(record, Date.now() + ARCHIVE_UNDO_MS, "delete");
   });
   bb.events.on("thread.idle", sweep);
   bb.events.on("thread.failed", sweep);
+
+  const changed = (threadId: string) => bb.rpc.experimental_invalidate([workspaceTag(threadId)]);
+  const workspaceDeps = {
+    host,
+    listHosts: (signal?: AbortSignal) => bb.sdk.hosts.list({ signal }),
+    projectSources: async (projectId: string, signal?: AbortSignal) => (await bb.sdk.projects.get({ projectId, signal })).sources,
+  };
+  const provider = workerProvider({
+    ...workspaceDeps,
+    store,
+    refusedMachineEnv,
+    release: (binding) => releaser.release(binding),
+    retire: (binding) => void releaser.retire(binding, Date.now(), "environment"),
+    changed,
+    log: (message) => bb.log.warn(message),
+  });
+  bb.experimental_environments.register(provider as unknown as Parameters<typeof bb.experimental_environments.register>[0]);
+
+  async function threadWorkspace(binding: Binding): Promise<ThreadWorkspace> {
+    const view = {
+      bindingId: binding.id,
+      agentHostId: binding.workerHostId,
+      workspaceHostId: binding.workspaceHostId,
+      workspaceHostName: binding.workspaceHostName,
+      root: binding.root,
+    };
+    if (binding.brokenReason !== null) return { ...view, branch: null, issue: brokenText(binding.brokenReason) };
+    try {
+      const result = await host.call("resolveRoot", { path: binding.root }, { hostId: binding.workspaceHostId, signal: AbortSignal.timeout(8_000) });
+      if (!result.ok) return { ...view, branch: null, issue: `Workspace refused: ${result.error}` };
+      return { ...view, branch: result.branch, issue: null };
+    } catch (error) {
+      return { ...view, branch: null, issue: `Workspace machine ${binding.workspaceHostName} did not answer: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
+  function workspacesFor<H extends { id: string }>(agent: H, hosts: H[], sources: { type: string; hostId: string; path: string }[]) {
+    return sources.flatMap((source) => {
+      const workspace = hosts.find((h) => h.id === source.hostId);
+      return source.type !== "local_path" || workspace === undefined || workspace.id === agent.id ? [] : [{ workspace, root: source.path }];
+    });
+  }
+
+  bb.rpc.register(accountWorkersAppContract, {
+    async choices({ projectId }) {
+      const [hosts, sources] = await Promise.all([workspaceDeps.listHosts(), workspaceDeps.projectSources(projectId)]);
+      const choices: WorkerChoice[] = hosts.flatMap((agent) =>
+        workspacesFor(agent, hosts, sources).map(({ workspace, root }) => {
+          const offline = [agent, workspace].find((h) => h.status !== "connected");
+          return {
+            agentHostId: agent.id,
+            agentHostName: agent.name,
+            workspaceHostId: workspace.id,
+            workspaceHostName: workspace.name,
+            root,
+            disabledReason: offline === undefined ? null : `${offline === agent ? "Worker" : "Workspace machine"} ${offline.name} is ${offline.status}`,
+          };
+        }),
+      );
+      return { choices };
+    },
+    async workspaceOptions({ threadId }) {
+      const binding = store.byThread(threadId);
+      if (binding === null || binding.owner !== "provider") return { options: [] };
+      const thread = await bb.sdk.threads.get({ threadId });
+      const [hosts, sources] = await Promise.all([workspaceDeps.listHosts(), workspaceDeps.projectSources(thread.projectId)]);
+      const agent = hosts.find((h) => h.id === binding.workerHostId);
+      if (agent === undefined) return { options: [] };
+      const options: WorkspaceOption[] = workspacesFor(agent, hosts, sources).map(({ workspace, root }) => ({
+        workspaceHostId: workspace.id,
+        workspaceHostName: workspace.name,
+        root,
+        current: workspace.id === binding.workspaceHostId,
+        disabledReason: workspace.status === "connected" ? null : `Workspace machine ${workspace.name} is ${workspace.status}`,
+      }));
+      return { options };
+    },
+    async threadWorkspace({ threadId }) {
+      const binding = store.byThread(threadId);
+      return { workspace: binding === null || binding.owner !== "provider" ? null : await threadWorkspace(binding) };
+    },
+    async rebind({ threadId, workspaceHostId }) {
+      const current = bindingOrFail(threadId);
+      if (current.owner !== "provider") {
+        throw new PluginCliError(`Thread ${threadId} was bound by spawn; use bb account-workers rebind`, { code: "not_provider" });
+      }
+      const thread = await bb.sdk.threads.get({ threadId });
+      let workspace;
+      try {
+        workspace = await resolveProjectWorkspace(workspaceDeps, thread.projectId, workspaceHostId, current.workerHostId);
+      } catch (error) {
+        if (error instanceof WorkspaceProblem) throw new PluginCliError(error.message, { code: "bad_workspace" });
+        throw error;
+      }
+      const binding = store.rebind(threadId, {
+        workspaceHostId: workspace.hostId,
+        workspaceHostName: workspace.hostName,
+        root: workspace.root,
+        instructions: workspace.instructions,
+      });
+      if (binding === null) throw new PluginCliError(`Thread ${threadId} has no workspace binding`, { code: "not_bound" });
+      changed(threadId);
+      return { workspace: { ...(await threadWorkspace(binding)), branch: workspace.branch } };
+    },
+  });
 
   async function resolveMachine(idOrName: string, signal?: AbortSignal) {
     const hosts = await bb.sdk.hosts.list({ signal });
@@ -479,6 +592,12 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           async run(input, ctx) {
             const o = input.options as Record<string, string>;
             const current = bindingOrFail(o.thread!);
+            if (current.owner === "provider") {
+              throw new PluginCliError(
+                `Thread ${o.thread} started from the new-thread picker; use Change workspace in its environment menu, which moves it only to the project's sources`,
+                { code: "provider_binding" },
+              );
+            }
             const w = await resolveWorkspace(o["workspace-machine"]!, o.path!, current.workerHostId, ctx.signal);
             const binding = store.rebind(o.thread!, {
               workspaceHostId: w.hostId,

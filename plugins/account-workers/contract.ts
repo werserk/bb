@@ -28,6 +28,7 @@ export const accountWorkersHostContract = defineRpcContract({
       root: z.string(),
       hostname: z.string(),
       instructions: z.array(instructionFileSchema),
+      branch: z.string().nullable(),
     }),
     experimental_retryable: true,
   },
@@ -47,7 +48,7 @@ export const accountWorkersHostContract = defineRpcContract({
       .object({
         bindingId: mintedBindingId,
         profile: profileId,
-        scratchPath: z.string().min(1).max(4096),
+        scratchPath: z.string().min(1).max(4096).optional(),
       })
       .strict(),
     output: outcome({}),

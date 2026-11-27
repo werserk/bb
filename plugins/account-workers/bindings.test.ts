@@ -23,10 +23,18 @@ describe("binding store", () => {
     db.exec(BLOCK1_SCHEMA);
     db.prepare("INSERT INTO bindings VALUES ('aw_old', 't1', 'h1', '/s/aw_old', 'h2', 'ws', '/r', '[]', 1, 1)").run();
     const store = new BindingStore(db);
-    expect(store.byThread("t1")).toMatchObject({ id: "aw_old", profile: "claude", brokenReason: null, root: "/r", ready: true, releasedAt: null, cleanedAt: null });
+    expect(store.byThread("t1")).toMatchObject({ id: "aw_old", profile: "claude", brokenReason: null, root: "/r", ready: true, releasedAt: null, cleanedAt: null, owner: "cli" });
     new BindingStore(db);
     const created = store.create({ id: "aw_new", workerHostId: "h1", scratchPath: "/s/aw_new", workspaceHostId: "h2", workspaceHostName: "ws", root: "/r", instructions: [], profile: "opencode" });
     expect(created).toMatchObject({ profile: "opencode", brokenReason: null, threadId: null });
+  });
+
+  it("a binding from before owner existed reads as a CLI binding", () => {
+    const db = new Database(":memory:");
+    new BindingStore(db);
+    db.exec("ALTER TABLE bindings DROP COLUMN owner");
+    db.prepare("INSERT INTO bindings (id, thread_id, worker_host_id, scratch_path, workspace_host_id, workspace_host_name, root, instructions, created_at, updated_at) VALUES ('aw_pre', 't2', 'h1', '/s/aw_pre', 'h2', 'ws', '/r', '[]', 1, 1)").run();
+    expect(new BindingStore(db).recordByThread("t2")?.owner).toBe("cli");
   });
 
   it("markBroken sticks until rebind clears it", () => {
