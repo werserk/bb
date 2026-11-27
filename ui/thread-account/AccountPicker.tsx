@@ -20,6 +20,7 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { UseThreadAccount } from "./hooks.js";
+import type { ThreadAccountGet } from "./view.js";
 import {
   CODEX_PICKER_NOTE,
   confirmParts,
@@ -32,22 +33,29 @@ import {
 interface PendingConfirm {
   target: PickTarget;
   parts: ConfirmParts;
+  /** The state the dialog describes; its revision guards the write (F2). */
+  seen: ThreadAccountGet;
 }
+
+/** Choose a target; `returnFocus` gets focus back when a dialog closes. */
+export type ChooseAccount = (target: PickTarget, returnFocus?: HTMLElement | null) => void;
 
 /** Pick handling shared by every picker of a thread: confirm, then `set`. */
 export function useAccountPick(account: UseThreadAccount): {
-  choose: (target: PickTarget) => void;
+  choose: ChooseAccount;
   pending: PendingConfirm | null;
   dialog: ReactNode;
 } {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const get = account.snapshot.get;
-  const choose = (target: PickTarget) => {
+  const choose: ChooseAccount = (target, returnFocus = null) => {
     if (get === null || isSamePolicy(get, target)) return;
     const parts = confirmParts(get, target);
     if (parts !== null) {
-      setPending({ target, parts });
+      returnFocusRef.current = returnFocus;
+      setPending({ target, parts, seen: get });
       return;
     }
     void account.store.pick(target, false);
@@ -65,6 +73,13 @@ export function useAccountPick(account: UseThreadAccount): {
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             cancelRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            const back = returnFocusRef.current;
+            returnFocusRef.current = null;
+            if (back === null || !back.isConnected) return;
+            event.preventDefault();
+            back.focus();
           }}
         >
           <DialogHeader>
@@ -87,9 +102,9 @@ export function useAccountPick(account: UseThreadAccount): {
             </Button>
             <Button
               onClick={() => {
-                const { target, parts } = pending;
+                const { target, parts, seen } = pending;
                 setPending(null);
-                void account.store.pick(target, parts.newSession);
+                void account.store.pick(target, parts.newSession, seen);
               }}
             >
               {pending.parts.confirmLabel}
@@ -107,6 +122,7 @@ function RadioRow({
   label,
   secondary,
   reasonId,
+  describedBy,
   usable,
   onPick,
 }: {
@@ -114,6 +130,8 @@ function RadioRow({
   label: string;
   secondary: string | null;
   reasonId?: string;
+  /** Id of the text explaining why the row is unusable, when not its own. */
+  describedBy?: string;
   usable: boolean;
   onPick: () => void;
 }) {
@@ -133,7 +151,7 @@ function RadioRow({
         role="menuitemradio"
         aria-checked={checked}
         aria-disabled={usable ? undefined : true}
-        aria-describedby={usable ? undefined : reasonId}
+        aria-describedby={usable ? undefined : (describedBy ?? reasonId)}
         title={label}
         className={cn(
           "flex w-full min-w-0 items-center gap-2 text-left max-md:pointer-coarse:min-h-9",
@@ -160,7 +178,7 @@ function Heading({ children }: { children: ReactNode }) {
 
 export interface AccountMenuProps {
   account: UseThreadAccount;
-  choose: (target: PickTarget) => void;
+  choose: ChooseAccount;
   /** Called before Radix moves focus back to the trigger on close. */
   confirmPending: () => boolean;
   trigger: ReactNode;
@@ -173,6 +191,8 @@ export interface AccountMenuProps {
 export function AccountMenu({ account, choose, confirmPending, trigger, align = "end", header }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const baseId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pickTo = (target: PickTarget) => choose(target, triggerRef.current);
   const { snapshot, view, store } = account;
   const get = snapshot.get;
   const rows = pickerRows(snapshot.accounts, Date.now());
@@ -186,7 +206,9 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
         else store.pickerClosed();
       }}
     >
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild ref={triggerRef}>
+        {trigger}
+      </DropdownMenuTrigger>
       <DropdownMenuContent
         align={align}
         mobileTitle="Account for this thread"
@@ -208,7 +230,7 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
             Retry
           </DropdownMenuItem>
         ) : null}
-        {get === null ? null : (
+        {get === null || !view.canPick ? null : (
           <>
             <Heading>Account for this thread</Heading>
             <div role="group" aria-label="Account" className="max-h-64 overflow-y-auto">
@@ -217,22 +239,27 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
                 label="Auto"
                 secondary="Pool picks, fails over"
                 usable
-                onPick={() => choose({ kind: "auto" })}
+                onPick={() => pickTo({ kind: "auto" })}
               />
-              {rows.map((row) => (
+              {rows.map((row, index) => (
                 <RadioRow
                   key={row.accountId}
                   checked={named?.accountId === row.accountId}
                   label={row.label}
                   secondary={row.secondary}
-                  reasonId={`${baseId}-${row.accountId}`}
+                  reasonId={`${baseId}-row-${index}`}
                   usable={row.usable || named?.accountId === row.accountId}
-                  onPick={() => choose({ kind: "named", accountId: row.accountId, accountLabel: row.label })}
+                  onPick={() => pickTo({ kind: "named", accountId: row.accountId, accountLabel: row.label })}
                 />
               ))}
             </div>
             <DropdownMenuSeparator />
             <Heading>When this account hits its limit</Heading>
+            {named === null ? (
+              <p id={`${baseId}-onlimit-hint`} className="px-2 pb-1 text-xs text-muted-foreground">
+                Pin an account first.
+              </p>
+            ) : null}
             <div role="group" aria-label="When this account hits its limit">
               {(
                 [
@@ -244,10 +271,10 @@ export function AccountMenu({ account, choose, confirmPending, trigger, align = 
                   key={onLimit}
                   checked={named?.onLimit === onLimit}
                   label={label}
-                  secondary={named === null ? "Pin an account first" : null}
-                  reasonId={`${baseId}-onlimit-${onLimit}`}
+                  secondary={null}
+                  describedBy={`${baseId}-onlimit-hint`}
                   usable={named !== null}
-                  onPick={() => choose({ kind: "on-limit", onLimit })}
+                  onPick={() => pickTo({ kind: "on-limit", onLimit })}
                 />
               ))}
             </div>

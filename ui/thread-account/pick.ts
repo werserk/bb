@@ -10,10 +10,17 @@ export type PickTarget =
 /** True when the target is the policy the thread already has (send nothing). */
 export function isSamePolicy(get: ThreadAccountGet, target: PickTarget): boolean {
   const policy = get.policy;
+  if (!isKnownMode(get)) return false;
   if (target.kind === "auto") return policy.mode === "auto";
   if (target.kind === "named")
     return policy.mode === "named" && policy.accountId === target.accountId;
   return policy.mode !== "named" || policy.onLimit === target.onLimit;
+}
+
+/** False for a policy mode this UI does not know (a newer pool). */
+export function isKnownMode(get: ThreadAccountGet): boolean {
+  const mode: string = get.policy.mode;
+  return mode === "auto" || mode === "named";
 }
 
 export function needsNewSession(get: ThreadAccountGet, target: PickTarget): boolean {
@@ -66,7 +73,7 @@ export function setInputFor(
   expectedRevision: number;
   newSession?: boolean;
 } | null {
-  if (isSamePolicy(get, target)) return null;
+  if (!isKnownMode(get) || isSamePolicy(get, target)) return null;
   const common = { threadId: get.threadId, expectedRevision: get.revision };
   if (target.kind === "auto") return { ...common, policy: { mode: "auto" } };
   if (target.kind === "on-limit") {
@@ -76,9 +83,11 @@ export function setInputFor(
       policy: { mode: "named", accountId: get.policy.accountId, onLimit: target.onLimit },
     };
   }
+  // Switching between pinned accounts keeps the thread's on-limit rule (F3).
+  const onLimit = get.policy.mode === "named" ? get.policy.onLimit : undefined;
   return {
     ...common,
-    policy: { mode: "named", accountId: target.accountId },
+    policy: { mode: "named", accountId: target.accountId, ...(onLimit === undefined ? {} : { onLimit }) },
     ...(newSession ? { newSession: true } : {}),
   };
 }
@@ -108,6 +117,15 @@ export interface PickerAccountRow {
   reasonText: string | null;
 }
 
+const KIND_TEXT: Record<string, string> = { oauth: "Subscription", "api-key": "API key" };
+
+/** "pro" → "Pro"; without a plan, the account kind in words. */
+function planText(entry: { subscriptionType: string | null; kind: string }): string {
+  const plan = entry.subscriptionType;
+  if (plan !== null && plan !== "") return plan.charAt(0).toUpperCase() + plan.slice(1);
+  return KIND_TEXT[entry.kind] ?? entry.kind;
+}
+
 export function pickerRows(accounts: ThreadAccountList | null, now: number): PickerAccountRow[] {
   if (accounts === null) return [];
   return accounts.accounts
@@ -123,7 +141,7 @@ export function pickerRows(accounts: ThreadAccountList | null, now: number): Pic
       return {
         accountId: entry.accountId,
         label: entry.accountLabel,
-        secondary: reasonText ?? entry.subscriptionType ?? entry.kind,
+        secondary: reasonText ?? planText(entry),
         usable: entry.usable,
         reasonText,
       };

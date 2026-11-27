@@ -25,8 +25,6 @@ export interface ThreadAccountSnapshot {
   dismissedId: number | null;
   note: string | null;
   busy: boolean;
-  /** Bumped by the reset timer so views re-evaluate time-based rules. */
-  tick: number;
 }
 
 interface Pending {
@@ -85,7 +83,6 @@ export class ThreadAccountStore {
       dismissedId: readDismissed(threadId),
       note: null,
       busy: false,
-      tick: 0,
     };
   }
 
@@ -191,9 +188,17 @@ export class ThreadAccountStore {
     }
   }
 
-  /** Send a pick. Returns the answer, or null when nothing was sent. */
-  async pick(target: PickTarget, newSession: boolean): Promise<ThreadAccountSet | null> {
-    const get = this.snapshot.get;
+  /**
+   * Send a pick. `seen` is the state a confirm dialog showed: its revision
+   * guards the write, so a change made meanwhile conflicts instead of being
+   * overwritten. Returns the answer, or null when nothing was sent.
+   */
+  async pick(
+    target: PickTarget,
+    newSession: boolean,
+    seen: ThreadAccountGet | null = null,
+  ): Promise<ThreadAccountSet | null> {
+    const get = seen ?? this.snapshot.get;
     if (get === null || this.snapshot.busy) return null;
     const input = setInputFor(get, target, newSession);
     if (input === null) return null;
@@ -242,7 +247,6 @@ export class ThreadAccountStore {
     this.resetTimer = setTimeout(() => {
       this.resetTimer = null;
       this.resetTimerAt = null;
-      this.snapshot = { ...this.snapshot, tick: this.snapshot.tick + 1 };
       void this.fetchAccounts();
     }, Math.max(0, delay));
   }

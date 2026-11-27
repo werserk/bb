@@ -37,7 +37,8 @@ export type ViewState =
   | "auto-fallback"
   | "named"
   | "named-on-auto"
-  | "named-stopped";
+  | "named-stopped"
+  | "policy-unknown";
 export type Tone = "muted" | "default" | "warning" | "destructive";
 
 export interface LimitCardView {
@@ -175,6 +176,16 @@ function servingLabel(get: ThreadAccountGet): string | null {
   return get.serving.accountLabel ?? REMOVED_ACCOUNT;
 }
 
+/** How a cause reads after the account name; unknown causes stay neutral. */
+const CAUSE_TEXT: Record<string, string> = {
+  limit: "hit its limit",
+  deleted: "was removed",
+  unavailable: "is unavailable",
+};
+function causeText(cause: string): string {
+  return CAUSE_TEXT[cause] ?? "could not serve";
+}
+
 function limitCard(
   get: ThreadAccountGet,
   limit: LimitEvent,
@@ -190,7 +201,7 @@ function limitCard(
       id: limit.id,
       tone: "warning",
       icon: "AlertTriangle",
-      title: cause === "deleted" ? `${name} was removed` : `${name} hit its limit`,
+      title: `${name} ${causeText(cause)}`,
       body: [
         cause === "deleted" || serving === null
           ? "The pool moved this thread to Auto."
@@ -221,25 +232,21 @@ function limitCard(
       id: limit.id,
       tone: "destructive",
       icon: "Pause",
-      title: isLimit
-        ? `${name} hit its limit: stopped`
-        : cause === "deleted"
-          ? `${name} was removed: stopped`
-          : `${name} is unavailable: stopped`,
+      title: `${name} ${causeText(cause)}: stopped`,
       body: isLimit
         ? ["This thread waits until ", { resetAt }, " or until you switch."]
         : ["This thread is set to stop."],
       action: "back-to-auto",
       actionLabel: "Back to Auto",
-      dismissLabel: isLimit ? "Wait" : "Dismiss",
+      dismissLabel: isLimit ? "Dismiss (keep waiting)" : "Dismiss",
     };
   }
   return null;
 }
 
 const ON_LIMIT_TEXT: Record<string, string> = {
-  "fallback-auto": "Move to Auto",
-  stop: "Stop until reset",
+  "fallback-auto": "it moves to Auto",
+  stop: "it stops until reset",
 };
 
 export interface ViewInput {
@@ -290,7 +297,7 @@ export function threadAccountView(input: ViewInput): ThreadAccountView {
     const name = get.policy.accountLabel ?? REMOVED_ACCOUNT;
     if (action === "stopped" && limit !== null) {
       const resetAt = findAccount(accounts, limit.accountId)?.resetAt ?? null;
-      const why = limit.cause === "limit" ? "which hit its limit" : limit.cause === "deleted" ? "which was removed" : "which is unavailable";
+      const why = `which ${causeText(limit.cause)}`;
       return {
         ...base("named-stopped", `${name} · stopped`, "Pause", "destructive", `Pinned to ${name}, ${why}. Stopped until ${formatReset(resetAt, now)}.`, true),
         limit: card,
@@ -301,15 +308,25 @@ export function threadAccountView(input: ViewInput): ThreadAccountView {
         ...base("named-on-auto", `${name} · on Auto`, "Pin", "warning", `Pinned to ${name}, which is unavailable. Auto serves this thread until ${name} is back.`, true),
         limit: card,
       };
-    const rule = ON_LIMIT_TEXT[get.policy.onLimit] ?? "Move to Auto";
+    const rule = ON_LIMIT_TEXT[get.policy.onLimit] ?? ON_LIMIT_TEXT["fallback-auto"];
     const details =
       route === "machine-token"
         ? `Pinned to ${name}. Its last turn ran on the machine token; the pin applies from its next turn on its own pass.`
         : route === "none" && serving !== null
           ? `Pinned to ${name}. Its last turn did not go through the pool; the pin applies to turns that do.`
-          : `Pinned to ${name}. At its limit: ${rule}.`;
+          : `Pinned to ${name}. At its limit ${rule}.`;
     return base("named", name, "Pin", "default", details, true);
   }
+
+  if (get.policy.mode !== "auto")
+    return base(
+      "policy-unknown",
+      "Account policy unknown",
+      "AlertTriangle",
+      "muted",
+      "The pool reports an account policy this view does not know. Change it with bb pool thread set.",
+      false,
+    );
 
   if (action === "fell-back" && limit !== null) {
     const name = limitLabel(get, limit);
@@ -319,7 +336,7 @@ export function threadAccountView(input: ViewInput): ThreadAccountView {
         serving === null ? "Auto" : `Auto · ${serving}`,
         "Layers",
         "default",
-        `Auto since ${name} hit its limit at ${formatTime(limit.at)}.${serving === null ? "" : ` Served by ${serving}.`}`,
+        `Auto since ${name} ${causeText(limit.cause)} at ${formatTime(limit.at)}.${serving === null ? "" : ` Served by ${serving}.`}`,
         true,
       ),
       dot: true,

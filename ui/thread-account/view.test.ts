@@ -184,6 +184,25 @@ describe("unknown enums and labels (test 4)", () => {
     expect(served.label).toBe("Auto · Removed account");
   });
 
+  it("an unknown policy mode is shown neutrally and never written (N3)", () => {
+    const get = getState({ policy: { mode: "future" } as unknown as ThreadAccountGet["policy"] });
+    const result = view(get);
+    expect(result).toMatchObject({ state: "policy-unknown", label: "Account policy unknown", canPick: false });
+    expect(setInputFor(get, { kind: "auto" }, false)).toBeNull();
+    expect(setInputFor(get, { kind: "named", accountId: "acc_a", accountLabel: "Work A" }, false)).toBeNull();
+  });
+
+  it("an unknown cause reads 'could not serve' (N4)", () => {
+    const get = getState({ policy: named("acc_a", "Work A", "stop"), updatedAt: T0 - HOUR, lastLimit: limitEvent({ cause: "future" as unknown as "limit", action: "stopped" }) });
+    const result = view(get, aAtLimit());
+    expect(result.limit?.title).toBe("Work A could not serve: stopped");
+    expect(result.details).toContain("which could not serve");
+  });
+
+  it("the pinned details state the on-limit rule in a sentence (N5)", () => {
+    expect(view(getState({ policy: named("acc_a", "Work A", "stop") })).details).toBe("Pinned to Work A. At its limit it stops until reset.");
+  });
+
   it("an unknown refusal gives the pool's message", () => {
     expect(setResultNote({ ok: false, reason: "future" as unknown as "not-idle", message: "Nope." })).toBe("Nope.");
   });
@@ -213,6 +232,20 @@ describe("set inputs (test 6)", () => {
       policy: { mode: "named", accountId: "acc_a", onLimit: "stop" },
     });
     expect(needsNewSession(get, { kind: "on-limit", onLimit: "stop" })).toBe(false);
+  });
+
+  it("switching pinned accounts keeps the on-limit rule (F3)", () => {
+    const pinB = { kind: "named", accountId: "acc_b", accountLabel: "Work B" } as const;
+    expect(setInputFor(getState({ policy: named("acc_a", "Work A", "stop"), revision: 3 }), pinB, false)).toEqual({
+      threadId: "thr_test1",
+      expectedRevision: 3,
+      policy: { mode: "named", accountId: "acc_b", onLimit: "stop" },
+    });
+    expect(setInputFor(getState({ policy: named("acc_a", "Work A", "fallback-auto") }), pinB, false)?.policy).toEqual({
+      mode: "named",
+      accountId: "acc_b",
+      onLimit: "fallback-auto",
+    });
   });
 
   it("carries expectedRevision and newSession for a pin", () => {
@@ -270,8 +303,14 @@ describe("picker rows", () => {
   it("keeps pool order, hides other-provider rows, explains unusable ones", () => {
     const rows = pickerRows(accountList(), T0);
     expect(rows.map((row) => row.label)).toEqual(["Work A", "Work B", "Work C"]);
-    expect(rows[1]?.secondary).toBe("pro");
+    expect(rows[1]?.secondary).toBe("Pro");
+    expect(rows[0]?.secondary).toBe("Max");
     expect(rows[2]).toMatchObject({ usable: false, reasonText: expect.stringMatching(/^At limit until \d\d:\d\d$/u) });
+  });
+
+  it("without a plan, shows the account kind in words", () => {
+    const list = { ...accountList(), accounts: [entry({ accountId: "acc_a", subscriptionType: null, kind: "api-key" }), entry({ accountId: "acc_b", subscriptionType: null, kind: "oauth" })] };
+    expect(pickerRows(list, T0).map((row) => row.secondary)).toEqual(["API key", "Subscription"]);
   });
 });
 
@@ -280,7 +319,7 @@ describe("limit card rows (§4)", () => {
     [{ cause: "limit", action: "fell-back" }, "auto", "Work A hit its limit", "choose", "Keep Auto", "warning"],
     [{ cause: "deleted", action: "fell-back" }, "auto", "Work A was removed", "choose", "Keep Auto", "warning"],
     [{ cause: "unavailable", action: "served-auto" }, "named", "Work A is unavailable", "use-auto", "Dismiss", "warning"],
-    [{ cause: "limit", action: "stopped" }, "named", "Work A hit its limit: stopped", "back-to-auto", "Wait", "destructive"],
+    [{ cause: "limit", action: "stopped" }, "named", "Work A hit its limit: stopped", "back-to-auto", "Dismiss (keep waiting)", "destructive"],
     [{ cause: "deleted", action: "stopped" }, "named", "Work A was removed: stopped", "back-to-auto", "Dismiss", "destructive"],
     [{ cause: "unavailable", action: "stopped" }, "named", "Work A is unavailable: stopped", "back-to-auto", "Dismiss", "destructive"],
   ] as const;

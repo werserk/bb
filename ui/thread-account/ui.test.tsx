@@ -178,7 +178,7 @@ describe("confirm dialog (test 8)", () => {
   it("a grandfathered pin asks first; focus starts on Cancel; Cancel sends nothing", async () => {
     const slot = renderRow(handlers(getState({ route: "machine-token", grandfathered: true, serving: null })));
     expect(await slot.findByText("Machine token")).toBeTruthy();
-    await openPicker(slot);
+    const trigger = await openPicker(slot);
     fireEvent.click(await slot.findByRole("menuitemradio", { name: /Work A/u }));
     const dialog = await slot.findByRole("dialog");
     expect(dialog.textContent).toContain("Pin this thread to Work A?");
@@ -188,6 +188,48 @@ describe("confirm dialog (test 8)", () => {
     fireEvent.click(cancel);
     await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
     expect(setCalls(slot)).toHaveLength(0);
+    // F1: focus goes back to the picker's trigger, not to the page.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("Escape and confirm also return focus to the trigger (F1)", async () => {
+    const slot = renderRow(handlers(getState({ route: "machine-token", grandfathered: true, serving: null })));
+    const trigger = await openPicker(slot);
+    fireEvent.click(await slot.findByRole("menuitemradio", { name: /Work A/u }));
+    const dialog = await slot.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    await openPicker(slot);
+    fireEvent.click(await slot.findByRole("menuitemradio", { name: /Work A/u }));
+    fireEvent.click(await slot.findByRole("button", { name: "Pin to Work A" }));
+    await waitFor(() => expect(setCalls(slot)).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("a change made while the dialog is open conflicts instead of being overwritten (F2)", async () => {
+    let current = getState({ route: "machine-token", grandfathered: true, serving: null, revision: 1 });
+    const slot = renderRow({
+      "thread-account.v1.get": () => current,
+      "thread-account.v1.accounts": () => accountList(),
+      "thread-account.v1.set": (input: unknown) => {
+        const { expectedRevision } = input as { expectedRevision: number };
+        if (expectedRevision !== current.revision) return { ok: false, reason: "revision-conflict", message: "" };
+        return { ...current, ok: true, changed: true, sessionRebuild: "none", message: null };
+      },
+    });
+    await openPicker(slot);
+    fireEvent.click(await slot.findByRole("menuitemradio", { name: /Work A/u }));
+    await slot.findByRole("dialog");
+    // Another client pins Work C meanwhile; the signal refreshes the store.
+    current = getState({ route: "machine-token", grandfathered: true, serving: null, revision: 2, policy: named("acc_c", "Work C") });
+    await slot.emitRealtime("thread-account-changed", { threadId: THREAD });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50)));
+    fireEvent.click(await slot.findByRole("button", { name: "Pin to Work A" }));
+    await waitFor(() => expect(setCalls(slot)).toHaveLength(1));
+    expect(setCalls(slot)[0]?.input).toMatchObject({ expectedRevision: 1, policy: { mode: "named", accountId: "acc_a" } });
+    expect(await slot.findAllByText("Changed elsewhere; refreshed.", {}, { timeout: 2000 })).not.toHaveLength(0);
+    expect(await slot.findByText("Work C")).toBeTruthy();
   });
 
   it("a Codex pin from another account confirms a new session", async () => {
@@ -352,6 +394,76 @@ describe("store (test 10)", () => {
     await slot.setRealtimeConnectionState("reconnecting");
     await slot.setRealtimeConnectionState("connected");
     await waitFor(() => expect(slot.rpcCalls.length).toBe(count + 2), { timeout: 2000 });
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => (resolve = done));
+    return { promise, resolve };
+  }
+
+  it("a get in flight before a pick's answer does not overwrite it (F4)", async () => {
+    const gets: Array<ReturnType<typeof deferred<ThreadAccountGet>>> = [];
+    const pinned = getState({ policy: named(), revision: 2 });
+    const call = vi.fn(async (method: string) => {
+      if (method.endsWith(".get")) {
+        const next = deferred<ThreadAccountGet>();
+        gets.push(next);
+        return next.promise;
+      }
+      if (method.endsWith(".set")) return { ...pinned, ok: true, changed: true, sessionRebuild: "none", message: null };
+      return accountList();
+    });
+    const store = new ThreadAccountStore(THREAD, call);
+    store.start();
+    gets[0]?.resolve(getState({ revision: 1 }));
+    await waitFor(() => expect(store.getSnapshot().get?.revision).toBe(1));
+    store.retry(); // a refetch starts before the pick
+    expect(gets).toHaveLength(2);
+    await store.pick({ kind: "named", accountId: "acc_a", accountLabel: "Work A" }, false);
+    expect(store.getSnapshot().get?.revision).toBe(2);
+    gets[1]?.resolve(getState({ revision: 1 })); // the older answer arrives late
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(store.getSnapshot().get?.revision).toBe(2);
+    store.dispose();
+  });
+
+  it("an older get answering after a newer one is dropped (F4)", async () => {
+    const gets: Array<ReturnType<typeof deferred<ThreadAccountGet>>> = [];
+    const call = vi.fn(async (method: string) => {
+      if (!method.endsWith(".get")) return accountList();
+      const next = deferred<ThreadAccountGet>();
+      gets.push(next);
+      return next.promise;
+    });
+    const store = new ThreadAccountStore(THREAD, call);
+    store.start();
+    store.retry();
+    gets[1]?.resolve(getState({ revision: 5 }));
+    await waitFor(() => expect(store.getSnapshot().get?.revision).toBe(5));
+    gets[0]?.resolve(getState({ revision: 4 }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(store.getSnapshot().get?.revision).toBe(5);
+    store.dispose();
+  });
+
+  it("a second pick while one is in flight sends nothing (F4)", async () => {
+    const answer = deferred<unknown>();
+    const call = vi.fn(async (method: string) => {
+      if (method.endsWith(".get")) return getState();
+      if (method.endsWith(".set")) return answer.promise;
+      return accountList();
+    });
+    const store = new ThreadAccountStore(THREAD, call);
+    store.start();
+    await waitFor(() => expect(store.getSnapshot().get).not.toBeNull());
+    const first = store.pick({ kind: "named", accountId: "acc_a", accountLabel: "Work A" }, false);
+    const second = await store.pick({ kind: "named", accountId: "acc_b", accountLabel: "Work B" }, false);
+    expect(second).toBeNull();
+    answer.resolve({ ...getState({ policy: named(), revision: 2 }), ok: true, changed: true, sessionRebuild: "none", message: null });
+    await first;
+    expect(call.mock.calls.filter((args) => args[0] === "thread-account.v1.set")).toHaveLength(1);
+    store.dispose();
   });
 
   it("realtime for this thread refreshes the row", async () => {
