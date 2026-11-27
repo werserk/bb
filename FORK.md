@@ -136,7 +136,7 @@ The fork merged upstream `desktop-v0.50.1` on top of `fork/main` `6597674a8d`, b
 - Head state: upstream moved it to `thread-head-state.ts`; plan `staleSince`, context-clear hiding and `includeService` filtering are ported there and stay exposed through the route, SDK and CLI.
 - Send intake keeps its own receipts; `sent` receipts carry upstream's required `messageSequence`, and receipts stored by older builds are read with it filled from the request or left empty.
 - Dropped for upstream's version: the `resumeThreadsAfterRestart` experiment (now a General setting), the fork's event-loop lineage bound, the Codex exact stale-steer match, hand-kept bb-guide API indexes (now generated), the second compiled app Vitest run, the sidebar update chips (upstream's update button and card), and the provider-codex and provider-pi shared-worker Vitest configs.
-- Upstream's new lint rules (`bb/no-comments`, `bb/forkable-plugin-imports`, `bb/no-raw-resize-observer`, React Compiler `all_errors`) now cover fork code; fork code satisfies them without rule changes, apart from three line-level `react/set-state-in-effect` disables around one-shot plan focus tokens in the app.
+- Upstream's new lint rules (`bb/no-comments`, `bb/forkable-plugin-imports`, `bb/no-raw-resize-observer`, React Compiler `all_errors`) now cover fork code; fork code satisfies them without rule changes, apart from five line-level disables in the app: three `react/set-state-in-effect` around one-shot plan focus tokens and two `bb/no-native-title-with-aria-label` (context banner, question navigator).
 
 ## Upstream sync: desktop-v0.49.0
 
