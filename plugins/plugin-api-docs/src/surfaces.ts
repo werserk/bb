@@ -768,8 +768,14 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         id: "composer-inline-panels",
         title: "Inline composer panels",
         summary:
-          "Preview assistance inside the composer border while keeping the draft editable.",
+          "Add a panel inside the prompt box, above the draft. With this, a plugin can:",
         bullets: [
+          "Preview assistance while the draft stays editable",
+          "Open the panel from its own button in the prompt box, on desktop and phones",
+          "Pause ghost-text suggestions while the panel is open",
+          "Apply its result to the draft only if the draft is unchanged, without sending it",
+        ],
+        reference: [
           "Register experimental_inlinePanels with app.composer.customize; the bundled Composer renders them above the draft on desktop and compact layouts.",
           "Use a toolbar action for opening the panel; keep state scoped to the mounted composer and cancel asynchronous work on disposal.",
           "experimental_suggestions.experimental_suspend clears competing ghost text until its idempotent release function is called. It does not disable automatic suggestions globally.",
@@ -790,8 +796,13 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         id: "composer-suggestions",
         title: "Next-message suggestions",
         summary:
-          "Offer transient text that the user explicitly accepts into a draft.",
+          "Add a next-message suggestion as ghost text in the prompt box. With this, a plugin can:",
         bullets: [
+          "Suggest what to send next once a turn completes",
+          "Let Tab accept it into the draft, and Enter or Send accept and send it",
+          "Drop a pending suggestion as soon as someone types, switches context or dismisses it",
+        ],
+        reference: [
           "useComposer().experimental_suggestions exposes a scoped reactive controller.",
           "Capture its eligible snapshot before generation; show checks composer, completed turn, context and draft revisions.",
           "Tab accepts into the draft. Enter and native Send accept, then use the normal submit path; controller.accept alone never submits.",
@@ -1917,6 +1928,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Write thread titles and commit messages with any model",
           "Transcribe voice input from the microphone button",
           "Appear as a choice in Settings → AI services",
+          "Offer exact text models to other plugins, with service tiers and session affinity",
+        ],
+        reference: [
           "List host/profile-bound text models and invoke one exact model from another plugin",
           "Keep requested model identity separate from the provider-reported snapshot; system messages precede conversation",
           "Reuse the same bounded dispatcher as native helper tasks; unavailable model catalogs are omitted",
@@ -1949,10 +1963,12 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Use bb's own chat, prompt box, and pickers inside plugin pages. With this, a plugin can:",
         bullets: [
           "Embed a thread, a new-thread prompt box, or a textarea with editable voice input",
-          "Open a restrictive artifact popup with imperative experimental_artifact {version:1,readRoot,physicalSource:{hostId,canonicalReadRoot},revalidate,lifetime}; callback and AbortSignal are required in-process custody, never JSON. Core races admission against its 10,000ms deadline before each application-controlled load/Retry; missing lifetime or stale history refuses without a lease. Revalidation receives target/readRoot/relativePath/signal and must retain the original physical source. Primary PDF/image GET shares that attempt; later browser reads/Download may reuse the strict TTL lease despite membership/project-disable/logical rebinding. Ack pins policy and expectedSource; every daemon read enforces it, not continuous DB revocation. Roots are relative for workspace/storage and absolute for host. False retains safe fallback; never retry by dropping scope. Ordinary native/semantic document links share classification without acquiring a lease.",
           "Render Markdown, code, diffs, and file links, and copy text and save files, the way bb does",
           "Open app links with device approval, remember allowed apps, and revoke approvals in Settings",
           "Add or override app icons while matching bb's styling",
+        ],
+        reference: [
+          "Open a restrictive artifact popup with imperative experimental_artifact {version:1,readRoot,physicalSource:{hostId,canonicalReadRoot},revalidate,lifetime}; callback and AbortSignal are required in-process custody, never JSON. Core races admission against its 10,000ms deadline before each application-controlled load/Retry; missing lifetime or stale history refuses without a lease. Revalidation receives target/readRoot/relativePath/signal and must retain the original physical source. Primary PDF/image GET shares that attempt; later browser reads/Download may reuse the strict TTL lease despite membership/project-disable/logical rebinding. Ack pins policy and expectedSource; every daemon read enforces it, not continuous DB revocation. Roots are relative for workspace/storage and absolute for host. False retains safe fallback; never retry by dropping scope. Ordinary native/semantic document links share classification without acquiring a lease.",
         ],
         apiSymbols: [
           "experimental_getApplicationLinkApprovals",

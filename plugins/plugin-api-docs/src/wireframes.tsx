@@ -1970,7 +1970,7 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
         showChip={false}
         className={cn(
           "flex flex-col rounded-xl border border-border bg-background shadow-lift",
-          mobile ? "min-h-48" : "h-36",
+          mobile ? "min-h-64" : "h-52",
         )}
       >
         <div
@@ -1980,6 +1980,18 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
             mobile && "gap-7",
           )}
         >
+          <RegionMark
+            id="composer-inline-panels"
+            label="A plugin panel inside the prompt box, above the draft"
+            className="mx-2 mb-2 flex h-8 items-center gap-2 rounded-md border border-border-hairline bg-surface-raised px-2.5 text-xs"
+            chip="corner-inset"
+          >
+            <span aria-hidden className="flex items-center gap-2">
+              <PluginGlyph className="size-3.5" />
+              <span className="text-foreground">Your panel</span>
+              <span>Preview before applying</span>
+            </span>
+          </RegionMark>
           <div
             className={cn(
               "mx-2 flex items-center rounded-md text-sm leading-none text-foreground",
@@ -2044,6 +2056,19 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
               in checkout.
             </span>
           </div>
+          <RegionMark
+            id="composer-suggestions"
+            label="A plugin's next-message suggestion, as ghost text"
+            className="mx-2 mt-1 flex h-6 w-fit items-center gap-2 px-1 text-sm text-subtle-foreground"
+            chip="side"
+          >
+            <span aria-hidden className="flex items-center gap-2">
+              Then update the changelog
+              <span className="rounded border border-border-hairline px-1 text-xs">
+                Tab
+              </span>
+            </span>
+          </RegionMark>
 
           <div className="mt-auto flex h-10 items-center gap-1">
             <span className="relative">
