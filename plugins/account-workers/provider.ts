@@ -92,6 +92,24 @@ export interface WorkerProviderDeps {
 
 export class WorkspaceProblem extends Error {}
 
+export function bounded<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -176,13 +194,13 @@ export function workerProvider(deps: WorkerProviderDeps) {
     let prepared = false;
     try {
       report.step(step);
-      const refused = await deps.refusedMachineEnv(profile, thread.projectId);
+      const refused = await bounded(signal, deps.refusedMachineEnv(profile, thread.projectId));
       if (refused.length > 0) {
         return { status: "failed", message: `BB machine variables ${refused.join(", ")} are set for this project; they override the scratch ${profile.id} config, so the worker's native tools would stay on. Remove them first.` };
       }
       step = "Resolving the workspace";
       report.step(step);
-      const workspace = await resolveProjectWorkspace(deps, thread.projectId, ctx.inputs.workspaceHostId, worker.id, signal);
+      const workspace = await bounded(signal, resolveProjectWorkspace(deps, thread.projectId, ctx.inputs.workspaceHostId, worker.id, signal));
       if (!sameRoot(ctx.inputs, workspace)) {
         return { status: "failed", message: `Workspace root ${ctx.inputs.root} is no longer this project's source on ${workspace.hostName} (${workspace.root})` };
       }
@@ -190,10 +208,9 @@ export function workerProvider(deps: WorkerProviderDeps) {
       report.step(step);
       const model = deps.store.startModel(thread.id)?.model ?? null;
       prepared = true;
-      const scratch = await deps.host.call(
-        "prepareScratch",
-        { bindingId, profile: profile.id, providerId: thread.providerId, model },
-        { hostId: worker.id, signal },
+      const scratch = await bounded(
+        signal,
+        deps.host.call("prepareScratch", { bindingId, profile: profile.id, providerId: thread.providerId, model }, { hostId: worker.id, signal }),
       );
       if (!scratch.ok) {
         prepared = false;

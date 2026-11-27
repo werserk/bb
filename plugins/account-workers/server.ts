@@ -225,7 +225,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
   const workspaceDeps = {
     host,
     listHosts: (signal?: AbortSignal) => bb.sdk.hosts.list({ signal }),
-    projectSources: async (projectId: string) => (await bb.sdk.projects.get({ projectId })).sources,
+    projectSources: async (projectId: string, signal?: AbortSignal) => (await bb.sdk.projects.get({ projectId, signal })).sources,
   };
   const provider = workerProvider({
     ...workspaceDeps,
@@ -592,6 +592,12 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
           async run(input, ctx) {
             const o = input.options as Record<string, string>;
             const current = bindingOrFail(o.thread!);
+            if (current.owner === "provider") {
+              throw new PluginCliError(
+                `Thread ${o.thread} started from the new-thread picker; use Change workspace in its environment menu, which moves it only to the project's sources`,
+                { code: "provider_binding" },
+              );
+            }
             const w = await resolveWorkspace(o["workspace-machine"]!, o.path!, current.workerHostId, ctx.signal);
             const binding = store.rebind(o.thread!, {
               workspaceHostId: w.hostId,

@@ -70,7 +70,7 @@ export async function releaseScratch(
   signal: AbortSignal = new AbortController().signal,
 ) {
   if (!BINDING_ID.test(input.bindingId)) throw new WorkspaceRefusal(`invalid binding id ${input.bindingId}`);
-  const scratchPath = input.scratchPath ?? path.join(scratchBase(), input.bindingId);
+  const scratchPath = input.scratchPath ?? path.join(await realpath(scratchBase()).catch(() => scratchBase()), input.bindingId);
   if (path.basename(scratchPath) !== input.bindingId) {
     throw new WorkspaceRefusal(`scratch path does not belong to binding ${input.bindingId}`);
   }

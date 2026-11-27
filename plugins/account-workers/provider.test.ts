@@ -70,6 +70,7 @@ function provider(host: Loaded) {
     validate(ctx: unknown): Promise<{ action: string; message?: string }>;
     create(ctx: unknown): Promise<{ status: string; path?: string; message?: string; resource?: unknown }>;
     remove(ctx: unknown): Promise<{ status: string; message?: string }>;
+    availability(ctx: unknown): Promise<{ status: string; message?: string }>;
   };
 }
 
@@ -181,6 +182,66 @@ describe("worker environment provider", () => {
   });
 });
 
+describe("provider review cases", () => {
+  const worker = (status = "connected") => ({ id: WORKER, name: "worker", status });
+
+  it("availability: needs a connected machine and a source on another machine", async () => {
+    const host = await load(rpc());
+    const ask = (status?: string) => provider(host).availability({ project: { id: "p1" }, host: worker(status) });
+    expect(await ask()).toEqual({ status: "available" });
+    expect(await ask("disconnected")).toEqual({ status: "unavailable", message: "worker is disconnected" });
+    host.harness.sdk.stub("projects.get", async () => ({ id: "p1", sources: [{ ...sources[0], hostId: WORKER }] }) as never);
+    expect(await ask()).toEqual({ status: "unavailable", message: "No other machine holds this project's source" });
+    host.harness.sdk.stub("projects.get", async () => ({ id: "p1", sources: [] }) as never);
+    expect((await ask()).status).toBe("unavailable");
+  });
+
+  it("validate refuses when the workspace machine refuses the source path", async () => {
+    const host = await load(rpc({ resolveRoot: () => ({ ok: false, error: "not a directory" }) }));
+    const ctx = { project: { id: "p1" }, host: { id: WORKER }, inputs: INPUTS, projectCheckout: null, gitRemote: null };
+    expect(await provider(host).validate(ctx)).toEqual({ action: "refuse", message: "Workspace path refused: not a directory" });
+  });
+
+  it("a reattempt on another worker fails instead of reusing the binding", async () => {
+    const host = await load(rpc());
+    await provider(host).create(createContext());
+    const other = await provider(host).create(createContext("thr_new", { attempt: 2, host: { id: "host-other", name: "other", status: "connected" } }));
+    expect(other.status).toBe("failed");
+    expect(other.message).toMatch(/already has workspace binding/);
+    expect(calls(host, "prepareScratch")).toHaveLength(1);
+  });
+
+  it("create fails when the chosen root is no longer the project's source, before the worker", async () => {
+    const host = await load(rpc());
+    const result = await provider(host).create(createContext("thr_new", { inputs: { workspaceHostId: WORKSPACE, root: "/elsewhere" } }));
+    expect(result.status).toBe("failed");
+    expect(result.message).toMatch(/no longer this project's source/);
+    expect(calls(host, "prepareScratch")).toHaveLength(0);
+    expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_new" })).toEqual({ workspace: null });
+  });
+
+  it("unarchive never restores a provider binding, even one in the archive undo window", async () => {
+    const host = await load(rpc());
+    await provider(host).create(createContext());
+    host.bb.storage.database()
+      .prepare("UPDATE bindings SET released_at = ?, release_reason = 'archive', release_due = ? WHERE thread_id = 'thr_new'")
+      .run(Date.now(), Date.now() + 60_000);
+    expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_new" })).toEqual({ workspace: null });
+    await host.harness.behavior.emitThreadEvent("thread.unarchived", { thread: makeThreadResponse({ id: "thr_new" }) });
+    expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_new" })).toEqual({ workspace: null });
+  });
+
+  it("the CLI rebind sends a picker thread to Change workspace and leaves it bound where it was", async () => {
+    const host = await load(rpc());
+    await provider(host).create(createContext());
+    const result = await host.harness.behavior.runCli(["rebind", "--thread", "thr_new", "--workspace-machine", "workspace", "--path", "/elsewhere"]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/use Change workspace/);
+    expect(calls(host, "resolveRoot").some((c) => (c.input as { path: string }).path === "/elsewhere")).toBe(false);
+    expect(await host.harness.callRpc("threadWorkspace", { threadId: "thr_new" })).toMatchObject({ workspace: { root: ROOT } });
+  });
+});
+
 describe("worker start hook", () => {
   it("records the start's model on the inline attempt and again on a reattempt, and lets the thread proceed", async () => {
     const host = await load(rpc());
@@ -229,7 +290,7 @@ describe("create deadline", () => {
       log: () => undefined,
       deadlineMs,
     };
-    return { store, hostCalls, provider: workerProvider(deps) };
+    return { store, hostCalls, provider: workerProvider(deps), deps };
   }
 
   it("a worker that hangs past the deadline fails create with the step that hung and cleans up", async () => {
@@ -240,6 +301,33 @@ describe("create deadline", () => {
     expect(result.status === "failed" && result.message).toMatch(/Preparing the claude scratch directory on worker timed out after 0 s/);
     const release = hostCalls.find((c) => c.method === "releaseScratch");
     expect(release?.input).not.toHaveProperty("scratchPath");
+    expect(store.recordByThread("thr_new")).toBeNull();
+  });
+
+  it("bounds steps whose calls ignore the signal: a hung SDK call or worker still fails at the deadline", async () => {
+    const never = () => new Promise<never>(() => undefined);
+    const ok = async () => ({ ok: true, path: SCRATCH });
+    for (const [step, patch, prepare] of [
+      ["Checking machine variables", { refusedMachineEnv: never }, ok],
+      ["Resolving the workspace", { projectSources: never }, ok],
+      ["Preparing the claude scratch directory on worker", {}, never],
+    ] as const) {
+      const { store, hostCalls, deps } = direct(prepare, 50);
+      const result = await workerProvider({ ...deps, ...patch }).create(createContext());
+      expect(result.status === "failed" && result.message).toBe(`account-workers: ${step} timed out after 0 s`);
+      expect(store.recordByThread("thr_new")).toBeNull();
+      expect(hostCalls.some((c) => c.method === "releaseScratch")).toBe(step.startsWith("Preparing"));
+    }
+  });
+
+  it("a create cancelled before it starts fails at once, even on a step that ignores the signal", async () => {
+    const { store, deps } = direct(async () => ({ ok: true, path: SCRATCH }), 60_000);
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    const result = await workerProvider({ ...deps, refusedMachineEnv: () => new Promise<never>(() => undefined) }).create(
+      createContext("thr_new", { signal: controller.signal }),
+    );
+    expect(result.status === "failed" && result.message).toBe("account-workers: Checking machine variables cancelled");
     expect(store.recordByThread("thr_new")).toBeNull();
   });
 

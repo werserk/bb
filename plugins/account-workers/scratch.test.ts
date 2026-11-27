@@ -159,6 +159,36 @@ describe("release", () => {
     }
   });
 
+  it("without a stored path, releases the path prepare handed out, also behind a symlinked state directory", async () => {
+    const seen: string[] = [];
+    const undo = withProfile({
+      id: "probe",
+      providerIds: ["probe-provider"],
+      async prepare() {},
+      async release(ctx) {
+        seen.push(ctx.scratchDir);
+      },
+    });
+    try {
+      const real = path.join(state, "real-state");
+      await mkdir(real);
+      const linked = path.join(state, "linked-state");
+      await symlink(real, linked);
+      vi.stubEnv("XDG_STATE_HOME", linked);
+      const prepared = await prepareScratch({ bindingId: ID, profile: "probe", providerId: "probe-provider", model: null });
+      expect(prepared.path).toBe(path.join(real, "bb-account-workers/scratch", ID));
+      expect(await releaseScratch({ bindingId: ID, profile: "probe" })).toEqual({});
+      expect(seen).toEqual([prepared.path]);
+      expect(await readdir(path.join(real, "bb-account-workers/scratch"))).toEqual([]);
+      seen.length = 0;
+      vi.stubEnv("XDG_STATE_HOME", path.join(state, "never-made"));
+      expect(await releaseScratch({ bindingId: ID, profile: "probe" })).toEqual({});
+      expect(seen).toEqual([path.join(state, "never-made/bb-account-workers/scratch", ID)]);
+    } finally {
+      undo();
+    }
+  });
+
   it("is a no-op for a scratch entry that is already gone", async () => {
     await expect(releaseScratch({ bindingId: ID, profile: "claude", scratchPath: `/gone/${ID}` })).resolves.toEqual({});
   });
