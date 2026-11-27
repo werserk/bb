@@ -39,7 +39,7 @@ function Row({
   connected,
   trailing,
 }: {
-  icon: "Server" | "Laptop";
+  icon: "ComputerCloud" | "Laptop";
   label: string;
   value: string;
   connected: boolean;
@@ -134,7 +134,7 @@ export function RunOnThreadPopover({ view }: { view: RunOnThreadView }) {
           This thread runs on
         </div>
         <Row
-          icon="Server"
+          icon="ComputerCloud"
           label="Agent"
           value={chip.agentName}
           connected={!chip.agentOffline}

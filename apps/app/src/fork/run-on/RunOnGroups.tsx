@@ -57,7 +57,7 @@ export function RunOnTriggerLabel({ chip }: { chip: RunOnChipView }) {
       )}
     >
       <Icon
-        name="Server"
+        name="ComputerCloud"
         className={COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS}
       />
       <span
@@ -129,7 +129,7 @@ function RunOnRow({
             className={COARSE_POINTER_DOT_SIZE_CLASS}
           />
           <Icon
-            name="Server"
+            name="ComputerCloud"
             className={cn(
               "text-muted-foreground",
               COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
