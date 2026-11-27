@@ -10,6 +10,7 @@ import type {
   ExperimentalComposerRunRowItemRegistration,
   ExperimentalRunOnProviderRegistration,
 } from "./run-on-contract.js";
+import type { PluginAppSlots } from "../app-contract.js";
 
 export const RUN_ON_SLOT_VERSION = 1;
 
@@ -96,5 +97,39 @@ export function collectComposerRunRowItem(
     id,
     ...(order !== undefined ? { order } : {}),
     component: requireComponent(kind, registration.component),
+  };
+}
+
+export interface RunOnCollected {
+  runOnProviders: ExperimentalRunOnProviderRegistration[];
+  composerRunRowItems: ExperimentalComposerRunRowItemRegistration[];
+}
+
+export function emptyCollected(): RunOnCollected {
+  return { runOnProviders: [], composerRunRowItems: [] };
+}
+
+export function slots(
+  collected: RunOnCollected,
+  onWarning: (message: string) => void,
+): Pick<
+  PluginAppSlots,
+  "experimental_runOnProvider" | "experimental_composerRunRowItem"
+> {
+  const seenProviders = new Set<string>();
+  const seenItems = new Set<string>();
+  return {
+    experimental_runOnProvider(registration) {
+      const run = collectRunOnProvider(registration, seenProviders, onWarning);
+      if (run !== null) collected.runOnProviders.push(run);
+    },
+    experimental_composerRunRowItem(registration) {
+      const item = collectComposerRunRowItem(
+        registration,
+        seenItems,
+        onWarning,
+      );
+      if (item !== null) collected.composerRunRowItems.push(item);
+    },
   };
 }
