@@ -256,7 +256,7 @@ Default deny: only a machine with a role gets central Claude and Codex pooling.
 
 | Role | Its threads get | Nested bb servers |
 |---|---|---|
-| `server`, `trusted` | the machine's hub token | the hub (parent markers) |
+| `server`, `trusted` | a pass per thread; the machine's hub token for threads older than per-thread policy (until a policy is set) and sends without a thread | the hub (parent markers) |
 | `worker` | a pass per thread; a catalog pass without a thread | nothing |
 | none | nothing: own provider login | nothing |
 
@@ -310,8 +310,31 @@ to another machine revokes it at the first send there. A revoked pass never
 comes back. The catalog pass is per machine: `pass revoke` does not
 touch it; only a role change or a key rotation does. Events missed while the plugin was down are
 caught within 15 minutes. If the key file cannot be read, workers get no
-central routing until it is fixed and the plugin reloaded; hub tokens keep
-working. RPC: `pass.list` (null input), `pass.revoke` (`{threadId}`).
+central routing and threads on `server` and `trusted` machines use the machine
+token until it is fixed and the plugin reloaded; hub tokens keep working. RPC:
+`pass.list` (null input), `pass.revoke` (`{threadId}`).
+
+### Thread account
+
+```bash
+bb pool thread show "$BB_THREAD_ID"
+```
+
+```bash
+bb pool thread set "$BB_THREAD_ID" <account-id|label|auto> [--on-limit fallback-auto|stop]
+```
+
+A named account serves only its provider's model requests of that thread,
+until its real limit (100 %, not the switch threshold). `fallback-auto` then
+stores `auto`; `stop` answers 429 until the reset. A disabled, signed-out or
+blocked named account serves that request via auto and keeps the policy.
+Refusals carry a reason code (`unknown-account`, `other-provider`,
+`at-limit`, `revision-conflict`, …). Codex threads may need
+`--new-session` (idle thread only). A thread older than per-thread policy on a
+`server` or `trusted` machine rebuilds its session once at its next turn after
+its first `set`. `bb pool thread accounts|events|list` show the usable accounts,
+the account events and the threads served in the last 24 h. Full contract:
+`docs/THREAD_ACCOUNT_V1.md` (`thread-account.v1` RPC).
 
 ### Audit log
 

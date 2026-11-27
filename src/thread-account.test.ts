@@ -106,8 +106,8 @@ async function fixture(
           if (found === undefined) throw notFound;
           return found;
         },
-        list: async (input: { threadIds: string[] }) =>
-          input.threadIds.flatMap((id) => {
+        list: async (input?: { threadIds?: readonly string[] }) =>
+          (input?.threadIds ?? []).flatMap((id) => {
             const found = threads.get(id);
             return found === undefined || found.deletedAt !== null ? [] : [found];
           }),

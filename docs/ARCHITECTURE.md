@@ -12,7 +12,10 @@ machine access, account selection, quotas, affinity, refresh, streaming and
 parent delegation. Provider adapters own upstream credentials and wire format;
 upstreams.ts fixes the provider hosts they send to.
 host-roles.ts decides which machines are pooled and how, thread-pass.ts issues
-and checks worker passes, audit-log.ts keeps the append-only audit.
+and checks per-thread passes, audit-log.ts keeps the append-only audit,
+thread-policy.ts stores each thread's account policy and thread-account.ts
+serves it as the public `thread-account.v1` contract and `bb pool thread`
+(docs/THREAD_ACCOUNT_V1.md).
 GET /models selects Claude and maps to upstream /v1/models. GET /v1/models
 selects Codex. Parent forwarding retains the public alias; only the final adapter
 maps it. Queries and upstream errors are preserved. The adapter supplies the
@@ -92,7 +95,7 @@ decisions and Proxied health treat it as unpooled.
 
 | Role | Credential in its threads' env | Nested bb servers |
 |---|---|---|
-| `server`, `trusted` | the machine's hub token | get the hub (parent markers) |
+| `server`, `trusted` | a pass per thread; the hub token for threads that existed at P3's first start (until a policy is set) and for sends without a thread | get the hub (parent markers, the machine's hub token) |
 | `worker` | a pass per thread; a catalog pass without a thread | get nothing (markers empty) |
 | none | nothing (neutral env) | get nothing |
 
@@ -145,9 +148,11 @@ native identity, readiness, worker registry, capacity lease or scheduling.
 
 ## Per-thread passes
 
-`src/thread-pass.ts`. A worker machine's threads get a pass bound to one thread
-and one machine instead of the machine's hub token, so a leaked credential
-reaches one thread and dies with it. A pass is
+`src/thread-pass.ts`. A thread gets a pass bound to one thread and one machine
+instead of the machine's hub token, so a leaked credential reaches one thread
+and dies with it, and the hub knows which thread sent each request (the input
+of the thread account policy). P2 issued passes on `worker` machines only;
+P3 issues them on every role (see Grandfathering). A pass is
 `pt1.<threadId>.<mac>`, where mac = base64url(HMAC-SHA256(key,
 "pt1\0" threadId "\0" hostId "\0" nonce)). A send without a thread (the model
 catalog) gets `pc1.<hostId>.<mac>`, which only lists models: right after
@@ -163,8 +168,9 @@ a malformed pass (wrong part count, id characters or MAC length) is a 401.
   created at the first worker issue and only if it does not exist (exclusive
   create, then a hard link: an existing file always wins); never overwritten.
   Any other read or parse failure is logged once and leaves passes off until a
-  restart (workers get neutral env, every pass is refused); hub tokens are
-  unaffected.
+  restart (workers get neutral env, threads on `server` and `trusted` machines
+  get the machine token, logged once when that starts and once when it ends;
+  every pass is refused); hub tokens are unaffected.
 - Rotation: with no worker turn running, delete the file and reload the plugin;
   every pass dies and the next send issues new ones.
 - Why a row and a nonce: revoking deletes the row; a new row gets a new nonce,
@@ -177,13 +183,14 @@ a malformed pass (wrong part count, id characters or MAC length) is a 401.
 | `thread.unarchived` later | the row goes; the next send issues a new pass |
 | `thread.deleted` (soft delete, no undelete) | revoked at once |
 | `experimental_host.deleted` | every pass of the machine is revoked |
-| role leaves `worker`, or `none` | every pass of the machine is revoked |
+| role leaves `worker`, or `none` | every pass of the machine is revoked (an issue running meanwhile writes nothing) |
 | `bb pool pass revoke <thread>` | revoked; the next send issues a new pass |
 | thread moves to another machine | the next send issues a new pass; the old one dies |
 
 An existing row is marked archived whatever the roles (a later build may have
 issued it on any role). An archive that lands before the thread's first issue
-still writes an archived row while some machine is a worker, so a racing issue
+still writes an archived row while some machine is a worker or the thread may
+hold a pass (created after the pass epoch, or with a policy row), so a racing issue
 cannot leave a live pass behind; a role change while a pass is issued leaves
 no row and no credential (the role is checked again after the awaits); a send to a thread whose
 row is archived asks bb whether an unarchive was missed. Events missed while
@@ -193,12 +200,62 @@ the grace, rows of machines `hosts.get` answers 404 for, and rows of deleted or
 404 threads. An SDK error keeps the row for the next round, so the window for a
 missed event is at most 15 minutes. There is no per-request thread lookup.
 
-Role-agnostic seam: the module knows no roles. `mayHold` decides who is issued
-passes (P2: `worker`), `mayPresent` whose passes are accepted (any role). A
-later build that issues passes on every role (so per-thread policy sees threads
-of `server` and `trusted` machines) only widens `mayHold`, and can roll back to
-this build without failing a turn in flight. A pass presented to a build older
-than this one is a 401.
+Role-agnostic seam: the module knows no roles. `mayHoldThreadPass` decides who
+is issued thread passes (P2: `worker`; P3: any role), `mayHoldCatalogPass` who
+gets the catalog pass (`worker`: other roles keep the machine token for sends
+without a thread), `mayPresent` whose passes are accepted (any role, since P2).
+A host revoke bumps a per-host counter, so an issue that started before it
+writes nothing even though the role check still passes. Rolling back to P2
+keeps passes of `server` and `trusted` threads valid (P2 accepts them) until
+their process env is rebuilt with the machine token. A pass presented to a
+build older than P2 is a 401.
+
+### Grandfathering (P3)
+
+`pool_pass_epoch(id = 1, started_at)` records P3's first start and never
+changes. On `server` and `trusted` machines a thread uses a pass when it has a
+policy row or bb's `createdAt` is at or after that time; otherwise, or when bb
+cannot describe the thread, the env is byte-identical to P2's (machine token).
+Why: a changed credential makes Claude and Codex rebuild the session at the
+next turn, which ends background shells, monitors and subagents; threads
+running when P3 arrives must not pay that. A `set` that stores a policy for
+such a thread says so (`sessionRebuild: "next-turn"`). The creation time is
+cached per thread (10 000 entries).
+
+## Thread account policy (P3)
+
+`src/thread-policy.ts`, `pool_thread_policy(thread_id, mode, provider,
+account_id, on_limit, revision, updated_at)` plus `pool_pass_epoch`, the
+thirteenth migration (index 12). No row is `auto` at revision 0; every write is
+a compare-and-set on the revision. `named` carries the provider, so a named
+Claude account never applies to Codex requests of the same thread.
+
+The hub reads the policy per model request of a thread principal (a pass).
+Named: only that account is tried, inside the normal loop, with the affinity
+binding rebound to it (an inherited binding never overrides the pin) and the
+active account untouched. When it cannot serve:
+
+| State | `fallback-auto` | `stop` |
+|---|---|---|
+| real limit (utilization 1.0, or an upstream quota rejection) | CAS to `auto`, `named-limit limit-fallback-auto` + `policy auto@limit` | 429 + `retry-after`, `named-limit limit-stop` |
+| account deleted | CAS to `auto`, `deleted-fallback-auto` | 429, `deleted-stop` |
+| disabled, error, access blocked, restricted | served by auto, policy kept, one `unavailable-fallback-auto` row per stretch | 429, `unavailable-stop` |
+| transient failure (5xx, short hold) | returned as is | returned as is |
+
+Why the real limit and not the switch threshold (D1): the owner chose that
+account. Why only a limit or a deletion persists `auto` (D2): a disabled or
+blocked account is the owner's own switch or a temporary state. A CAS loser
+re-reads the policy (at most three reads). `named-limit` rows that change
+nothing are deduplicated per thread, revision and detail until the named
+account serves again. The first request served by a newly named account writes
+`switch` instead of `select`; the previous serving account comes from an LRU
+filled from the audit log, so this survives a restart. Policies of deleted
+threads are dropped on `thread.deleted` and by the reconcile; archived threads
+keep theirs.
+
+Rollback to P2: P2's migrator ignores the extra migration, its audit read
+returns the new reasons as they are, and its hub ignores policies (threads go
+back to auto). Rows stay for a later roll forward.
 
 ## Audit log
 
@@ -208,7 +265,8 @@ fixed-vocabulary detail only, never prompt content, model names, headers,
 tokens or passes. Reasons: `select`, `failover`, `limit` (with `quota`,
 `rate-limit`, `auth`, `upstream`), `pass-issued`, `pass-revoked` (with
 `archived`, `deleted`, `restored`, `manual`, `role`, `host-removed`,
-`reconcile`) and `role-change` (`<from>-><to>`). The reason is checked in code,
+`reconcile`), `role-change` (`<from>-><to>`) and, since P3, `switch`,
+`policy` and `named-limit` (details in docs/THREAD_ACCOUNT_V1.md). The reason is checked in code,
 so a new reason needs no table rebuild; reads return unknown reasons and
 details as they are, so `bb pool audit` keeps working after a rollback from a
 build that writes more; a row that breaks the id and time invariants or holds
