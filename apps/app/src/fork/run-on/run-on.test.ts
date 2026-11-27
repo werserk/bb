@@ -227,18 +227,36 @@ describe("single pluginSubmission", () => {
     });
   });
 
-  it("keeps the data through a refused or failed create and clears it only after success", () => {
+  it("stores a snapshot, so a later mutation neither changes nor grows it", () => {
     const store = createRunRowSubmissionStore();
-    store.set("p\0codex", "account-pool", { a: 1 });
-    const refused = mergePluginSubmissions(store.get()?.value ?? null, {
-      pluginId: "other",
-      data: 1,
-    });
-    expect(refused.ok).toBe(false);
-    expect(store.get()?.value.data).toEqual({ a: 1 });
+    const data: { policy: { accountId: string }; pad?: string } = {
+      policy: { accountId: "a1" },
+    };
+    expect(store.set("p\0codex", "account-pool", data)).toBe(true);
+    data.policy.accountId = "a2";
+    data.pad = "x".repeat(RUN_ROW_SUBMISSION_MAX_BYTES * 2);
+    expect(store.get()?.value.data).toEqual({ policy: { accountId: "a1" } });
+  });
 
-    expect(store.get()?.value.data).toEqual({ a: 1 });
-    store.clear();
+  it.each([
+    ["undefined", undefined],
+    ["a function", () => 1],
+    ["a Map", new Map([["a", 1]])],
+    ["NaN", Number.NaN],
+    ["a Date", new Date(0)],
+    ["an undefined field", { a: undefined }],
+    ["a BigInt", { n: BigInt(1) }],
+  ])("refuses %s without throwing", (_label, value) => {
+    const store = createRunRowSubmissionStore();
+    expect(store.set("p\0codex", "account-pool", value as never)).toBe(false);
+    expect(store.get()).toBeNull();
+  });
+
+  it("refuses cyclic data without throwing", () => {
+    const store = createRunRowSubmissionStore();
+    const cyclic: Record<string, unknown> = { a: 1 };
+    cyclic.self = cyclic;
+    expect(store.set("p\0codex", "account-pool", cyclic as never)).toBe(false);
     expect(store.get()).toBeNull();
   });
 });

@@ -2,6 +2,7 @@
 
 import { PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID } from "@bb/client-core";
 import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { ComposerSubmitExtras } from "@get-bb/plugin-sdk/internal/composer-handle";
 import type {
   ExperimentalRunOnChoices,
   ExperimentalRunOnWorkspace,
@@ -17,6 +18,7 @@ import type { PluginRunOnProviderSlot } from "@/lib/plugin-slots";
 import type { RunOnHost } from "./model";
 import type { RunOnThreadWorkspaceState } from "./probes";
 import type { AcceptedRunOnProvider } from "./registrations";
+import { useRunRowSubmission } from "./submission";
 import { useRunOnComposer, type RunOnComposer } from "./useRunOnComposer";
 import { useRunOnOpenThread } from "./useRunOnOpenThread";
 
@@ -29,6 +31,9 @@ const stubs = vi.hoisted(() => ({
   hosts: [] as unknown[],
   environment: undefined as unknown,
   workspace: { status: "loading" } as unknown,
+  rowItemProps: null as {
+    setSubmissionFor?: (pluginId: string, data: JsonValue | null) => boolean;
+  } | null,
 }));
 
 vi.mock("./registrations", () => ({
@@ -42,7 +47,12 @@ vi.mock("./probes", () => ({
     state: slot === null ? { status: "loading" } : stubs.workspace,
   }),
 }));
-vi.mock("./ComposerRunRowItems", () => ({ ComposerRunRowItems: () => null }));
+vi.mock("./ComposerRunRowItems", () => ({
+  ComposerRunRowItems: (props: typeof stubs.rowItemProps) => {
+    stubs.rowItemProps = props;
+    return null;
+  },
+}));
 vi.mock("@/hooks/queries/host-queries", () => ({
   useHosts: () => ({ data: stubs.hosts }),
 }));
@@ -166,6 +176,57 @@ afterEach(() => {
 });
 
 describe("useRunOnComposer", () => {
+  it("keeps the row item data through a failed create and clears it after success", async () => {
+    const projectId = nextProject();
+    const { result } = renderHook(() => useComposerHarness(projectId));
+    render(<>{result.current.runOn.rowItems}</>);
+    act(() => {
+      expect(
+        stubs.rowItemProps?.setSubmissionFor?.("account-pool", {
+          accountId: "a1",
+        }),
+      ).toBe(true);
+    });
+    const send = vi
+      .fn<(extras: ComposerSubmitExtras) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("create failed"))
+      .mockResolvedValue(undefined);
+
+    await act(async () => {
+      await expect(result.current.runOn.submit({}, send)).rejects.toThrow(
+        "create failed",
+      );
+    });
+    await act(async () => {
+      await result.current.runOn.submit({}, send);
+    });
+    await act(async () => {
+      await result.current.runOn.submit({}, send);
+    });
+
+    const held = { pluginId: "account-pool", data: { accountId: "a1" } };
+    expect(send.mock.calls.map(([extras]) => extras.pluginSubmission)).toEqual([
+      held,
+      held,
+      undefined,
+    ]);
+  });
+
+  it("drops a scope's row item data when the scope changes", () => {
+    const { result, rerender } = renderHook(
+      ({ scope }) => useRunRowSubmission(scope),
+      { initialProps: { scope: "p\0codex" } },
+    );
+    act(() => {
+      result.current.setFor("account-pool", { a: 1 });
+    });
+    expect(result.current.current?.data).toEqual({ a: 1 });
+    rerender({ scope: "p\0claude-code" });
+    expect(result.current.current).toBeNull();
+    rerender({ scope: "p\0codex" });
+    expect(result.current.current).toBeNull();
+  });
+
   it("selects the stock provider on the agent host and seeds its inputs", () => {
     const projectId = nextProject();
     const { result } = renderHook(() => useComposerHarness(projectId));
