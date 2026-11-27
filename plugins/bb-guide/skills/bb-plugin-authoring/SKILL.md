@@ -92,6 +92,8 @@ the same change.
   settings, navigation, thread panels, environment and machine provider
   inputs, interactions, sidebar actions, file openers, the provider directory,
   and tab API migration.
+- Read references/fork-run-on-slots.md for the fork-only New Thread "Run on"
+  picker group and composer run-row items.
 - Read references/frontend-renderer-slots.md for source, diff, message,
   timeline, palette, and provider-icon renderers or actions.
 - Read references/frontend-components.md for ThreadChat, provider controls,
