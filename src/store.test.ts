@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -287,5 +288,72 @@ describe("access observation rollback compatibility", () => {
     } finally {
       database.close();
     }
+  });
+});
+
+describe("migration continuity", () => {
+  // sha256 of each statement as the SDK records it in _bb_migrations, pinned from the
+  // build that still shipped native cells. A changed or reordered entry makes the SDK
+  // refuse every existing store, so these never change; new migrations are appended.
+  const RECORDED_MIGRATION_HASHES = [
+    "3720ef4afed7c7d9fae068a2d9dd37a18f33ab8bf90725f5ddd275540fef62b7",
+    "9a9a5485f162d2fa3de976f6b8f3fa2d21aaa64f6bc2e9a721b6535cad281737",
+    "eb21a6258795537792182089b403a6319dc3e92ff06f7d0e5de7e767a3eb3e68",
+    "262c2203c745c0c06c15650cfc67a440afa62f164b8c62c1b366d3c70984f9ad",
+    "e89a01e3cd050b493dccff99945e88446ef05509fe22d8d1f780a3f3844385aa",
+    "7d22a08fed7eab826a721f15cfb6b6a74f5a038b1e3edddea8ab17058688ebc3",
+    "702ba51e1687868c9f86aff2ab0d58c8ec0f61c183890e15a6b379b18ede012d",
+    "da87bb5d61407af0225faf226753e60367f27f109eacb39799cc10984831ba61",
+    // The retired native-cell tables.
+    "8a894f03e76693a36576cd11c3fdf19959510d5ec3f7fadc996c35b37e09399f",
+  ];
+  const sha256 = (statement: string) =>
+    createHash("sha256").update(statement).digest("hex");
+
+  it("keeps every recorded migration byte-identical at its index", () => {
+    expect(
+      QUOTA_MIGRATIONS.slice(0, RECORDED_MIGRATION_HASHES.length).map(sha256),
+    ).toEqual(RECORDED_MIGRATION_HASHES);
+  });
+
+  it("reopens a store recorded by the native-cell build and keeps its rows", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "pool-continuity-"));
+    const host = createFakePluginHost({ pluginId: "continuity", dataDir });
+    const filename = path.join(dataDir, "policy.db");
+    let database = new Database(filename);
+    cleanups.push(async () => {
+      database.close();
+      await host.harness.dispose();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    });
+    // Write _bb_migrations exactly as the previous build left it.
+    database.exec(
+      "CREATE TABLE _bb_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL, statement_hash TEXT)",
+    );
+    const record = database.prepare(
+      "INSERT INTO _bb_migrations (id, applied_at, statement_hash) VALUES (?, 1, ?)",
+    );
+    QUOTA_MIGRATIONS.slice(0, RECORDED_MIGRATION_HASHES.length).forEach(
+      (statement, index) => {
+        database.exec(statement);
+        record.run(index, RECORDED_MIGRATION_HASHES[index]);
+      },
+    );
+    database
+      .prepare(
+        "INSERT INTO native_cell (id, hostId, generation, label, workspace, sshTarget, enabled, qualified) VALUES ('cell-one', 'host-one', 'g1', 'Cell', '/workspace', 'cell.invalid', 0, 0)",
+      )
+      .run();
+    database.close();
+    database = new Database(filename);
+    expect(() =>
+      host.bb.storage.migrate(database, QUOTA_MIGRATIONS),
+    ).not.toThrow();
+    expect(
+      database.prepare("SELECT id, hostId FROM native_cell").all(),
+    ).toEqual([{ id: "cell-one", hostId: "host-one" }]);
+    expect(
+      database.prepare("SELECT count(*) AS count FROM _bb_migrations").get(),
+    ).toEqual({ count: QUOTA_MIGRATIONS.length });
   });
 });

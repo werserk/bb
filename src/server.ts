@@ -1,12 +1,4 @@
 import { handleResponses } from "./responses-nonstream.js";
-import { nativeHostContract } from "./native-host-contract.js";
-import { createNativeClients } from "./native-adapter.js";
-import {
-  NativePool,
-  NativePoolStore,
-  type NativeClients,
-} from "./native-pool.js";
-import { registerNativeSurface } from "./native-surface.js";
 import {
   HostExclusions,
   HostExcludedError,
@@ -79,8 +71,6 @@ const FORMER_UPSTREAM_DEFAULTS: Readonly<Record<string, string>> = {
 };
 
 export interface AccountPoolPluginOptions {
-  nativeClients?: NativeClients;
-  nativePolicy?: { enabled: boolean; qualified: boolean };
   fetch?: typeof fetch;
   now?: () => number;
   env?: NodeJS.ProcessEnv;
@@ -180,32 +170,6 @@ export function createAccountPoolPlugin(
     const now = options.now ?? Date.now;
     const db = bb.storage.database();
     bb.storage.migrate(db, QUOTA_MIGRATIONS);
-    const nativePool = new NativePool(
-      new NativePoolStore(db),
-      options.nativeClients ?? createNativeClients(bb),
-      options.nativePolicy,
-    );
-    bb.experimental_hooks.on("message.dispatch", async (context) => {
-      if (!context.host) return { action: "proceed" };
-      await nativePool.resume(context.thread.id, context.host.id);
-      const decision = nativePool.dispatch(context.thread.id, context.host.id);
-      return decision.allow
-        ? { action: "proceed" }
-        : { action: "wait", reason: decision.reason };
-    });
-    registerNativeSurface(bb, nativePool);
-    const workerEvents = bb.hosts.experimental_client({
-      contract: nativeHostContract,
-    });
-    bb.onDispose(
-      workerEvents.experimental_onWorkerExit((event) =>
-        nativePool.workerLost(event.hostId),
-      ),
-    );
-    await nativePool.reconcile();
-    bb.events.on("thread.idle", async () => {
-      await nativePool.capacityChanged();
-    });
     const hostExclusions = new HostExclusions(
       db,
       () => bb.sdk.hosts.list(),
@@ -403,7 +367,6 @@ export function createAccountPoolPlugin(
       config,
       projectPriority,
       hostExclusions,
-      nativePool,
     );
     const canServe = async (provider: PoolProvider): Promise<boolean> => {
       if (!(await operations.isRoutingEnabled(provider))) return false;

@@ -102,36 +102,23 @@ is not preserved isolation; enrolled native machines need independent launcher
 or network confinement before rollback. This feature establishes no native
 identity, readiness, worker registry, capacity lease or scheduling guarantee.
 
-## Personal native pool (disabled candidate)
+## Retired native cells
 
-`native-pool.ts` owns the cell registry, immutable bindings, durable submission
-custody and resident slots. Migration nine is appended to QUOTA_MIGRATIONS in
-the existing SQLite database. No lease expiry frees capacity. `native-adapter.ts`
-composes typed SDK spawn/send/queue/idle-release with authenticated host status;
-`native-surface.ts` shares controller operations between RPC and `pool native`
-CLI. `native-workers.tsx` renders the settings section.
+The native-cell controller (cell registry, immutable bindings, resident slots,
+the `message.dispatch` hold and `pool native`) was removed on 2026-11-27 by the
+owner's decision. Why: a cell kept its own provider login next to the pooled
+account, so two processes could refresh the same OAuth grant and invalidate each
+other. The hub is now the only refresh owner for every pooled account; a machine
+that must use its own login is excluded under Machine routing instead.
 
-`native-host.ts` probes a fixed lock inode, validates the participating launcher
-receipt against kernel FLOCK PID/device/inode, process start identity and boot
-identity. `worker/native-launcher.py` is an explicit deployment input, not
-installed by the plugin build. Status performs no provider CLI or quota probe.
-Missing configuration and unverifiable holders retain unknown holds. Ordinary
-owner SSH remains unrestricted. Runtime workspace and SSH target are separate.
+Migration nine (`NATIVE_POOL_MIGRATION` in `store.ts`) stays byte-identical at
+its index. The SDK checks every applied migration by index and statement hash,
+so editing or dropping it would make existing stores refuse to open, and keeping
+its tables lets the previous build open the same store on rollback. Nothing
+reads those tables now. `store.test.ts` pins the recorded hashes; new
+migrations are appended after it.
 
-The source adapter depends on a locally packed candidate Plugin SDK; see
-`NATIVE_POOL.md` for provenance and qualification boundaries. Default server
-policy and new cells are disabled/unqualified. No production settings or
-installation are changed by this source candidate. This separates process and
-custody proof from later live qualification and account enrollment.
-
-Capacity-change handling rechecks BB's plugin-held continuation queue before
-pumping new intents. Released bindings can thereby reacquire their original cell
-when its resident becomes idle. Reservation and pumping share eligibleCells;
-disabled, unqualified or centrally included free cells never hide an eligible
-idle resident. No timer or second runnable continuation queue is introduced.
-
-Explicit Stop issues owned-row cleanup and thread interruption independently:
-a consumed queue row or failed cleanup cannot suppress interruption. Both
-outcomes remain visible in the cancelling intent; neither acknowledgement frees
-capacity. Cancellation during exact create recovery also interrupts the late
-bound thread without transferring its initial input.
+The Plugin SDK dependency is still the locally packed
+`vendor/bb-plugin-sdk-native-pool.tgz` (version `0.6.132+werserk.artifacts.3`,
+SHA256 `7581557bb54002e7a3ae2d0a68ac5545185dd0d546692900d0836fe80087a4d0`),
+kept unchanged with the lockfile; replacing it is separate work.

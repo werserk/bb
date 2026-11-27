@@ -36,6 +36,7 @@ import {
   AccountStore,
   HubTokenStore,
   PoolAffinityStore,
+  QUOTA_MIGRATIONS,
   QuotaStore,
 } from "./store.js";
 import {
@@ -9182,6 +9183,46 @@ describe("machine-wide exclusion", () => {
       expect(upstream).not.toHaveBeenCalled();
     },
   );
+
+  it("serves a former native-cell host like any other host and keeps its exclusion", async () => {
+    const fixture = await createFixture({
+      upstreamUrl: "https://unused.invalid",
+      beforePlugin(host) {
+        // Rows the native-cell build left: an enabled, qualified cell on host-one.
+        const db = host.bb.storage.database();
+        host.bb.storage.migrate(db, QUOTA_MIGRATIONS);
+        db.prepare(
+          "UPDATE native_policy SET enabled = 1, qualified = 1 WHERE id = 1",
+        ).run();
+        db.prepare(
+          "INSERT INTO native_cell (id, hostId, generation, label, workspace, sshTarget, enabled, qualified) VALUES ('cell-one', 'host-one', 'g1', 'Cell', '/workspace', 'cell.invalid', 1, 1)",
+        ).run();
+      },
+    });
+    const { hooks } = fixture.host.harness.inspection.registrations;
+    expect(hooks["message.dispatch"]).toBeNull();
+    expect(await resolveToken(fixture.host, "host-one", "thread-one")).not.toBe(
+      "",
+    );
+    await fixture.host.harness.behavior.callRpc("hostExclusion.set", {
+      hostId: "host-one",
+      excluded: true,
+    });
+    for (const provider of ["claude-code", "codex"]) {
+      const entries = await fixture.host.harness.behavior.resolveProviderEnv(
+        provider,
+        { threadId: "thread-one", projectId: "project-one", hostId: "host-one" },
+      );
+      for (const name of ["ANTHROPIC_AUTH_TOKEN", "CODEX_POOL_AUTH_TOKEN"])
+        expect(entries.find((e) => e.name === name)?.value).toBe("");
+    }
+    expect(
+      fixture.host.bb.storage
+        .database()
+        .prepare("SELECT hostId FROM native_cell")
+        .all(),
+    ).toEqual([{ hostId: "host-one" }]);
+  });
 });
 
 it("rechecks policy while retry request events are resolving", async () => {
