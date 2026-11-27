@@ -5,6 +5,7 @@ import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { JsonValue } from "@get-bb/plugin-sdk/app";
 import { dispatchAccountSchema } from "../../src/dispatch-account.js";
 import { DRAFT_REFUSED_NOTE, DRAFT_TITLE } from "./draft.js";
+import { CODEX_PICKER_NOTE } from "./pick.js";
 import { getState, ID_A, named, summaries, THREAD } from "./fixtures.js";
 import { RUN_ROW_ITEM_ID, RUN_ROW_ITEM_ORDER, ThreadAccountRunRowItem } from "./RunRowItem.js";
 import { registerRunRowItem, type ExperimentalComposerRunRowItemProps } from "./run-row-slot.js";
@@ -130,6 +131,8 @@ describe("new thread (5.3)", () => {
     await openMenu(slot, /^Account: Auto$/u);
     expect(await slot.findByRole("menuitemradio", { name: /Codex X/u })).toBeTruthy();
     expect(slot.queryByRole("menuitemradio", { name: /Work A/u })).toBeNull();
+    // A new thread has no session yet, so the open thread's Codex session note does not apply.
+    expect(slot.queryByText(CODEX_PICKER_NOTE)).toBeNull();
   });
 
   it("is hidden for a provider the pool does not route, or with no provider", async () => {

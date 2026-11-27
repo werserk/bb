@@ -39,6 +39,13 @@ describe("draftAccountList", () => {
     expect(byId.get(ID_C)).toMatchObject({ usable: false, reason: "at-limit", resetAt: T0 + 3600_000 });
   });
 
+  it("ignores a model family's window: the first dispatch has no model yet", () => {
+    const spent = { utilization: 1, resetAt: T0 + 86_400_000, status: null, observedAt: T0 - 60_000, source: "usage" as const };
+    const familyWeekly = { fable: spent, sonnet: spent, opus: spent, haiku: spent, other: spent };
+    const [entry] = draftAccountList("claude", [summary({ id: ID_A, label: "Work A", familyWeekly })], T0).accounts;
+    expect(entry).toMatchObject({ usable: true, reason: null, resetAt: null });
+  });
+
   it("marks a disabled account unavailable", () => {
     const [entry] = draftAccountList("claude", [summary({ id: ID_A, label: "Work A", enabled: false })], T0).accounts;
     expect(entry).toMatchObject({ usable: false, reason: "unavailable" });
