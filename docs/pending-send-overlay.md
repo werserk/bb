@@ -126,11 +126,11 @@ caches: a receipt after the reset settles only the entry that stayed.
 A transient `profile-pending` status, a failed status read or a reconnect only
 suspends journal saves and restoration (identity unknown); it never clears custody.
 A status read that fails at startup, before the account plugin is up, stays
-unknown until a reconnect, an account signal or Refresh. A send whose input a
-draft cannot carry (`promptInputFitsDraft`: agent-only chunks, URL images) is never
-handed back; it stays visible with its own Resend/Retry/Copy, so plugin context is
-neither dropped nor put into the owner's draft. The text is then covered
-by the no-journal draft rule below.
+unknown until a reconnect, an account signal or Refresh. The text is then covered
+by the no-journal draft rule below. A send whose input a draft cannot carry
+(`promptInputFitsDraft`: agent-only chunks, URL images) is never handed back; it
+stays visible with its own Resend/Retry/Copy, so plugin context is neither dropped
+nor put into the owner's draft.
 The journal key includes that identity, origin, primary host and data root. There
 is no separate core logout UI; the account plugin owns that action. Unit integration
 covers the actual signal/RPC boundary; live account-switch proof remains separate.
