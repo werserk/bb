@@ -5,8 +5,13 @@ import {
   listStoredEventRowsContaining,
   type DbQueryConnection,
 } from "@bb/db";
-import { turnRequestEventDataSchema } from "@bb/domain";
+import {
+  clientSubmissionIdTime,
+  turnRequestEventDataSchema,
+} from "@bb/domain";
 import { ApiError } from "../../errors.js";
+
+export const SUBMISSION_CLOCK_SKEW_MS = 60 * 60 * 1000;
 
 export function assertSubmissionNotAdmitted(
   db: DbQueryConnection,
@@ -49,12 +54,16 @@ export function findRequestedSubmission(
   afterSequence?: number,
 ) {
   const literal = /^[0-9A-Za-z-]+$/u.test(id);
+  const issuedAt = clientSubmissionIdTime(id);
   const rows = literal
     ? listStoredEventRowsContaining(db, {
         threadId,
         type: "client/turn/requested",
         window: 1000,
         needles: [id],
+        ...(issuedAt === undefined
+          ? {}
+          : { sinceCreatedAt: issuedAt - SUBMISSION_CLOCK_SKEW_MS }),
         ...(afterSequence === undefined ? {} : { afterSequence }),
       })
     : listStoredEventRows(db, {

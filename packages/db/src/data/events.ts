@@ -1661,9 +1661,43 @@ export function listStoredEventRowMetadata(
 export interface ListStoredEventRowsContainingArgs {
   afterSequence?: number;
   needles: readonly string[];
+  sinceCreatedAt?: number;
   threadId: string;
   type: ThreadEventType;
   window: number;
+}
+
+function firstEventCreatedSince(
+  db: DbQueryConnection,
+  indexed: SQL,
+  scope: SQL | undefined,
+  oldest: number,
+  createdAt: number,
+): number {
+  const first = (from: number) =>
+    db
+      .select({
+        sequence: sql<number>`${events.sequence}`,
+        createdAt: sql<number>`${events.createdAt}`,
+      })
+      .from(indexed)
+      .where(and(scope, gte(events.sequence, from)))
+      .orderBy(events.sequence)
+      .limit(1)
+      .get();
+  const boundary = first(oldest);
+  if (!boundary || boundary.createdAt <= createdAt) return oldest;
+  let found = boundary.sequence;
+  let low = first(Number.MIN_SAFE_INTEGER)?.sequence ?? found;
+  let high = found;
+  while (low < high) {
+    const middle = Math.floor(low / 2 + high / 2);
+    const row = first(middle);
+    if (!row || row.sequence >= high) high = middle;
+    else if (row.createdAt < createdAt) low = row.sequence + 1;
+    else high = found = row.sequence;
+  }
+  return found;
 }
 
 export function listStoredEventRowsContaining(
@@ -1687,13 +1721,17 @@ export function listStoredEventRowsContaining(
     .limit(1)
     .offset(args.window - 1)
     .get()?.sequence;
+  const lowest =
+    oldest === undefined || args.sinceCreatedAt === undefined
+      ? oldest
+      : firstEventCreatedSince(db, indexed, scope, oldest, args.sinceCreatedAt);
   return db
     .select(storedEventRowSqlFields(null))
     .from(indexed)
     .where(
       and(
         scope,
-        oldest === undefined ? undefined : gte(events.sequence, oldest),
+        lowest === undefined ? undefined : gte(events.sequence, lowest),
         or(
           ...args.needles.map(
             (needle) => sql`instr(${events.data}, ${needle}) > 0`,

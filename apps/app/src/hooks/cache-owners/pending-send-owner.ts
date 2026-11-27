@@ -2,6 +2,7 @@ import {
   PendingSendOverlay,
   PendingSendJournal,
   parsePromptDraftStorage,
+  promptInputFitsDraft,
   promptInputToDraft,
   serializePromptDraftStorage,
   type PendingSend,
@@ -26,6 +27,7 @@ import {
   type ThreadTimelineResponse,
 } from "@bb/server-contract";
 import type { ThreadQueuedMessage } from "@bb/domain";
+import { createClientSubmissionId } from "@bb/domain";
 import {
   syncThreadTimelineSubscriptionTag,
   COMPACT_THREAD_TIMELINE_SEGMENT_LIMIT,
@@ -189,6 +191,10 @@ function handBackUnacknowledged(
       )
     )
       continue;
+    if (entry.request && !promptInputFitsDraft(entry.request.input)) {
+      kept.push(entry);
+      continue;
+    }
     const projectId = getThreadEntity(client, entry.threadId)?.thread.projectId;
     const draft = entry.request
       ? promptInputToDraft(entry.request.input)
@@ -642,7 +648,7 @@ export function pendingSendDraftId(
       if (parsed.success) binding = parsed.data;
     }
   } catch {}
-  return binding?.draft === draftHash(draft) ? binding.id : crypto.randomUUID();
+  return binding?.draft === draftHash(draft) ? binding.id : createClientSubmissionId();
 }
 export function newPendingSend(
   entry: Omit<PendingSend, "sequence" | "state">,

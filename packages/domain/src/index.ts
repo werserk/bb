@@ -93,6 +93,8 @@ export * from "./question-resolution-notice.js";
 
 export {
   clientSubmissionIdSchema,
+  clientSubmissionIdTime,
   clientSubmissionQueueId,
+  createClientSubmissionId,
 } from "./client-submission.js";
 export * from "./pre-completion.js";

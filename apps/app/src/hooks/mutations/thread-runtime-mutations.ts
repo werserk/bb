@@ -7,7 +7,10 @@ import {
   refreshPendingSends,
 } from "../cache-owners/pending-send-owner";
 import { z } from "zod";
-import { clientTurnRequestIdSchema } from "@bb/domain";
+import {
+  clientTurnRequestIdSchema,
+  createClientSubmissionId,
+} from "@bb/domain";
 import { notifyComposerSubmitted } from "@/lib/composer-submissions";
 import {
   mutationOptions,
@@ -193,7 +196,7 @@ export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
       return dispatchPendingSend(
         queryClient,
         id,
-        request.clientSubmissionId ?? crypto.randomUUID(),
+        request.clientSubmissionId ?? createClientSubmissionId(),
         request,
         [],
         async () => {

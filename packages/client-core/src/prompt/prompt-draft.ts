@@ -294,6 +294,16 @@ export function promptDraftToInput(draft: PromptDraftState): PromptInput[] {
   return input;
 }
 
+export function promptInputFitsDraft(input: readonly PromptInput[]): boolean {
+  return input.every(
+    (chunk) =>
+      chunk.visibility !== "agent-only" &&
+      (chunk.type === "text" ||
+        chunk.type === "localImage" ||
+        chunk.type === "localFile"),
+  );
+}
+
 export function promptInputToDraft(
   input: readonly PromptInput[],
 ): PromptDraftState {

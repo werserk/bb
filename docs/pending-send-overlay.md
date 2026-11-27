@@ -14,9 +14,21 @@ copy-on-write. A weak projection memo is cleared on custody changes, so acknowle
 or hidden owner payloads are not retained by a second content cache. Presentation
 context remains stable until owner state or the rendered thread changes.
 
-Each owner action has an optional UUID `clientSubmissionId`. Public ingress
-coalesces concurrent identical requests, rejects conflicts, searches the latest
-1000 requested events and the derived queue key, and rechecks before insertion.
+Each owner action has an optional UUID `clientSubmissionId`; the app mints UUIDv7
+(`createClientSubmissionId` in `@bb/domain`), whose first 48 bits are its creation
+time. Public ingress coalesces concurrent identical requests, rejects conflicts,
+searches the latest 1000 requested events and the derived queue key, and rechecks
+before insertion. For a v7 id the search also reaches back to the id's creation
+time minus `SUBMISSION_CLOCK_SKEW_MS` (one hour), found by a binary search over
+`events_thread_type_sequence_idx` (about 20 point reads; only needed when the
+1000-row window starts later than that time). An id is always minted before its
+first admission, so a Resend of an old id finds the original however many requests
+followed; a fresh send scans the same window as before (bench: 10k rows of 4 KiB,
+fresh v4 6.2 ms and fresh v7 6.1 ms p50, a Resend 9.5k rows back 55 ms p50).
+Requested events are not pruned (`PRUNABLE_THREAD_EVENT_TYPES`); only a thread
+rewind (the request is erased with its suffix) or a thread purge removes them.
+v4 ids (CLI `--client-submission-id`, plugins, journals written by older builds)
+and a client clock more than an hour ahead keep the 1000-row window.
 The immediate transaction recheck uses the sequence captured before the initial
 check, plus the queue key. Only events newer than that fence can race preparation.
 The search runs `instr(data, id)` inside SQLite over that 1000-row window (chosen
@@ -26,8 +38,12 @@ hand-written with `\u` escapes for those characters is outside the check. The
 send receipt and the send-now receipt look only at rows appended since the
 submission's checks began, so a send scans the full window once.
 Internal queue/retry dispatch legitimately preserves admitted membership and
-bypasses public submission deduplication. This is bounded replay protection,
-not global exactly-once execution after pruning or the retention window.
+bypasses public submission deduplication. This is replay protection for the
+thread's stored requests, not global exactly-once execution across rewinds.
+
+The send-now receipt (`sendQueuedMessageResponseSchema`) declares the optional
+`submissionIds`, `sourceQueuedMessageIds` and, when sent, `requested` that the
+server returns; the overlay's `receipt()` settles custody from them.
 
 Ordinary identified queue IDs are server-derived `qsub_<UUID>`. No schema,
 migration, daemon field, dependency or index is added. Requested event JSON carries
@@ -110,7 +126,10 @@ caches: a receipt after the reset settles only the entry that stayed.
 A transient `profile-pending` status, a failed status read or a reconnect only
 suspends journal saves and restoration (identity unknown); it never clears custody.
 A status read that fails at startup, before the account plugin is up, stays
-unknown until a reconnect, an account signal or Refresh. The text is then covered
+unknown until a reconnect, an account signal or Refresh. A send whose input a
+draft cannot carry (`promptInputFitsDraft`: agent-only chunks, URL images) is never
+handed back; it stays visible with its own Resend/Retry/Copy, so plugin context is
+neither dropped nor put into the owner's draft. The text is then covered
 by the no-journal draft rule below.
 The journal key includes that identity, origin, primary host and data root. There
 is no separate core logout UI; the account plugin owns that action. Unit integration
@@ -172,22 +191,21 @@ The plugin-owned fork patch ledger was updated in plugin commit
 
 ## S3 whole-change review rework (`port/s3-rework-049`)
 
-| Review item                   | Disposition                                                                                                      | Remaining risk                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| 1a scope/identity reset       | Unacknowledged direct sends go back to an empty draft, bound to their id; an entry with an occupied draft stays  | A handed-back send that later succeeds still leaves its text in the draft (a resend is deduped) |
-| 1b in-flight scope change     | Real `onError` path: definite 4xx → rejected + restore; network error → unconfirmed + bound restore              | None identified                                                                                 |
-| 1c no own journal             | Unconfirmed text goes back to the draft, bound to the same id                                                    | Bound id is per tab (session storage)                                                           |
-| 2 SQL prefilter / second scan | `instr` in SQLite over the 1000-row window; receipts bounded to the send                                         | Hand-escaped ids are not matched; Resend outside the window can duplicate                       |
-| 3 fresh journal overwrite     | Predecessor entries kept as `inherited`, adopted when their lock is free                                         | Shown only after an acquire finds the lock free (e.g. next reload)                              |
-| 4 rollback deferred steer     | `clientSubmissions` no longer part of `immutableOwnerInput` (0.49 fields)                                        | None identified                                                                                 |
-| 5 tests                       | Added for each item above, plus a stay-queued receipt with the row absent from the queue cache                   | Live browser/Web Locks/duplicate-tab proof: lab controller                                      |
-| Delta 1 deduped bound resend  | Composer: an admitted or accepted submission is a success (no toast, no restore), both submit actions            | None identified                                                                                 |
-| Delta 3 inherited quota       | Quota fallback also drops resend payloads from inherited entries                                                 | Inherited journals are bounded by count (8), not bytes                                          |
-| Delta 2, 4                    | Recorded follow-ups (draft left after a later success; cross-tab new id; handback keeps agent-only, drops image) | See `PORT-NOTES-rework.md`                                                                      |
+| Review item                   | Disposition                                                                                                                    | Remaining risk                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 1a scope/identity reset       | Unacknowledged direct sends go back to an empty draft, bound to their id; an entry with an occupied draft stays                | A handed-back send that later succeeds still leaves its text in the draft (a resend is deduped) |
+| 1b in-flight scope change     | Real `onError` path: definite 4xx → rejected + restore; network error → unconfirmed + bound restore                            | None identified                                                                                 |
+| 1c no own journal             | Unconfirmed text goes back to the draft, bound to the same id                                                                  | Bound id is per tab (session storage)                                                           |
+| 2 SQL prefilter / second scan | `instr` in SQLite over the 1000-row window; receipts bounded to the send                                                       | Hand-escaped ids are not matched; Resend outside the window: closed for v7 ids (tails slice B)  |
+| 3 fresh journal overwrite     | Predecessor entries kept as `inherited`, adopted when their lock is free                                                       | Shown only after an acquire finds the lock free (e.g. next reload)                              |
+| 4 rollback deferred steer     | `clientSubmissions` no longer part of `immutableOwnerInput` (0.49 fields)                                                      | None identified                                                                                 |
+| 5 tests                       | Added for each item above, plus a stay-queued receipt with the row absent from the queue cache                                 | Live browser/Web Locks/duplicate-tab proof: lab controller                                      |
+| Delta 1 deduped bound resend  | Composer: an admitted or accepted submission is a success (no toast, no restore), both submit actions                          | None identified                                                                                 |
+| Delta 3 inherited quota       | Quota fallback also drops resend payloads from inherited entries                                                               | Inherited journals are bounded by count (8), not bytes                                          |
+| Delta 2, 4                    | Recorded follow-ups (draft left after a later success; cross-tab new id); handback of undraftable input fixed in tails slice B | See `PORT-NOTES-rework.md`                                                                      |
 
 No release readiness is inferred from unit/typecheck/build evidence. Stored-format,
 Chrome/Electron Web Locks and packaged native/embedded proof remain separate gates.
-
 
 ## Authorised intake amendment (unreleased)
 
