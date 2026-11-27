@@ -94,8 +94,10 @@ export interface ExperimentalComposerRunRowItemProps {
   submission?: JsonValue | null;
   /**
    * New thread only. This plugin's data for the send's single
-   * `pluginSubmission`; null clears it. Returns false when it is refused
-   * (another plugin holds it, or the JSON is over 16 KB). Core drops it after
+   * `pluginSubmission`; null clears it. Core stores a JSON copy, so later
+   * mutation of `data` has no effect. Returns false when it is refused
+   * (another plugin holds it, the value does not survive a JSON round trip,
+   * or the JSON is over 16 KB). Core drops it after
    * a successful create (a refused or failed create keeps it with the draft)
    * and on a project or agent provider change. A plain function: safe to call
    * detached.

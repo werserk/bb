@@ -5268,7 +5268,7 @@ choices; core accepts it only when the provider list entry for that id is
 owned by the registering plugin, one per provider. A row item may hold the
 send's single `pluginSubmission` (16 KB, one plugin per send). Both carry
 `version: 1`; other versions are skipped with a warning. Docs:
-`frontend-core-slots.md`, design in `openspec/changes/core-run-on-picker`.
+`fork-run-on-slots.md`, design in `openspec/changes/core-run-on-picker`.
 
 Audit before stabilizing: the owner check against composed providers, the
 single-submission rule against `useComposer().submit({ experimental_data })`,
