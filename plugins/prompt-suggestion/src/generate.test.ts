@@ -76,7 +76,6 @@ describe("native generation boundary", () => {
           experimental_sessionAffinity: null,
         }),
       ]);
-      // While the primary cools down, the fallback is asked directly.
       await generate(
         host.bb.experimental_aiServices,
         { ...config, model, fallbackModel: backup },

@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 import { EditorContent, type Editor } from "@tiptap/react";
 import { COARSE_POINTER_TEXT_BASE_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import { cn } from "@/lib/utils";
+import { observeSharedResize } from "@/lib/shared-resize-observer";
 import {
   PromptMentionLinkContext,
   type PromptMentionLinkResolver,
@@ -44,26 +45,23 @@ export function ComposerEditorSlot({
   useLayoutEffect(() => {
     const scroll = scrollContainerRef.current;
     if (!scroll || !editor) return;
-    const measure = () => {
+    const readMoreLines = () => {
       const line =
         Number.parseFloat(getComputedStyle(editor.view.dom).lineHeight) || 24;
-      setMoreLines(
-        Math.max(
-          0,
-          Math.ceil((scroll.scrollHeight - scroll.clientHeight) / line),
-        ),
+      return Math.max(
+        0,
+        Math.ceil((scroll.scrollHeight - scroll.clientHeight) / line),
       );
     };
+    const measure = () => setMoreLines(readMoreLines());
     measure();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(measure);
-    observer?.observe(scroll);
-    observer?.observe(editor.view.dom);
+    const unobserve = observeSharedResize([scroll, editor.view.dom], {
+      read: readMoreLines,
+      write: setMoreLines,
+    });
     editor.on("update", measure);
     return () => {
-      observer?.disconnect();
+      unobserve();
       editor.off("update", measure);
     };
   }, [editor, expanded, isCompactLayout, scrollContainerRef]);
@@ -109,9 +107,7 @@ export function ComposerEditorSlot({
               "[&_.ProseMirror_blockquote]:my-1 [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-surface-selected-border [&_.ProseMirror_blockquote]:pl-3 [&_.ProseMirror_blockquote]:text-muted-foreground",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none",
               suggestionVisible
-                ? // A suggestion shows at most two lines; Tab still accepts the full text.
-                  // The hidden ::after reserves its height and overlaps the caret line.
-                  "[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child::before]:absolute [&_.ProseMirror_p.is-editor-empty:first-child::before]:inset-x-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:top-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::before]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:[margin-top:-1lh] [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]"
+                ? "[&_.ProseMirror_p.is-editor-empty:first-child]:relative [&_.ProseMirror_p.is-editor-empty:first-child::before]:absolute [&_.ProseMirror_p.is-editor-empty:first-child::before]:inset-x-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:top-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::before]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:line-clamp-2 [&_.ProseMirror_p.is-editor-empty:first-child::after]:[margin-top:-1lh] [&_.ProseMirror_p.is-editor-empty:first-child::after]:invisible [&_.ProseMirror_p.is-editor-empty:first-child::after]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::after]:break-words [&_.ProseMirror_p.is-editor-empty:first-child::after]:[content:attr(data-placeholder)]"
                 : "[&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:text-subtle-foreground",
               "[&_.ProseMirror_p.is-editor-empty:first-child::before]:font-light",

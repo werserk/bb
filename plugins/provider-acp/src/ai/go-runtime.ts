@@ -5,10 +5,8 @@ import { z } from "zod";
 import { openCodeGoGenerationSchema, type OpenCodeGoGenerationRequest, type OpenRouterModel } from "./contract.js";
 import { completionResult, readJson } from "./runtime.js";
 
-// OpenCode Go: the subscription behind the OpenCode Console sign-in, OpenAI chat completions shape.
 const BASE_URL = "https://opencode.ai/inference/go/v1";
 const CATALOG_TTL_MS = 60000;
-// Cloudflare in front of the endpoint rejects requests without a client user agent.
 const USER_AGENT = "bb-provider-acp (opencode-go)";
 const credentialSchema = z.array(z.object({ integrationID: z.string(), active: z.boolean(), value: z.unknown() }));
 const oauthSchema = z.object({ type: z.literal("oauth"), access: z.string().trim().min(1), expires: z.number() });
@@ -118,7 +116,6 @@ export function createOpenCodeGoRuntime(dependencies: {
         headers: {
           ...headers(token),
           "Content-Type": "application/json",
-          // Go routes by session; a request without one is rejected.
           "x-opencode-session": parsed.data.experimental_sessionAffinity ?? randomUUID(),
         },
         body: JSON.stringify(body),

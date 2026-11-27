@@ -22,7 +22,6 @@ export const resultSchema = z.discriminatedUnion("kind", [
 export type GenerationResult = z.infer<typeof resultSchema>;
 export type GeneratorConfig = {
   model: string;
-  /** Tried once, with provider defaults, when the model's request fails. */
   fallbackModel?: string;
   instructions: string;
   timeoutMs: number;
@@ -45,8 +44,6 @@ export class IncompleteGenerationError extends Error {
   }
 }
 
-// A failing primary (an exhausted quota answers slowly) is skipped for a while
-// so the fallback gets the whole deadline instead of what the primary left.
 const PRIMARY_COOLDOWN_MS = 5 * 60_000;
 const primaryFailedAt = new Map<string, number>();
 
@@ -77,7 +74,6 @@ async function generateValue(
             ? null
             : config.serviceTier,
         timeoutMs: config.timeoutMs,
-        // Affinity was derived for the primary model; another model may not accept it.
         experimental_sessionAffinity: primary
           ? (config.sessionAffinity ?? null)
           : null,
@@ -121,7 +117,6 @@ async function generateValue(
   return JSON.parse(result.text);
 }
 
-/** Test seam: forget remembered primary failures. */
 export function resetPrimaryCooldown() {
   primaryFailedAt.clear();
 }

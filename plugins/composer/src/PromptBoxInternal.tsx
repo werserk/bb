@@ -3630,7 +3630,6 @@ export function PromptBoxInternal({
               </span>
             )}
             {suggestionState.request?.phase === "error" && (
-              // Sits where the pending spinner was, so it never shifts the draft line.
               <details className="absolute right-10 top-3 z-20 text-xs text-muted-foreground">
                 <summary
                   aria-label="Suggestion error details"

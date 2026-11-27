@@ -56,7 +56,6 @@ function HelperAction({
     panel.getSnapshot,
     panel.getSnapshot,
   );
-  // Sits before the draft line: a click asks for a new proposal, Tab accepts.
   return (
     <button
       type="button"

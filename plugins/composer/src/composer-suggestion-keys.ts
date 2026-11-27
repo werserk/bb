@@ -21,7 +21,6 @@ export function handleComposerSuggestionKey(
   submit: () => boolean,
 ): boolean {
   if (blocked || event.isComposing || event.keyCode === 229) return false;
-  // Something earlier (e.g. the context panel's Escape) already handled it.
   if (event.defaultPrevented) return false;
   if (
     (event.key === "Tab" || event.key === "Escape") &&
