@@ -15,20 +15,19 @@ interface StoredQueuePayload {
 export function encodeQueuedMessagePayload(
   payload: QueuedMessagePayload,
 ): StoredQueuePayload {
-  const parsed = queuedMessagePayloadSchema.parse(payload);
   return {
-    payloadKind: parsed.kind,
-    questionId: parsed.kind === "questionResponse" ? parsed.questionId : null,
+    payloadKind: payload.kind,
+    questionId: payload.kind === "questionResponse" ? payload.questionId : null,
     questionRevision:
-      parsed.kind === "questionResponse" ? parsed.revision : null,
+      payload.kind === "questionResponse" ? payload.revision : null,
     retryOfTurnRequestId:
-      parsed.kind === "retry"
-        ? parsed.retryOfTurnRequestId
-        : parsed.kind === "deferredSteer"
-          ? parsed.sourceRequestId
+      payload.kind === "retry"
+        ? payload.retryOfTurnRequestId
+        : payload.kind === "deferredSteer"
+          ? payload.sourceRequestId
           : null,
-    retryAttempt: parsed.kind === "retry" ? parsed.attempt : null,
-    retryReason: parsed.kind === "retry" ? parsed.reason : null,
+    retryAttempt: payload.kind === "retry" ? payload.attempt : null,
+    retryReason: payload.kind === "retry" ? payload.reason : null,
   };
 }
 
