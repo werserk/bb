@@ -34,6 +34,7 @@ function ChoicesHookProbe({
   projectId: string;
   onReport: (providerId: string, choices: ExperimentalRunOnChoices) => void;
 }) {
+  "use no memo";
   const useChoices = slot.useChoices;
   const choices = useChoices({ projectId });
   useEffect(() => {
@@ -120,6 +121,7 @@ function WorkspaceHookProbe({
   inputs: JsonValue | null;
   onReport: (workspace: ExperimentalRunOnWorkspace | null) => void;
 }) {
+  "use no memo";
   const useThreadWorkspace = slot.useThreadWorkspace;
   const workspace = useThreadWorkspace({ threadId, inputs });
   useEffect(() => {
