@@ -47,6 +47,31 @@ import type {
 import { parentRequestHeaders, type ParentPool } from "./parent-pool.js";
 import { orderForProject, readProjectId } from "./project-priority.js";
 import { PROVIDER_UPSTREAMS, type ProviderUpstreams } from "./upstreams.js";
+import type { AuditInput } from "./audit-log.js";
+import { looksLikePass, type PassPrincipal } from "./thread-pass.js";
+
+// Who sent a request: a machine (hub token) or, on a worker machine, one
+// thread (thread pass) or the model catalog (catalog pass).
+export type HubPrincipal = { kind: "host"; hostId: string } | PassPrincipal;
+
+export interface HubPasses {
+  verify(presented: string): Promise<PassPrincipal | null>;
+}
+
+// Requests that reach a model. The audit logs only these: catalog listings and
+// token counts never pick an account for a conversation.
+const AUDITED_ROUTES = new Set([
+  "/v1/messages",
+  "/v1/responses",
+  "/v1/responses/compact",
+  "/v1/images/generations",
+  "/v1/images/edits",
+  "/v1/alpha/search",
+]);
+const CATALOG_ROUTES = new Set(["/models", "/v1/models"]);
+const MAX_AUDIT_SELECT_KEYS = 10_000;
+
+type FailoverCause = "quota" | "rate-limit" | "auth" | "upstream";
 
 const ROUTE = "/api/v1/plugins/account-pool-prewarm/http";
 const DEFAULT_REFRESH_URL = "https://platform.claude.com/v1/oauth/token";
@@ -81,6 +106,8 @@ interface HubOptions {
   affinity: PoolAffinityStore;
   maxAffinityBindings: number;
   hubTokens: HubTokenStore;
+  passes: HubPasses | null;
+  audit: (entry: AuditInput) => void;
   getSettings: () => AccountPoolConfig;
   adapters: ReadonlyMap<PoolProvider, ProviderAdapter>;
   fetch: typeof fetch;
@@ -158,6 +185,8 @@ export class AccountPoolHub {
   private readonly pacingByAccount = new Map<string, PacingFlight>();
   private affinityBindings = new Map<string, AccountBinding>();
   private activeAccounts = new Map<PoolProvider, ActiveAccount>();
+  // Last account logged as `select` per [provider, principal, session].
+  private readonly auditedSelections = new Map<string, string>();
   private readonly usageRefreshes = new Map<string, Promise<void>>();
   private readonly lastUsageRefreshAt = new Map<string, number>();
   private readonly drainWaiters = new Set<() => void>();
@@ -180,11 +209,17 @@ export class AccountPoolHub {
     await this.stop();
   }
 
-  async authenticate(request: Request): Promise<string | null> {
+  async authenticate(request: Request): Promise<HubPrincipal | null> {
     const token =
       request.headers.get("x-bb-account-pool-token") ??
       readBearer(request.headers.get("authorization"));
-    return this.options.hubTokens.authenticate(token);
+    if (token === null) return null;
+    if (looksLikePass(token))
+      return this.options.passes === null
+        ? null
+        : this.options.passes.verify(token);
+    const hostId = await this.options.hubTokens.authenticate(token);
+    return hostId === null ? null : { kind: "host", hostId };
   }
 
   async handle(
@@ -193,10 +228,17 @@ export class AccountPoolHub {
     routePath: string,
   ): Promise<Response> {
     const adapter = this.adapter(provider);
-    const hostId = await this.authenticate(request);
-    if (hostId === null) {
+    const principal = await this.authenticate(request);
+    if (principal === null) {
       return adapter.errorResponse(401, "Invalid Account Pooler bearer token.");
     }
+    // Before any other branch, the parent proxy included: a catalog pass only
+    // lists models.
+    if (principal.kind === "catalog" && !CATALOG_ROUTES.has(routePath))
+      return adapter.errorResponse(
+        403,
+        "This Account Pooler pass only lists models.",
+      );
     if (!this.accepting)
       return adapter.errorResponse(
         503,
@@ -212,7 +254,8 @@ export class AccountPoolHub {
       request,
       new Uint8Array(await request.arrayBuffer()),
       adapter,
-      hostId,
+      principal,
+      routePath,
       projectId === null ? null : this.options.getProjectOrder(projectId),
     );
   }
@@ -645,9 +688,29 @@ export class AccountPoolHub {
     request: Request,
     body: Uint8Array,
     adapter: ProviderAdapter,
-    hostId: string,
+    principal: HubPrincipal,
+    routePath: string,
     projectOrder: readonly string[] | null,
   ): Promise<Response> {
+    const { hostId } = principal;
+    const threadId = principal.kind === "thread" ? principal.threadId : null;
+    const audited = AUDITED_ROUTES.has(routePath);
+    const audit = (
+      reason: "select" | "failover" | "limit",
+      accountId: string,
+      detail: FailoverCause | null = null,
+    ) => {
+      if (audited)
+        this.options.audit({
+          reason,
+          provider: adapter.provider,
+          threadId,
+          hostId,
+          accountId,
+          detail,
+        });
+    };
+    let cause: FailoverCause = "upstream";
     const signal = AbortSignal.any([request.signal, this.stopped.signal]);
     const attempted = new Set<string>();
     const waited = new Set<string>();
@@ -731,6 +794,8 @@ export class AccountPoolHub {
                 "The current Account Pooler account is temporarily rate limited.",
               headers: { "retry-after": String(Math.ceil(heldMs / 1_000)) },
             };
+            audit("limit", selected.account.id, "rate-limit");
+            cause = "rate-limit";
             if (selected.keepAffinity)
               return adapter.errorResponse(
                 failure.status,
@@ -746,6 +811,8 @@ export class AccountPoolHub {
             continue;
           }
         }
+        if (previousAccountId !== null && previousAccountId !== selected.account.id)
+          audit("failover", selected.account.id, cause);
         previousAccountId = selected.account.id;
         attempted.add(selected.account.id);
         const changed = await this.options.accounts.recordUsed(
@@ -837,6 +904,8 @@ export class AccountPoolHub {
                 (parsed.data.error.code === "insufficient_quota" ||
                   parsed.data.error.type === "insufficient_quota")
               ) {
+                audit("limit", selected.account.id, "quota");
+                cause = "quota";
                 const message =
                   "OpenAI API insufficient_quota. Restore project credits, then enable the account to retry.";
                 await this.rejectCredential(selected.account, secret, signal, () =>
@@ -848,6 +917,8 @@ export class AccountPoolHub {
               }
             }
             if (adapter.isQuotaRejection(response.headers)) {
+              audit("limit", selected.account.id, "quota");
+              cause = "quota";
               await this.discardUpstream(upstream, false);
               break;
             }
@@ -871,6 +942,8 @@ export class AccountPoolHub {
               await abortable(pacing.result, signal);
               continue;
             }
+            audit("limit", selected.account.id, "rate-limit");
+            cause = "rate-limit";
             if (!selected.keepAffinity) {
               failure = {
                 status: 429,
@@ -890,6 +963,10 @@ export class AccountPoolHub {
             response.status === 504 ||
             response.status === 529
           ) {
+            cause =
+              response.status === 401 || response.status === 403
+                ? "auth"
+                : "upstream";
             const retryAfter = response.headers.get("retry-after");
             const detail = await this.discardUpstream(upstream, true);
             signal.throwIfAborted();
@@ -975,6 +1052,13 @@ export class AccountPoolHub {
           if (response.ok) {
             this.observeAccess(selected.account, response.status, "", secret);
             selected.accept();
+            this.auditSelect(
+              audited,
+              adapter.provider,
+              principal,
+              parsed.affinityId,
+              selected.account.id,
+            );
           }
           return this.clientResponse(upstream);
         }
@@ -996,6 +1080,46 @@ export class AccountPoolHub {
           : "Account Pooler stopped accepting requests.",
       );
     }
+  }
+
+  // One `select` row per account change of a session, not per request: the
+  // key is [provider, principal, session]. Threads of one machine run on
+  // different accounts at once, so a key without the session would log on
+  // nearly every request.
+  private auditSelect(
+    audited: boolean,
+    provider: PoolProvider,
+    principal: HubPrincipal,
+    affinityId: string | null,
+    accountId: string,
+  ): void {
+    if (!audited) return;
+    const key = JSON.stringify([
+      provider,
+      principal.kind === "thread"
+        ? `thread:${principal.threadId}`
+        : `host:${principal.hostId}`,
+      affinityId ?? "-",
+    ]);
+    if (this.auditedSelections.get(key) === accountId) {
+      this.auditedSelections.delete(key);
+      this.auditedSelections.set(key, accountId);
+      return;
+    }
+    this.auditedSelections.delete(key);
+    this.auditedSelections.set(key, accountId);
+    while (this.auditedSelections.size > MAX_AUDIT_SELECT_KEYS) {
+      const oldest = this.auditedSelections.keys().next();
+      if (oldest.done) break;
+      this.auditedSelections.delete(oldest.value);
+    }
+    this.options.audit({
+      reason: "select",
+      provider,
+      threadId: principal.kind === "thread" ? principal.threadId : null,
+      hostId: principal.hostId,
+      accountId,
+    });
   }
 
   private async discardUpstream(
@@ -1706,6 +1830,8 @@ export function createHub(options: {
   quotas: QuotaStore;
   affinity: PoolAffinityStore;
   hubTokens: HubTokenStore;
+  passes?: HubPasses | null;
+  audit?: (entry: AuditInput) => void;
   getSettings: () => AccountPoolConfig;
   fetch?: typeof fetch;
   now?: () => number;
@@ -1754,6 +1880,8 @@ export function createHub(options: {
     affinity: options.affinity,
     maxAffinityBindings: options.maxAffinityBindings ?? MAX_AFFINITY_BINDINGS,
     hubTokens: options.hubTokens,
+    passes: options.passes ?? null,
+    audit: options.audit ?? (() => {}),
     getSettings: options.getSettings,
     adapters,
     fetch: options.fetch ?? fetch,

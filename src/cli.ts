@@ -2,6 +2,8 @@ import {
   createHostRoleCommands,
   type HostRoles,
 } from "./host-roles.js";
+import { createAuditCommands, type AuditLog } from "./audit-log.js";
+import { createPassCommands, type ThreadPasses } from "./thread-pass.js";
 import {
   PluginCliError,
   cliCommand,
@@ -257,6 +259,9 @@ export function registerPoolCli(
   config: AccountPoolConfigController,
   projectPriority: ProjectPriority,
   hostRoles: HostRoles,
+  passes: ThreadPasses,
+  audit: AuditLog,
+  now: () => number = Date.now,
 ): void {
   bb.cli.register(
     defineCli({
@@ -267,6 +272,8 @@ export function registerPoolCli(
       commands: {
         ...createProjectPriorityCommands(projectPriority),
         ...createHostRoleCommands(hostRoles),
+        ...createPassCommands(passes),
+        ...createAuditCommands(audit, now),
         ping: cliCommand({
           summary:
             "Send one tiny Haiku request through exactly one local Claude account",

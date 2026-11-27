@@ -253,26 +253,78 @@ See PLUGIN_OVERVIEW.md → OpenAI Platform API keys for routing and error recove
 ## Machine roles
 
 Default deny: only a machine with a role gets central Claude and Codex pooling.
-The roles are `server`, `worker` and `trusted`; they currently behave the same.
+
+| Role | Its threads get | Nested bb servers |
+|---|---|---|
+| `server`, `trusted` | the machine's hub token | the hub (parent markers) |
+| `worker` | a pass per thread; a catalog pass without a thread | nothing |
+| none | nothing: own provider login | nothing |
+
 Use `bb pool machine list [--json]` to see enrolled machines and removed machines
 that kept a role. `bb pool machine role <host-id> <server|worker|trusted|none>
 [--json]` sets the exact ID's role; `none` removes it, including for a machine
 no longer enrolled. Unknown IDs cannot get a role. Names are display only.
-
 Settings → Advanced → Machine routing and RPC `hostRole.list` (null input),
-`hostRole.set` (`{hostId, role}`) use the same persisted service.
+`hostRole.set` (`{hostId, role}`) use the same persisted service; the UI asks
+before removing a role or turning a token machine into a worker.
+
 Without a role, environment contributions carry no Pooler endpoint, auth or
 parent markers, including catalog calls with no thread, and no
 ANTHROPIC_CUSTOM_HEADERS, preserving opaque target-host headers byte-for-byte.
 Preexisting arbitrary project-header cleanup belongs to the separately
 configured VM launcher. The machine must use its own provider login.
 
-No hub token is minted for a machine without a role. Setting `none` deletes its
-token file, so current and grace tokens fail newly performed authentication;
-already authenticated requests may finish and running processes keep their
-environment. A change between roles keeps the token. A role is not proof of
-native login or capacity; no registry/scheduler is created.
-A removed machine keeps its role until it is set to `none`: set `none` before
-removing a machine. Roles survive reload. The exclusion table is kept as the
-rollback input of the previous version and rewritten from roles; after a
-rollback that version routes exactly the machines that had a role.
+No hub token is minted for a machine without a role or for a worker. Setting
+`none` or `worker` deletes the machine's token file, so current and grace
+tokens fail newly performed authentication; already authenticated requests may
+finish and running processes keep their environment (their next request with
+the old token gets 401). Leaving `worker` or setting `none` revokes the
+machine's passes. A change between `server` and `trusted` keeps the token.
+`bb pool token rotate` refuses a worker; revoke one thread's pass instead.
+A role is not proof of native login or capacity; no registry/scheduler is
+created. A removed machine keeps its role until it is set to `none`: set
+`none` before removing a machine. Roles survive reload. The pool's `server`
+role does not follow a move of bb's core server; set roles again after one.
+The exclusion table is kept as the rollback input of older versions and
+rewritten from roles; after a rollback they route exactly the `server` and
+`trusted` machines. An Include made under an older version is not carried
+forward; give the machine a role after rolling forward.
+
+### Enrol a worker
+
+1. Enrol the machine in bb as usual and find its ID: `bb pool machine list --json`.
+2. `bb pool machine role <host-id> worker --json`.
+3. Start or continue a thread on it: each send gets that thread's pass
+   (`pt1.…`); a send without a thread gets a catalog pass (`pc1.…`) that only
+   lists models. Processes started before the change keep their old
+   environment, so restart them.
+4. Check: `bb pool pass list --json` shows the thread as `active`; the pass
+   itself is never printed.
+
+Passes are derived from a key in the pool's secrets on every send and never
+stored. A pass survives the 30-second archive undo grace and a timely
+unarchive; a later unarchive gets a new pass at the next send. Deleting the
+thread, deleting the machine, leaving `worker` and
+`bb pool pass revoke <thread-id> [--json]` revoke it at once; moving the thread
+to another machine revokes it at the first send there. A revoked pass never
+comes back. The catalog pass is per machine: `pass revoke` does not
+touch it; only a role change or a key rotation does. Events missed while the plugin was down are
+caught within 15 minutes. If the key file cannot be read, workers get no
+central routing until it is fixed and the plugin reloaded; hub tokens keep
+working. RPC: `pass.list` (null input), `pass.revoke` (`{threadId}`).
+
+### Audit log
+
+`bb pool audit [--thread <id>] [--host <id>] [--account <id>] [--reason <r>]
+[--since <30m|24h|7d|ISO>] [--limit <1-1000>] [--json]` prints newest first,
+tab-separated: time, reason, provider, thread, machine, account, detail. RPC
+`audit.list` takes the same filters (`threadId`, `hostId`, `accountId`,
+`reason`, `since` in ms, `limit`) and returns `{entries, skipped}`; JSON
+output has the same shape, and text output reports skipped rows on stderr. Reasons: `select` (once per account change
+of a session, not per request), `failover`, `limit` (`quota`, `rate-limit`,
+`auth`, `upstream`), `pass-issued`, `pass-revoked` (`archived`, `deleted`,
+`restored`, `manual`, `role`, `host-removed`, `reconcile`), `role-change`
+(`<from>-><to>`). Rows hold ids and these words only, never prompts, models,
+headers, tokens or passes; unknown reasons from a newer version are shown as
+they are. Kept 90 days, at most 200 000 rows. A pool in parent mode does not
+log requests it forwards; the parent logs them.

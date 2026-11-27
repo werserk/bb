@@ -938,8 +938,67 @@ it("keeps the authoritative machine role on a failed save", async () => {
     await slot.findByRole("combobox", { name: "Role of New" }),
   );
   fireEvent.change(picker, { target: { value: "none" } });
+  fireEvent.click(await slot.findByRole("button", { name: "Remove role" }));
   expect(await slot.findByText("Role save failed")).toBeTruthy();
   expect(picker.value).toBe("trusted");
+});
+
+// P1 review L1: removing a role revokes the machine's token at once, and
+// making a machine a worker does too, so both ask first.
+it.each([
+  ["none", "Remove the role of New?", "Remove role"],
+  ["worker", "Make New a worker?", "Make worker"],
+] as const)(
+  "asks before a role change that revokes the token (%s)",
+  async (role, title, confirm) => {
+    const slot = render([], {
+      "hostRole.list": () => [
+        { hostId: "new-host", hostName: "New", enrolled: true, role: "server" },
+      ],
+      "hostRole.set": () => ({
+        hostId: "new-host",
+        hostName: "New",
+        enrolled: true,
+        role: role === "none" ? null : role,
+      }),
+    });
+    fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
+    const picker = select(
+      await slot.findByRole("combobox", { name: "Role of New" }),
+    );
+    fireEvent.change(picker, { target: { value: role } });
+    expect(await slot.findByText(title)).toBeTruthy();
+    expect(picker.value).toBe("server");
+    fireEvent.click(slot.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(slot.queryByText(title)).toBeNull());
+    expect(
+      slot.rpcCalls.some((call) => call.method === "hostRole.set"),
+    ).toBe(false);
+    fireEvent.change(picker, { target: { value: role } });
+    fireEvent.click(await slot.findByRole("button", { name: confirm }));
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "hostRole.set",
+        input: { hostId: "new-host", role },
+      }),
+    );
+  },
+);
+
+it("disables rotation for a worker machine", async () => {
+  const slot = render([], {
+    "hostRole.list": () => [
+      { hostId: "host-one", hostName: "bee", enrolled: true, role: "worker" },
+    ],
+  });
+  fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
+  expect(
+    (
+      await slot.findByRole("button", {
+        name: "bee: Worker, passes per thread",
+      })
+    ).hasAttribute("disabled"),
+  ).toBe(true);
 });
 
 it("disables rotation for a machine without a role", async () => {
@@ -1013,6 +1072,7 @@ it.each([true, false])(
     fireEvent.change(await slot.findByRole("combobox", { name }), {
       target: { value: "none" },
     });
+    fireEvent.click(await slot.findByRole("button", { name: "Remove role" }));
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({
         method: "hostRole.set",

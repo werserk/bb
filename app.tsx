@@ -91,6 +91,8 @@ type DialogState =
   | { kind: "account" | "priority" | "remove"; accountId: string }
   | { kind: "claude-login" | "codex-login" }
   | { kind: "api-key"; provider: PoolProvider }
+  // Roles that revoke the machine's hub token at once ask first.
+  | { kind: "machine-role"; hostId: string; role: "none" | "worker" }
   | null;
 
 type ConfigField = Exclude<keyof AccountPoolConfig, "parentMode">;
@@ -778,6 +780,45 @@ function AuthorizationUrlRow({
   );
 }
 
+function MachineRoleDialog({
+  name,
+  role,
+  onCancel,
+  onConfirm,
+}: {
+  name: string;
+  role: "none" | "worker";
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <DialogFrame
+      title={
+        role === "none"
+          ? `Remove the role of ${name}?`
+          : `Make ${name} a worker?`
+      }
+      footer={
+        <>
+          <span className="flex-1" />
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            {role === "none" ? "Remove role" : "Make worker"}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        {role === "none"
+          ? "This revokes the machine's hub token or thread passes now. Its threads lose central Claude and Codex pooling and must use the machine's own provider credentials."
+          : "This revokes the machine's hub token now. Each thread gets its own pass at its next message; requests already sent with the token fail."}
+      </p>
+    </DialogFrame>
+  );
+}
+
 function DialogFrame({
   title,
   children,
@@ -1401,8 +1442,10 @@ function AccountPoolSettings() {
                 <p className="text-xs text-muted-foreground">
                   Only a machine with a role gets central Claude and Codex
                   pooling. Without a role it gets no hub token and must use its
-                  own provider credentials. Removing a role revokes the
-                  machine&apos;s token; requests already running finish.
+                  own provider credentials. Server and trusted machines hold a
+                  machine token; a worker gets a pass per thread instead, which
+                  stops working when the thread is archived or deleted. Removing
+                  a role or making a machine a worker revokes its token at once.
                 </p>
                 {machineError !== null ? (
                   <p role="alert">{machineError}</p>
@@ -1429,12 +1472,23 @@ function AccountPoolSettings() {
                         className="rounded-md border border-border bg-background px-2 py-1 text-sm"
                         value={machine.role ?? "none"}
                         disabled={savingMachines.has(machine.hostId)}
-                        onChange={(event) =>
-                          void setMachineRole(
-                            machine.hostId,
-                            event.currentTarget.value as HostRole | "none",
+                        onChange={(event) => {
+                          const role = event.currentTarget.value as
+                            | HostRole
+                            | "none";
+                          if (
+                            (role === "none" && machine.role !== null) ||
+                            (role === "worker" &&
+                              machine.role !== null &&
+                              machine.role !== "worker")
                           )
-                        }
+                            setDialog({
+                              kind: "machine-role",
+                              hostId: machine.hostId,
+                              role,
+                            });
+                          else void setMachineRole(machine.hostId, role);
+                        }}
                       >
                         <option value="none">No role</option>
                         {HOST_ROLES.map((role) => (
@@ -1464,7 +1518,8 @@ function AccountPoolSettings() {
                         machineError !== null ||
                         machines.some(
                           (machine) =>
-                            machine.hostId === host.hostId && machine.role === null,
+                            machine.hostId === host.hostId &&
+                            (machine.role === null || machine.role === "worker"),
                         )
                       }
                       size="sm"
@@ -1482,7 +1537,13 @@ function AccountPoolSettings() {
                           machine.hostId === host.hostId && machine.role === null,
                       )
                         ? `${host.hostName ?? host.hostId}: No Account Pooler role`
-                        : `Rotate ${host.hostName ?? host.hostId}`}
+                        : machines?.some(
+                              (machine) =>
+                                machine.hostId === host.hostId &&
+                                machine.role === "worker",
+                            )
+                          ? `${host.hostName ?? host.hostId}: Worker, passes per thread`
+                          : `Rotate ${host.hostName ?? host.hostId}`}
                     </Button>
                   ))}
                 </div>
@@ -1621,6 +1682,20 @@ function AccountPoolSettings() {
               their machine login when no other pooled account is available.
             </p>
           </DialogFrame>
+        ) : null}
+        {dialog?.kind === "machine-role" ? (
+          <MachineRoleDialog
+            name={
+              machines?.find((machine) => machine.hostId === dialog.hostId)
+                ?.hostName ?? dialog.hostId
+            }
+            role={dialog.role}
+            onCancel={closeDialog}
+            onConfirm={() => {
+              setDialog(null);
+              void setMachineRole(dialog.hostId, dialog.role);
+            }}
+          />
         ) : null}
         {dialog?.kind === "claude-login" ? (
           <LoginDialog

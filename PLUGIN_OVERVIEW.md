@@ -10,7 +10,7 @@ Keep a Claude Code or Codex thread running when one account hits its limit. The 
 
 ## How it works
 
-The hub serves Anthropic Messages and OpenAI Responses endpoints. Routed providers report **Proxied** and receive a machine-scoped hub token. Accounts in error are skipped. The switch threshold defaults to 98 percent. Claude extra usage and Codex credits are fallbacks: usable subscription accounts take precedence, and conversations return when quota recovers. Exhausted accounts are rechecked before fallback. Codex spending-control and explicit credit-depletion restrictions block routing even below the threshold. The pool does not enable extra usage, purchase credits, or change spending limits. Settings shows “Extra usage available” only for reported allowance, never current billing activity. CLI and RPC status expose the same observations. Secrets stay on the server and tokens refresh in the background.
+The hub serves Anthropic Messages and OpenAI Responses endpoints. Routed providers report **Proxied** and receive a machine-scoped hub token, or a per-thread pass on worker machines. Accounts in error are skipped. The switch threshold defaults to 98 percent. Claude extra usage and Codex credits are fallbacks: usable subscription accounts take precedence, and conversations return when quota recovers. Exhausted accounts are rechecked before fallback. Codex spending-control and explicit credit-depletion restrictions block routing even below the threshold. The pool does not enable extra usage, purchase credits, or change spending limits. Settings shows “Extra usage available” only for reported allowance, never current billing activity. CLI and RPC status expose the same observations. Secrets stay on the server and tokens refresh in the background.
 
 The pool waits once on the same account for short temporary rate limits. Longer holds return Retry-After for pinned conversations while new conversations can advance. A model-family limit detours requests for that family without moving the session’s main pin or the provider cursor. The pool commits a new account after a successful response; a failed attempt across every account retains the previous binding. The current account and session pins survive hub restarts. Session pins expire after 65 idle minutes, with the 4,096 most recently used pins retained.
 
@@ -39,7 +39,7 @@ Experimental: routing, storage, and CLI may change.
 
 ## For agents
 
-`bb pool account add|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool bypass <thread-id>`, and `bb pool project-priority list|set|clear`. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
+`bb pool account add|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, `bb pool pass list|revoke`, `bb pool audit`, `bb pool bypass <thread-id>`, and `bb pool project-priority list|set|clear`. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
 
 ## Targeted Claude ping
 
@@ -121,17 +121,29 @@ an account-wide credential error. Temporary 429 follows the existing hold policy
 ## Machine routing
 
 Only a machine with an Account Pooler role gets central Claude and Codex
-pooling; a machine without one gets nothing, not even a hub token. The roles are
-`server`, `worker` and `trusted` and currently behave the same. Settings →
-Advanced → Machine routing lists enrolled machines and removed machines that
-kept a role, with a role picker per machine. A machine without a role uses its
-own provider credentials; the setting is not observed native readiness.
+pooling; a machine without one gets nothing. `server` and `trusted` machines
+get a machine hub token. A `worker` machine gets no machine token: each of its
+threads gets its own pass, bound to that thread and machine, which dies when the
+thread is deleted, archived (after the 30-second undo grace) or moved (at its
+first send on the new machine), when the
+machine is removed or leaves `worker`, or on `bb pool pass revoke <thread-id>`.
+A send without a thread on a worker gets a pass that only lists models.
+Settings → Advanced → Machine routing lists enrolled machines and removed
+machines that kept a role, with a role picker per machine; it asks before
+removing a role or making a token machine a worker. A machine without a role
+uses its own provider credentials; the setting is not observed native readiness.
 
 `bb pool machine list --json` and `bb pool machine role <host-id>
 <server|worker|trusted|none> --json` share `hostRole.list` and `hostRole.set`
-RPC policy. IDs are exact; names are display labels. Only `none` revokes the
-machine's hub token; a change between roles keeps it. A removed machine keeps
-its role until it is set to `none`, so set `none` before removing a machine.
-Existing process environments are unchanged; after `none`, new machine-token
-authentication is denied, while already authenticated requests may finish.
+RPC policy. IDs are exact; names are display labels. `none` and `worker` revoke
+the machine's hub token; a change between `server` and `trusted` keeps it. A
+removed machine keeps its role until it is set to `none`, so set `none` before
+removing a machine. Existing process environments are unchanged; after a
+revocation, new authentication with the old credential is denied, while already
+authenticated requests may finish. The pool's `server` role does not follow a
+move of bb's core server.
+
+`bb pool audit` (and RPC `audit.list`) shows an append-only log of account
+selection, failover, limits, passes and role changes: ids and fixed words only,
+never prompt content or credentials, kept 90 days and at most 200 000 rows.
 See [the architecture map](docs/ARCHITECTURE.md) for persistence and rollback limits.

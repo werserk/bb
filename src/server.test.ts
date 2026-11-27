@@ -15,7 +15,11 @@ import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import {
+  createFakePluginHost,
+  makeHostResponse,
+  makeThreadResponse,
+} from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountSchema,
@@ -9271,7 +9275,9 @@ describe("machine roles, default deny", () => {
     ).rejects.toThrow();
   });
 
-  it.each(["server", "worker", "trusted"] as const)(
+  // Rewritten in block P2: a worker no longer gets the hub token (see
+  // "worker passes" below), so only server and trusted are checked here.
+  it.each(["server", "trusted"] as const)(
     "routes a host with role %s through the hub",
     async (role) => {
       const fixture = await createFixture({
@@ -9665,3 +9671,550 @@ it.each(["claude-code", "codex"])(
       expect(merged[name]).toBe(inherited[name]);
   },
 );
+
+describe("worker passes", () => {
+  const WORKER = "host-two";
+  const secretsOf = (fixture: Fixture) =>
+    path.join(fixture.dataDir, "plugins", "account-pool", "secrets", "accounts");
+  const MESSAGE = JSON.stringify({
+    model: "claude-haiku-4-5-20251001",
+    messages: [{ role: "user", content: "AUDIT-BODY-MARKER" }],
+  });
+
+  async function workerFixture(
+    args: {
+      options?: TestPluginOptions;
+      upstream?: UpstreamHandler;
+      codex?: boolean;
+    } = {},
+  ) {
+    const clock = { time: Date.now() };
+    const calls: string[] = [];
+    const upstream = await startUpstream(
+      args.upstream ??
+        (async (request, response) => {
+          calls.push(`${request.method} ${request.url}`);
+          await readRequestBody(request);
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end("{}");
+        }),
+    );
+    cleanups.push(upstream.close);
+    const fixture = await createFixture({
+      upstreamUrl: upstream.url,
+      options: { now: () => clock.time, ...args.options },
+    });
+    const threads = new Map<string, Record<string, unknown> | Error>();
+    fixture.host.harness.sdk.stub("threads.get", async (input: unknown) => {
+      const { threadId } = z.object({ threadId: z.string() }).parse(input);
+      const thread = threads.get(threadId) ?? {
+        host: { id: WORKER },
+        archivedAt: null,
+        deletedAt: null,
+      };
+      if (thread instanceof Error) throw thread;
+      return thread;
+    });
+    fixture.host.harness.sdk.stub("hosts.get", async () => ({ id: WORKER }));
+    const { callRpc, resolveProviderEnv, fetchHttp } =
+      fixture.host.harness.behavior;
+    await callRpc("hostRole.set", { hostId: WORKER, role: "worker" });
+    if (args.codex === true)
+      await callRpc("account.add", {
+        provider: "codex",
+        source: { kind: "api-key", apiKey: "sk-codex" },
+        label: null,
+        priority: 100,
+      });
+    const env = async (
+      threadId: string | null,
+      provider: "claude-code" | "codex" = "claude-code",
+      hostId = WORKER,
+    ) =>
+      Object.fromEntries(
+        (
+          await resolveProviderEnv(provider, {
+            threadId,
+            projectId: null,
+            hostId,
+          })
+        ).map((entry) => [entry.name, entry.value]),
+      );
+    const pass = async (threadId: string | null, hostId = WORKER) =>
+      String((await env(threadId, "claude-code", hostId)).ANTHROPIC_AUTH_TOKEN);
+    const send = async (
+      credential: string,
+      route = "/v1/messages",
+      method: "GET" | "POST" = "POST",
+      body = MESSAGE,
+    ) => {
+      const response = await fetchHttp(method, route, {
+        headers: authHeaders(credential),
+        ...(method === "POST" ? { body } : {}),
+      });
+      await response.text();
+      return response.status;
+    };
+    const audit = async () =>
+      z
+        .object({ entries: z.array(z.record(z.string(), z.unknown())) })
+        .parse(
+          JSON.parse(
+            (await fixture.host.harness.behavior.runCli(["audit", "--json"]))
+              .stdout,
+          ),
+        )
+        .entries.reverse();
+    return { fixture, clock, calls, threads, env, pass, send, audit, callRpc };
+  }
+
+  it("gives a worker thread its own pass for both providers and no hub token", async () => {
+    const { fixture, env, pass } = await workerFixture({ codex: true });
+    for (const provider of ["claude-code", "codex"] as const) {
+      const entries = await env("thread-two", provider);
+      const credential =
+        provider === "claude-code"
+          ? entries.ANTHROPIC_AUTH_TOKEN
+          : entries.CODEX_POOL_AUTH_TOKEN;
+      expect(credential).toMatch(/^pt1\.thread-two\.[A-Za-z0-9_-]{43}$/u);
+      expect(entries[PARENT_URL_ENV]).toBe("");
+      expect(entries[PARENT_TOKEN_ENV]).toBe("");
+    }
+    expect(await pass("thread-two")).toBe(await pass("thread-two"));
+    expect(await pass("thread-three")).not.toBe(await pass("thread-two"));
+    expect(
+      (await fs.readdir(secretsOf(fixture))).filter((name) =>
+        name.startsWith("hub-token-"),
+      ),
+    ).toEqual(["hub-token-host-one.json"]);
+  });
+
+  it("accepts a thread pass on model routes and refuses forged or malformed ones with 401", async () => {
+    const { pass, send, calls } = await workerFixture();
+    const two = await pass("thread-two");
+    const three = await pass("thread-three");
+    expect(await send(two)).toBe(200);
+    expect(await send(two, "/v1/responses")).not.toBe(401);
+    const mac = two.split(".")[2] as string;
+    const forged = [
+      `pt1.thread-three.${mac}`,
+      `pt1.thread-two.${three.split(".")[2]}`,
+      `pt1.thread-two.${mac.slice(2)}`,
+      `pt1.thread-two.${mac}AA`,
+      `pt1.thread-two.${mac}.x`,
+      `pc1.host-two.${mac}`,
+    ];
+    calls.length = 0;
+    for (const credential of forged) {
+      expect(await send(credential), credential).toBe(401);
+      expect(await send(credential, "/v1/responses"), credential).toBe(401);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "lets the catalog pass of a thread-less send only list models (parent proxy %s)",
+    async (parent) => {
+      const parentCalls: string[] = [];
+      const { pass, send, calls } = await workerFixture(
+        parent
+          ? {
+              options: {
+                env: {
+                  [PARENT_URL_ENV]: "https://parent.invalid",
+                  [PARENT_TOKEN_ENV]: "p".repeat(43),
+                },
+                fetch: async (input) => {
+                  parentCalls.push(String(input));
+                  return Response.json(
+                    String(input).endsWith(AVAILABILITY_PATH)
+                      ? { claude: true, codex: true }
+                      : { data: [] },
+                  );
+                },
+              },
+            }
+          : {},
+      );
+      const catalog = await pass(null);
+      expect(catalog).toMatch(/^pc1\.host-two\.[A-Za-z0-9_-]{43}$/u);
+      expect(await send(catalog, "/models", "GET")).toBe(200);
+      // No codex account locally: past the pass and the gate, then 503.
+      expect(await send(catalog, "/v1/models", "GET")).toBe(parent ? 200 : 503);
+      const forwarded = parent ? parentCalls.length : calls.length;
+      for (const route of [
+        "/v1/messages",
+        "/v1/messages/count_tokens",
+        "/v1/responses",
+        "/v1/images/generations",
+      ])
+        expect(await send(catalog, route), route).toBe(403);
+      expect(await send(catalog, AVAILABILITY_PATH, "GET")).toBe(403);
+      expect(
+        await send(
+          catalog,
+          "/retry-availability?provider=claude&family=haiku",
+          "GET",
+        ),
+      ).toBe(403);
+      expect(parent ? parentCalls.length : calls.length).toBe(forwarded);
+    },
+  );
+
+  it("keeps a thread's pass through the archive undo grace, restores it on undo and drops it on delete", async () => {
+    const { fixture, clock, threads, pass, send } = await workerFixture();
+    const emit = fixture.host.harness.behavior.emitThreadEvent.bind(
+      fixture.host.harness.behavior,
+    );
+    const thread = (archivedAt: number | null, deletedAt: number | null = null) =>
+      makeThreadResponse({ id: "thread-two", archivedAt, deletedAt });
+    const first = await pass("thread-two");
+    expect((await emit("thread.archived", { thread: thread(clock.time) })).errors).toEqual([]);
+    clock.time += 29_000;
+    expect(await send(first, AVAILABILITY_PATH, "GET")).toBe(200);
+    expect((await emit("thread.unarchived", { thread: thread(null) })).errors).toEqual([]);
+    clock.time += 60_000;
+    expect(await send(first, AVAILABILITY_PATH, "GET")).toBe(200);
+    await emit("thread.archived", { thread: thread(clock.time) });
+    clock.time += 30_000;
+    expect(await send(first, AVAILABILITY_PATH, "GET")).toBe(401);
+    threads.set("thread-two", {
+      host: { id: WORKER },
+      archivedAt: null,
+      deletedAt: null,
+    });
+    await emit("thread.unarchived", { thread: thread(null) });
+    const second = await pass("thread-two");
+    expect(second).not.toBe(first);
+    expect(await send(second, AVAILABILITY_PATH, "GET")).toBe(200);
+    await emit("thread.deleted", { thread: thread(null, clock.time) });
+    expect(await send(second, AVAILABILITY_PATH, "GET")).toBe(401);
+    const third = await pass("thread-two");
+    expect(await send(second, AVAILABILITY_PATH, "GET")).toBe(401);
+    expect(await send(third, AVAILABILITY_PATH, "GET")).toBe(200);
+    await emit("experimental_host.deleted", {
+      host: makeHostResponse({ id: WORKER }),
+    });
+    expect(await send(third, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  it("moves between worker and token roles without leaving a credential behind", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    const threadPass = await pass("thread-two");
+    const catalog = await pass(null);
+    // worker -> worker changes nothing.
+    await callRpc("hostRole.set", { hostId: WORKER, role: "worker" });
+    expect(await send(threadPass, AVAILABILITY_PATH, "GET")).toBe(200);
+    // worker -> trusted: thread passes die, the machine gets a hub token.
+    // The catalog pass still only lists models.
+    await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+    expect(await send(threadPass, AVAILABILITY_PATH, "GET")).toBe(401);
+    expect(await send(catalog, "/models", "GET")).toBe(200);
+    expect(await send(catalog)).toBe(403);
+    const token = await pass("thread-two");
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(await send(token, AVAILABILITY_PATH, "GET")).toBe(200);
+    // trusted -> worker: the hub token dies and its file goes.
+    await callRpc("hostRole.set", { hostId: WORKER, role: "worker" });
+    expect(await send(token, AVAILABILITY_PATH, "GET")).toBe(401);
+    await expect(
+      fs.access(path.join(secretsOf(fixture), `hub-token-${WORKER}.json`)),
+    ).rejects.toThrow();
+    const next = await pass("thread-two");
+    expect(next).not.toBe(threadPass);
+    expect(await send(next, AVAILABILITY_PATH, "GET")).toBe(200);
+    // The old pass never comes back.
+    expect(await send(threadPass, AVAILABILITY_PATH, "GET")).toBe(401);
+    // No role: nothing works.
+    await callRpc("hostRole.set", { hostId: WORKER, role: "none" });
+    expect(await send(next, AVAILABILITY_PATH, "GET")).toBe(401);
+    expect(await send(catalog, "/models", "GET")).toBe(401);
+    expect(await callRpc("pass.list", null)).toEqual([]);
+  });
+
+  // A later build issues passes on every role; after a rollback to this one a
+  // turn in flight on a trusted machine keeps working.
+  it("accepts a pass held by a trusted machine and refuses it once the role is gone", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    const held = await pass("thread-two");
+    // The later build's state: the same row, the machine now trusted.
+    fixture.host.bb.storage
+      .database()
+      .prepare("UPDATE pool_host_role SET role = 'trusted' WHERE host_id = ?")
+      .run(WORKER);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(200);
+    expect(await send(held)).toBe(200);
+    // One reconcile round keeps it too.
+    const round = fixture.host.harness.behavior.runService("pass-reconcile");
+    round.controller.abort();
+    await round.done;
+    expect(await callRpc("pass.list", null)).toHaveLength(1);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(200);
+    await callRpc("hostRole.set", { hostId: WORKER, role: "none" });
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  // The roles build (P1) keeps a worker's hub token; after a roll-forward that
+  // token must not work and the next status deletes its file.
+  it("refuses a hub token kept for a machine that became a worker under an older build", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+    const token = await pass("thread-two");
+    expect(token).not.toMatch(/^pt1\./u);
+    expect(await send(token)).toBe(200);
+    fixture.host.bb.storage
+      .database()
+      .prepare("UPDATE pool_host_role SET role = 'worker' WHERE host_id = ?")
+      .run(WORKER);
+    expect(await send(token)).toBe(401);
+    await fixture.host.harness.behavior.runCli(["status", "--json"]);
+    expect(
+      (await fs.readdir(secretsOf(fixture))).filter((name) =>
+        name.startsWith("hub-token-"),
+      ),
+    ).toEqual(["hub-token-host-one.json"]);
+  });
+
+  // L1: the role row is committed before the callback runs, so a failing
+  // audit write must not keep a former worker's passes alive.
+  it("revokes a former worker's passes even when the role-change audit write fails", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    const held = await pass("thread-two");
+    fixture.host.bb.storage
+      .database()
+      .exec(
+        "CREATE TRIGGER fail_role_audit BEFORE INSERT ON pool_audit WHEN NEW.reason = 'role-change' BEGIN SELECT RAISE(FAIL, 'disk full'); END",
+      );
+    await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+    expect(await callRpc("pass.list", null)).toEqual([]);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  // L2: a row issued on any role (a later build) is still marked archived when
+  // no machine is a worker.
+  it("archives an existing pass when no machine is a worker", async () => {
+    const { fixture, clock, pass, send } = await workerFixture();
+    const held = await pass("thread-two");
+    fixture.host.bb.storage
+      .database()
+      .prepare("UPDATE pool_host_role SET role = 'trusted' WHERE host_id = ?")
+      .run(WORKER);
+    const { errors } = await fixture.host.harness.behavior.emitThreadEvent(
+      "thread.archived",
+      { thread: makeThreadResponse({ id: "thread-two", archivedAt: clock.time }) },
+    );
+    expect(errors).toEqual([]);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(200);
+    clock.time += 30_000;
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  // L3: a role change while the env contribution awaits bb leaves neither a
+  // pass row nor a credential in the environment: inside the issue (the
+  // missed-unarchive lookup) and after it (the retry-route write).
+  it("contributes nothing when the machine stops being a worker during the contribution", async () => {
+    const { fixture, clock, env, pass, callRpc } = await workerFixture();
+    await pass("thread-two");
+    await fixture.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-two", archivedAt: clock.time }),
+    });
+    fixture.host.harness.sdk.stub("threads.get", async () => {
+      await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+      return { host: { id: WORKER }, archivedAt: null, deletedAt: null };
+    });
+    const during = await env("thread-two");
+    expect(during.ANTHROPIC_AUTH_TOKEN).toBe("");
+    expect(during.ANTHROPIC_BASE_URL).toBe("");
+    expect(await callRpc("pass.list", null)).toEqual([]);
+
+    await callRpc("hostRole.set", { hostId: WORKER, role: "worker" });
+    const kv = fixture.host.bb.storage.kv;
+    const set = kv.set.bind(kv);
+    kv.set = (async (key: string, value: unknown) => {
+      if (key === "retry-route:thread-three")
+        await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+      return set(key, value as never);
+    }) as typeof kv.set;
+    const after = await env("thread-three");
+    expect(after.ANTHROPIC_AUTH_TOKEN).toBe("");
+    expect(after.ANTHROPIC_BASE_URL).toBe("");
+  });
+
+  it("refuses to rotate a worker's token and points to pass revoke", async () => {
+    const { fixture, callRpc } = await workerFixture();
+    await expect(callRpc("token.rotate", { machine: WORKER })).rejects.toThrow(
+      "per-thread passes",
+    );
+    const cli = await fixture.host.harness.behavior.runCli([
+      "token",
+      "rotate",
+      "--machine",
+      WORKER,
+    ]);
+    expect(cli.exitCode).not.toBe(0);
+    expect(`${cli.stdout}${cli.stderr}`).toContain("bb pool pass revoke");
+  });
+
+  it("revokes one thread's pass by command and never prints a pass", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    const { runCli } = fixture.host.harness.behavior;
+    const first = await pass("thread-two");
+    await pass(null);
+    const listed = await runCli(["pass", "list", "--json"]);
+    expect(JSON.parse(listed.stdout)).toEqual({
+      passes: [
+        {
+          threadId: "thread-two",
+          hostId: WORKER,
+          issuedAt: expect.any(Number),
+          state: "active",
+        },
+      ],
+    });
+    expect(await callRpc("pass.list", null)).toEqual(
+      JSON.parse(listed.stdout).passes,
+    );
+    const revoked = await runCli(["pass", "revoke", "thread-two", "--json"]);
+    expect(JSON.parse(revoked.stdout)).toEqual({
+      threadId: "thread-two",
+      revoked: true,
+    });
+    expect(await callRpc("pass.revoke", { threadId: "thread-two" })).toEqual({
+      threadId: "thread-two",
+      revoked: false,
+    });
+    expect(await send(first, AVAILABILITY_PATH, "GET")).toBe(401);
+    const second = await pass("thread-two");
+    expect(await send(second, AVAILABILITY_PATH, "GET")).toBe(200);
+    const outputs = [
+      listed.stdout,
+      revoked.stdout,
+      (await runCli(["pass", "list"])).stdout,
+      (await runCli(["audit"])).stdout,
+      (await runCli(["audit", "--json"])).stdout,
+      JSON.stringify(await callRpc("audit.list", {})),
+    ].join("\n");
+    expect(outputs).not.toMatch(/pt1\.|pc1\./u);
+  });
+
+  it("logs one select per session and account, never per request, and nothing for catalog or token counts", async () => {
+    const keys: string[] = [];
+    const { fixture, pass, send, audit } = await workerFixture({
+      upstream: async (request, response) => {
+        keys.push(String(request.headers["x-api-key"]));
+        await readRequestBody(request);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      },
+    });
+    await addApiAccount(fixture, "sk-two");
+    const credential = await pass("thread-two");
+    const session = (id: string) =>
+      JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        metadata: { user_id: JSON.stringify({ session_id: id }) },
+        messages: [{ role: "user", content: "AUDIT-BODY-MARKER" }],
+      });
+    for (let index = 0; index < 10; index++)
+      expect(
+        await send(
+          credential,
+          "/v1/messages",
+          "POST",
+          session(index % 2 === 0 ? "session-a" : "session-b"),
+        ),
+      ).toBe(200);
+    expect(await send(credential, "/v1/messages/count_tokens")).toBe(200);
+    expect(await send(credential, "/models", "GET")).toBe(200);
+    const selects = (await audit()).filter((entry) => entry.reason === "select");
+    expect(selects).toHaveLength(2);
+    expect(selects.map((entry) => entry.threadId)).toEqual([
+      "thread-two",
+      "thread-two",
+    ]);
+    expect(selects.every((entry) => entry.hostId === WORKER)).toBe(true);
+    expect(keys.filter((key) => key !== "undefined")).toHaveLength(12);
+    expect(JSON.stringify(await audit())).not.toContain("AUDIT-BODY-MARKER");
+  });
+
+  it("logs limits, failover, passes and role changes without request content", async () => {
+    let calls = 0;
+    const { fixture, pass, send, audit } = await workerFixture({
+      upstream: async (request, response) => {
+        calls++;
+        await readRequestBody(request);
+        if (calls === 1) {
+          response.writeHead(429, {
+            "content-type": "application/json",
+            "anthropic-ratelimit-unified-5h-status": "allowed",
+            "anthropic-ratelimit-unified-7d-status": "allowed",
+            "anthropic-ratelimit-unified-7d_oi-reset": "4102452000",
+            "anthropic-ratelimit-unified-7d_oi-status": "rejected",
+          });
+          response.end('{"rejected":true}');
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      },
+    });
+    const second = await addApiAccount(fixture, "sk-two");
+    const credential = await pass("thread-two");
+    expect(
+      await send(
+        credential,
+        "/v1/messages",
+        "POST",
+        JSON.stringify({
+          model: "claude-fable-5",
+          messages: [{ role: "user", content: "AUDIT-BODY-MARKER" }],
+        }),
+      ),
+    ).toBe(200);
+    await fixture.host.harness.behavior.callRpc("hostRole.set", {
+      hostId: WORKER,
+      role: "trusted",
+    });
+    const rows = (await audit()).map((entry) =>
+      [entry.reason, entry.threadId, entry.accountId, entry.detail].join(":"),
+    );
+    expect(rows).toEqual([
+      expect.stringMatching(/^role-change:::none->trusted$/u),
+      expect.stringMatching(/^role-change:::none->trusted$/u),
+      "role-change:::trusted->worker",
+      "pass-issued:thread-two::",
+      `limit:thread-two:${fixture.account.id}:quota`,
+      `failover:thread-two:${second.id}:quota`,
+      `select:thread-two:${second.id}:`,
+      "pass-revoked:thread-two::role",
+      "role-change:::worker->trusted",
+    ]);
+    expect(JSON.stringify(await audit())).not.toMatch(
+      /AUDIT-BODY-MARKER|claude-fable|sk-/u,
+    );
+  });
+
+  it("gives server and trusted machines exactly the P1 hub-token env, with and without a thread", async () => {
+    const { env } = await workerFixture({ codex: true });
+    for (const threadId of [null, "thread-one"]) {
+      const claude = await env(threadId, "claude-code", "host-one");
+      const codex = await env(threadId, "codex", "host-one");
+      const token = claude.ANTHROPIC_AUTH_TOKEN;
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      expect(claude).toEqual({
+        ANTHROPIC_BASE_URL: expect.objectContaining({ serverPath: expect.any(String) }),
+        ANTHROPIC_AUTH_TOKEN: token,
+        ENABLE_TOOL_SEARCH: "true",
+        _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: "1",
+        [PARENT_URL_ENV]: expect.objectContaining({ serverPath: expect.any(String) }),
+        [PARENT_TOKEN_ENV]: token,
+      });
+      expect(codex).toEqual({
+        CODEX_OPENAI_BASE_URL: expect.objectContaining({ serverPath: expect.any(String) }),
+        CODEX_POOL_AUTH_TOKEN: token,
+        [PARENT_URL_ENV]: expect.objectContaining({ serverPath: expect.any(String) }),
+        [PARENT_TOKEN_ENV]: token,
+      });
+    }
+  });
+});
