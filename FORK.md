@@ -1,6 +1,6 @@
 # werserk/bb fork
 
-This is a maintained downstream fork of [get-bb/bb](https://github.com/get-bb/bb). `fork/main` started at the upstream release tag `desktop-v0.48.1`, now carries upstream `desktop-v0.49.0` merged in, and adds only downstream patches; it integrates upstream `desktop-v*` release tags, never upstream `main`. Architecture, branch model, release policy and the patch ledger live in the maintainer's repository: `docs/bb-fork/` in [werserk/bb-plugin-lab](https://github.com/werserk/bb-plugin-lab) (private).
+This is a maintained downstream fork of [get-bb/bb](https://github.com/get-bb/bb). `fork/main` started at the upstream release tag `desktop-v0.48.1`, now carries upstream `desktop-v0.50.1` merged in (after `desktop-v0.49.0`), and adds only downstream patches; it integrates upstream `desktop-v*` release tags, never upstream `main`. Architecture, branch model, release policy and the patch ledger live in the maintainer's repository: `docs/bb-fork/` in [werserk/bb-plugin-lab](https://github.com/werserk/bb-plugin-lab) (private).
 
 `apps/app/src/lib/synchronized-spinners.ts`, installed before React mounts in `main.tsx`, aligns native `spin` animations and pure full-turn animations on `.animate-spin` or working `.wp-status-mark` targets, including scoped plugin names, to a 1000ms document-timeline phase. Existing animations and later animation starts share the same path; reduced-motion and paused animations are left to CSS. It adds no render loop or DOM observer.
 
@@ -125,6 +125,18 @@ use ReadingScrollArea. FilePreviewHostScrollContext makes the existing host slot
 the sole Markdown scroll owner when it already scrolls; full-height slots let the
 preview own scrolling. This avoids an unbounded nested Radix viewport observed
 in the isolated candidate lab. No context or primitive is exported through SDK.
+
+## Upstream sync: desktop-v0.50.1
+
+The fork merged upstream `desktop-v0.50.1` on top of `fork/main` `6597674a8d`, by the same rule: where upstream ships an equivalent, take upstream's and drop the fork's. The per-patch table (kept, dropped, adapted, with evidence) is in the maintainer's repo, `docs/bb-fork/evidence/sync-0.50.1.md`.
+
+- Daemon protocol: upstream 268, the fork 274 (six fork bumps).
+- Database: `packages/db/drizzle/` takes upstream `0153`-`0158` unchanged (all additive: new tables, added columns, one settings copy). Fork migrations `drizzle/fork/0000`-`0006` are unchanged; the fork snapshot was refreshed over the synced schema by the sync procedure above. Rollback: the new migrations drop nothing, so the previous build is expected to start on a migrated database (inferred, not rehearsed); restoring the pre-start database snapshot remains the safe path.
+- Thread lifecycle: upstream's persisted lifecycle (`apps/server/src/services/threads/lifecycle/`, tables `thread_run_states` and `thread_turn_requests`) replaces the fork's lifecycle event appliers, `turn-completed-events.ts` and `lifecycle-outcome.ts`. The fork's rules now live on it: refused held-answer recovery in `thread-lifecycle.ts` (only while the tracked request is not yet accepted), no owner attention for hidden service turns in `lifecycle/run.ts` and `finish.ts`, and native-pool `release-idle` through `buildThreadStopCommand`. A stale-turn answer on a running thread follows upstream's single redelivery into the running turn instead of the fork's re-queue.
+- Head state: upstream moved it to `thread-head-state.ts`; plan `staleSince`, context-clear hiding and `includeService` filtering are ported there and stay exposed through the route, SDK and CLI.
+- Send intake keeps its own receipts; `sent` receipts carry upstream's required `messageSequence`, and receipts stored by older builds are read with it filled from the request or left empty.
+- Dropped for upstream's version: the `resumeThreadsAfterRestart` experiment (now a General setting), the fork's event-loop lineage bound, the Codex exact stale-steer match, hand-kept bb-guide API indexes (now generated), the second compiled app Vitest run, the sidebar update chips (upstream's update button and card), and the provider-codex and provider-pi shared-worker Vitest configs.
+- Upstream's new lint rules (`bb/no-comments`, `bb/forkable-plugin-imports`, `bb/no-raw-resize-observer`, React Compiler `all_errors`) now cover fork code; fork code satisfies them without rule changes, apart from three line-level `react/set-state-in-effect` disables around one-shot plan focus tokens in the app.
 
 ## Upstream sync: desktop-v0.49.0
 
