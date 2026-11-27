@@ -51,6 +51,10 @@ async function fixture(
   // Which API key the upstream saw, in order, and what it answers per key.
   const seen: string[] = [];
   const replies = new Map<string, Reply>();
+  // Runs while the upstream holds a request, before it answers.
+  const upstreamHook: { current: ((key: string) => Promise<void>) | null } = {
+    current: null,
+  };
   const server = http.createServer((request, response) => {
     const key = String(
       request.headers["x-api-key"] ??
@@ -58,7 +62,10 @@ async function fixture(
     );
     seen.push(key);
     request.resume();
-    request.on("end", () => {
+    request.on("end", async () => {
+      const hook = upstreamHook.current;
+      upstreamHook.current = null;
+      await hook?.(key);
       const reply = replies.get(key) ?? { status: 200 };
       response.writeHead(reply.status, {
         "content-type": "application/json",
@@ -149,7 +156,8 @@ async function fixture(
   await args.beforeStart?.(dataDir);
   await createAccountPoolPlugin({
     usageUrl: "data:application/json,{}",
-    upstreams: { anthropic: url, chatgptCodex: url },
+    // Every upstream is the fake one: no request leaves the machine.
+    upstreams: { anthropic: url, chatgptCodex: url, openai: url },
     now: () => clock.time,
   })(host.bb);
   const { callRpc, resolveProviderEnv, fetchHttp, runCli } = host.harness.behavior;
@@ -205,6 +213,15 @@ async function fixture(
         "anthropic-version": "2023-06-01",
       },
       body,
+    });
+    await response.text();
+    return response;
+  };
+  const sendCodex = async (threadId: string) => {
+    const pass = String((await env(threadId, "codex")).CODEX_POOL_AUTH_TOKEN);
+    const response = await fetchHttp("POST", "/v1/responses", {
+      headers: { "x-bb-account-pool-token": pass, "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5", input: "hi" }),
     });
     await response.text();
     return response;
@@ -277,6 +294,8 @@ async function fixture(
     changedSignals,
     seen,
     replies,
+    upstreamHook,
+    sendCodex,
     thread,
     threads,
     clearContext,
@@ -849,5 +868,185 @@ describe("new-thread family, serving signal and route (A2, U1, U2)", () => {
     await f.callRpc("hostRole.set", { hostId: "host-two", role: "none" });
     await f.env("thread-w", "claude-code", "host-two");
     expect(await route("thread-w")).toBe("none");
+  });
+});
+
+const QUOTA_REJECTION: Reply = {
+  status: 429,
+  headers: {
+    "anthropic-ratelimit-unified-status": "rejected",
+    "anthropic-ratelimit-unified-5h-status": "rejected",
+    "anthropic-ratelimit-unified-5h-utilization": "1",
+    "anthropic-ratelimit-unified-5h-reset": String(Math.floor(START / 1_000) + 3_600),
+  },
+};
+
+describe("final review fixes (F1, F2, F5)", () => {
+  it("keeps a grandfathered thread grandfathered when its new session fails (F1)", async () => {
+    const f = await fixture();
+    const delta = await f.add("delta", 0, "codex");
+    const epsilon = await f.add("epsilon", 10, "codex");
+    f.thread("thread-old", { providerId: "codex", createdAt: START - 1 });
+    const codexToken = async (threadId: string | null) =>
+      String((await f.env(threadId, "codex")).CODEX_POOL_AUTH_TOKEN);
+    const machine = await codexToken(null);
+    expect(await codexToken("thread-old")).toBe(machine);
+    const named = (threadId: string, accountId: string) =>
+      f.rpc("set", { threadId, policy: { mode: "named", accountId }, newSession: true });
+    f.clearContext.mockRejectedValueOnce(
+      Object.assign(new Error("Thread became active"), { status: 409 }),
+    );
+    expect(await named("thread-old", delta)).toMatchObject({
+      ok: false,
+      reason: "not-idle",
+      message: expect.stringContaining("the policy was not changed"),
+    });
+    expect(await f.rpc("get", { threadId: "thread-old" })).toMatchObject({
+      grandfathered: true,
+      policy: { mode: "auto" },
+      revision: 0,
+    });
+    expect(await codexToken("thread-old")).toBe(machine);
+    expect((await f.audit()).filter((row) => row.startsWith("policy"))).toEqual([
+      "policy:thread-old:named-fallback-auto@client+new-session",
+      "policy:thread-old:auto@revert",
+    ]);
+    // Another writer wins while bb refuses: its policy stays, and the answer
+    // says so (I6).
+    f.thread("thread-new", { providerId: "codex" });
+    f.clearContext.mockImplementationOnce(async () => {
+      await f.rpc("set", {
+        threadId: "thread-new",
+        policy: { mode: "named", accountId: epsilon },
+      });
+      throw new Error("busy");
+    });
+    expect(await named("thread-new", delta)).toMatchObject({
+      ok: false,
+      reason: "not-idle",
+      message: expect.stringContaining("another writer changed the policy"),
+    });
+    expect(await f.rpc("get", { threadId: "thread-new" })).toMatchObject({
+      policy: { mode: "named", accountId: epsilon },
+      revision: 2,
+    });
+  });
+
+  it("applies a named Claude account to the thread's Claude requests only (F2a)", async () => {
+    const f = await fixture();
+    await f.add("delta", 0, "codex");
+    f.thread("thread-a");
+    await f.rpc("set", { threadId: "thread-a", policy: { mode: "named", accountId: f.beta } });
+    expect((await f.sendCodex("thread-a")).status).toBe(200);
+    expect(f.seen.at(-1)).toBe("sk-delta");
+    expect(await f.rpc("get", { threadId: "thread-a" })).toMatchObject({
+      policy: { mode: "named", accountId: f.beta },
+      revision: 1,
+      lastLimit: null,
+    });
+    expect((await f.send(await f.token("thread-a"))).status).toBe(200);
+    expect(f.seen.at(-1)).toBe("sk-beta");
+  });
+
+  it("follows a concurrent writer when its own fallback loses the compare-and-set (F2b)", async () => {
+    const f = await fixture();
+    const gamma = await f.add("gamma", 20);
+    f.thread("thread-a");
+    await f.rpc("set", { threadId: "thread-a", policy: { mode: "named", accountId: f.beta } });
+    const a = await f.token("thread-a");
+    expect((await f.send(a)).status).toBe(200);
+    f.clock.time += 1_000;
+    f.replies.set("sk-beta", QUOTA_REJECTION);
+    f.upstreamHook.current = async () => {
+      await f.rpc("set", { threadId: "thread-a", policy: { mode: "named", accountId: gamma } });
+    };
+    expect((await f.send(a)).status).toBe(200);
+    // Served under the policy the other writer stored, not as auto: the move
+    // to gamma is that policy's `switch`.
+    expect(f.seen.slice(-2)).toEqual(["sk-beta", "sk-gamma"]);
+    expect((await f.audit()).at(-1)).toBe("switch:thread-a:-");
+    expect(await f.rpc("get", { threadId: "thread-a" })).toMatchObject({
+      policy: { mode: "named", accountId: gamma },
+      revision: 2,
+    });
+    expect(await f.audit()).not.toContain("policy:thread-a:auto@limit");
+  });
+
+  it("persists auto when the named account is deleted (F2c)", async () => {
+    const f = await fixture();
+    f.thread("thread-a");
+    await f.rpc("set", { threadId: "thread-a", policy: { mode: "named", accountId: f.beta } });
+    const a = await f.token("thread-a");
+    await f.callRpc("account.remove", { id: f.beta });
+    expect((await f.send(a)).status).toBe(200);
+    expect(f.seen.at(-1)).toBe("sk-alpha");
+    expect(await f.rpc("get", { threadId: "thread-a" })).toMatchObject({
+      policy: { mode: "auto" },
+      revision: 2,
+      lastLimit: { cause: "deleted", action: "fell-back" },
+    });
+    expect(
+      (await f.audit()).filter((row) => /^(named-limit|policy)/u.test(row)),
+    ).toEqual([
+      "policy:thread-a:named-fallback-auto@client",
+      "named-limit:thread-a:deleted-fallback-auto",
+      "policy:thread-a:auto@limit",
+    ]);
+  });
+
+  it("starts no new session for a Codex thread that stays on its account (F2d)", async () => {
+    const f = await fixture();
+    const delta = await f.add("delta", 0, "codex");
+    f.thread("thread-codex", { providerId: "codex" });
+    expect((await f.sendCodex("thread-codex")).status).toBe(200);
+    expect(f.seen.at(-1)).toBe("sk-delta");
+    expect(
+      await f.rpc("set", {
+        threadId: "thread-codex",
+        policy: { mode: "named", accountId: delta },
+        newSession: true,
+      }),
+    ).toMatchObject({ ok: false, reason: "new-session-not-needed" });
+    expect(f.clearContext).not.toHaveBeenCalled();
+    expect(await f.rpc("get", { threadId: "thread-codex" })).toMatchObject({ revision: 0 });
+  });
+
+  it("logs a pool move back to the named account as select, not switch (F5)", async () => {
+    const f = await fixture();
+    f.thread("thread-a");
+    const a = await f.token("thread-a");
+    const step = async () => {
+      f.clock.time += 1_000;
+      expect((await f.send(a)).status).toBe(200);
+      return f.seen.at(-1);
+    };
+    expect(await step()).toBe("sk-alpha");
+    f.clock.time += 1_000;
+    await f.rpc("set", { threadId: "thread-a", policy: { mode: "named", accountId: f.beta } });
+    expect(await step()).toBe("sk-beta");
+    await f.callRpc("account.disable", { id: f.beta });
+    expect(await step()).toBe("sk-alpha");
+    await f.callRpc("account.enable", { id: f.beta });
+    expect(await step()).toBe("sk-beta");
+    expect(
+      (await f.audit()).filter((row) => /^(select|switch)/u.test(row)),
+    ).toEqual([
+      "select:thread-a:-",
+      "switch:thread-a:-",
+      "select:thread-a:-",
+      "select:thread-a:-",
+    ]);
+  });
+
+  it("closes a new thread archived before its first pass on a trusted machine (F5)", async () => {
+    const f = await fixture();
+    // No pass was ever issued; the archive marks the thread so the first
+    // issue checks bb instead of writing a live pass.
+    f.thread("thread-new", { archivedAt: START + 2 });
+    const { errors } = await f.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-new", createdAt: START + 1, archivedAt: START + 2 }),
+    });
+    expect(errors).toEqual([]);
+    expect((await f.env("thread-new")).ANTHROPIC_AUTH_TOKEN).toBe("");
   });
 });

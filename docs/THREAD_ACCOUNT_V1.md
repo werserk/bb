@@ -8,10 +8,25 @@ and other plugins use the same service.
 
 ## Compatibility rule
 
-`v1` never changes meaning. Within `v1`, output objects may gain optional
-fields and enums may gain values; a caller ignores fields it does not know and
-treats an unknown enum value as "not one of mine". A removed field, a renamed
-value or a changed meaning is `thread-account.v2`, registered next to `v1`.
+`v1` never changes meaning. Within `v1`, output objects may gain fields and
+enums may gain values. A removed field, a renamed value or a changed meaning is
+`thread-account.v2`, registered next to `v1`. A caller:
+
+- ignores output fields it does not know;
+- treats an unknown refusal `reason` as a generic refusal and shows `message`;
+- skips an event whose `kind` it does not know;
+- reads an unknown `switchContinuity` as `may-restart`;
+- reads an unknown `route` as `none`, and an unknown `lastLimit.cause` or
+  `action` as "the named account could not serve".
+
+## Callers
+
+Any bb client (the UI, every agent on any machine, the CLI) and any plugin may
+call every method for any thread, including `set` with `newSession`, which
+clears the model context of an idle Codex thread. That is no new authority:
+bb's own `threads.clearContext` is open to the same callers. Per-caller limits
+are a bb core matter (class G1), not this contract's. A plugin caller is
+recorded as `plugin-<id>` in the audit; every other caller is `client`.
 
 ## Pooled providers
 
@@ -138,8 +153,10 @@ Refusals are `{ ok: false, reason, message, resetAt? }`, checked in this order:
 | `not-idle` | `newSession` while the thread is busy, or bb refused the new session (the policy is put back) |
 
 With `newSession`, the policy is stored first and then bb starts a new Codex
-session; if bb refuses, the previous policy is written back
-(`policy …@revert`) and the answer is `not-idle`.
+session; if bb refuses, the previous policy is put back (`policy …@revert`)
+and the answer is `not-idle`. A thread that had no stored policy gets none
+again, so a grandfathered thread stays grandfathered. If another writer
+changed the policy in between, its policy stays and the message says so.
 
 ### `thread-account.v1.accounts`
 
@@ -179,8 +196,8 @@ bb pool thread list
 
 `set` takes an account id or a unique label; `--json`, `--expected-revision`
 and `--new-session` match the RPC. `bb pool status` adds a Threads block
-(named policies, threads served per account in the last 24 h, requests still
-sessions selected on a machine token).
+(named policies, threads served per account in the last 24 h, and model
+sessions still selected on a machine token).
 
 ## Realtime
 

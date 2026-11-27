@@ -197,6 +197,19 @@ export class ThreadPolicyStore {
     })();
   }
 
+  // Deletes the row if its revision is still `expected`: puts a thread that
+  // had no row back to "no row" (it stays grandfathered). False when another
+  // writer won.
+  deleteIf(threadId: string, expected: number): boolean {
+    return (
+      this.db
+        .prepare(
+          "DELETE FROM pool_thread_policy WHERE thread_id = ? AND revision = ?",
+        )
+        .run(threadId, expected).changes > 0
+    );
+  }
+
   delete(threadId: string): boolean {
     this.serving.delete(threadId);
     return (

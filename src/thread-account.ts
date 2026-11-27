@@ -481,15 +481,6 @@ export class ThreadAccounts {
         ...(await this.state(threadId, provider, labels)),
       };
     }
-    // `auto` with no row is the default: nothing to store, nothing rebuilt.
-    if (next.mode === "auto" && !hadRow)
-      return {
-        ok: true,
-        changed: false,
-        sessionRebuild: "none",
-        message: null,
-        ...(await this.state(threadId, provider, labels)),
-      };
     const revision = this.deps.policies.write(threadId, next, current.revision);
     if (revision === null)
       return refusal(
@@ -507,8 +498,12 @@ export class ThreadAccounts {
       try {
         await this.deps.clearContext(threadId);
       } catch {
-        // No half state: put the previous policy back.
-        if (this.deps.policies.write(threadId, before, revision) !== null)
+        // No half state: put the previous policy back. A thread that had no
+        // row gets none again, so a grandfathered thread stays one (R3).
+        const reverted = hadRow
+          ? this.deps.policies.write(threadId, before, revision) !== null
+          : this.deps.policies.deleteIf(threadId, revision);
+        if (reverted)
           this.deps.audit.append({
             reason: "policy",
             provider: provider ?? null,
@@ -519,7 +514,9 @@ export class ThreadAccounts {
         this.deps.onChanged(threadId);
         return refusal(
           "not-idle",
-          "bb could not start a new session (the thread is busy or waiting for input); the policy was not changed.",
+          reverted
+            ? "bb could not start a new session (the thread is busy or waiting for input); the policy was not changed."
+            : "bb could not start a new session (the thread is busy or waiting for input), and another writer changed the policy meanwhile; read it again.",
         );
       }
     }

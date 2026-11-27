@@ -261,7 +261,9 @@ keep theirs.
 
 Rollback to P2: P2's migrator ignores the extra migration, its audit read
 returns the new reasons as they are, and its hub ignores policies (threads go
-back to auto). Rows stay for a later roll forward.
+back to auto). Rows stay for a later roll forward. A roll forward keeps the
+pass epoch, so threads created while P2 ran count as new: each gets a pass at
+its next turn, which rebuilds its session once.
 
 ## Audit log
 
