@@ -98,7 +98,22 @@ export async function resolveRoot(input: { path: string }) {
     } catch {
     }
   }
-  return { root, hostname: hostname(), instructions };
+  return { root, hostname: hostname(), instructions, branch: await readBranch(root) };
+}
+
+export async function readBranch(root: string): Promise<string | null> {
+  try {
+    let gitDir = path.join(root, ".git");
+    if ((await stat(gitDir)).isFile()) {
+      const pointer = /^gitdir: (.+)$/.exec((await readFile(gitDir, "utf8")).trim());
+      if (pointer === null) return null;
+      gitDir = path.resolve(root, pointer[1]!);
+    }
+    const head = /^ref: refs\/heads\/(.+)$/.exec((await readFile(path.join(gitDir, "HEAD"), "utf8")).trim());
+    return head === null ? null : head[1]!;
+  } catch {
+    return null;
+  }
 }
 
 export async function readOp(input: {

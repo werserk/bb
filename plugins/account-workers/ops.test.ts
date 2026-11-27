@@ -187,4 +187,19 @@ describe("resolveRoot", () => {
     await symlink(path.join(base, "outside/secret.py"), path.join(root, "CLAUDE.md"));
     expect((await resolveRoot({ path: root })).instructions).toEqual([]);
   });
+
+  it("reports the branch of a checkout and of a linked worktree, and null elsewhere", async () => {
+    expect((await resolveRoot({ path: root })).branch).toBeNull();
+    await mkdir(path.join(root, ".git"));
+    await writeFile(path.join(root, ".git", "HEAD"), "ref: refs/heads/feature/x\n");
+    expect((await resolveRoot({ path: root })).branch).toBe("feature/x");
+    const linked = path.join(base, "linked");
+    await mkdir(path.join(linked), { recursive: true });
+    await mkdir(path.join(root, ".git", "worktrees", "linked"), { recursive: true });
+    await writeFile(path.join(root, ".git", "worktrees", "linked", "HEAD"), "ref: refs/heads/side\n");
+    await writeFile(path.join(linked, ".git"), `gitdir: ${path.join(root, ".git", "worktrees", "linked")}\n`);
+    expect((await resolveRoot({ path: linked })).branch).toBe("side");
+    await writeFile(path.join(root, ".git", "HEAD"), "0123456789abcdef0123456789abcdef01234567\n");
+    expect((await resolveRoot({ path: root })).branch).toBeNull();
+  });
 });

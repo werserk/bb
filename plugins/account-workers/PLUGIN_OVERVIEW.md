@@ -8,6 +8,10 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 - The workspace's `AGENTS.md` and `CLAUDE.md` reach the agent as quoted instructions.
 - The thread runs in an empty scratch directory on the worker whose settings turn off the provider's native file, shell and other tools, so nothing acts on the worker by mistake. Supported providers: Claude Code (`claude-code`, the default), OpenCode 2 (`acp-opencode`) and Codex (`codex`; the spawn first runs a no-fallback check on the worker).
 
+## From the new-thread picker
+
+Choose **On a worker** as the environment, the worker as the machine, and the workspace (the project's folder on another machine) in the control next to it. The thread starts with the same scratch directory and workspace tools as `spawn`; archiving or deleting it releases the scratch directory through BB's environment cleanup.
+
 ## For agents and scripts
 
 - `bb account-workers spawn --workspace-machine <machine> --path <dir> --machine <worker> --prompt <text> [--provider <id>] [--model <id>] [--send-at <epoch ms>] [--account <id|label>] [--on-limit fallback-auto|stop]` starts a bound thread.

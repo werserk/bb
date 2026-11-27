@@ -66,18 +66,19 @@ export async function verifyProfile(
 }
 
 export async function releaseScratch(
-  input: { bindingId: string; profile: string; scratchPath: string },
+  input: { bindingId: string; profile: string; scratchPath?: string },
   signal: AbortSignal = new AbortController().signal,
 ) {
   if (!BINDING_ID.test(input.bindingId)) throw new WorkspaceRefusal(`invalid binding id ${input.bindingId}`);
-  if (path.basename(input.scratchPath) !== input.bindingId) {
+  const scratchPath = input.scratchPath ?? path.join(scratchBase(), input.bindingId);
+  if (path.basename(scratchPath) !== input.bindingId) {
     throw new WorkspaceRefusal(`scratch path does not belong to binding ${input.bindingId}`);
   }
   const profile = knownProfile(input.profile);
   const { release } = profile;
   if (release !== undefined) {
     await runHook(profile, "release", () =>
-      release.call(profile, { scratchDir: input.scratchPath, bindingId: input.bindingId, signal }),
+      release.call(profile, { scratchDir: scratchPath, bindingId: input.bindingId, signal }),
     );
   }
   await rm(path.join(scratchBase(), input.bindingId), { recursive: true, force: true });

@@ -114,6 +114,17 @@ The thread runs on the worker host in a scratch directory outside BB's data dire
 
 This relies on `provider-claude-code` loading project and local settings (`settingSources` includes `project` and `local`).
 
+### Environment provider (new-thread picker)
+
+`provider.ts` registers the environment provider `account-workers-worker` ("On a worker"), so a thread can be started on a worker from BB's own new-thread picker instead of `spawn`. The picker's machine is the worker; the provider's inputs `{ workspaceHostId, root }` name the workspace. The app entry (`app.tsx`) supplies the inputs control: a list of the project's `local_path` sources on other connected machines, from the `choices` RPC. It submits ready only for a usable choice and blocks with the reason otherwise (no project, a new machine, a workspace or worker offline, no source on another machine).
+
+- **Contract.** Written against the v1 (thread-based) provider contract of the cores it runs on (0.49, 0.50.1), with local types; the SDK in this repository types only v2. A v2 port is a follow-up once core drops v1.
+- **`validate`** resolves the workspace (machine connected, the project has a source there, `resolveRoot` on that path) within 8 s and refuses when the inputs' root is not that source. The workspace must be another machine than the worker (`SAME_HOST`).
+- **Model.** `create` gets the thread, which carries no model. The `message.dispatch` hook records the model of the start attempt (`provider_starts`, by thread id) when the intent is this provider, the thread is `pending` and the attempt is `start-turn`; it refuses a provider with no profile. `create` reads it for the profile (Codex needs it) and forgets it once the binding is recorded.
+- **`create`** runs the same steps as `spawn` (machine variables, workspace, `prepareScratch` on the worker, the binding row with `owner = provider`, ready at once) under one deadline (`CREATE_DEADLINE_MS`). A timeout or failure names the step, removes any scratch directory it may have made (by binding id, also when the path is not known yet), and records no binding. A reattempt for a thread that already has a live provider binding on the same worker returns it unchanged. It returns `ownsPath: false`: the scratch directory is not a checkout, so core must not run the project's setup or teardown scripts there.
+- **Lifecycle.** A provider binding is the environment's resource (`{ bindingId }`). Core's retirement calls `remove`, which tombstones the binding (reason `environment`) and runs the [release](#release) on the worker; a failed release is returned as failed, so core retries it. The plugin's own archive, unarchive and delete handlers act only on `owner = cli` bindings.
+- **App reads.** `threadWorkspace` (tag `workspace:<threadId>`, invalidated on create, release and rebind) shows the bound workspace with its current branch and any issue (broken, released, offline). `rebind` moves a thread to another workspace machine of the same project. `choices` is not realtime: BB has no host events for plugins, so a machine going offline shows on the next query.
+
 ## Provider profiles
 
 A provider profile turns off one provider's worker-side tools in the scratch directory. Each profile is one file in `plugins/account-workers/profiles/`; adding a provider is that file plus one entry in `profiles/index.ts`.
@@ -217,6 +228,7 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
 | Provider profile seam, OpenCode profile | Built, block 2 |
 | Codex profile | Built, block 3 |
 | Dispatch hold, binding release (`unbind`, archive, delete) | Built, block 4; the `--send-at` hold after A2 |
+| Environment provider `account-workers-worker`, workspace inputs control, app RPCs | Built (plugin side of core-run-on-picker); the fork's `experimental_runOnProvider` registration waits for the fork core slot |
 | Account selection | Built: `spawn --account` and the account in `list` through the pool's `thread-account.v1`, block A2 ([accounts](#accounts)); the policy, passes and switching are the pool's |
 | Earlier core implementation (PlacementService, queue, storage, cross-host runtime) | Frozen in `archive/aw/*` tags; see [decisions](decisions.md) |
 
@@ -246,4 +258,5 @@ Dropped: per-worker account homes and a pool bypass for them (each home needed i
   - The canary's catalog is the worker's cache. A thread whose login does not match the cache's identity uses the bundled catalog or fetches a fresh one, which may differ.
   - As with Claude (G2), the worker user's own instructions, skills and hooks still load.
 - **G11. Account window.** In the one live check (2026-11-27) the hold did its job: the policy was stored 39 ms before the first turn was requested. `get`'s `serving.since` is the time of the first model request, not of `set`, so it cannot date the policy. `spawn --account` relies on the dispatch hold, so the paths that skip hooks also skip the account: the user's **Send now** on the queued first message before the policy is stored sends that turn through `auto`. The spawn then still succeeds, with a warning when `get` already shows another serving account. The warning can miss a first turn of several requests whose later requests already ran on the named account; the pool's `events` would catch that and are not read yet. Closing it needs a core change (a plugin create without a first message, then `set`, then the send). A refused spawn deletes its queued messages for the same reason: after release, Send now would skip the hook in a cleaned scratch.
+- **G12. Picker start.** Core 0.49/0.50.1 runs the v1 provider contract with a deprecation warning; a core that drops v1 needs the v2 port. Send now and the paths that skip hooks (G8, G11) also skip the start model record; `create` then prepares with no model, which a Codex profile refuses. `choices` does not update live when a machine connects or drops.
 - **Cloud mode.** Running without the owner's PC needs the BB server off that PC; this is deployment, not plugin code (Later).
