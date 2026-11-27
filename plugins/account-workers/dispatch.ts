@@ -45,7 +45,7 @@ export function decideDispatch(
     }
     return wait("preparing the workspace binding");
   }
-  if (record.sendAt !== null && record.sendAt > now) {
+  if (record.sendAt !== null && record.sendAt > now && thread.status === "pending") {
     return { decision: waitDecision(`account-workers: holding this thread's messages until its --send-at time ${new Date(record.sendAt).toISOString()}`, record.sendAt) };
   }
   return { decision: { action: "proceed" } };

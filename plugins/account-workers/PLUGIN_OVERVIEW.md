@@ -12,7 +12,7 @@ Run an agent on one machine (the worker, which holds the provider login) while i
 
 - `bb account-workers spawn --workspace-machine <machine> --path <dir> --machine <worker> --prompt <text> [--provider <id>] [--model <id>] [--send-at <epoch ms>] [--account <id|label>] [--on-limit fallback-auto|stop]` starts a bound thread.
 - `--account` pins the thread to one pool account (Account Pooler `thread-account.v1`) before its first message; `--on-limit` says what happens at that account's limit (default `fallback-auto`). Any refusal stops the spawn and archives the new thread; without `--account` the pool picks.
-- `--send-at` schedules the first message. account-workers, not core, guarantees it: the thread's messages wait until that time, also on cores that drop the sender's time under a plugin wait. Send now still sends at once.
+- `--send-at` schedules the first message. account-workers, not core, guarantees it: while the thread has not started, its messages wait until that time, also on cores that drop the sender's time under a plugin wait. The time given to `spawn` wins over a later reschedule to an earlier time; only Send now sends earlier.
 - `bb account-workers list` (with each thread's account and policy when the pool is present), `rebind`, `unbind` manage bindings.
 - `bb account-workers exec --thread <id> -- <command>` runs a command through the same path as the agent's exec tool.
 

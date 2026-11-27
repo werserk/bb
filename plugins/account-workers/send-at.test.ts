@@ -25,9 +25,11 @@ const cores = {
   },
 };
 
-const ctx = () =>
+type Status = "pending" | "idle" | "starting" | "active" | "stopping" | "error";
+
+const ctx = (status: Status = "pending") =>
   makeMessageDispatchHookContext({
-    thread: { id: "t1", originPluginId: ME, createdAt: T0 },
+    thread: { id: "t1", originPluginId: ME, createdAt: T0, status },
     requestedExecution: { providerId: "claude-code", model: null, reasoningLevel: null, serviceTier: null, permissionMode: null },
   });
 
@@ -71,6 +73,16 @@ describe("--send-at hold", () => {
     expect(decideDispatch(ME, ctx(), ready, T0 + DAY).decision).toEqual({ action: "proceed" });
   });
 
+  it.each<Status>(["idle", "starting", "active", "stopping", "error"])("a thread that has started (%s) proceeds before the time: --send-at schedules only the first message", (status) => {
+    expect(decideDispatch(ME, ctx(status), create(store(), { sendAt: T0 + DAY }), T0).decision).toEqual({ action: "proceed" });
+  });
+
+  it("the same binding holds a pending thread and lets it through once the thread has started", () => {
+    const record = create(store(), { sendAt: T0 + DAY });
+    expect(decideDispatch(ME, ctx("pending"), record, T0).decision).toMatchObject({ action: "wait", sendAt: T0 + DAY });
+    expect(decideDispatch(ME, ctx("active"), record, T0).decision).toEqual({ action: "proceed" });
+  });
+
   it.each([
     ["a missing time", null],
     ["a past-due time", T0 - 1],
@@ -90,6 +102,33 @@ describe("--send-at hold", () => {
       }, T0, () => undefined).decision;
       expect(waitTime(failed)).toBe(T0 + WAIT_RECHECK_MS);
     });
+  });
+
+  it("model of the 0.6.132 queue: rechecks and due sweeps before T re-ask and wait; the sweep at T dispatches", () => {
+    const s = store();
+    const record = create(s, { ready: false, sendAt: T0 + DAY });
+    const parse = cores["SDK 0.6.132 core (no #7872)"];
+    const row = { sendAt: null as number | null, dispatchedAt: null as number | null };
+    const attempt = (now: number) => {
+      const decision = decideDispatch(ME, ctx(), s.byId(record.id)!, now).decision;
+      if (decision.action === "proceed") row.dispatchedAt = now;
+      else row.sendAt = parse(decision);
+    };
+    const sweep = (now: number) => {
+      if (row.dispatchedAt === null && row.sendAt !== null && row.sendAt <= now) attempt(now);
+    };
+    attempt(T0);
+    expect(row.sendAt).toBe(T0 + WAIT_RECHECK_MS);
+    s.markReadyIfLive(record.id);
+    attempt(T0 + 10);
+    expect(row.sendAt).toBe(T0 + DAY);
+    for (const now of [T0 + WAIT_RECHECK_MS, T0 + 60_000, T0 + DAY / 2, T0 + DAY - 1]) {
+      sweep(now);
+      attempt(now);
+    }
+    expect(row).toEqual({ sendAt: T0 + DAY, dispatchedAt: null });
+    sweep(T0 + DAY);
+    expect(row.dispatchedAt).toBe(T0 + DAY);
   });
 
   it("control: the SDK 0.6.174 name alone is lost on a 0.6.132 core, which is why the hook does not use it", () => {

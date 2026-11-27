@@ -143,10 +143,10 @@ async function load(pool: Pool | null, releaseScratch?: unknown) {
             : (pool?.get ?? (() => getState(null)))(args);
     return args.outputSchema.parse(await value);
   });
-  const dispatch = () =>
+  const dispatch = (status: "pending" | "idle" | "active" = "pending") =>
     host.harness.inspection.registrations.hooks["message.dispatch"]!(
       makeMessageDispatchHookContext({
-        thread: { id: THREAD, originPluginId: "account-workers", createdAt: Date.now() },
+        thread: { id: THREAD, originPluginId: "account-workers", createdAt: Date.now(), status },
         requestedExecution: { providerId: "claude-code", model: null, reasoningLevel: null, serviceTier: null, permissionMode: null },
       }),
     );
@@ -189,6 +189,7 @@ describe("spawn --send-at", () => {
     expect((await t.spawn(["--send-at", String(at)])).exitCode).toBe(0);
     expect(sent).toEqual([at]);
     expect(await t.dispatch()).toMatchObject({ action: "wait", sendAt: at });
+    expect(await t.dispatch("active")).toEqual({ action: "proceed" });
     Date.now = () => at;
     expect(await t.dispatch()).toEqual({ action: "proceed" });
   });
