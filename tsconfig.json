@@ -25,6 +25,8 @@
   },
   "include": [
     "src/**/*.ts",
+    "ui/**/*.ts",
+    "ui/**/*.tsx",
     "app.tsx",
     "app.test.tsx",
     "vitest.config.ts",
