@@ -175,6 +175,18 @@ Input `{ threadId, afterId?, limit? (1–200, default 50) }`. Output
 `failover`, `switch`, `policy`, `named-limit`), `accountId`, `accountLabel`
 and `detail`. Page with the last `id`.
 
+## New thread account
+
+A new thread's composer can carry the account choice as a plugin submission under the pool's own plugin id: `{ "policy": { "mode": "auto" } }` or `{ "policy": { "mode": "named", "accountId": "acct-b", "onLimit": "stop" } }` (`onLimit` optional). The pool's `message.dispatch` hook (`src/dispatch-account.ts`) applies it on the thread's first dispatch:
+
+- It acts only on a submission whose `pluginId` is the pool's, whose data passes the schema above, and only on the inline start attempt of a `pending` thread (`attempt` `start-turn`, no queued rows). Other plugins' submissions and every other dispatch proceed untouched; invalid data under the pool's id is rejected.
+- It calls `set` with caller `plugin` (audit setter `plugin-account-pool`) and no `expectedRevision`. A stored policy already equal to the choice counts as success with no write, so a reattempt with the same submission proceeds.
+- A `set` refusal (`unavailable`, `at-limit`, `other-provider`, …) rejects the send with the pool's message. A machine with no pool role, or none known, is rejected with a reason, since a stored policy would not apply there.
+- A Send later create runs this inline pass at creation, so the policy is stored before the time wait; the later timed dispatch has no submission and proceeds. The pool tests model this order; that core runs the hook inline on such a create is checked on the core side.
+- On the inline attempt the thread has no turn and no queued message yet, so `set` cannot know its model: `unavailable` and `at-limit` count only the shared quota.
+
+It is a decision that stores a policy, never a hold.
+
 ## Audit rows
 
 | reason | detail |

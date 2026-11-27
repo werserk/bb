@@ -267,6 +267,13 @@ back to auto). Rows stay for a later roll forward. A roll forward keeps the
 pass epoch, so threads created while P2 ran count as new: each gets a pass at
 its next turn, which rebuilds its session once.
 
+New thread account: `src/dispatch-account.ts` registers a `message.dispatch`
+hook that stores the composer's account choice (a plugin submission) through
+`set` on a pending thread's inline start attempt, or rejects the send with the
+reason ([contract](THREAD_ACCOUNT_V1.md#new-thread-account)). It answers at
+once and never waits, so it is not the retired native-cell hold; on a reattempt
+an equal stored policy makes it a no-op.
+
 ## Audit log
 
 `src/audit-log.ts`, `pool_audit(id, ts, reason, provider, thread_id, host_id,
