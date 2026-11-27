@@ -133,7 +133,7 @@ it("keeps an archived thread's pass for the undo grace and restores it on a time
   const { passes, state, live, reasons } = await setup();
   live("thread-1");
   const pass = (await passes.issue("thread-1", "host-w")) as string;
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   state.time += ARCHIVE_UNDO_GRACE_MS - 1;
   expect(await passes.verify(pass)).not.toBeNull();
   expect(passes.list()).toMatchObject([{ state: "archived-grace" }]);
@@ -143,13 +143,13 @@ it("keeps an archived thread's pass for the undo grace and restores it on a time
   // Undo within the grace: the same pass works again.
   passes.unarchived("thread-1");
   const again = (await passes.issue("thread-1", "host-w")) as string;
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   state.time += 10_000;
   passes.unarchived("thread-1");
   expect(await passes.verify(again)).not.toBeNull();
   expect(await passes.issue("thread-1", "host-w")).toBe(again);
   // Undo after the grace: the old pass stays dead, the next send gets a new one.
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   state.time += ARCHIVE_UNDO_GRACE_MS;
   passes.unarchived("thread-1");
   expect(await passes.verify(again)).toBeNull();
@@ -174,7 +174,7 @@ it("closes the race of an archive that lands before the first pass is issued", a
     archivedAt: state.time,
     deletedAt: null,
   });
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   const pass = await passes.issue("thread-1", "host-w");
   state.time += ARCHIVE_UNDO_GRACE_MS;
   expect(pass === null || (await passes.verify(pass)) === null).toBe(true);
@@ -185,8 +185,20 @@ it("closes the race of an archive that lands before the first pass is issued", a
     archivedAt: state.time,
     deletedAt: null,
   });
-  await passes.archived("thread-t", state.time);
+  await passes.archived("thread-t", state.time, true);
   expect(passes.list()).toEqual([]);
+  // Without lookUp (no host may be issued passes) an unknown thread is not
+  // looked up, but an existing row is still marked.
+  state.threads.set("thread-2", { hostId: "host-w", archivedAt: null, deletedAt: null });
+  const held = (await passes.issue("thread-2", "host-w")) as string;
+  state.threads.set("thread-3", { hostId: "host-w", archivedAt: state.time, deletedAt: null });
+  await passes.archived("thread-3", state.time, false);
+  await passes.archived("thread-2", state.time, false);
+  expect(passes.list().map((entry) => [entry.threadId, entry.state])).toEqual([
+    ["thread-2", "archived-grace"],
+  ]);
+  state.time += ARCHIVE_UNDO_GRACE_MS;
+  expect(await passes.verify(held)).toBeNull();
 });
 
 it("revokes a deleted or manually revoked thread's pass at once and never revives it", async () => {
@@ -215,19 +227,19 @@ it("gives a missed unarchive a working pass at the next send", async () => {
   const { passes, state, live } = await setup();
   live("thread-1");
   const pass = (await passes.issue("thread-1", "host-w")) as string;
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   // Within the grace: the same pass comes back.
   state.time += 10_000;
   expect(await passes.issue("thread-1", "host-w")).toBe(pass);
   expect(await passes.verify(pass)).not.toBeNull();
   // After the grace: a new pass.
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   state.time += ARCHIVE_UNDO_GRACE_MS + 1;
   const fresh = (await passes.issue("thread-1", "host-w")) as string;
   expect(fresh).not.toBe(pass);
   expect(await passes.verify(fresh)).not.toBeNull();
   // Still archived in bb: no pass.
-  await passes.archived("thread-1", state.time);
+  await passes.archived("thread-1", state.time, true);
   state.threads.set("thread-1", {
     hostId: "host-w",
     archivedAt: state.time,
@@ -330,6 +342,19 @@ it("makes two loaders racing on a missing key agree on one key", async () => {
   expect(left).not.toBeNull();
   expect(left?.equals(right as Buffer)).toBe(true);
   expect(await fs.readdir(secrets)).toEqual([PASS_KEY_FILE]);
+});
+
+// A loader that saw the key missing must take the key another loader created
+// meanwhile, never replace it (link, not rename).
+it("never overwrites a key created after a loader saw it missing", async () => {
+  const { secrets } = await setup();
+  const late = new PassKey(secrets, () => {});
+  expect(await late.get(false)).toBeNull();
+  const created = await new PassKey(secrets, () => {}).get(true);
+  const file = path.join(secrets, PASS_KEY_FILE);
+  const bytes = await fs.readFile(file);
+  expect((await late.get(true))?.equals(created as Buffer)).toBe(true);
+  expect(await fs.readFile(file)).toEqual(bytes);
 });
 
 it.each([

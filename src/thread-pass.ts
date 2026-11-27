@@ -324,9 +324,15 @@ export class ThreadPasses {
       : null;
   }
 
-  // thread.archived. With no row yet, a worker thread still gets an archived
-  // row, so an issue racing this event cannot leave a live pass behind.
-  async archived(threadId: string, archivedAt: number): Promise<void> {
+  // thread.archived. An existing row is always marked. With no row yet and
+  // `lookUp` (some host may be issued passes), a thread whose host may hold
+  // passes still gets an archived row, so an issue racing this event cannot
+  // leave a live pass behind.
+  async archived(
+    threadId: string,
+    archivedAt: number,
+    lookUp: boolean,
+  ): Promise<void> {
     const existing = this.row(threadId);
     if (existing !== null) {
       this.options.db
@@ -335,6 +341,7 @@ export class ThreadPasses {
       this.audit("pass-revoked", existing, "archived");
       return;
     }
+    if (!lookUp) return;
     let hostId: string | null;
     try {
       hostId = (await this.options.getThread(threadId))?.hostId ?? null;

@@ -194,17 +194,24 @@ export function createAccountPoolPlugin(
       db,
       () => bb.sdk.hosts.list(),
       async (hostId, previous, next) => {
-        audit.append({
-          reason: "role-change",
-          hostId,
-          detail: `${previous ?? "none"}->${next ?? "none"}`,
-        });
         // A worker never holds a hub token; a machine that stops being a
         // worker, or loses its role, loses its passes. Other changes keep the
-        // token (P1).
-        if (next === null || next === "worker") await hubTokens.revoke(hostId);
+        // token (P1). Revoke first: the role row is already committed, so a
+        // failing audit write must not leave a credential behind.
         if (previous === "worker" || next === null)
           passes.revokeHost(hostId, "role");
+        if (next === null || next === "worker") await hubTokens.revoke(hostId);
+        try {
+          audit.append({
+            reason: "role-change",
+            hostId,
+            detail: `${previous ?? "none"}->${next ?? "none"}`,
+          });
+        } catch (error) {
+          bb.log.warn(
+            `Account Pooler could not write a role-change audit row: ${error instanceof Error ? error.message : String(error)}.`,
+          );
+        }
       },
       () => bb.realtime.publish(ACCOUNT_POOL_HOST_ROLES_CHANGED, {}),
     );
@@ -781,9 +788,14 @@ export function createAccountPoolPlugin(
     // Thread lifecycle revokes worker passes. Events missed while the plugin
     // was down are caught by the reconcile below.
     bb.events.on("thread.archived", async ({ thread }) => {
-      // Without a worker there is no pass to revoke and no race to close.
-      if (hostRoles.hasAny("worker"))
-        await passes.archived(thread.id, thread.archivedAt ?? now());
+      // An existing row is always marked (a later build may have issued it on
+      // any role). Without a worker there is no first issue to race, so no
+      // thread lookup.
+      await passes.archived(
+        thread.id,
+        thread.archivedAt ?? now(),
+        hostRoles.hasAny("worker"),
+      );
     });
     bb.events.on("thread.unarchived", ({ thread }) => {
       passes.unarchived(thread.id);

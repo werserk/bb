@@ -9975,6 +9975,71 @@ describe("worker passes", () => {
     ).toEqual(["hub-token-host-one.json"]);
   });
 
+  // L1: the role row is committed before the callback runs, so a failing
+  // audit write must not keep a former worker's passes alive.
+  it("revokes a former worker's passes even when the role-change audit write fails", async () => {
+    const { fixture, pass, send, callRpc } = await workerFixture();
+    const held = await pass("thread-two");
+    fixture.host.bb.storage
+      .database()
+      .exec(
+        "CREATE TRIGGER fail_role_audit BEFORE INSERT ON pool_audit WHEN NEW.reason = 'role-change' BEGIN SELECT RAISE(FAIL, 'disk full'); END",
+      );
+    await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+    expect(await callRpc("pass.list", null)).toEqual([]);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  // L2: a row issued on any role (a later build) is still marked archived when
+  // no machine is a worker.
+  it("archives an existing pass when no machine is a worker", async () => {
+    const { fixture, clock, pass, send } = await workerFixture();
+    const held = await pass("thread-two");
+    fixture.host.bb.storage
+      .database()
+      .prepare("UPDATE pool_host_role SET role = 'trusted' WHERE host_id = ?")
+      .run(WORKER);
+    const { errors } = await fixture.host.harness.behavior.emitThreadEvent(
+      "thread.archived",
+      { thread: makeThreadResponse({ id: "thread-two", archivedAt: clock.time }) },
+    );
+    expect(errors).toEqual([]);
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(200);
+    clock.time += 30_000;
+    expect(await send(held, AVAILABILITY_PATH, "GET")).toBe(401);
+  });
+
+  // L3: a role change while the env contribution awaits bb leaves neither a
+  // pass row nor a credential in the environment: inside the issue (the
+  // missed-unarchive lookup) and after it (the retry-route write).
+  it("contributes nothing when the machine stops being a worker during the contribution", async () => {
+    const { fixture, clock, env, pass, callRpc } = await workerFixture();
+    await pass("thread-two");
+    await fixture.host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: "thread-two", archivedAt: clock.time }),
+    });
+    fixture.host.harness.sdk.stub("threads.get", async () => {
+      await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+      return { host: { id: WORKER }, archivedAt: null, deletedAt: null };
+    });
+    const during = await env("thread-two");
+    expect(during.ANTHROPIC_AUTH_TOKEN).toBe("");
+    expect(during.ANTHROPIC_BASE_URL).toBe("");
+    expect(await callRpc("pass.list", null)).toEqual([]);
+
+    await callRpc("hostRole.set", { hostId: WORKER, role: "worker" });
+    const kv = fixture.host.bb.storage.kv;
+    const set = kv.set.bind(kv);
+    kv.set = (async (key: string, value: unknown) => {
+      if (key === "retry-route:thread-three")
+        await callRpc("hostRole.set", { hostId: WORKER, role: "trusted" });
+      return set(key, value as never);
+    }) as typeof kv.set;
+    const after = await env("thread-three");
+    expect(after.ANTHROPIC_AUTH_TOKEN).toBe("");
+    expect(after.ANTHROPIC_BASE_URL).toBe("");
+  });
+
   it("refuses to rotate a worker's token and points to pass revoke", async () => {
     const { fixture, callRpc } = await workerFixture();
     await expect(callRpc("token.rotate", { machine: WORKER })).rejects.toThrow(
@@ -10121,8 +10186,8 @@ describe("worker passes", () => {
       `limit:thread-two:${fixture.account.id}:quota`,
       `failover:thread-two:${second.id}:quota`,
       `select:thread-two:${second.id}:`,
-      "role-change:::worker->trusted",
       "pass-revoked:thread-two::role",
+      "role-change:::worker->trusted",
     ]);
     expect(JSON.stringify(await audit())).not.toMatch(
       /AUDIT-BODY-MARKER|claude-fable|sk-/u,

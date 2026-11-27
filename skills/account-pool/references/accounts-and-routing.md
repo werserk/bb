@@ -307,7 +307,8 @@ unarchive; a later unarchive gets a new pass at the next send. Deleting the
 thread, deleting the machine, leaving `worker` and
 `bb pool pass revoke <thread-id> [--json]` revoke it at once; moving the thread
 to another machine revokes it at the first send there. A revoked pass never
-comes back. Events missed while the plugin was down are
+comes back. The catalog pass is per machine: `pass revoke` does not
+touch it; only a role change or a key rotation does. Events missed while the plugin was down are
 caught within 15 minutes. If the key file cannot be read, workers get no
 central routing until it is fixed and the plugin reloaded; hub tokens keep
 working. RPC: `pass.list` (null input), `pass.revoke` (`{threadId}`).

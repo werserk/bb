@@ -117,7 +117,8 @@ one-time seed, reconcile, projection), then the token store and its prune.
   machine a role after rolling forward.
 - Role changes: to `none` or to `worker` deletes the machine's token file;
   leaving `worker` or losing the role deletes its passes; any other change
-  keeps the token. Every real change writes a `role-change` audit row. Prune at
+  keeps the token. Every real change writes a `role-change` audit row, after
+  the revocations; a failed audit write is logged and revokes nothing less. Prune at
   start and on every `status` drops tokens of machines that are not enrolled or
   hold no token role.
 - A removed machine keeps its role ("No longer enrolled, role kept") because
@@ -180,8 +181,11 @@ a malformed pass (wrong part count, id characters or MAC length) is a 401.
 | `bb pool pass revoke <thread>` | revoked; the next send issues a new pass |
 | thread moves to another machine | the next send issues a new pass; the old one dies |
 
-An archive that lands before the thread's first issue still writes an archived
-row, so a racing issue cannot leave a live pass behind; a send to a thread whose
+An existing row is marked archived whatever the roles (a later build may have
+issued it on any role). An archive that lands before the thread's first issue
+still writes an archived row while some machine is a worker, so a racing issue
+cannot leave a live pass behind; a role change while a pass is issued leaves
+no row and no credential (the role is checked again after the awaits); a send to a thread whose
 row is archived asks bb whether an unarchive was missed. Events missed while
 the plugin was down are caught by a reconcile at start and every 15 minutes
 (`pass-reconcile` service): it deletes rows of role-less machines, rows past
