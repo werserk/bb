@@ -62,8 +62,10 @@ plugin's internal code:
 - Non-model routes (`/models`, `count_tokens`) never stop a thread.
 
 The next model request uses a new policy; nothing restarts. A Claude session
-continues on another account. A Codex session may need a new session; set it
-with `newSession: true` while the thread is idle.
+continues on another account: the same provider session, with the earlier turns
+in context (measured live, see [LIVE_CHECKS.md](LIVE_CHECKS.md)). A Codex switch
+is not measured yet, so a Codex session may need a new session; set it with
+`newSession: true` while the thread is idle.
 
 Threads that existed when this build first started on a `server` or `trusted`
 machine keep the machine token (`grandfathered: true`), so no policy applies to
@@ -110,7 +112,8 @@ A grandfathered thread that has not run since this build reads
 the thread (null before the first one).
 `lastLimit` is the latest `named-limit` event: `cause` `limit` | `deleted` |
 `unavailable`, `action` `fell-back` | `served-auto` | `stopped`.
-`switchContinuity` is `continues` (Claude), `may-restart` (Codex, unknown) or
+`switchContinuity` is `continues` (Claude, measured), `may-restart` (Codex, not
+measured yet) or
 `new-session` (right after a `set` with `newSession`).
 
 ### `thread-account.v1.set`
