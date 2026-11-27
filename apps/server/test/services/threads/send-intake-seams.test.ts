@@ -45,7 +45,7 @@ describe("intake transaction/effect seams", () => {
   it("rejects stale queue handoff within the actual queue transaction", async () => {
     await withTestHarness({ sendIntake: true }, async h => {
       const { thread } = seedThreadFixture(h); const intake = authority(h, thread.id); expire(h, intake);
-      expect(() => recordQueuedMessageWait(h.deps, { intake, placement: "back", thread, claimed: null, sendAt: null,
+      expect(() => recordQueuedMessageWait(h.deps, { intake, placement: "back", thread, claimed: null, sendAt: null, recheckAt: null,
         waitingOn: { kind: "thread-busy" }, message: { clientSubmissionId: intake.claim.clientSubmissionId!, input: textInput("owned"), execution,
           senderThreadId: null, origin: null, originPluginId: null, requestedBy: null, payload: { kind: "inline" }, systemNotice: null, deliveryMode: "queue" },
       })).toThrow(/claim/i);

@@ -1,11 +1,11 @@
 // werserk fork: the fork's migrations live in `drizzle/fork/`, with their own
 // journal and their own ledger table, so `drizzle/` and `__drizzle_migrations`
 // stay exactly upstream's. See "Database migrations" in FORK.md.
-import { migrate as drizzleMigrate } from "drizzle-orm/better-sqlite3/migrator";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DbConnection } from "./connection.js";
+import { forkMigrationsCoveredUpstream } from "./fork-upstream-backports.js";
 
 export const forkMigrationsTable = "__bb_fork_migrations";
 
@@ -107,19 +107,55 @@ export function adoptLegacyForkMigrationRows(
 }
 
 /**
+ * Drizzle's migrator, with one difference: a fork migration whose upstream
+ * migration this database already applied is recorded without running (see
+ * fork-upstream-backports.ts). Like Drizzle, it runs every migration newer
+ * than the newest ledger row, in one transaction.
+ */
+function runForkMigrations(db: DbConnection, migrationsFolder: string): void {
+  const covered = forkMigrationsCoveredUpstream(db, migrationsFolder);
+  const migrations = readMigrationFiles({
+    migrationsFolder: resolveForkMigrationsFolder(migrationsFolder),
+  });
+  const sqlite = db.$client;
+  // The table shape Drizzle creates for a migrations ledger.
+  sqlite.exec(
+    `CREATE TABLE IF NOT EXISTS "${forkMigrationsTable}" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)`,
+  );
+  const newest = sqlite
+    .prepare<[], { createdAt: number }>(
+      `SELECT created_at AS createdAt FROM "${forkMigrationsTable}" ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get();
+  const insert = sqlite.prepare<[string, number]>(
+    `INSERT INTO "${forkMigrationsTable}" (hash, created_at) VALUES (?, ?)`,
+  );
+  sqlite.transaction(() => {
+    for (const migration of migrations) {
+      if (
+        newest !== undefined &&
+        Number(newest.createdAt) >= migration.folderMillis
+      )
+        continue;
+      if (!covered.has(migration.folderMillis)) {
+        for (const statement of migration.sql) sqlite.prepare(statement).run();
+      }
+      insert.run(migration.hash, migration.folderMillis);
+    }
+  })();
+}
+
+/**
  * Apply pending fork migrations, then require every fork migration in the
- * fork ledger with its file's hash. Drizzle skips a migration older than the
- * newest ledger row, so a fork migration merged out of timestamp order fails
- * here instead of being skipped silently.
+ * fork ledger with its file's hash. The runner skips a migration older than
+ * the newest ledger row, so a fork migration merged out of timestamp order
+ * fails here instead of being skipped silently.
  */
 export function applyForkMigrations(
   db: DbConnection,
   migrationsFolder: string,
 ): void {
-  drizzleMigrate(db, {
-    migrationsFolder: resolveForkMigrationsFolder(migrationsFolder),
-    migrationsTable: forkMigrationsTable,
-  });
+  runForkMigrations(db, migrationsFolder);
   const applied = readLedger(db, forkMigrationsTable);
   const problems = readForkMigrations(migrationsFolder)
     .filter(

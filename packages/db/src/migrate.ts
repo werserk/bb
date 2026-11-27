@@ -9,6 +9,10 @@ import {
   applyForkMigrations,
 } from "./fork-migrations.js";
 import {
+  restoreStagedForkRecheckAt,
+  stageForkRecheckAtForUpstream,
+} from "./fork-upstream-backports.js";
+import {
   compatibleMigrationHashes,
   publishedMigrationWhensByTag,
 } from "./migration-history.js";
@@ -102,6 +106,11 @@ export interface MigrationWarningLogger {
 
 export interface MigrateOptions {
   logger?: MigrationWarningLogger;
+  /**
+   * werserk fork: tests only. A copy of `drizzle/` with an upstream migration
+   * added, to run a later sync's migration against today's database.
+   */
+  migrationsFolder?: string;
 }
 
 interface AppliedMigrationRow {
@@ -1414,7 +1423,8 @@ function validateAppliedMigrationHistory(
 }
 
 export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
-  const migrationsFolder = resolveMigrationsFolder();
+  const migrationsFolder =
+    options.migrationsFolder ?? resolveMigrationsFolder();
   // werserk fork: first, before anything reads upstream's ledger.
   adoptLegacyForkMigrationRows(db, migrationsFolder);
   const sqlite = db.$client;
@@ -1459,12 +1469,15 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
     );
     const stagedThreadStorageDeletedAt =
       stageExistingThreadStorageDeletedAtColumn(db, migrationsFolder);
+    // werserk fork: a backported column upstream is about to add.
+    stageForkRecheckAtForUpstream(db, migrationsFolder);
     try {
       drizzleMigrate(db, { migrationsFolder });
     } finally {
       if (stagedConnectMachineId) restoreStagedConnectMachineIdColumn(db);
       if (stagedThreadStorageDeletedAt)
         restoreStagedThreadStorageDeletedAtColumn(db);
+      restoreStagedForkRecheckAt(db);
     }
     applyReorderedCleanupMigrations(db, migrationsFolder);
     seedKeepAwakePluginConfiguration(db);
