@@ -214,6 +214,100 @@ it("keeps Claude diagnostic forks from consuming a recorded conversation segment
   }
 });
 
+it("answers Claude's initialize before the bridge writes the prompt the recording sent first", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bb-replay-claude-init-"));
+  const lanes: Record<string, string[]> = {
+    "bridge→provider": [],
+    "provider→bridge": [],
+  };
+  for (const [direction, seq, message] of [
+    [
+      "bridge→provider",
+      1,
+      {
+        type: "control_request",
+        request_id: "recorded",
+        request: { subtype: "initialize" },
+      },
+    ],
+    [
+      "bridge→provider",
+      2,
+      { type: "user", message: { role: "user", content: "first" } },
+    ],
+    [
+      "provider→bridge",
+      3,
+      {
+        type: "control_response",
+        response: {
+          subtype: "success",
+          request_id: "recorded",
+          response: { marker: "initialized" },
+        },
+      },
+    ],
+    ["provider→bridge", 4, { type: "assistant", marker: "reply" }],
+  ] as const) {
+    lanes[direction]!.push(
+      JSON.stringify({
+        ts: seq,
+        run: 1,
+        seq,
+        dir: direction,
+        line: JSON.stringify(message),
+      }),
+    );
+  }
+  for (const [direction, lines] of Object.entries(lanes)) {
+    writeFileSync(join(dir, `${direction}.ndjson`), `${lines.join("\n")}\n`);
+  }
+  writeFileSync(join(dir, "cursor"), "end");
+  const child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL("./replay-provider-child.mjs", import.meta.url)),
+      "--recording",
+      dir,
+      "--dialect",
+      "claude-cli",
+      "--state",
+      dir,
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  const closed = once(child, "close");
+  let output = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    output += chunk;
+  });
+  try {
+    child.stdin.write(
+      `${JSON.stringify({
+        type: "control_request",
+        request_id: "live",
+        request: { subtype: "initialize" },
+      })}\n`,
+    );
+    await expect
+      .poll(() => output, { timeout: 2_000 })
+      .toContain('"request_id":"live"');
+    expect(output).toContain('"marker":"initialized"');
+    expect(output).not.toContain('"marker":"reply"');
+    child.stdin.write(
+      `${JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "first" },
+      })}\n`,
+    );
+    await expect.poll(() => output).toContain('"marker":"reply"');
+  } finally {
+    child.kill();
+    await closed;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it.each([false, true])(
   "answers one Pi prompt state probe without consuming later requests (recorded: %s)",
   async (probeRecorded) => {
