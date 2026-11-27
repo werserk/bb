@@ -204,6 +204,17 @@ export async function applyAccount(
   return { ...account, onLimit, revision: result.revision, warning };
 }
 
+export async function resetToAuto(sdk: PoolSdk, pluginId: string, threadId: string): Promise<void> {
+  const result = await sdk.plugins.callRpc({
+    pluginId,
+    method: SET,
+    input: { threadId, policy: { mode: "auto" } },
+    outputSchema: setSchema,
+    signal: AbortSignal.timeout(POOL_TIMEOUT_MS),
+  });
+  if (!result.ok) throw new Error(`${result.reason}: ${result.message}`);
+}
+
 export function describeThreadAccount(view: ThreadAccountView): string {
   const serving = view.serving === null ? "—" : (view.serving.accountLabel ?? view.serving.accountId);
   const policy =

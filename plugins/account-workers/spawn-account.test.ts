@@ -26,6 +26,7 @@ interface Pool {
   accounts?: Account[];
   set?: Handler;
   get?: Handler;
+  reset?: Handler;
   discoverThrows?: boolean;
 }
 
@@ -72,7 +73,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function hostRpc(calls: string[]) {
+function hostRpc(calls: string[], releaseScratch: unknown = { ok: true }) {
   return (call: ExperimentalFakeHostRpcCall) => {
     calls.push(call.method);
     switch (call.method) {
@@ -81,19 +82,19 @@ function hostRpc(calls: string[]) {
       case "prepareScratch":
         return { ok: true, path: SCRATCH };
       case "releaseScratch":
-        return { ok: true };
+        return releaseScratch;
       default:
         throw new Error(`unexpected ${call.method}`);
     }
   };
 }
 
-async function load(pool: Pool | null) {
+async function load(pool: Pool | null, releaseScratch?: unknown) {
   const order: string[] = [];
   const hostCalls: string[] = [];
   const rpc: RpcArgs[] = [];
   const queued = new Map<string, string[]>([[THREAD, ["q1"]]]);
-  const host = createFakePluginHost({ pluginId: "account-workers", experimental_callHostRpc: hostRpc(hostCalls) });
+  const host = createFakePluginHost({ pluginId: "account-workers", experimental_callHostRpc: hostRpc(hostCalls, releaseScratch) });
   await plugin(host.bb);
   const sdk = host.harness.sdk;
   sdk.stub("hosts.list", async () => [
@@ -129,14 +130,17 @@ async function load(pool: Pool | null) {
   });
   sdk.stub("plugins.callRpc", async (args: RpcArgs) => {
     rpc.push(args);
-    const short = args.method.replace("thread-account.v1.", "");
-    order.push(short);
+    const method = args.method.replace("thread-account.v1.", "");
+    const short = method === "set" && (args.input.policy as { mode: string }).mode === "auto" ? "reset" : method;
+    order.push(short === "reset" && args.signal?.aborted ? "reset:aborted" : short);
     const value =
       short === "accounts"
         ? { threadId: args.input.threadId, provider: null, accounts: (pool?.accounts ?? ACCOUNTS).map((a) => ({ ...a, kind: "oauth", subscriptionType: null, usable: false, reason: "not-pooled", resetAt: null })) }
         : short === "set"
           ? (pool?.set ?? ((a: RpcArgs) => named(a.input)))(args)
-          : (pool?.get ?? (() => getState(null)))(args);
+          : short === "reset"
+            ? (pool?.reset ?? (() => ({ ...getState(null), ok: true, changed: true, sessionRebuild: "none", message: null, revision: 2 })))(args)
+            : (pool?.get ?? (() => getState(null)))(args);
     return args.outputSchema.parse(await value);
   });
   const dispatch = () =>
@@ -162,6 +166,9 @@ async function expectAborted(t: Awaited<ReturnType<typeof load>>, result: { exit
   expect(errorOf(result.stdout).message).toContain(`Thread ${THREAD} was archived; nothing was sent.`);
   expect(t.queued.get(THREAD)).toEqual([]);
   expect(t.order).toContain("archive:live");
+  if (code === "account_refused") expect(t.order).not.toContain("reset");
+  else expect(t.order.indexOf("reset")).toBeGreaterThan(-1);
+  if (code !== "account_refused") expect(t.order.indexOf("reset")).toBeLessThan(t.order.indexOf("archive:live"));
   expect(t.hostCalls).toContain("releaseScratch");
   expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
   const list = await t.host.harness.behavior.runCli(["list", "--all"]);
@@ -332,9 +339,30 @@ describe("spawn --account", () => {
     expect(errorOf(result.stdout).message).toContain("state is unknown");
   });
 
-  it("ok with another stored policy → account_not_applied", async () => {
-    const t = await load({ set: (a) => ({ ...named(a.input), policy: { mode: "auto" } }) });
-    await expectAborted(t, await t.spawn(["--account", "Work A"]), "account_not_applied");
+  it.each([
+    ["auto", { mode: "auto" }, "stored auto"],
+    ["another account", { mode: "named", accountId: "acct-b", accountLabel: "Work B", onLimit: "fallback-auto" }, "stored named acct-b (fallback-auto)"],
+    ["another onLimit", { mode: "named", accountId: "acct-a", accountLabel: "Work A", onLimit: "stop" }, "stored named acct-a (stop)"],
+  ])("ok storing %s → account_not_applied, reset to auto, same abort", async (_name, policy, stored) => {
+    const t = await load({ set: (a) => ({ ...named(a.input), policy }) });
+    const result = await t.spawn(["--account", "Work A"]);
+    await expectAborted(t, result, "account_not_applied");
+    expect(errorOf(result.stdout).message).toContain(stored);
+  });
+
+  it.each([
+    ["throws", () => { throw new Error("pool restarting"); }, "pool restarting"],
+    ["refuses", () => ({ ok: false, reason: "not-writable", message: "archived" }), "not-writable: archived"],
+  ])("a reset to auto that %s is reported after the original cause; the abort still finishes", async (_name, reset, text) => {
+    const t = await load({ set: (a) => ({ ...named(a.input), policy: { mode: "auto" } }), reset: reset as Handler });
+    const result = await t.spawn(["--account", "Work A"]);
+    const { code, message } = errorOf(result.stdout);
+    expect(code).toBe("account_not_applied");
+    expect(message.indexOf("stored auto")).toBeLessThan(message.indexOf("resetting its pool policy to auto failed"));
+    expect(message).toContain(text);
+    expect(message).toContain(`Thread ${THREAD}: archived; nothing was sent; resetting`);
+    expect(t.order).toContain("archive:live");
+    expect(await t.dispatch()).toEqual({ action: "reject", message: RELEASED_MESSAGE });
   });
 
   it("the binding released while set is pending (ready deadline) → spawn_abandoned, no success", async () => {
@@ -351,6 +379,25 @@ describe("spawn --account", () => {
     expect(errorOf(result.stdout).code).toBe("spawn_abandoned");
     expect(t.host.harness.inspection.recheckCount).toBe(1);
     expect(t.queued.get(THREAD)).toEqual([]);
+    expect(t.order.indexOf("reset")).toBeGreaterThan(t.order.indexOf("set"));
+    expect(t.order.indexOf("reset")).toBeLessThan(t.order.indexOf("archive:live"));
+  });
+
+  it("without --account the binding cannot be released between claim and ready: a hook check inside threads.spawn only waits", async () => {
+    const t = await load(null);
+    let inside: unknown = null;
+    t.host.harness.sdk.stub("threads.spawn", async () => {
+      const now = realNow();
+      Date.now = () => now + READY_DEADLINE_MS + 1;
+      inside = await t.dispatch();
+      Date.now = realNow;
+      return makeThreadResponse({ id: THREAD });
+    });
+    const result = await t.spawn([]);
+    expect(inside).toMatchObject({ action: "wait" });
+    expect(result.exitCode).toBe(0);
+    expect(await t.dispatch()).toEqual({ action: "proceed" });
+    expect(t.order).not.toContain("discover");
   });
 
   it("a cancelled CLI still cleans up: abort-path calls do not get ctx.signal", async () => {
@@ -363,6 +410,49 @@ describe("spawn --account", () => {
     });
     const result = await t.spawn(["--account", "Work A"], { signal: controller.signal });
     await expectAborted(t, result, "account_pool_error");
+    expect(t.order).not.toContain("reset:aborted");
+  });
+
+  it("a queued message already gone (404) counts as removed", async () => {
+    const t = await load({ set: () => ({ ok: false, reason: "unavailable", message: "disabled" }) });
+    t.host.harness.sdk.stub("threads.queuedMessages.delete", async () => {
+      throw Object.assign(new Error("HTTP 404: queued message not found"), { status: 404 });
+    });
+    const result = await t.spawn(["--account", "Work A"]);
+    expect(errorOf(result.stdout).message).toContain(`Thread ${THREAD} was archived; nothing was sent.`);
+  });
+
+  it.each([
+    ["listing the queue fails", "threads.queuedMessages.list", "removing its queued messages failed: Error: queue down"],
+    ["deleting a row fails", "threads.queuedMessages.delete", "removing its queued messages failed: Error: queue down"],
+  ])("%s: reported, and nothing claims the prompt was withdrawn", async (_name, path, text) => {
+    const t = await load({ set: () => ({ ok: false, reason: "unavailable", message: "disabled" }) });
+    t.host.harness.sdk.stub(path as "threads.queuedMessages.list", async () => {
+      throw new Error("queue down");
+    });
+    const message = errorOf((await t.spawn(["--account", "Work A"])).stdout).message;
+    expect(message).toContain(`Thread ${THREAD}: archived; ${text}.`);
+    expect(message).not.toContain("nothing was sent");
+  });
+
+  it("a failing worker cleanup is reported with the retry hint", async () => {
+    const t = await load({ set: () => ({ ok: false, reason: "unavailable", message: "disabled" }) }, { ok: false, error: "disk busy" });
+    const message = errorOf((await t.spawn(["--account", "Work A"])).stdout).message;
+    expect(message).toContain("the worker cleanup failed: disk busy; run unbind to retry");
+  });
+
+  it.each([
+    ["sent by Send now", [], `Thread ${THREAD}: archived; no queued prompt was left to withdraw`],
+    ["withdrawn, another turn running", ["q1"], `Thread ${THREAD}: archived; a turn is running`],
+  ])("a turn already running (prompt %s) is named; the tail does not say nothing was sent", async (_name, rows, head) => {
+    const t = await load({ set: () => ({ ok: false, reason: "unavailable", message: "disabled" }) });
+    t.queued.set(THREAD, rows);
+    t.host.harness.sdk.stub("threads.get", async (args: { threadId: string }) => makeThreadResponse({ id: args.threadId, status: "active" }));
+    const message = errorOf((await t.spawn(["--account", "Work A"])).stdout).message;
+    expect(message).toContain(head);
+    expect(message).toContain("a turn is running (Send now), so the worker cleanup waits until it stops");
+    expect(message).not.toContain("nothing was sent");
+    expect(t.hostCalls).not.toContain("releaseScratch");
   });
 
   it("archive failing during the abort is reported with the cause; the binding stays released", async () => {

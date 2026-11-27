@@ -23,7 +23,9 @@ import {
   POOLED_PROVIDERS,
   PROBE_THREAD_ID,
   readThreadAccount,
+  resetToAuto,
   resolveAccount,
+  THREAD_ACCOUNT_V1,
   within,
   type AppliedAccount,
   type ChosenAccount,
@@ -259,29 +261,52 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
   const describe = (b: Binding, account?: ThreadAccountView | null) =>
     `${b.threadId ?? "(unclaimed)"}  ${b.workspaceHostName}:${b.root}  binding ${b.id}  profile ${b.profile}${state(b)}${account ? `  ${describeThreadAccount(account)}` : ""}`;
 
-  async function abortSpawn(bindingId: string, threadId: string, cause: unknown): Promise<PluginCliError> {
+  async function abortSpawn(bindingId: string, threadId: string, cause: unknown, poolId: string | null): Promise<PluginCliError> {
     const problems: string[] = [];
     const record = store.byId(bindingId);
     if (record !== null) releaser.retire(record, Date.now(), "account-refused");
+    let withdrawn: boolean | null = null;
     try {
       const rows = await bb.sdk.threads.queuedMessages.list({ threadId, signal: AbortSignal.timeout(POOL_TIMEOUT_MS) });
-      for (const row of rows) await bb.sdk.threads.queuedMessages.delete({ threadId, queuedMessageId: row.id });
+      for (const row of rows) {
+        await bb.sdk.threads.queuedMessages.delete({ threadId, queuedMessageId: row.id }).catch((error: unknown) => {
+          if (httpStatus(error) !== 404) throw error;
+        });
+      }
+      withdrawn = rows.length > 0;
     } catch (error) {
       problems.push(`removing its queued messages failed: ${String(error)}`);
     }
     await bb.experimental_hooks.recheck("message.dispatch").catch(() => undefined);
+    if (poolId !== null) {
+      await resetToAuto(bb.sdk, poolId, threadId).catch((error: unknown) => {
+        problems.push(`resetting its pool policy to auto failed: ${String(error)}`);
+      });
+    }
+    let archived = true;
     try {
       await bb.sdk.threads.archive({ threadId, signal: AbortSignal.timeout(POOL_TIMEOUT_MS) });
     } catch (error) {
+      archived = false;
       problems.push(`archiving it failed: ${String(error)}`);
     }
+    let running = false;
     if (record !== null) {
       const outcome = await releaser.release(record);
       if (outcome.kind === "failed") problems.push(`the worker cleanup failed: ${outcome.error}; run unbind to retry`);
+      running = outcome.kind === "live";
     }
     const original = cause instanceof PluginCliError ? cause : null;
     const text = cause instanceof Error ? cause.message : String(cause);
-    const tail = problems.length === 0 ? `Thread ${threadId} was archived; nothing was sent.` : `Thread ${threadId}: nothing was sent, but ${problems.join("; ")}.`;
+    const clean = archived && withdrawn === true && !running && problems.length === 0;
+    const parts = [
+      ...(archived ? ["archived"] : []),
+      ...(withdrawn === true && !running ? ["nothing was sent"] : []),
+      ...(withdrawn === false ? ["no queued prompt was left to withdraw (the hold rejected it, or Send now sent it)"] : []),
+      ...(running ? ["a turn is running (Send now), so the worker cleanup waits until it stops"] : []),
+      ...problems,
+    ];
+    const tail = clean ? `Thread ${threadId} was archived; nothing was sent.` : `Thread ${threadId}: ${parts.join("; ")}.`;
     return new PluginCliError(`${text}\n${tail}`, { code: original?.code ?? "account_pool_error" });
   }
 
@@ -344,7 +369,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
             const onLimit = (onLimitArg ?? ON_LIMIT[0]) as OnLimit;
             if (named && POOLED_PROVIDERS[providerId] === undefined) {
               throw new PluginCliError(
-                `--account: the Account Pooler does not route provider ${providerId}; pooled: ${Object.keys(POOLED_PROVIDERS).join(", ")}`,
+                `--account: the Account Pooler does not route provider ${providerId}; pooled (${THREAD_ACCOUNT_V1} "Pooled providers"): ${Object.keys(POOLED_PROVIDERS).join(", ")}`,
                 { code: "account_not_pooled" },
               );
             }
@@ -415,7 +440,8 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
               try {
                 applied = await applyAccount(bb.sdk, pool.pluginId, threadId, pool.account, onLimit, ctx.signal);
               } catch (error) {
-                throw await abortSpawn(bindingId, threadId, error);
+                const refused = error instanceof PluginCliError && error.code === "account_refused";
+                throw await abortSpawn(bindingId, threadId, error, refused ? null : pool.pluginId);
               }
             }
             if (!store.markReadyIfLive(bindingId)) {
@@ -426,6 +452,7 @@ export default async function accountWorkersPlugin(bb: BbPluginApi): Promise<voi
                   `Binding ${bindingId} was released before spawn readied it (the ready deadline passed, or the thread was archived or deleted)`,
                   { code: "spawn_abandoned" },
                 ),
+                pool?.pluginId ?? null,
               );
             }
             void bb.experimental_hooks.recheck("message.dispatch").catch(() => undefined);
