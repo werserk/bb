@@ -53,14 +53,14 @@ describe("fork thread status rules", () => {
     expect(indicatorFor({ hasOpenQuestion: true })).toBe("waiting-for-input");
   });
 
-  it("keeps a hidden service turn's error out of the glyph", () => {
+  it("shows an error after a hidden service turn as an error", () => {
     expect(
       indicatorFor({
         status: "error",
         lastReadAt: 1,
         serviceTurn: hiddenServiceTurn,
       }),
-    ).toBe("unread-success");
+    ).toBe("unread-error");
   });
 
   it("keeps a hidden service turn's side work out of the glyph", () => {
@@ -101,6 +101,6 @@ describe("fork thread status rules", () => {
       planMode: 4,
       goals: 0,
     });
-    expect(toThreadStatusThread(entry).status).toBe("idle");
+    expect(toThreadStatusThread(entry).status).toBe("error");
   });
 });

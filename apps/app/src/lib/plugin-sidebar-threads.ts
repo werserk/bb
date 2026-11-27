@@ -52,8 +52,6 @@ export function toThreadStatusThread(
   };
   return {
     ...raw,
-    status:
-      hiddenServiceTurn && entry.status === "error" ? "idle" : entry.status,
     hasPendingInteraction: threadNeedsOwnerAttention(entry),
     activity: hiddenServiceTurn ? noSideWork : raw.activity,
   };
