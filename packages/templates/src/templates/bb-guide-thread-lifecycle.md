@@ -51,7 +51,10 @@ Lifecycle:
   one whose failure put the thread in error; --turn asserts which turn you mean
   and fails when the thread has moved on, as does retrying a thread that has not
   failed (`no_failed_turn`) or a turn that already has a retry queued
-  (`retry_already_queued`). Without --send-at the retry
+  (`retry_already_queued`). A turn bb itself started after the thread was
+  stopped, such as a batch of child updates, is not retried
+  (`stopped_before_turn`) until the user or an agent sends the thread a
+  message; neither does a restart resume it. Without --send-at the retry
   is attempted now, and may still queue behind a busy thread or a plugin.
   With --send-at, an accepted turn on a thread that already has a retry
   waiting joins that retry instead of queuing another nudge: the waiting row

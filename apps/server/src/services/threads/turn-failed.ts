@@ -1,4 +1,6 @@
+import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
 import {
+  events as storedEvents,
   getLastStoredTurnRequestEvent,
   getLatestStoredRateLimitsEvent,
   getLatestStoredThreadEventOfTypes,
@@ -15,6 +17,7 @@ import {
   type ProviderErrorInfo,
   type ProviderRateLimitState,
   type Thread,
+  type ThreadEventType,
   type TurnRequestEventData,
 } from "@bb/domain";
 import type { PluginTurnFailedEvent } from "@get-bb/plugin-sdk";
@@ -89,6 +92,55 @@ export function retryChain(request: TurnRequestEventData): {
     attemptNumber: request.retryAttempt ?? 1,
     originalRequestId: request.retryOfRequestId ?? request.requestId,
   };
+}
+
+const TURN_REQUEST_EVENT_TYPES = [
+  "client/turn/requested",
+  "client/thread/start",
+  "client/turn/start",
+] as const satisfies readonly ThreadEventType[];
+
+export function wasStoppedBeforeSystemTurn(
+  db: DbConnection,
+  args: { threadId: string; failed: FailedTurnRecord },
+): boolean {
+  if (args.failed.request.initiator !== "system") return false;
+  const lastDirected = Math.max(
+    0,
+    ...TURN_REQUEST_EVENT_TYPES.map(
+      (type) =>
+        db
+          .select({ sequence: storedEvents.sequence })
+          .from(storedEvents)
+          .where(
+            and(
+              eq(storedEvents.threadId, args.threadId),
+              eq(storedEvents.type, type),
+              lt(storedEvents.sequence, args.failed.requestSequence),
+              sql`coalesce(json_extract(${storedEvents.data}, '$.initiator'), 'user') <> 'system'`,
+            ),
+          )
+          .orderBy(desc(storedEvents.sequence))
+          .limit(1)
+          .get()?.sequence ?? 0,
+    ),
+  );
+  return (
+    db
+      .select({ id: storedEvents.id })
+      .from(storedEvents)
+      .where(
+        and(
+          eq(storedEvents.threadId, args.threadId),
+          eq(storedEvents.type, "system/thread/interrupted"),
+          gt(storedEvents.sequence, lastDirected),
+          lt(storedEvents.sequence, args.failed.requestSequence),
+          sql`json_extract(${storedEvents.data}, '$.reason') = 'manual-stop'`,
+        ),
+      )
+      .limit(1)
+      .get() !== undefined
+  );
 }
 
 /**

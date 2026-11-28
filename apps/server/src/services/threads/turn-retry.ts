@@ -25,6 +25,7 @@ import {
   loadFailedTurn,
   retryChain,
   wasFailedTurnInputAccepted,
+  wasStoppedBeforeSystemTurn,
   type FailedTurnRecord,
 } from "./turn-failed.js";
 
@@ -289,6 +290,13 @@ async function dispatchRetry(
   const chain = retryChain(failed.request);
   const originalRequestId = chain.originalRequestId;
   const inFlightKey = `${thread.id}:${originalRequestId}`;
+  if (wasStoppedBeforeSystemTurn(deps.db, { threadId: thread.id, failed })) {
+    throw new ApiError(
+      409,
+      "stopped_before_turn",
+      `Turn ${failed.request.requestId} on thread ${thread.id} was started by bb after the thread was stopped, so it is not retried. Send a message to continue the thread.`,
+    );
+  }
   if (
     retriesInFlight.has(inFlightKey) ||
     hasQueuedRetryFor(deps, { threadId: thread.id, originalRequestId })

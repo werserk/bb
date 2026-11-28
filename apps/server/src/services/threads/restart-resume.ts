@@ -24,6 +24,7 @@ import { isParentNotifiableChildThread } from "./thread-parent.js";
 import {
   loadFailedTurn,
   retryChain,
+  wasStoppedBeforeSystemTurn,
   type FailedTurnRecord,
 } from "./turn-failed.js";
 import { retryTurnAfterRestart } from "./turn-retry.js";
@@ -251,6 +252,13 @@ export function planRestartResumes(
     }
     const turn = loadFailedTurn(deps.db, id);
     if (turn === null) {
+      continue;
+    }
+    if (wasStoppedBeforeSystemTurn(deps.db, { threadId: id, failed: turn })) {
+      deps.logger.info(
+        { requestId: turn.request.requestId, threadId: id },
+        "Not resuming a turn bb started after the thread was stopped",
+      );
       continue;
     }
     const jobs = nameStoppedBackgroundJobs(deps.db, {

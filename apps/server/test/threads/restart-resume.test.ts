@@ -7,7 +7,12 @@ import {
   setAppSettings,
   threads,
 } from "@bb/db";
-import { threadScope, turnRequestEventDataSchema, turnScope } from "@bb/domain";
+import {
+  encodeClientTurnRequestIdNumber,
+  threadScope,
+  turnRequestEventDataSchema,
+  turnScope,
+} from "@bb/domain";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   groupHostDaemonEvents,
@@ -333,6 +338,97 @@ function interruptionErrorDetails(
   return interruptionErrors(harness, threadId).map((data) => data.detail);
 }
 
+function setThreadStatus(
+  harness: TestAppHarness,
+  threadId: string,
+  status: "active" | "idle",
+) {
+  harness.db
+    .update(threads)
+    .set({ status })
+    .where(eq(threads.id, threadId))
+    .run();
+}
+
+function seedNextTurnRequest(
+  harness: TestAppHarness,
+  fixture: HostFixture,
+  running: ReturnType<typeof seedRunningThread>,
+  args: { initiator: "user" | "system"; text: string },
+): string {
+  const sequence =
+    getLatestThreadSequence(harness.db, { threadId: running.thread.id }) + 1;
+  const requestId = encodeClientTurnRequestIdNumber({ value: sequence });
+  seedEvent(harness.deps, {
+    threadId: running.thread.id,
+    environmentId: fixture.environment.id,
+    providerThreadId: running.providerThreadId,
+    sequence,
+    type: "client/turn/requested",
+    scope: threadScope(),
+    data: {
+      direction: "outbound",
+      requestId,
+      input: [{ type: "text", text: args.text }],
+      target: { kind: "new-turn" },
+      execution: {
+        model: "gpt-5",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+        source: "client/turn/requested",
+      },
+      initiator: args.initiator,
+      ...(args.initiator === "system"
+        ? { systemMessageKind: "child-outcome-batch" }
+        : {}),
+      senderThreadId: null,
+      request: { method: "turn/start", params: {} },
+      source: "tell",
+    },
+  });
+  const turnId = `turn-${running.thread.id}-${sequence}`;
+  seedTurnStarted(harness.deps, {
+    environmentId: fixture.environment.id,
+    providerThreadId: running.providerThreadId,
+    threadId: running.thread.id,
+    turnId,
+  });
+  seedEvent(harness.deps, {
+    threadId: running.thread.id,
+    environmentId: fixture.environment.id,
+    providerThreadId: running.providerThreadId,
+    sequence:
+      getLatestThreadSequence(harness.db, { threadId: running.thread.id }) + 1,
+    type: "turn/input/accepted",
+    scope: turnScope(turnId),
+    data: {
+      providerThreadId: running.providerThreadId,
+      clientRequestId: requestId,
+    },
+  });
+  setThreadStatus(harness, running.thread.id, "active");
+  return requestId;
+}
+
+function seedManualStop(
+  harness: TestAppHarness,
+  fixture: HostFixture,
+  running: ReturnType<typeof seedRunningThread>,
+) {
+  seedEvent(harness.deps, {
+    threadId: running.thread.id,
+    environmentId: fixture.environment.id,
+    providerThreadId: running.providerThreadId,
+    sequence:
+      getLatestThreadSequence(harness.db, { threadId: running.thread.id }) + 1,
+    type: "system/thread/interrupted",
+    scope: threadScope(),
+    data: { reason: "manual-stop" },
+  });
+  setThreadStatus(harness, running.thread.id, "idle");
+}
+
 async function sweepPastResume(harness: TestAppHarness): Promise<void> {
   await runQueuedMessageDispatch(harness.deps, {
     kind: "time-reached",
@@ -651,6 +747,68 @@ describe("resuming threads after a restart", () => {
       expect(threadStatus(harness, asking.thread.id)).toBe("error");
       expect(interruptionErrorDetails(harness, asking.thread.id)).toEqual([
         "Please retry the thread to continue.",
+      ]);
+    });
+  });
+
+  it("does not resume or retry a turn bb started after the thread was stopped, until the user or an agent speaks again", async () => {
+    await withTestHarness(async (harness) => {
+      continueAfterRestarts(harness, true);
+      const fixture = seedHostWithProject(harness);
+      const stopped = seedRunningThread(harness, fixture);
+      seedManualStop(harness, fixture, stopped);
+      const systemRequestId = seedNextTurnRequest(harness, fixture, stopped, {
+        initiator: "system",
+        text: "Child thread updates",
+      });
+      const spoken = seedRunningThread(harness, fixture);
+      seedManualStop(harness, fixture, spoken);
+      seedNextTurnRequest(harness, fixture, spoken, {
+        initiator: "user",
+        text: "Carry on",
+      });
+      seedNextTurnRequest(harness, fixture, spoken, {
+        initiator: "system",
+        text: "Child thread updates",
+      });
+
+      await restartDaemon(harness, fixture);
+      await sweepPastResume(harness);
+
+      expect(queue(harness, stopped.thread.id)).toEqual([]);
+      expect(requestTexts(harness, stopped.thread.id)).toEqual([
+        "Do the thing",
+        "Child thread updates",
+      ]);
+      expect(threadStatus(harness, stopped.thread.id)).toBe("error");
+      expect(interruptionErrorDetails(harness, stopped.thread.id)).toEqual([
+        "Please retry the thread to continue.",
+      ]);
+      const failed = getThread(harness.db, stopped.thread.id);
+      if (failed === null) throw new Error("expected a thread");
+      await expect(
+        retryFailedTurn(harness.deps, {
+          thread: failed,
+          request: { turnRequestId: null, sendAt: null, reason: "Retry" },
+        }),
+      ).rejects.toMatchObject({ body: { code: "stopped_before_turn" } });
+      await expect(
+        retryFailedTurn(harness.deps, {
+          thread: failed,
+          request: {
+            turnRequestId: systemRequestId,
+            sendAt: Date.now() + 60_000,
+            reason: "WProjects: one automatic retry after a failed turn",
+          },
+        }),
+      ).rejects.toMatchObject({ body: { code: "stopped_before_turn" } });
+      expect(queue(harness, stopped.thread.id)).toEqual([]);
+
+      expect(requestTexts(harness, spoken.thread.id)).toEqual([
+        "Do the thing",
+        "Carry on",
+        "Child thread updates",
+        RESUMED_WHILE_WORKING,
       ]);
     });
   });
