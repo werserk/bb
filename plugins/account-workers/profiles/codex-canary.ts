@@ -476,6 +476,7 @@ export interface CanaryReport {
   command: string;
   model: string | null;
   catalog: "models_cache" | "bundled";
+  catalogSkipped: string | null;
   toolMode: string | null;
   offered: string[];
   calls: number;
@@ -511,19 +512,43 @@ export function canaryConfig(input: Pick<CanaryInput, "config" | "mcpNames" | "s
   };
 }
 
-async function cachedModels(home: string): Promise<Json[] | null> {
+export function codexVersion(userAgent: string): string | null {
+  return /^[^/\s]+\/(\d+\.\d+\.\d+\S*)/u.exec(userAgent)?.[1] ?? null;
+}
+
+async function probeCodexVersion(launch: CodexLaunch, env: NodeJS.ProcessEnv, temp: string, signal: AbortSignal): Promise<string | null> {
+  const server = new AppServer(launch, [], env, temp, signal);
+  try {
+    return codexVersion(await server.initialize());
+  } finally {
+    await server.close();
+  }
+}
+
+export interface CachedCatalog {
+  models: Json[] | null;
+  skipped: string | null;
+}
+
+export async function cachedModels(home: string, version: string | null): Promise<CachedCatalog> {
   let text: string;
   try {
     text = await readFile(path.join(home, "models_cache.json"), "utf8");
   } catch {
-    return null;
+    return { models: null, skipped: null };
   }
+  let cache: Json;
   try {
-    const models = (JSON.parse(text) as Json).models;
-    return Array.isArray(models) && models.length > 0 ? (models as Json[]) : null;
+    cache = JSON.parse(text) as Json;
   } catch {
     throw new WorkspaceRefusal("the worker's Codex models_cache.json is not valid JSON");
   }
+  const written = typeof cache.client_version === "string" ? cache.client_version : null;
+  if (version === null || written !== version) {
+    return { models: null, skipped: `models_cache.json is for Codex ${written ?? "(no version)"}, the worker runs ${version ?? "(unknown)"}` };
+  }
+  const models = cache.models;
+  return { models: Array.isArray(models) && models.length > 0 ? (models as Json[]) : null, skipped: null };
 }
 
 async function listModels(server: AppServer): Promise<string[]> {
@@ -549,7 +574,8 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
     await writeFile(path.join(marks, "worker-image.png"), Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489", "hex"));
     const nodePath = input.nodePath ?? process.execPath;
     await writeFile(path.join(home, "config.toml"), stringify(canaryConfig(input, fakeMcp, marks, nodePath)));
-    const cached = await cachedModels(input.home);
+    const version = await probeCodexVersion(input.launch, canaryEnv(home, temp), temp, input.signal);
+    const { models: cached, skipped: catalogSkipped } = await cachedModels(input.home, version);
     const catalog = cached === null ? null : path.join(temp, "model-catalog.json");
     if (catalog !== null) await writeFile(catalog, JSON.stringify({ models: cached }), { mode: 0o600 });
     const model = input.model;
@@ -591,12 +617,15 @@ export function runCanary(input: CanaryInput): Promise<CanaryReport> {
           offered,
           calls: planned.map((call, i) => ({ name: call.name, expect: call.expect, output: outputs.get(`aw_${i}`) })),
         };
+        const failures = evaluateGate(observation, input.allowed);
+        if (codexVersion(userAgent) !== version) failures.push(`Codex changed version during the canary (${version ?? "unknown"} to ${codexVersion(userAgent) ?? "unknown"})`);
         return {
-          failures: evaluateGate(observation, input.allowed),
+          failures,
           userAgent,
           command: [input.launch.command, ...input.launch.args].join(" "),
           model,
           catalog: catalog === null ? "bundled" : "models_cache",
+          catalogSkipped,
           toolMode,
           offered: offered.map((tool) => (tool.namespace ? `${tool.namespace}${tool.name}` : tool.name)),
           calls: planned.length,
