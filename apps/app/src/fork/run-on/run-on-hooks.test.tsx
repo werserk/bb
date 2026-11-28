@@ -460,7 +460,7 @@ describe("useRunOnOpenThread", () => {
     );
     expect(
       trigger.querySelector("[data-promptbox-compact-label]")?.textContent,
-    ).toBe("machine-b");
+    ).toBe("machine-b → machine-a");
     expect(
       trigger.querySelector("[data-promptbox-full-label]")?.textContent,
     ).toContain("machine-a");

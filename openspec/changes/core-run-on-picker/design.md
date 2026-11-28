@@ -164,7 +164,7 @@ export interface ExperimentalComposerRunRowItemProps {
 
 The menu keeps today's machine list as the **Local** group ("agent and files on one machine") and adds each accepted registration below it with its heading and description. A row is `dot · icon · agent → workspace · reason or "last seen" · check`. The machine sections stop listing a provider that has an accepted registration, so the worker does not appear twice. The footer shows the selected choice's `workspace.detail` (e.g. `Workspace machine-a · /srv/repo`). Projectless new threads get no groups.
 
-Choosing a row sets the stock selection value `provider:<agentHostId>:<environmentProviderId>` and seeds the stock inputs state (`handleProviderInputsChange`, `NewThreadComposer.tsx:1210-1260`) with `choice.inputs`. The plugin's stock inputs control still renders beside it and may change the workspace; the chip then reads the choice whose `inputs` deep-equal the current value, or the agent host alone with "Choose a workspace" when none matches.
+Choosing a row sets the stock selection value `provider:<agentHostId>:<environmentProviderId>` and seeds the stock inputs state (`handleProviderInputsChange`, `NewThreadComposer.tsx:1210-1260`) with `choice.inputs`. When an accepted Run on registration covers the selected provider, the composer row does not render that provider's stock inputs control (`runOnOwnsProviderInputs` in `EnvironmentSlot`): core holds the seeded inputs, and the workspace changes only through the Run on menu. Covered providers are already left out of the stock provider list; uncovered providers keep their stock control. Live acceptance found the control taking the row and squeezing the chip to its icon. The chip reads the choice whose `inputs` deep-equal the current value, or the agent host alone with "Choose a workspace" when none matches.
 
 Core remembers the choice id per project in a fork preference (new file). A remembered choice that is gone, or whose plugin is not running, falls back to the default Local host, and the chip shows that host: it never claims a worker it is not going to use.
 
@@ -245,7 +245,7 @@ None of `core/composer-context-sheet` (already ported as f83901b733), `core/cont
 | App (built) | `apps/app/src/fork/run-on/{registrations.ts, model.ts, probes.tsx, RunOnGroups.tsx, RunOnThreadPopover.tsx, ComposerRunRowItems.tsx, useRunOnComposer.tsx, useRunOnOpenThread.tsx, run-on-preference.ts, submission.ts, mentions.ts}` plus tests and stories; `RunOnChip` and `useRunOnSelection` from the plan live in `RunOnGroups.tsx` and `useRunOnComposer.tsx` |
 | Docs and server test | `plugins/bb-guide/skills/bb-plugin-authoring/references/fork-run-on-slots.md`, `apps/server/test/threads/fork-run-on-send-later.test.ts` |
 
-**Hot files (built, `git diff --numstat 6456171fe0` on the R2 head): 13 files, 170 added and 15 removed lines (code 150/15, docs 20).**
+**Hot files (built, `git diff --numstat 6456171fe0` on the R2 head): 13 files, 170 added and 15 removed lines (code 150/15, docs 20); 174/16 (code 154/16) after the live inputs-control fix.**
 
 | File | +/− | What |
 |---|---|---|
@@ -257,7 +257,7 @@ None of `core/composer-context-sheet` (already ported as f83901b733), `core/cont
 | `packages/plugin-sdk/src/app-contract.ts` | 13/0 | two slot members, type re-export |
 | `apps/app/src/components/promptbox/ThreadEnvironmentSummary.tsx` | 9/2 | `environmentOverride`, `rowItems` |
 | `apps/app/src/components/thread/composer/useComposerTypeahead.ts` | 8/0 | mention host override |
-| `apps/app/src/components/promptbox/NewThreadPromptBox.tsx` | 4/0 | `runOn`, `runRowItems` |
+| `apps/app/src/components/promptbox/NewThreadPromptBox.tsx` | 8/1 | `runOn`, `runRowItems`; no stock inputs control under a Run on choice |
 | `packages/plugin-sdk/src/internal/plugin-app-registration-collector.ts` | 4/1 | spreads the fork collector |
 | `packages/plugin-sdk/src/testing/app.tsx` | 2/0 | captured registrations |
 | `plugins/bb-guide/skills/bb-plugin-authoring/references/frontend-core-slots.md` | 2/0 | pointer to `fork-run-on-slots.md` |

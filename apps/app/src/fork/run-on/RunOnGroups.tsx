@@ -46,6 +46,13 @@ function AgentArrow() {
   );
 }
 
+export function runOnOwnsProviderInputs(
+  runOn: RunOnPickerModel | undefined,
+  providerId: string,
+): boolean {
+  return runOn?.registeredProviderIds.has(providerId) ?? false;
+}
+
 export function RunOnTriggerLabel({ chip }: { chip: RunOnChipView }) {
   const text = chipText(chip);
   return (
@@ -68,8 +75,8 @@ export function RunOnTriggerLabel({ chip }: { chip: RunOnChipView }) {
         <AgentArrow />
         <span className="min-w-[3ch] truncate">{text.workspace}</span>
       </span>
-      <span className="min-w-0 truncate" data-promptbox-compact-label="">
-        {text.agent}
+      <span className="min-w-[3ch] truncate" data-promptbox-compact-label="">
+        {`${text.agent} → ${text.workspace}`}
       </span>
     </span>
   );

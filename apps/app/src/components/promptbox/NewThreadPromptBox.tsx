@@ -70,6 +70,7 @@ import {
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
 import { useHostDaemon } from "@/hooks/useHostDaemon";
+import { runOnOwnsProviderInputs } from "@/fork/run-on/RunOnGroups";
 
 const NEW_THREAD_PROMPT_BOX_MIN_HEIGHT = 80;
 
@@ -452,7 +453,9 @@ export function EnvironmentSlot({
       selectedProvider.machineInputs !== null
         ? machineProviderInputsSlot
         : null}
-      {selectedProvider !== undefined && selectedProvider.inputs !== null
+      {selectedProvider !== undefined &&
+      selectedProvider.inputs !== null &&
+      !runOnOwnsProviderInputs(environment.runOn, selectedProvider.id)
         ? environmentProviderInputsSlot
         : null}
       {environment.runRowItems}
