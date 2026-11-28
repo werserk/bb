@@ -2424,7 +2424,6 @@ export function getStoredProviderRetryStall(
   const recent = db
     .select({
       createdAt: events.createdAt,
-      data: events.data,
       sequence: events.sequence,
       turnId: events.turnId,
       type: events.type,
@@ -2448,16 +2447,27 @@ export function getStoredProviderRetryStall(
     (row) => !PROVIDER_RETRY_STALL_INPUT_TYPES.has(row.type),
   );
   if (error === undefined || error.type !== "provider/error") return null;
+  const stored = db
+    .select({ data: events.data })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        eq(events.sequence, error.sequence),
+      ),
+    )
+    .get();
+  if (stored === undefined) return null;
   let willRetry: unknown;
   try {
-    willRetry = (JSON.parse(error.data) as { willRetry?: unknown }).willRetry;
+    willRetry = (JSON.parse(stored.data) as { willRetry?: unknown }).willRetry;
   } catch {
     return null;
   }
   if (willRetry !== true) return null;
   return {
     createdAt: error.createdAt,
-    data: error.data,
+    data: stored.data,
     quietSince: newest.createdAt,
     sequence: error.sequence,
     turnId: error.turnId,

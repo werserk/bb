@@ -202,7 +202,7 @@ describe("provider retry stall", () => {
       expect(stallErrors(harness, fixture.threadId)).toMatchObject([
         {
           message: expect.stringContaining(
-            "retryable error (HTTP 429 stream-disconnected) and then sent nothing for 8 minutes",
+            "retryable error (HTTP 429 stream-disconnected) and then made no progress for 8 minutes",
           ),
           detail: expect.stringContaining("429 Too Many Requests"),
         },
@@ -243,7 +243,7 @@ describe("provider retry stall", () => {
       const requests = parentSystemRequests(harness, fixture.parentId);
       expect(requests).toHaveLength(1);
       expect(JSON.stringify(requests[0]?.input)).toContain(
-        "was stopped by bb because its provider reported a retryable error (HTTP 429 stream-disconnected) and then sent nothing for 8 minutes",
+        "was stopped by bb because its provider reported a retryable error (HTTP 429 stream-disconnected) and then made no progress for 8 minutes",
       );
     });
   });
@@ -302,7 +302,7 @@ describe("provider retry stall", () => {
       await sweepAt(harness, toldAt + PROVIDER_RETRY_STALL_MS + 1_000);
       expect(getThread(harness.db, fixture.threadId)?.status).toBe("stopping");
       expect(stallErrors(harness, fixture.threadId)).toMatchObject([
-        { message: expect.stringContaining("sent nothing for 8 minutes") },
+        { message: expect.stringContaining("made no progress for 8 minutes") },
       ]);
     });
   });

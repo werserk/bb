@@ -1110,7 +1110,7 @@ export function transitionThreadLifecycle(
       draft.effect({
         kind: "append-system-error",
         code: "provider_retry_stalled",
-        message: `The provider reported a retryable error (${input.reason}) and then sent nothing for ${input.quietMinutes} minutes, so bb stopped the turn. Send a message to try again.`,
+        message: `The provider reported a retryable error (${input.reason}) and then made no progress for ${input.quietMinutes} minutes, so bb stopped the turn. Send a message to try again.`,
         detail: input.detail,
         turnId: state.activeTurnId,
       });
@@ -1119,7 +1119,7 @@ export function transitionThreadLifecycle(
         kind: "notify-parent",
         notice: {
           turnStatus: "failed",
-          failureContext: `was stopped by bb because its provider reported a retryable error (${input.reason}) and then sent nothing for ${input.quietMinutes} minutes`,
+          failureContext: `was stopped by bb because its provider reported a retryable error (${input.reason}) and then made no progress for ${input.quietMinutes} minutes`,
           turnId: null,
         },
       });
