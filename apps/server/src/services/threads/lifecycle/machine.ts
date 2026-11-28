@@ -111,7 +111,12 @@ export type ThreadLifecycleInput =
       sameInstance: boolean;
     }
   | { type: "daemon.socket-opened"; now: number }
-  | { type: "daemon.lost"; reason: DaemonLossReason; resuming: boolean }
+  | {
+      type: "daemon.lost";
+      reason: DaemonLossReason;
+      resuming: boolean;
+      heldByStop?: boolean;
+    }
   | { type: "turn-start.overdue"; deadlineMinutes: number; now: number }
   | {
       type: "provider-retry.stalled";
@@ -333,12 +338,19 @@ function moveForInterruption(
 
 function interruptionFailureMessage(
   reason: RuntimeInterruptionReason,
-  resuming: boolean,
+  resumption: { resuming: boolean; heldByStop: boolean },
 ): { message: string; detail: string } | null {
-  if (resuming) {
+  if (resumption.resuming) {
     return {
       message: "Thread interrupted because bb restarted",
       detail: "bb will resume the thread shortly.",
+    };
+  }
+  if (resumption.heldByStop) {
+    return {
+      message: "Thread interrupted because bb restarted",
+      detail:
+        "bb started this turn after the thread was stopped, so it is not resumed. Send a message to continue the thread.",
     };
   }
   switch (reason) {
@@ -470,6 +482,7 @@ function interruptForLoss(
     cause: "host-connection-lost" | null;
     reason: SystemThreadInterruptedReason;
     resuming: boolean;
+    heldByStop?: boolean;
   },
 ): void {
   const { state } = draft;
@@ -481,7 +494,10 @@ function interruptForLoss(
       providerCheckpointId: null,
     });
   }
-  const failure = interruptionFailureMessage(effective, args.resuming);
+  const failure = interruptionFailureMessage(effective, {
+    resuming: args.resuming,
+    heldByStop: args.heldByStop ?? false,
+  });
   if (failure !== null) {
     draft.effect({
       kind: "append-system-error",
@@ -849,6 +865,7 @@ function loseDaemon(
         ? "host-daemon-restarted"
         : input.reason,
     resuming: input.resuming,
+    heldByStop: input.heldByStop ?? false,
   });
 }
 

@@ -392,7 +392,10 @@ function recoverRefusedTurnSubmit(
       lifecyclePostCommit(outcome),
       {
         run: (deps) => {
-          deps.hub.notifyThread(thread.id, ["events-appended", "queue-changed"]);
+          deps.hub.notifyThread(thread.id, [
+            "events-appended",
+            "queue-changed",
+          ]);
           if (reason === "competing_turn") return;
           requestQueuedMessageDispatch(deps, {
             kind: "thread-ready",
@@ -1217,6 +1220,7 @@ interface InterruptActiveThreadsForHostArgs {
   includeStopping: boolean;
   reason: "host-daemon-restarted" | "host-removed";
   resumingThreadIds: ReadonlySet<string>;
+  heldByStopThreadIds?: ReadonlySet<string>;
 }
 
 interface InterruptedActiveThreadResult {
@@ -1259,6 +1263,7 @@ export function interruptActiveThreadsForHost(
       type: "daemon.lost",
       reason,
       resuming: args.resumingThreadIds.has(threadId),
+      heldByStop: args.heldByStopThreadIds?.has(threadId) ?? false,
     });
     finishThreadLifecycleInBackground(deps, outcome);
     if (outcome.statusChanged) {

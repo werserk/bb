@@ -118,7 +118,7 @@ export async function handleHostSessionOpened(
   }
 
   if (replacedSession && !sameDaemonInstance) {
-    const continuations = planRestartResumes(deps, {
+    const { continuations, heldByStop } = planRestartResumes(deps, {
       hostId: args.hostId,
       ownerStoppedSinceMs: replacedSession.createdAt,
     });
@@ -135,6 +135,7 @@ export async function handleHostSessionOpened(
       hostId: args.hostId,
       reason: "host-daemon-restarted",
       resumingThreadIds: new Set(continuations.keys()),
+      heldByStopThreadIds: heldByStop,
     });
     settleDanglingBackgroundTasks(deps, {
       hostId: args.hostId,

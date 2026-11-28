@@ -494,7 +494,11 @@ Resume interrupted threads after a restart is available in Settings → General 
   (or Send now) before it goes out overtakes it. Turns stopped by the user,
   threads waiting on a question or approval, and archived threads are not
   resumed, and a turn is not retried again once its retry chain reaches
-  attempt 4 (three restarts in a row). A child thread that resumes does not notify its parent
+  attempt 4 (three restarts in a row). A turn bb itself started after the
+  thread was stopped, such as a batch of child updates the agent had already
+  received, is not resumed, and `bb thread retry` refuses it
+  (`stopped_before_turn`) until the user or an agent sends the thread a
+  message; one the provider never accepted is resent. A child thread that resumes does not notify its parent
   that it was interrupted; the parent hears when the child finishes.
   `bb thread wait` keeps waiting on a thread whose resume is queued.
   Updating bb counts as a restart, so threads that Update now (or

@@ -354,7 +354,7 @@ function seedNextTurnRequest(
   harness: TestAppHarness,
   fixture: HostFixture,
   running: ReturnType<typeof seedRunningThread>,
-  args: { initiator: "user" | "system"; text: string },
+  args: { accepted?: boolean; initiator: "user" | "system"; text: string },
 ): string {
   const sequence =
     getLatestThreadSequence(harness.db, { threadId: running.thread.id }) + 1;
@@ -394,19 +394,22 @@ function seedNextTurnRequest(
     threadId: running.thread.id,
     turnId,
   });
-  seedEvent(harness.deps, {
-    threadId: running.thread.id,
-    environmentId: fixture.environment.id,
-    providerThreadId: running.providerThreadId,
-    sequence:
-      getLatestThreadSequence(harness.db, { threadId: running.thread.id }) + 1,
-    type: "turn/input/accepted",
-    scope: turnScope(turnId),
-    data: {
+  if (args.accepted ?? true) {
+    seedEvent(harness.deps, {
+      threadId: running.thread.id,
+      environmentId: fixture.environment.id,
       providerThreadId: running.providerThreadId,
-      clientRequestId: requestId,
-    },
-  });
+      sequence:
+        getLatestThreadSequence(harness.db, { threadId: running.thread.id }) +
+        1,
+      type: "turn/input/accepted",
+      scope: turnScope(turnId),
+      data: {
+        providerThreadId: running.providerThreadId,
+        clientRequestId: requestId,
+      },
+    });
+  }
   setThreadStatus(harness, running.thread.id, "active");
   return requestId;
 }
@@ -771,6 +774,13 @@ describe("resuming threads after a restart", () => {
         initiator: "system",
         text: "Child thread updates",
       });
+      const undelivered = seedRunningThread(harness, fixture);
+      seedManualStop(harness, fixture, undelivered);
+      seedNextTurnRequest(harness, fixture, undelivered, {
+        accepted: false,
+        initiator: "system",
+        text: "Child thread updates",
+      });
 
       await restartDaemon(harness, fixture);
       await sweepPastResume(harness);
@@ -782,7 +792,7 @@ describe("resuming threads after a restart", () => {
       ]);
       expect(threadStatus(harness, stopped.thread.id)).toBe("error");
       expect(interruptionErrorDetails(harness, stopped.thread.id)).toEqual([
-        "Please retry the thread to continue.",
+        "bb started this turn after the thread was stopped, so it is not resumed. Send a message to continue the thread.",
       ]);
       const failed = getThread(harness.db, stopped.thread.id);
       if (failed === null) throw new Error("expected a thread");
@@ -809,6 +819,11 @@ describe("resuming threads after a restart", () => {
         "Carry on",
         "Child thread updates",
         RESUMED_WHILE_WORKING,
+      ]);
+      expect(requestTexts(harness, undelivered.thread.id)).toEqual([
+        "Do the thing",
+        "Child thread updates",
+        "Child thread updates",
       ]);
     });
   });

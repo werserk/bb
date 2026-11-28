@@ -24,7 +24,7 @@ import { isParentNotifiableChildThread } from "./thread-parent.js";
 import {
   loadFailedTurn,
   retryChain,
-  wasStoppedBeforeSystemTurn,
+  isRetryHeldByStop,
   type FailedTurnRecord,
 } from "./turn-failed.js";
 import { retryTurnAfterRestart } from "./turn-retry.js";
@@ -202,10 +202,11 @@ function withinResumeLimit(
 export function planRestartResumes(
   deps: RestartResumeDeps,
   args: { hostId: string; ownerStoppedSinceMs: number },
-): Map<string, string> {
+): { continuations: Map<string, string>; heldByStop: Set<string> } {
   const continuations = new Map<string, string>();
+  const heldByStop = new Set<string>();
   if (!getAppSettings(deps.db).resumeThreadsAfterRestart) {
-    return continuations;
+    return { continuations, heldByStop };
   }
   const openRowsByThread = groupRowsByThread(
     listOpenBackgroundTaskItemRowsForHost(deps.db, { hostId: args.hostId }).map(
@@ -254,7 +255,11 @@ export function planRestartResumes(
     if (turn === null) {
       continue;
     }
-    if (wasStoppedBeforeSystemTurn(deps.db, { threadId: id, failed: turn })) {
+    if (
+      status === "active" &&
+      isRetryHeldByStop(deps.db, { threadId: id, failed: turn })
+    ) {
+      heldByStop.add(id);
       deps.logger.info(
         { requestId: turn.request.requestId, threadId: id },
         "Not resuming a turn bb started after the thread was stopped",
@@ -292,7 +297,7 @@ export function planRestartResumes(
       }),
     );
   }
-  return continuations;
+  return { continuations, heldByStop };
 }
 
 export async function queueRestartResumes(

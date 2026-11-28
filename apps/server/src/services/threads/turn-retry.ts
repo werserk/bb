@@ -25,7 +25,7 @@ import {
   loadFailedTurn,
   retryChain,
   wasFailedTurnInputAccepted,
-  wasStoppedBeforeSystemTurn,
+  isRetryHeldByStop,
   type FailedTurnRecord,
 } from "./turn-failed.js";
 
@@ -290,7 +290,7 @@ async function dispatchRetry(
   const chain = retryChain(failed.request);
   const originalRequestId = chain.originalRequestId;
   const inFlightKey = `${thread.id}:${originalRequestId}`;
-  if (wasStoppedBeforeSystemTurn(deps.db, { threadId: thread.id, failed })) {
+  if (isRetryHeldByStop(deps.db, { threadId: thread.id, failed })) {
     throw new ApiError(
       409,
       "stopped_before_turn",

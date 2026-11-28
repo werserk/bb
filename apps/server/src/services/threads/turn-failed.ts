@@ -100,46 +100,44 @@ const TURN_REQUEST_EVENT_TYPES = [
   "client/turn/start",
 ] as const satisfies readonly ThreadEventType[];
 
-export function wasStoppedBeforeSystemTurn(
+export function isRetryHeldByStop(
   db: DbConnection,
   args: { threadId: string; failed: FailedTurnRecord },
 ): boolean {
   if (args.failed.request.initiator !== "system") return false;
-  const lastDirected = Math.max(
-    0,
-    ...TURN_REQUEST_EVENT_TYPES.map(
-      (type) =>
-        db
-          .select({ sequence: storedEvents.sequence })
-          .from(storedEvents)
-          .where(
-            and(
-              eq(storedEvents.threadId, args.threadId),
-              eq(storedEvents.type, type),
-              lt(storedEvents.sequence, args.failed.requestSequence),
-              sql`coalesce(json_extract(${storedEvents.data}, '$.initiator'), 'user') <> 'system'`,
-            ),
-          )
-          .orderBy(desc(storedEvents.sequence))
-          .limit(1)
-          .get()?.sequence ?? 0,
-    ),
-  );
-  return (
-    db
-      .select({ id: storedEvents.id })
-      .from(storedEvents)
-      .where(
-        and(
-          eq(storedEvents.threadId, args.threadId),
-          eq(storedEvents.type, "system/thread/interrupted"),
-          gt(storedEvents.sequence, lastDirected),
-          lt(storedEvents.sequence, args.failed.requestSequence),
-          sql`json_extract(${storedEvents.data}, '$.reason') = 'manual-stop'`,
-        ),
-      )
-      .limit(1)
-      .get() !== undefined
+  const stop = db
+    .select({ sequence: storedEvents.sequence })
+    .from(storedEvents)
+    .where(
+      and(
+        eq(storedEvents.threadId, args.threadId),
+        eq(storedEvents.type, "system/thread/interrupted"),
+        lt(storedEvents.sequence, args.failed.requestSequence),
+        sql`json_extract(${storedEvents.data}, '$.reason') = 'manual-stop'`,
+      ),
+    )
+    .orderBy(desc(storedEvents.sequence))
+    .limit(1)
+    .get();
+  if (stop === undefined || !wasFailedTurnInputAccepted(db, args)) {
+    return false;
+  }
+  return !TURN_REQUEST_EVENT_TYPES.some(
+    (type) =>
+      db
+        .select({ id: storedEvents.id })
+        .from(storedEvents)
+        .where(
+          and(
+            eq(storedEvents.threadId, args.threadId),
+            eq(storedEvents.type, type),
+            gt(storedEvents.sequence, stop.sequence),
+            lt(storedEvents.sequence, args.failed.requestSequence),
+            sql`coalesce(json_extract(${storedEvents.data}, '$.initiator'), 'user') <> 'system'`,
+          ),
+        )
+        .limit(1)
+        .get() !== undefined,
   );
 }
 
