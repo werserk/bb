@@ -59,6 +59,7 @@ const workerProvider = {
   displayName: "Worker",
   pluginId: "account-workers",
   icon: "ComputerCloud",
+  inputs: { type: "object" },
   acceptsEmptyInputs: false,
 } as SystemEnvironmentProvider;
 
@@ -120,10 +121,21 @@ function AccountChip() {
   );
 }
 
-export function NewThreadLongNames() {
+function WorkspaceInputsControl() {
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Workspace</span>
+      <select className="rounded border border-border bg-transparent px-1 py-0.5">
+        <option>{`${hostA.name}: /srv/repo/with/a/long/absolute/path`}</option>
+      </select>
+    </label>
+  );
+}
+
+function NewThreadComposerScene({ width }: { width: string }) {
   const draft = useComposerDraftFixture("");
   return (
-    <div className="mx-auto w-full max-w-[760px]">
+    <div className="mx-auto w-full" style={{ maxWidth: width }}>
       <NewThreadPromptBoxUI
         mentionMenuPlacement="bottom"
         id="run-on-new-thread-long-names"
@@ -151,6 +163,7 @@ export function NewThreadLongNames() {
             runOn: pickerModel(),
             runRowItems: <AccountChip />,
           },
+          environmentProviderInputsSlot: <WorkspaceInputsControl />,
           worktree: {
             options: STORY_WORKTREE_OPTIONS,
             value: null,
@@ -167,6 +180,14 @@ export function NewThreadLongNames() {
       />
     </div>
   );
+}
+
+export function NewThreadLongNames() {
+  return <NewThreadComposerScene width="760px" />;
+}
+
+export function NewThreadNarrowColumn() {
+  return <NewThreadComposerScene width="528px" />;
 }
 
 export function OpenThreadLongNames() {
