@@ -7,7 +7,10 @@ import {
   DRAFT_REMOVED_DETAILS,
   DraftAccountStore,
   draftAccountList,
+  draftMemoryKey,
   draftView,
+  sessionDraftMemory,
+  type DraftMemory,
 } from "./draft.js";
 import { ID_A, ID_B, ID_C, summaries, summary, T0 } from "./fixtures.js";
 import { REMOVED_ACCOUNT } from "./view.js";
@@ -197,5 +200,113 @@ describe("DraftAccountStore", () => {
     await vi.waitFor(() => expect(store.getSnapshot().note).toBe(DRAFT_ACCOUNTS_ERROR_NOTE));
     expect(store.getSnapshot().accounts).toBeNull();
     store.stop();
+  });
+});
+
+function memoryStore(initial: DispatchAccount | null = null) {
+  let value = initial;
+  const memory: DraftMemory = { read: () => value, write: vi.fn((data) => void (value = data)) };
+  return { memory, current: () => value };
+}
+
+function setupWithMemory(initial: DispatchAccount | null, answer: (data: DispatchAccount | null) => boolean = () => true) {
+  const submit = vi.fn(answer);
+  const load = vi.fn(async () => summaries());
+  const mem = memoryStore(initial);
+  const store = new DraftAccountStore("claude", submit, load, () => T0, mem.memory);
+  return { store, submit, ...mem };
+}
+
+describe("DraftAccountStore memory (a pick outlives a reload or a remount)", () => {
+  it("core holds nothing: the remembered pin goes back into core's draft and shows on the chip", async () => {
+    const pin: DispatchAccount = { policy: { mode: "named", accountId: ID_A, onLimit: "stop" } };
+    const { store, submit } = setupWithMemory(pin);
+    store.start(null);
+    expect(submit.mock.calls).toEqual([[pin]]);
+    expect(store.getSnapshot().get?.policy).toEqual({ mode: "named", accountId: ID_A, accountLabel: null, onLimit: "stop" });
+    await vi.waitFor(() => expect(draftView(store.getSnapshot(), T0)).toMatchObject({ state: "named", label: "Work A" }));
+  });
+
+  it("core still holds a pin: core wins, nothing is resubmitted, memory follows core", () => {
+    const { store, submit, current } = setupWithMemory({ policy: { mode: "named", accountId: ID_B } });
+    store.start({ policy: { mode: "named", accountId: ID_A } });
+    expect(submit).not.toHaveBeenCalled();
+    expect(current()).toEqual({ policy: { mode: "named", accountId: ID_A } });
+  });
+
+  it("core refuses the remembered pin: Auto, and the memory is dropped", () => {
+    const { store, current } = setupWithMemory({ policy: { mode: "named", accountId: ID_A } }, () => false);
+    store.start(null);
+    expect(store.getSnapshot().get?.policy).toEqual({ mode: "auto" });
+    expect(current()).toBeNull();
+  });
+
+  it("a pick is remembered, Auto forgets it, a refused pick forgets it", async () => {
+    let accept = true;
+    const { store, current } = setupWithMemory(null, () => accept);
+    store.start(null);
+    await store.pick({ kind: "named", accountId: ID_A, accountLabel: "Work A" });
+    expect(current()).toEqual({ policy: { mode: "named", accountId: ID_A } });
+    await store.pick({ kind: "auto" });
+    expect(current()).toBeNull();
+    await store.pick({ kind: "named", accountId: ID_B, accountLabel: "Work B" });
+    accept = false;
+    await store.pick({ kind: "named", accountId: ID_C, accountLabel: "Work C" });
+    expect(current()).toBeNull();
+  });
+
+  it("draft data the hook would not parse also clears the memory", () => {
+    const { store, current } = setupWithMemory({ policy: { mode: "named", accountId: ID_A } });
+    store.start("x");
+    expect(current()).toBeNull();
+    expect(store.getSnapshot().get?.policy).toEqual({ mode: "auto" });
+  });
+});
+
+describe("sessionDraftMemory", () => {
+  function fakeStorage() {
+    const map = new Map<string, string>();
+    return {
+      map,
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+    };
+  }
+
+  it("round-trips a named pin under a key per project and provider", () => {
+    const storage = fakeStorage();
+    const key = draftMemoryKey("proj_1", "codex");
+    expect(key).not.toBe(draftMemoryKey("proj_2", "codex"));
+    expect(key).not.toBe(draftMemoryKey("proj_1", "claude"));
+    const memory = sessionDraftMemory(key, storage);
+    memory.write({ policy: { mode: "named", accountId: ID_A, onLimit: "stop" } });
+    expect(memory.read()).toEqual({ policy: { mode: "named", accountId: ID_A, onLimit: "stop" } });
+    memory.write(null);
+    expect(memory.read()).toBeNull();
+    expect(storage.map.size).toBe(0);
+  });
+
+  it("drops stored data the hook would not parse, and survives a throwing storage", () => {
+    const storage = fakeStorage();
+    const key = draftMemoryKey(null, "claude");
+    storage.setItem(key, JSON.stringify({ policy: { mode: "auto" } }));
+    expect(sessionDraftMemory(key, storage).read()).toBeNull();
+    expect(storage.map.has(key)).toBe(false);
+    storage.setItem(key, "{not json");
+    expect(sessionDraftMemory(key, storage).read()).toBeNull();
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("full");
+      },
+      removeItem: () => {},
+    };
+    const memory = sessionDraftMemory(key, broken);
+    expect(memory.read()).toBeNull();
+    expect(() => memory.write({ policy: { mode: "named", accountId: ID_A } })).not.toThrow();
+    expect(sessionDraftMemory(key, null).read()).toBeNull();
   });
 });
