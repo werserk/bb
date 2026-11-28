@@ -615,6 +615,92 @@ describe("provider-native id translation", () => {
     expect(unmapped).toMatchObject({ turnId: "unmapped-turn" });
     expect(unmapped?.turnOrigin).not.toBe("provider");
   });
+  it("attests ACP tool calls through the bridge's current-turn alias", () => {
+    const adapter = createBridgeProtocolAdapter({
+      id: "grok",
+      capabilities: {
+        supportsThreadArchive: false,
+        supportsThreadRename: false,
+        supportsServiceTier: false,
+        fork: "none",
+        permissionModes: ["full"],
+      },
+      process: { command: "node", args: ["acp-bridge.mjs"] },
+    });
+    const call = (turnId: string | null, callId: string) =>
+      adapter.decodeToolCallRequest({
+        id: callId,
+        method: "item/tool/call",
+        params: {
+          providerThreadId: "acp-session",
+          threadId: "t_acp",
+          turnId,
+          callId,
+          tool: "wprojects_outcome",
+          arguments: {},
+        },
+      });
+    const turnIdsOf = (events: ThreadEvent[]) =>
+      events.flatMap((event) =>
+        event.type === "turn/started" && event.scope.kind === "turn"
+          ? [event.scope.turnId]
+          : [],
+      );
+
+    const first = turnIdsOf(
+      feedDeltas(adapter, "t_acp", [
+        {
+          kind: "turn.open",
+          currentTurnAlias: "acp-origin-1",
+        },
+      ]),
+    );
+    expect(first).toHaveLength(1);
+    expect(call("acp-origin-1", "c1")).toMatchObject({
+      turnId: first[0],
+      turnOrigin: "provider",
+    });
+    expect(call(null, "c2")?.turnOrigin).not.toBe("provider");
+    expect(call("acp-origin-x", "c3")?.turnOrigin).not.toBe("provider");
+
+    expect(
+      turnIdsOf(
+        feedDeltas(adapter, "t_acp", [
+          {
+            kind: "turn.open",
+            currentTurnAlias: "acp-origin-1",
+          },
+        ]),
+      ),
+    ).toEqual([]);
+
+    feedDeltas(adapter, "t_acp", [
+      { kind: "turn.boundary", status: "completed", claimIfIdle: true },
+    ]);
+    const second = turnIdsOf(
+      feedDeltas(adapter, "t_acp", [
+        { kind: "turn.open" },
+        {
+          kind: "turn.open",
+          currentTurnAlias: "acp-origin-2",
+        },
+      ]),
+    );
+    expect(second).toHaveLength(1);
+    expect(second[0]).not.toBe(first[0]);
+    expect(call("acp-origin-2", "c4")).toMatchObject({
+      turnId: second[0],
+      turnOrigin: "provider",
+    });
+
+    const explicit = turnIdsOf(
+      feedDeltas(adapter, "t_acp_explicit", [
+        { kind: "turn.open" },
+        { kind: "turn.open", providerTurnId: "acp-origin-3" },
+      ]),
+    );
+    expect(explicit).toHaveLength(2);
+  });
   it("keeps Codex native Stop correction on the original mapped bb turn", () => {
     const adapter = makeAdapter();
     const opened = feedDeltas(adapter, "bb-stop", [

@@ -113,6 +113,7 @@ export const ACP_WARNING_METHOD = "acp/warning";
 export const acpTurnStartedNotificationParamsSchema = z
   .object({
     threadId: z.string().min(1),
+    turnId: z.string().min(1).optional(),
   })
   .passthrough();
 
