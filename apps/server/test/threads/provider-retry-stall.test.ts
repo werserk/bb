@@ -270,6 +270,43 @@ describe("provider retry stall", () => {
     });
   });
 
+  it("still fails a stalled retry after a message joins the turn, counting from that message", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await withTestHarness(async (harness) => {
+      const fixture = seedChild(harness, 6);
+      const erroredAt = await startTurnThatStallsOnRetry(harness, fixture);
+      const toldAt = erroredAt + 5 * 60_000;
+      vi.setSystemTime(toldAt);
+      const thread = getThread(harness.db, fixture.threadId);
+      if (thread === undefined || thread === null)
+        throw new Error("missing thread");
+      await acceptThreadSendRequest(harness.deps, {
+        thread,
+        payload: { input: textInput("are you there?"), mode: "auto" },
+      });
+      const requests = listEvents(harness.db, { threadId: fixture.threadId })
+        .filter((event) => event.type === "client/turn/requested")
+        .filter((event) => event.createdAt >= toldAt);
+      expect(requests.length).toBeGreaterThan(0);
+      await postEvents(harness, fixture, [
+        {
+          type: "turn/input/accepted",
+          clientRequestId: JSON.parse(requests.at(-1)?.data ?? "{}").requestId,
+        },
+      ]);
+
+      await sweepAt(harness, erroredAt + PROVIDER_RETRY_STALL_MS + 1_000);
+      expect(getThread(harness.db, fixture.threadId)?.status).toBe("active");
+      expect(stallErrors(harness, fixture.threadId)).toEqual([]);
+
+      await sweepAt(harness, toldAt + PROVIDER_RETRY_STALL_MS + 1_000);
+      expect(getThread(harness.db, fixture.threadId)?.status).toBe("stopping");
+      expect(stallErrors(harness, fixture.threadId)).toMatchObject([
+        { message: expect.stringContaining("sent nothing for 8 minutes") },
+      ]);
+    });
+  });
+
   it("counts bookkeeping events after the error as silence", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     await withTestHarness(async (harness) => {

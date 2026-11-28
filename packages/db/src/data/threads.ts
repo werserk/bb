@@ -2401,9 +2401,18 @@ const PROVIDER_RETRY_STALL_NOISE_TYPES = [
   "provider.env-resolved",
 ] as const;
 
+const PROVIDER_RETRY_STALL_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "client/turn/requested",
+  "client/turn/rejected",
+  "turn/input/accepted",
+]);
+
+const PROVIDER_RETRY_STALL_SCAN_LIMIT = 32;
+
 export interface StoredProviderRetryStall {
   createdAt: number;
   data: string;
+  quietSince: number;
   sequence: number;
   turnId: string | null;
 }
@@ -2412,7 +2421,7 @@ export function getStoredProviderRetryStall(
   db: DbQueryConnection,
   args: { deadline: number; threadId: string },
 ): StoredProviderRetryStall | null {
-  const latest = db
+  const recent = db
     .select({
       createdAt: events.createdAt,
       data: events.data,
@@ -2431,26 +2440,26 @@ export function getStoredProviderRetryStall(
       ),
     )
     .orderBy(desc(events.sequence))
-    .limit(1)
-    .get();
-  if (
-    latest === undefined ||
-    latest.type !== "provider/error" ||
-    latest.createdAt > args.deadline
-  ) {
-    return null;
-  }
+    .limit(PROVIDER_RETRY_STALL_SCAN_LIMIT)
+    .all();
+  const newest = recent[0];
+  if (newest === undefined || newest.createdAt > args.deadline) return null;
+  const error = recent.find(
+    (row) => !PROVIDER_RETRY_STALL_INPUT_TYPES.has(row.type),
+  );
+  if (error === undefined || error.type !== "provider/error") return null;
   let willRetry: unknown;
   try {
-    willRetry = (JSON.parse(latest.data) as { willRetry?: unknown }).willRetry;
+    willRetry = (JSON.parse(error.data) as { willRetry?: unknown }).willRetry;
   } catch {
     return null;
   }
   if (willRetry !== true) return null;
   return {
-    createdAt: latest.createdAt,
-    data: latest.data,
-    sequence: latest.sequence,
-    turnId: latest.turnId,
+    createdAt: error.createdAt,
+    data: error.data,
+    quietSince: newest.createdAt,
+    sequence: error.sequence,
+    turnId: error.turnId,
   };
 }

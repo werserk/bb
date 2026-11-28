@@ -91,7 +91,7 @@ export function providerRetryStallSweep(
               type: "provider-retry.stalled",
               detail,
               now,
-              quietMinutes: Math.floor((now - stall.createdAt) / 60_000),
+              quietMinutes: Math.floor((now - stall.quietSince) / 60_000),
               reason,
               turnId: stall.turnId,
             },
