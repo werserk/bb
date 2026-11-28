@@ -19,6 +19,58 @@ import {
 export type SetSubmission = (data: DispatchAccount | null) => boolean;
 export type LoadAccounts = () => Promise<AccountSummary[]>;
 
+/**
+ * Where a new thread's pick outlives the composer. Core holds this plugin's
+ * submission only in memory, so a page reload or a composer remount mounts the
+ * chip with nothing; the store then puts the remembered pick back into core's
+ * draft. `read` returns only data the dispatch hook would parse.
+ */
+export interface DraftMemory {
+  read(): DispatchAccount | null;
+  write(data: DispatchAccount | null): void;
+}
+
+export const NO_DRAFT_MEMORY: DraftMemory = { read: () => null, write: () => {} };
+
+/** Per tab: a reload keeps the pick, a new tab starts on Auto. */
+export function sessionDraftMemory(key: string, storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = sessionStorageOrNull()): DraftMemory {
+  if (storage === null) return NO_DRAFT_MEMORY;
+  return {
+    read() {
+      try {
+        const text = storage.getItem(key);
+        if (text === null) return null;
+        const parsed = dispatchAccountSchema.safeParse(JSON.parse(text));
+        if (parsed.success && parsed.data.policy.mode === "named") return parsed.data;
+        storage.removeItem(key);
+        return null;
+      } catch {
+        return null;
+      }
+    },
+    write(data) {
+      try {
+        if (data === null) storage.removeItem(key);
+        else storage.setItem(key, JSON.stringify(data));
+      } catch {
+        // Storage full or blocked: the pick still holds until the reload.
+      }
+    },
+  };
+}
+
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function draftMemoryKey(projectId: string | null, provider: PoolProvider): string {
+  return `account-pool:new-thread-account:v1\u0000${projectId ?? ""}\u0000${provider}`;
+}
+
 export const DRAFT_TITLE = "Account for the new thread";
 export const DRAFT_AUTO_DETAILS = "Auto. The pool picks the account and fails over.";
 export const DRAFT_REFUSED_NOTE =
@@ -123,6 +175,7 @@ export class DraftAccountStore {
     private submit: SetSubmission,
     private load: LoadAccounts,
     private readonly now: () => number = Date.now,
+    private readonly memory: DraftMemory = NO_DRAFT_MEMORY,
   ) {
     this.snapshot = {
       get: draftGet(provider, AUTO),
@@ -161,20 +214,49 @@ export class DraftAccountStore {
     const policy = parsed.success ? parsed.data.policy : null;
     if (policy !== null && policy.mode === "named") {
       this.held = true;
-      this.update({
-        get: draftGet(this.provider, {
-          mode: "named",
-          accountId: policy.accountId,
-          accountLabel: null,
-          onLimit: policy.onLimit ?? "fallback-auto",
-        }),
-      });
+      this.memory.write({ policy });
+      this.showPin(policy, null);
+    } else if (submission === null || submission === undefined) {
+      this.restoreRemembered();
     } else {
-      if (submission !== null && submission !== undefined) this.submit(null);
+      this.submit(null);
+      this.memory.write(null);
       this.held = false;
       this.update({ get: draftGet(this.provider, AUTO) });
     }
     void this.fetchAccounts();
+  }
+
+  /** Core holds nothing (a reload or a remount): put the remembered pick back. */
+  private restoreRemembered(): void {
+    const remembered = this.memory.read();
+    if (remembered !== null && remembered.policy.mode === "named" && this.submit(remembered)) {
+      this.held = true;
+      this.showPin(remembered.policy, null);
+      return;
+    }
+    if (remembered !== null) this.memory.write(null);
+    this.held = false;
+    this.update({ get: draftGet(this.provider, AUTO) });
+  }
+
+  private showPin(policy: Extract<DispatchAccount["policy"], { mode: "named" }>, accountLabel: string | null): void {
+    this.update({
+      get: draftGet(this.provider, {
+        mode: "named",
+        accountId: policy.accountId,
+        accountLabel,
+        onLimit: policy.onLimit ?? "fallback-auto",
+      }),
+    });
+  }
+
+  /** Core dropped this plugin's draft (it clears it after a send): forget the pick. */
+  coreCleared(): void {
+    this.memory.write(null);
+    if (!this.held) return;
+    this.held = false;
+    this.update({ get: draftGet(this.provider, AUTO) });
   }
 
   /** Unmount: ignore answers still in flight and drop the note timer. */
@@ -226,11 +308,13 @@ export class DraftAccountStore {
       // Keep Auto, in core's draft as well as on the chip.
       if (this.held) this.submit(null);
       this.held = false;
+      this.memory.write(null);
       this.update({ get: draftGet(this.provider, AUTO) });
       this.showNote(DRAFT_REFUSED_NOTE);
       return null;
     }
     this.held = data !== null;
+    this.memory.write(data);
     const label =
       target.kind === "named" ? target.accountLabel : get.policy.mode === "named" ? get.policy.accountLabel : null;
     this.update({

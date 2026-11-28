@@ -17,7 +17,15 @@ import { ACCOUNT_POOL_ACCOUNTS_CHANGED } from "../../src/realtime.js";
 import type { accountPoolRpcContract } from "../../src/rpc.js";
 import { TONE_TEXT } from "./AccountCardRow.js";
 import { AccountMenu, useAccountPick } from "./AccountPicker.js";
-import { DRAFT_TITLE, DraftAccountStore, draftView, type LoadAccounts, type SetSubmission } from "./draft.js";
+import {
+  DRAFT_TITLE,
+  DraftAccountStore,
+  draftMemoryKey,
+  draftView,
+  sessionDraftMemory,
+  type LoadAccounts,
+  type SetSubmission,
+} from "./draft.js";
 import { useThreadAccount, type PickerAccount } from "./hooks.js";
 import type { ExperimentalComposerRunRowItemProps } from "./run-row-slot.js";
 import type { ThreadAccountView } from "./view.js";
@@ -103,11 +111,13 @@ function OpenThreadAccount({ threadId, compact }: { threadId: string; compact: b
 }
 
 function DraftAccountChip({
+  projectId,
   provider,
   compact,
   submission,
   setSubmission,
 }: {
+  projectId: string | null;
   provider: PoolProvider;
   compact: boolean;
   submission: JsonValue | null | undefined;
@@ -117,7 +127,9 @@ function DraftAccountChip({
   // The policy object has no undefined members, so it is plain JSON.
   const submit: SetSubmission = (data) => setSubmission(data as JsonValue | null);
   const load: LoadAccounts = () => rpc.call("account.list", null);
-  const [store] = useState(() => new DraftAccountStore(provider, submit, load));
+  const [store] = useState(
+    () => new DraftAccountStore(provider, submit, load, Date.now, sessionDraftMemory(draftMemoryKey(projectId, provider))),
+  );
   // Core's draft as it was at mount; later picks go through the store.
   const [initial] = useState(submission);
   store.setSources(submit, load);
@@ -125,6 +137,16 @@ function DraftAccountChip({
     store.start(initial);
     return () => store.stop();
   }, [store, initial]);
+  // A sent thread must not hand its account to the next one: when core's
+  // draft goes from this plugin's data to nothing, the pick is forgotten.
+  const lastSubmission = useRef(submission);
+  useEffect(() => {
+    const before = lastSubmission.current;
+    lastSubmission.current = submission;
+    if (before !== null && before !== undefined && (submission === null || submission === undefined)) {
+      store.coreCleared();
+    }
+  }, [store, submission]);
   useRealtime(ACCOUNT_POOL_ACCOUNTS_CHANGED, () => store.onAccountsChanged());
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const account: PickerAccount = { store, snapshot, view: draftView(snapshot, Date.now()) };
@@ -142,6 +164,7 @@ export function ThreadAccountRunRowItem({ scope, compact, submission, setSubmiss
   return (
     <DraftAccountChip
       key={`${scope.projectId ?? ""}\u0000${scope.providerId}`}
+      projectId={scope.projectId}
       provider={provider}
       compact={compact}
       submission={submission}

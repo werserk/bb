@@ -13,10 +13,14 @@ import { resetStoresForTest } from "./store.js";
 
 const app = await loadPluginApp(() => import("../../app"));
 
-beforeEach(() => resetStoresForTest());
+beforeEach(() => {
+  resetStoresForTest();
+  window.sessionStorage.clear();
+});
 afterEach(() => {
   cleanup();
   resetStoresForTest();
+  window.sessionStorage.clear();
 });
 
 const registration = { version: 1 as const, id: RUN_ROW_ITEM_ID, order: RUN_ROW_ITEM_ORDER, component: ThreadAccountRunRowItem };
@@ -195,6 +199,42 @@ describe("new thread (5.3)", () => {
     const chip = await slot.findByRole("button", { name: "Account: Removed account" });
     expect(chip.getAttribute("title")).toBe(DRAFT_REMOVED_DETAILS);
     expect(slot.getByText("Removed account").className).toContain("text-warning-text");
+    expect(setSubmission).not.toHaveBeenCalled();
+  });
+
+  it("a composer reload (core's draft lost) restores the remembered pick into core", async () => {
+    const setSubmission = vi.fn((_data: JsonValue | null) => true);
+    const first = renderItem({ scope: scope("claude-code"), compact: false, setSubmission }, rpc);
+    await openMenu(first, /^Account: Auto$/u);
+    fireEvent.click(await first.findByRole("menuitemradio", { name: /Work A/u }));
+    await first.findByRole("button", { name: "Account: Work A" });
+    cleanup();
+    setSubmission.mockClear();
+    const again = renderItem({ scope: scope("claude-code"), compact: false, submission: null, setSubmission }, rpc);
+    expect(await again.findByRole("button", { name: "Account: Work A" })).toBeTruthy();
+    expect(setSubmission.mock.calls).toEqual([[{ policy: { mode: "named", accountId: ID_A } }]]);
+  });
+
+  it("a send (core clears its draft) forgets the pick, so the next new thread starts on Auto", async () => {
+    let held: JsonValue | null = null;
+    const setSubmission = vi.fn((data: JsonValue | null) => {
+      held = data;
+      return true;
+    });
+    const props = () => ({ scope: scope("claude-code"), compact: false, submission: held, setSubmission });
+    const slot = renderItem(props(), rpc);
+    await openMenu(slot, /^Account: Auto$/u);
+    fireEvent.click(await slot.findByRole("menuitemradio", { name: /Work A/u }));
+    await slot.findByRole("button", { name: "Account: Work A" });
+    slot.lifecycle.rerender(<ThreadAccountRunRowItem {...props()} />);
+    held = null;
+    slot.lifecycle.rerender(<ThreadAccountRunRowItem {...props()} />);
+    expect(await slot.findByRole("button", { name: "Account: Auto" })).toBeTruthy();
+    cleanup();
+    setSubmission.mockClear();
+    const next = renderItem(props(), rpc);
+    expect(await next.findByRole("button", { name: "Account: Auto" })).toBeTruthy();
+    await act(async () => {});
     expect(setSubmission).not.toHaveBeenCalled();
   });
 
