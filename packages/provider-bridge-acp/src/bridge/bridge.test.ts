@@ -2978,16 +2978,13 @@ describe("acp bridge", () => {
     });
   });
 
-  it("sends the open turn's origin id with an in-turn dynamic tool call", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
-      dynamicTools: [
-        {
-          name: "wprojects_outcome",
-          description: "Report the outcome.",
-          inputSchema: { type: "object", properties: {} },
-        },
-      ],
-    });
+  const originTool = {
+    name: "wprojects_outcome",
+    description: "Report the outcome.",
+    inputSchema: { type: "object", properties: {} },
+  };
+
+  async function dynamicToolEnvAfterEchoTurn(providerThreadId: string) {
     await waitForResponse(
       sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
@@ -3014,19 +3011,61 @@ describe("acp bridge", () => {
     if (!host || !Number.isInteger(port) || !threadId || !token) {
       throw new Error("MCP server config is missing dynamic tool bridge env");
     }
-    const originIds = (): string[] =>
-      notifications(THREAD_DELTA_NOTIFICATION_METHOD).flatMap((message) => {
+    return { host, port, threadId, token };
+  }
+
+  function originIds(): string[] {
+    return notifications(THREAD_DELTA_NOTIFICATION_METHOD).flatMap(
+      (message) => {
         const params = message.params as
           | { deltas?: Record<string, unknown>[] }
           | undefined;
         return (params?.deltas ?? []).flatMap((delta) =>
           delta.kind === "turn.open" &&
-          delta.aliasesCurrentTurn === true &&
-          typeof delta.providerTurnId === "string"
-            ? [delta.providerTurnId]
+          typeof delta.currentTurnAlias === "string"
+            ? [delta.currentTurnAlias]
             : [],
         );
-      });
+      },
+    );
+  }
+
+  async function forwardedOriginCall(
+    toolEnv: { host: string; port: number; threadId: string; token: string },
+    callId: string,
+  ): Promise<unknown> {
+    const bridgeCall = callDynamicToolBridge({
+      callId,
+      ...toolEnv,
+      tool: originTool.name,
+      toolArguments: {},
+    });
+    const forwarded = await waitFor(
+      () =>
+        output.messages.find(
+          (message) =>
+            message.method === "item/tool/call" &&
+            message.id !== undefined &&
+            (message.params as { callId?: unknown }).callId === callId,
+        ),
+      `forwarded dynamic tool call ${callId}`,
+    );
+    handleLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: forwarded.id,
+        result: { success: true, contentItems: [] },
+      }),
+    );
+    await expect(bridgeCall).resolves.toMatchObject({ ok: true });
+    return (forwarded.params as { turnId?: unknown }).turnId;
+  }
+
+  it("sends the open turn's origin id with an in-turn dynamic tool call", async () => {
+    const { providerThreadId } = await startThread({
+      dynamicTools: [originTool],
+    });
+    const toolEnv = await dynamicToolEnvAfterEchoTurn(providerThreadId);
     const before = originIds();
     expect(before).toHaveLength(1);
 
@@ -3040,38 +3079,81 @@ describe("acp bridge", () => {
       "origin id of the hanging turn",
     );
     expect(origin).not.toBe(before[0]);
+    expect(await forwardedOriginCall(toolEnv, "in-turn-call")).toBe(origin);
+    await stopThread(providerThreadId);
+  });
 
-    const bridgeCall = callDynamicToolBridge({
-      callId: "in-turn-call",
-      host,
-      port,
-      threadId,
-      token,
-      tool: "wprojects_outcome",
-      toolArguments: {},
+  it("sends the agent's own turn origin id with its dynamic tool call", async () => {
+    const { providerThreadId } = await startThread({
+      dynamicTools: [originTool],
     });
-    const forwarded = await waitFor(
-      () =>
-        output.messages.find(
-          (message) =>
-            message.method === "item/tool/call" &&
-            message.id !== undefined &&
-            (message.params as { callId?: unknown }).callId === "in-turn-call",
-        ),
-      "forwarded in-turn dynamic tool call",
+    const toolEnv = await dynamicToolEnvAfterEchoTurn(providerThreadId);
+    await completeTurnWith(
+      providerThreadId,
+      "then-unprompted-open-tool",
+      executionOptions({}),
     );
-    expect(forwarded.params).toMatchObject({
-      threadId: bbThreadId,
-      turnId: origin,
+    await waitFor(
+      () =>
+        threadEventsOfType("turn/started").length >= 3 ? true : undefined,
+      "the agent's own turn",
+    );
+    const origins = await waitFor(
+      () => (originIds().length === 3 ? originIds() : undefined),
+      "origin id of the agent's turn",
+    );
+    expect(new Set(origins).size).toBe(3);
+    expect(await forwardedOriginCall(toolEnv, "agent-turn-call")).toBe(
+      origins[2],
+    );
+    await stopThread(providerThreadId);
+  });
+
+  it("keeps the turn's origin id across a permission rebuild inside the turn", async () => {
+    const { providerThreadId } = await startThread({
+      dynamicTools: [originTool],
+      envVars: { FAKE_ACP_LOAD_SESSION: "1" },
+      permissionCli: {
+        full: ["--full"],
+        workspaceWrite: ["--workspace"],
+        insertAfterArgs: 1,
+      },
     });
-    handleLine(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: forwarded.id,
-        result: { success: true, contentItems: [] },
+    const toolEnv = await dynamicToolEnvAfterEchoTurn(providerThreadId);
+    await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "hang", mentions: [] }],
       }),
     );
-    await expect(bridgeCall).resolves.toMatchObject({ ok: true });
+    const origin = await waitFor(
+      () => originIds().at(1),
+      "origin id of the hanging turn",
+    );
+    const replacedBefore = notifications("session/replaced").length;
+    expect(
+      (
+        await waitForResponse(
+          sendTurnRequest("turn/steer", providerThreadId, {
+            expectedTurnId: "turn-2",
+            clientRequestId: "creq_abcdefghjp",
+            input: [{ type: "text", text: "hang", mentions: [] }],
+            options: executionOptions({ permissionMode: "accept-edits" }),
+          }),
+        )
+      ).error,
+    ).toBeUndefined();
+    await waitFor(
+      () =>
+        notifications("session/replaced").length > replacedBefore &&
+        threadEventsOfType("turn/input/accepted").length === 3
+          ? true
+          : undefined,
+      "the rebuilt session to take the steer",
+    );
+    expect(originIds()).toHaveLength(2);
+    expect(await forwardedOriginCall(toolEnv, "rebuilt-turn-call")).toBe(
+      origin,
+    );
     await stopThread(providerThreadId);
   });
 

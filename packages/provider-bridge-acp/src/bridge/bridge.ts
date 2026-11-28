@@ -221,7 +221,6 @@ interface AcpThreadSession {
   policy: AcpSessionPolicy;
   pendingInstructions: string | undefined;
   activePromptKind: "turn" | "compaction" | "agent" | null;
-  // Origin id of the open turn, sent with its tool calls; undefined outside a turn.
   originTurnId: string | undefined;
   compactionAgentMessage: string;
   queuedInputs: AcpPendingTurnInput[];
@@ -3445,6 +3444,7 @@ async function rebuildAgentSession(
       : "Execution settings changed; the ACP session was rebuilt to apply them.";
   const queuedInputs = session.queuedInputs.splice(0);
   const continuingTurn = session.activePromptKind === "turn";
+  const continuingOriginTurnId = session.originTurnId;
   if (continuingTurn) {
     emitForSession(session, ACP_PROMPT_INTERRUPTED_METHOD, {
       threadId: session.bbThreadId,
@@ -3476,6 +3476,9 @@ async function rebuildAgentSession(
       emitSessionError(session, message);
     }
     throw error;
+  }
+  if (continuingTurn) {
+    replacement.originTurnId = continuingOriginTurnId;
   }
   replacement.queuedInputs.push(...queuedInputs);
   for (const grant of session.sessionGrants) {

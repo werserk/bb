@@ -1005,11 +1005,7 @@ export function createAcpDeltaTranslator(
           ...closed,
           turnId === undefined
             ? { kind: "turn.open" }
-            : {
-                kind: "turn.open",
-                providerTurnId: turnId,
-                aliasesCurrentTurn: true,
-              },
+            : { kind: "turn.open", currentTurnAlias: turnId },
         ];
       }
 

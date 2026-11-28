@@ -1308,16 +1308,19 @@ export function createDeltaAssembler(
       }
 
       case "turn.open": {
-        if (
-          (options.providerId === "claude-code" ||
-            delta.aliasesCurrentTurn === true) &&
-          delta.providerTurnId !== undefined &&
-          delta.parentRef === undefined
-        ) {
-          if (!state.bbTurnIdByProviderTurnId.has(delta.providerTurnId)) {
+        const currentTurnAlias =
+          delta.parentRef !== undefined
+            ? undefined
+            : options.providerId === "claude-code"
+              ? delta.providerTurnId
+              : delta.providerTurnId === undefined
+                ? delta.currentTurnAlias
+                : undefined;
+        if (currentTurnAlias !== undefined) {
+          if (!state.bbTurnIdByProviderTurnId.has(currentTurnAlias)) {
             const turnId = ensureTurnOpen(state, events);
-            state.bbTurnIdByProviderTurnId.set(delta.providerTurnId, turnId);
-            state.providerTurnIdByBbTurnId.set(turnId, delta.providerTurnId);
+            state.bbTurnIdByProviderTurnId.set(currentTurnAlias, turnId);
+            state.providerTurnIdByBbTurnId.set(turnId, currentTurnAlias);
             trimOldestEntries(
               state.bbTurnIdByProviderTurnId,
               MAX_ID_MAP_ENTRIES,

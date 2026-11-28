@@ -616,7 +616,6 @@ describe("provider-native id translation", () => {
     expect(unmapped?.turnOrigin).not.toBe("provider");
   });
   it("attests ACP tool calls through the bridge's current-turn alias", () => {
-    // ACP provider ids are per agent (grok, amp, ...), never "claude-code".
     const adapter = createBridgeProtocolAdapter({
       id: "grok",
       capabilities: {
@@ -652,8 +651,7 @@ describe("provider-native id translation", () => {
       feedDeltas(adapter, "t_acp", [
         {
           kind: "turn.open",
-          providerTurnId: "acp-origin-1",
-          aliasesCurrentTurn: true,
+          currentTurnAlias: "acp-origin-1",
         },
       ]),
     );
@@ -665,14 +663,12 @@ describe("provider-native id translation", () => {
     expect(call(null, "c2")?.turnOrigin).not.toBe("provider");
     expect(call("acp-origin-x", "c3")?.turnOrigin).not.toBe("provider");
 
-    // A repeated open of the same turn opens nothing new.
     expect(
       turnIdsOf(
         feedDeltas(adapter, "t_acp", [
           {
             kind: "turn.open",
-            providerTurnId: "acp-origin-1",
-            aliasesCurrentTurn: true,
+            currentTurnAlias: "acp-origin-1",
           },
         ]),
       ),
@@ -681,14 +677,12 @@ describe("provider-native id translation", () => {
     feedDeltas(adapter, "t_acp", [
       { kind: "turn.boundary", status: "completed", claimIfIdle: true },
     ]);
-    // An implicitly opened turn (no id yet) is the one the alias names.
     const second = turnIdsOf(
       feedDeltas(adapter, "t_acp", [
         { kind: "turn.open" },
         {
           kind: "turn.open",
-          providerTurnId: "acp-origin-2",
-          aliasesCurrentTurn: true,
+          currentTurnAlias: "acp-origin-2",
         },
       ]),
     );
@@ -699,7 +693,6 @@ describe("provider-native id translation", () => {
       turnOrigin: "provider",
     });
 
-    // Without the alias marker a provider turn id opens an explicit turn.
     const explicit = turnIdsOf(
       feedDeltas(adapter, "t_acp_explicit", [
         { kind: "turn.open" },
