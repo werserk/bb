@@ -232,6 +232,10 @@ export const threadDeltaSchema = z.discriminatedUnion("kind", [
     kind: z.literal("turn.open"),
     providerTurnId: providerTurnIdSchema.optional(),
     parentRef: deltaKeyPartSchema.optional(),
+    // The providerTurnId names the assembler's current (implicit) turn
+    // instead of opening an explicit provider turn; it attests tool-call
+    // origins of a bridge whose provider has no turn ids of its own.
+    aliasesCurrentTurn: z.literal(true).optional(),
   }),
 
   z.object({

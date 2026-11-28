@@ -1309,7 +1309,8 @@ export function createDeltaAssembler(
 
       case "turn.open": {
         if (
-          options.providerId === "claude-code" &&
+          (options.providerId === "claude-code" ||
+            delta.aliasesCurrentTurn === true) &&
           delta.providerTurnId !== undefined &&
           delta.parentRef === undefined
         ) {

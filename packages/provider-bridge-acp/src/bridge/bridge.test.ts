@@ -2978,6 +2978,103 @@ describe("acp bridge", () => {
     });
   });
 
+  it("sends the open turn's origin id with an in-turn dynamic tool call", async () => {
+    const { bbThreadId, providerThreadId } = await startThread({
+      dynamicTools: [
+        {
+          name: "wprojects_outcome",
+          description: "Report the outcome.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    });
+    await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
+      }),
+    );
+    await waitForTurnCompleted();
+    const configPrefix = "mcp-server-config:";
+    const configText = agentMessageTexts().find((text) =>
+      text.startsWith(configPrefix),
+    );
+    if (!configText) {
+      throw new Error("Fake ACP agent did not report MCP server config");
+    }
+    const [mcpServerConfig] = JSON.parse(
+      configText.slice(configPrefix.length),
+    ) as { env: { name: string; value: string }[] }[];
+    const env = new Map(
+      (mcpServerConfig?.env ?? []).map(({ name, value }) => [name, value]),
+    );
+    const host = env.get("BB_ACP_DYNAMIC_TOOL_HOST");
+    const port = Number(env.get("BB_ACP_DYNAMIC_TOOL_PORT"));
+    const threadId = env.get("BB_ACP_DYNAMIC_TOOL_THREAD_ID");
+    const token = env.get("BB_ACP_DYNAMIC_TOOL_TOKEN");
+    if (!host || !Number.isInteger(port) || !threadId || !token) {
+      throw new Error("MCP server config is missing dynamic tool bridge env");
+    }
+    const originIds = (): string[] =>
+      notifications(THREAD_DELTA_NOTIFICATION_METHOD).flatMap((message) => {
+        const params = message.params as
+          | { deltas?: Record<string, unknown>[] }
+          | undefined;
+        return (params?.deltas ?? []).flatMap((delta) =>
+          delta.kind === "turn.open" &&
+          delta.aliasesCurrentTurn === true &&
+          typeof delta.providerTurnId === "string"
+            ? [delta.providerTurnId]
+            : [],
+        );
+      });
+    const before = originIds();
+    expect(before).toHaveLength(1);
+
+    await waitForResponse(
+      sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "hang", mentions: [] }],
+      }),
+    );
+    const origin = await waitFor(
+      () => originIds().at(before.length),
+      "origin id of the hanging turn",
+    );
+    expect(origin).not.toBe(before[0]);
+
+    const bridgeCall = callDynamicToolBridge({
+      callId: "in-turn-call",
+      host,
+      port,
+      threadId,
+      token,
+      tool: "wprojects_outcome",
+      toolArguments: {},
+    });
+    const forwarded = await waitFor(
+      () =>
+        output.messages.find(
+          (message) =>
+            message.method === "item/tool/call" &&
+            message.id !== undefined &&
+            (message.params as { callId?: unknown }).callId === "in-turn-call",
+        ),
+      "forwarded in-turn dynamic tool call",
+    );
+    expect(forwarded.params).toMatchObject({
+      threadId: bbThreadId,
+      turnId: origin,
+    });
+    handleLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: forwarded.id,
+        result: { success: true, contentItems: [] },
+      }),
+    );
+    await expect(bridgeCall).resolves.toMatchObject({ ok: true });
+    await stopThread(providerThreadId);
+  });
+
   it.each(["socket-close", "provider-exit", "turn-end"])(
     "cancels the runtime tool request after %s",
     async (kind) => {

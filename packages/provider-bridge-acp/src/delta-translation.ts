@@ -1000,7 +1000,17 @@ export function createAcpDeltaTranslator(
         const closed = flushOpenTurnWork(context, "interrupted");
         clearThreadCalls(context);
         filesAddedThisTurn.clear();
-        return [...closed, { kind: "turn.open" }];
+        const turnId = params.data.turnId;
+        return [
+          ...closed,
+          turnId === undefined
+            ? { kind: "turn.open" }
+            : {
+                kind: "turn.open",
+                providerTurnId: turnId,
+                aliasesCurrentTurn: true,
+              },
+        ];
       }
 
       case ACP_PROMPT_INTERRUPTED_METHOD: {

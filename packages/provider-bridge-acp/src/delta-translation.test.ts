@@ -262,6 +262,39 @@ describe("acp file change kinds", () => {
 });
 
 describe("acp delta translation (bridge-shared invariants)", () => {
+  it("binds the bridge's turn origin id to the assembled current turn", () => {
+    const harness = createHarness();
+    const opened = harness.translate({
+      jsonrpc: "2.0",
+      method: ACP_TURN_STARTED_METHOD,
+      params: { threadId: THREAD_ID, turnId: "origin-1" },
+    });
+    expect(opened.filter((event) => event.type === "turn/started")).toHaveLength(
+      1,
+    );
+    const firstTurn = harness.openTurnId();
+    expect(firstTurn).not.toBe("");
+    expect(harness.assembler.getBbTurnId(THREAD_ID, "origin-1")).toBe(
+      firstTurn,
+    );
+    harness.translate(turnCompletedEvent("end_turn"));
+
+    harness.translate({
+      jsonrpc: "2.0",
+      method: ACP_TURN_STARTED_METHOD,
+      params: { threadId: THREAD_ID, turnId: "origin-2" },
+    });
+    const secondTurn = harness.openTurnId();
+    expect(secondTurn).not.toBe(firstTurn);
+    expect(harness.assembler.getBbTurnId(THREAD_ID, "origin-2")).toBe(
+      secondTurn,
+    );
+
+    harness.translate(turnCompletedEvent("end_turn"));
+    harness.translate(turnStartedEvent());
+    expect(harness.openTurnId()).not.toBe("");
+  });
+
   it("does not synthesize a turn for updates that arrive after turn completion", () => {
     const harness = createHarness();
     harness.translate(turnStartedEvent());

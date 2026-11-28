@@ -48,7 +48,7 @@ import type {
   BridgeToolCallImage,
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import { execPortableFile } from "@bb/process-utils";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs, readFileSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, basename, relative, resolve } from "node:path";
@@ -221,6 +221,8 @@ interface AcpThreadSession {
   policy: AcpSessionPolicy;
   pendingInstructions: string | undefined;
   activePromptKind: "turn" | "compaction" | "agent" | null;
+  // Origin id of the open turn, sent with its tool calls; undefined outside a turn.
+  originTurnId: string | undefined;
   compactionAgentMessage: string;
   queuedInputs: AcpPendingTurnInput[];
   promptRequestPending: boolean;
@@ -488,7 +490,7 @@ async function forwardDynamicToolCall(
       {
         providerThreadId: session.providerThreadId,
         threadId: session.bbThreadId,
-        turnId: null,
+        turnId: session.originTurnId ?? null,
         callId: args.callId,
         tool: args.tool,
         arguments: args.arguments,
@@ -2431,6 +2433,7 @@ async function startAgentSession(
     },
     pendingInstructions: params.instructions,
     activePromptKind: null,
+    originTurnId: undefined,
     compactionAgentMessage: "",
     queuedInputs: [],
     promptRequestPending: false,
@@ -2777,6 +2780,9 @@ function setActivePromptKind(
   kind: AcpThreadSession["activePromptKind"],
 ): void {
   session.activePromptKind = kind;
+  if (kind !== "turn" && kind !== "agent") {
+    session.originTurnId = undefined;
+  }
   if (kind === "turn" || kind === "compaction") {
     clearAgentTurnQuietTimer(session);
     if (!session.promptWorkOpen) {
@@ -2833,10 +2839,16 @@ function armAgentTurnQuietTimer(session: AcpThreadSession): void {
 
 function openAgentTurn(session: AcpThreadSession): void {
   setActivePromptKind(session, "agent");
+  emitTurnStarted(session);
+  armAgentTurnQuietTimer(session);
+}
+
+function emitTurnStarted(session: AcpThreadSession): void {
+  session.originTurnId = randomUUID();
   emitForSession(session, ACP_TURN_STARTED_METHOD, {
     threadId: session.bbThreadId,
+    turnId: session.originTurnId,
   });
-  armAgentTurnQuietTimer(session);
 }
 
 function finishAgentTurn(
@@ -3176,9 +3188,7 @@ function runTurn(
 ): void {
   setActivePromptKind(session, "turn");
   if (!turnAlreadyOpen) {
-    emitForSession(session, ACP_TURN_STARTED_METHOD, {
-      threadId: session.bbThreadId,
-    });
+    emitTurnStarted(session);
   }
   session.awaitingFirstPrompt = false;
   const outputBeforeTurn = session.turnOutputCount;
