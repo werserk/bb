@@ -6,7 +6,9 @@ import {
 } from "@bb/domain";
 import type { DbConnection } from "../../src/connection.js";
 import {
+  getStoredProviderRetryStall,
   isThreadAwaitingTurnStartPastDeadline,
+  listProviderRetryStallCandidates,
   listTurnStartDeadlineCandidates,
 } from "../../src/data/threads.js";
 import {
@@ -1604,6 +1606,20 @@ export const EVENTS_COST_CASES: readonly QueryCostCase[] = [
     run: (db, fixture) =>
       isThreadAwaitingTurnStartPastDeadline(db, {
         deadline: Date.now() - TURN_START_DEADLINE_MS,
+        threadId: fixture.threadId,
+      }),
+  },
+  {
+    name: `${THREADS}#listProviderRetryStallCandidates`,
+    prepare: markThreadAwaitingTurnStart,
+    run: (db) => listProviderRetryStallCandidates(db),
+  },
+  {
+    name: `${THREADS}#getStoredProviderRetryStall`,
+    prepare: markThreadAwaitingTurnStart,
+    run: (db, fixture) =>
+      getStoredProviderRetryStall(db, {
+        deadline: Date.now() - 8 * 60_000,
         threadId: fixture.threadId,
       }),
   },

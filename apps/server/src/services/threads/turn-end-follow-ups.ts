@@ -332,6 +332,7 @@ export function planTurnEnd(
       args.status === "interrupted"
         ? getTurnInterruption(deps, { threadId: thread.id, turnId })
         : undefined;
+    const notifiedByFailureStop = interruption?.reason === "provider-turn-idle";
     const manuallyStopped =
       interruption?.reason === "manual-stop" ||
       (args.status === "interrupted" &&
@@ -344,6 +345,7 @@ export function planTurnEnd(
       });
     if (
       !alreadyHandledByCommandFailure &&
+      !notifiedByFailureStop &&
       !manuallyStopped &&
       !compactionOnly
     ) {

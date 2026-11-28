@@ -2371,3 +2371,86 @@ export function isThreadAwaitingTurnStartPastDeadline(
       .get() !== undefined
   );
 }
+
+export interface ProviderRetryStallCandidate {
+  environmentId: string;
+  hostId: string;
+  threadId: string;
+}
+
+export function listProviderRetryStallCandidates(
+  db: DbQueryConnection,
+): ProviderRetryStallCandidate[] {
+  return db
+    .select({
+      environmentId: environments.id,
+      hostId: environments.hostId,
+      threadId: threads.id,
+    })
+    .from(threads)
+    .innerJoin(environments, eq(threads.environmentId, environments.id))
+    .where(and(eq(threads.status, "active"), isNull(threads.deletedAt)))
+    .all();
+}
+
+const PROVIDER_RETRY_STALL_NOISE_TYPES = [
+  "thread/extensionState/updated",
+  "provider/unhandled",
+  "provider/rateLimits/updated",
+  "thread/identity",
+  "provider.env-resolved",
+] as const;
+
+export interface StoredProviderRetryStall {
+  createdAt: number;
+  data: string;
+  sequence: number;
+  turnId: string | null;
+}
+
+export function getStoredProviderRetryStall(
+  db: DbQueryConnection,
+  args: { deadline: number; threadId: string },
+): StoredProviderRetryStall | null {
+  const latest = db
+    .select({
+      createdAt: events.createdAt,
+      data: events.data,
+      sequence: events.sequence,
+      turnId: events.turnId,
+      type: events.type,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        sql`${events.type} NOT IN (${sql.join(
+          PROVIDER_RETRY_STALL_NOISE_TYPES.map((type) => sql`${type}`),
+          sql`, `,
+        )})`,
+      ),
+    )
+    .orderBy(desc(events.sequence))
+    .limit(1)
+    .get();
+  if (
+    latest === undefined ||
+    latest.type !== "provider/error" ||
+    latest.createdAt > args.deadline
+  ) {
+    return null;
+  }
+  let willRetry: unknown;
+  try {
+    willRetry = (JSON.parse(latest.data) as { willRetry?: unknown }).willRetry;
+  } catch {
+    return null;
+  }
+  if (willRetry !== true) return null;
+  return {
+    createdAt: latest.createdAt,
+    data: latest.data,
+    sequence: latest.sequence,
+    turnId: latest.turnId,
+  };
+}

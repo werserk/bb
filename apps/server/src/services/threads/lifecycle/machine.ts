@@ -113,6 +113,14 @@ export type ThreadLifecycleInput =
   | { type: "daemon.socket-opened"; now: number }
   | { type: "daemon.lost"; reason: DaemonLossReason; resuming: boolean }
   | { type: "turn-start.overdue"; deadlineMinutes: number; now: number }
+  | {
+      type: "provider-retry.stalled";
+      detail: string | null;
+      now: number;
+      quietMinutes: number;
+      reason: string;
+      turnId: string | null;
+    }
   | { type: "server.restarted" };
 
 export type ThreadLifecycleInputType = ThreadLifecycleInput["type"];
@@ -302,9 +310,16 @@ class Draft {
   }
 }
 
-function moveForCompletion(status: HeldTurnCompletionStatus): ThreadStatusMove {
+function moveForCompletion(
+  status: HeldTurnCompletionStatus,
+  stopReason: SystemThreadInterruptedReason | null,
+): ThreadStatusMove {
   if (status === "failed") return "run.failed";
-  if (status === "interrupted") return "stop.settled";
+  if (status === "interrupted") {
+    return stopReason === null
+      ? "stop.settled"
+      : moveForInterruption(stopReason);
+  }
   return "run.succeeded";
 }
 
@@ -379,7 +394,12 @@ function applyCompletion(
   held: HeldTurnCompletion,
   disposition: "applied" | "released",
 ): void {
-  const applied = draft.move(moveForCompletion(held.status));
+  const applied = draft.move(
+    moveForCompletion(
+      held.status,
+      draft.status === "stopping" ? (draft.stop?.reason ?? null) : null,
+    ),
+  );
   if (applied && draft.status === "idle") {
     draft.effect({ kind: "prune-idle" });
   }
@@ -1074,6 +1094,32 @@ export function transitionThreadLifecycle(
         notice: {
           turnStatus: "failed",
           failureContext: `was stopped by bb because its provider did not start the turn within ${input.deadlineMinutes} minutes`,
+          turnId: null,
+        },
+      });
+      break;
+    case "provider-retry.stalled":
+      if (
+        draft.status !== "active" ||
+        state.activeTurnId === null ||
+        (input.turnId !== null && input.turnId !== state.activeTurnId)
+      ) {
+        break;
+      }
+      requestStop(draft, { now: input.now, reason: "provider-turn-idle" });
+      draft.effect({
+        kind: "append-system-error",
+        code: "provider_retry_stalled",
+        message: `The provider reported a retryable error (${input.reason}) and then sent nothing for ${input.quietMinutes} minutes, so bb stopped the turn. Send a message to try again.`,
+        detail: input.detail,
+        turnId: state.activeTurnId,
+      });
+      sendStop(draft, input.now);
+      draft.effect({
+        kind: "notify-parent",
+        notice: {
+          turnStatus: "failed",
+          failureContext: `was stopped by bb because its provider reported a retryable error (${input.reason}) and then sent nothing for ${input.quietMinutes} minutes`,
           turnId: null,
         },
       });

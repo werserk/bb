@@ -72,6 +72,7 @@ import {
   requestThreadStorageDeletion,
   turnStartDeadlineSweep,
 } from "../threads/thread-lifecycle.js";
+import { providerRetryStallSweep } from "../threads/provider-retry-stall.js";
 import {
   archiveUndoGraceKeepsTerminals,
   archiveUndoGraceKeepsTurnRunning,
@@ -772,6 +773,13 @@ export const PERIODIC_SWEEP_JOBS: readonly PeriodicSweepJob[] = [
     name: "turn-start-deadline",
     background: false,
     sweep: turnStartDeadlineSweep,
+  },
+  {
+    cadenceMs: 0,
+    category: "orphan-cleanup",
+    name: "provider-retry-stall",
+    background: false,
+    sweep: providerRetryStallSweep,
   },
   {
     cadenceMs: 0,
