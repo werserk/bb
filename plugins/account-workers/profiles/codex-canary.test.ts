@@ -5,12 +5,14 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { resolveCodexLaunch, runCanary } from "./codex-canary.js";
+import { cachedModels, codexVersion, resolveCodexLaunch, runCanary } from "./codex-canary.js";
 import { codexAllowed, codexFiles, createCodexProfile, expectedTrustKey, gateFile, hasTrust, heartbeatDir } from "./codex.js";
 import { writeProfileFiles } from "./files.js";
 import type { ProfileContext } from "./types.js";
 
-const hasCodex = spawnSync("codex", ["--version"], { encoding: "utf8" }).status === 0;
+const codexCli = spawnSync("codex", ["--version"], { encoding: "utf8" });
+const hasCodex = codexCli.status === 0;
+const installedVersion = hasCodex ? codexCli.stdout.trim().split(/\s+/u).at(-1)! : "0.0.0";
 const TOOLS = ["workspace_read", "workspace_write", "workspace_edit", "workspace_glob", "workspace_grep", "workspace_exec", "workspace_diff"];
 const SYNTHETIC = `model = "gpt-5.6-luna"
 
@@ -115,8 +117,24 @@ describe.skipIf(!hasCodex)("Codex no-fallback canary (real codex app-server, moc
     beforeEach(async () => {
       const luna = bundled().models.find((m) => m.slug === "gpt-5.6-luna")!;
       const models = [{ ...luna, slug: "aw-cache-only", display_name: "aw-cache-only" }];
-      await writeFile(path.join(home, "models_cache.json"), JSON.stringify({ fetched_at: new Date().toISOString(), identity: "opaque", models }));
+      await writeCache(models, installedVersion);
     });
+    let models: Record<string, unknown>[] = [];
+    const writeCache = async (list: Record<string, unknown>[], clientVersion: string) => {
+      models = list;
+      const cache = { fetched_at: new Date().toISOString(), identity: "opaque", client_version: clientVersion, models: list };
+      await writeFile(path.join(home, "models_cache.json"), JSON.stringify(cache));
+    };
+
+    it("ignores a cache another Codex version wrote, as Codex does, and checks the bundled catalog", async () => {
+      await writeCache(models, "0.0.1");
+      const profile = createCodexProfile({ CODEX_HOME: home });
+      await profile.prepare({ ...ctx(), model: "aw-cache-only" });
+      await expect(profile.check!({ ...ctx(), model: "aw-cache-only" })).rejects.toThrow(/catalog has no model aw-cache-only/);
+      const gate = JSON.parse(await readFile(gateFile(scratchDir), "utf8"));
+      expect(gate).toMatchObject({ passed: false, catalog: "bundled" });
+      expect(gate.catalogSkipped).toBe(`models_cache.json is for Codex 0.0.1, the worker runs ${installedVersion}`);
+    }, 120_000);
 
     it("checks a model that exists only in the cache with the cache's tool set", async () => {
       const profile = createCodexProfile({ CODEX_HOME: home });
@@ -146,4 +164,33 @@ describe.skipIf(!hasCodex)("Codex no-fallback canary (real codex app-server, moc
     expect(config.hooks).toBeUndefined();
     expect(await readFile(path.join(home, "config.toml"), "utf8")).toBe(SYNTHETIC);
   }, 120_000);
+});
+
+describe("the worker's Codex model cache", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "aw-codex-cache-test-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  const write = (cache: unknown) => writeFile(path.join(dir, "models_cache.json"), typeof cache === "string" ? cache : JSON.stringify(cache));
+
+  it("reads the Codex version from the app-server userAgent", () => {
+    expect(codexVersion("bb/0.167.1 (Arch Linux Rolling Release; x86_64) unknown (bb; 1.0.0)")).toBe("0.167.1");
+    expect(codexVersion("bb/0.168.0-alpha.2 (Linux)")).toBe("0.168.0-alpha.2");
+    expect(codexVersion("unknown")).toBeNull();
+  });
+
+  it("uses the cache only when the installed Codex wrote it", async () => {
+    expect(await cachedModels(dir, "0.167.1")).toEqual({ models: null, skipped: null });
+    await write({ client_version: "0.167.1", models: [{ slug: "m" }] });
+    expect(await cachedModels(dir, "0.167.1")).toEqual({ models: [{ slug: "m" }], skipped: null });
+    expect(await cachedModels(dir, "0.168.0")).toEqual({ models: null, skipped: "models_cache.json is for Codex 0.167.1, the worker runs 0.168.0" });
+    expect(await cachedModels(dir, null)).toEqual({ models: null, skipped: "models_cache.json is for Codex 0.167.1, the worker runs (unknown)" });
+    await write({ models: [{ slug: "m" }] });
+    expect((await cachedModels(dir, "0.167.1")).skipped).toBe("models_cache.json is for Codex (no version), the worker runs 0.167.1");
+    await write("{not json");
+    await expect(cachedModels(dir, "0.167.1")).rejects.toThrow(/not valid JSON/);
+  });
 });
