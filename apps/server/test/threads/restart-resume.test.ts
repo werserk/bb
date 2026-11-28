@@ -781,9 +781,33 @@ describe("resuming threads after a restart", () => {
         initiator: "system",
         text: "Child thread updates",
       });
+      const waitingHeld = seedRunningThread(harness, fixture);
+      seedManualStop(harness, fixture, waitingHeld);
+      seedNextTurnRequest(harness, fixture, waitingHeld, {
+        initiator: "system",
+        text: "Child thread updates",
+      });
+      seedBackgroundCommand(harness, fixture, waitingHeld, {
+        command: "./after-stop.sh",
+        description: "Job started after the stop",
+        id: "task-after-stop",
+      });
+      finishTurn(harness, waitingHeld.thread.id);
+      const warn = vi.spyOn(harness.deps.logger, "warn");
 
       await restartDaemon(harness, fixture);
       await sweepPastResume(harness);
+
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: waitingHeld.thread.id }),
+        expect.any(String),
+      );
+      expect(queue(harness, waitingHeld.thread.id)).toEqual([]);
+      expect(threadStatus(harness, waitingHeld.thread.id)).toBe("idle");
+      expect(requestTexts(harness, waitingHeld.thread.id)).toEqual([
+        "Do the thing",
+        "Child thread updates",
+      ]);
 
       expect(queue(harness, stopped.thread.id)).toEqual([]);
       expect(requestTexts(harness, stopped.thread.id)).toEqual([

@@ -255,10 +255,7 @@ export function planRestartResumes(
     if (turn === null) {
       continue;
     }
-    if (
-      status === "active" &&
-      isRetryHeldByStop(deps.db, { threadId: id, failed: turn })
-    ) {
+    if (isRetryHeldByStop(deps.db, { threadId: id, failed: turn })) {
       heldByStop.add(id);
       deps.logger.info(
         { requestId: turn.request.requestId, threadId: id },
